@@ -424,7 +424,7 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
     return False
 
 
-def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]):
+def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> bool:
     """
     User-code friendly utility to check if a value is static or dynamic.
     Returns true if given a constant, or a symbolic expression with a fixed value.
@@ -434,17 +434,21 @@ def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]):
     """
     assert isinstance(a, (SymBool, SymFloat, SymInt, bool, float, int))
     if (
-        isinstance(a, (SymBool, bool)) and is_concrete_bool(a)
-        or isinstance(a, (SymBool, float)) and is_concrete_float(a)
-        or isinstance(a, (SymBool, int)) and is_concrete_int(a)
+        isinstance(a, (SymBool, bool))
+        and is_concrete_bool(a)  # type: ignore[arg-type]
+        or isinstance(a, (SymBool, float))
+        and is_concrete_float(a)  # type: ignore[arg-type]
+        or isinstance(a, (SymBool, int))
+        and is_concrete_int(a)  # type: ignore[arg-type]
     ):
         return True
 
     if (
-        (fake_mode := torch._guards.detect_fake_mode())
-        and (shape_env := fake_mode.shape_env)
+        (fake_mode := torch._guards.detect_fake_mode()) and (
+            shape_env := fake_mode.shape_env
+        )
     ):
-        return shape_env.bound_sympy(a.node.expr).is_singleton()
+        return shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
     else:
         log.debug("Could not detect ShapeEnv in has_static_value(%s) call", a)
 
