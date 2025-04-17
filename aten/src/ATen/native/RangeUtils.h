@@ -29,15 +29,16 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   // the corner-case we do want to take into account is int64_t, which has higher precision than double
   double size_d;
   if constexpr (std::is_same_v<scalar_t, int64_t>) {
-    // workaround for corner case where casting start/end/step to int64_t
-    // may introduce precision loss; if all values are within double's
-    // representable range, we prefer double arithmetic for consistency
-    // across devices. Otherwise, fallback to int64_t computation.
-    auto xmax = static_cast<accscalar_t>(std::numeric_limits<double>::max());
-    auto xmin = static_cast<accscalar_t>(-std::numeric_limits<double>::max());
-    bool in_double_precision = xmin <= xstart && xstart <= xmax &&
-        xmin <= xend && xend <= xmax &&
-        xmin <= xstep && xstep <= xmax;
+    // Workaround for corner case where casting start/end/step to int64_t
+    // may introduce precision loss. If all values are within the range
+    // that double can represent exactly (i.e., [-2^53, 2^53]), we prefer 
+    // using double arithmetic for consistency across devices. Otherwise, 
+    // fallback to int64_t computation.
+    auto xmax = static_cast<accscalar_t>(1L << std::numeric_limits<double>::digits);
+    auto xmin = -xmax;
+    bool in_double_precision = xmin < xstart && xstart < xmax &&
+        xmin < xend && xend < xmax &&
+        xmin < xstep && xstep < xmax;
     if (C10_LIKELY(in_double_precision)) {
       size_d = std::ceil(
           static_cast<double>(end.to<double>() - start.to<double>()) /
