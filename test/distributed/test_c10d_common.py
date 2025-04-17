@@ -1691,9 +1691,10 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
         with self.assertRaises(ValueError):
             # TODO(whc) this is actually catching the wrong error:
-            # ValueError: Group <__mp_main__.DummyProcessGroup object at 0x7faa0a844540> is not registered, please create group with torch.distributed.new_group API
-            # It should be catching a different error where the rank doesn't exist in the global mapping.  But it's still
-            # testing the same part of the _canonicalize_group_rank helper so maybe this is fine
+            # ValueError: Group <__mp_main__.DummyProcessGroup object at 0x7faa0a844540> is not registered,
+            # please create group with torch.distributed.new_group API
+            # It should be catching a different error where the rank doesn't exist in the global mapping.
+            # But it's still testing the same part of the _canonicalize_group_rank helper so maybe this is fine
             _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
 
         dist.destroy_process_group()
