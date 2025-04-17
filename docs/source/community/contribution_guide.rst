@@ -1,3 +1,5 @@
+:orphan:
+
 .. note::
 
    This page has been deprecated. Please refer to the `Contribution Guide <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>`_ on the PyTorch Wiki.
