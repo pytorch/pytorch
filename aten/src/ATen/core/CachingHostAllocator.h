@@ -345,7 +345,7 @@ struct CachingHostAllocatorImpl {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for copy_data");
   }
 
-  HostStats get_stats() {
+  HostStats getStats() {
     HostStats stats;
 
     // To keep getStats lightweight we do *not* flush any available blocks
@@ -396,7 +396,7 @@ struct CachingHostAllocatorImpl {
     return stats;
   }
 
-  void reset_accumulated_stats() {
+  void resetAccumulatedStats() {
     // Reseting accumulated memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
@@ -421,7 +421,7 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  void reset_peak_stats() {
+  void resetPeakStats() {
     // Reseting peak memory stats requires concurrently holding both the
     // free list mutexes and the blocks mutex. Previously, this was only done in
     // empty_cache function.
@@ -674,15 +674,15 @@ struct CachingHostAllocatorInterface : public HostAllocator {
   }
 
   HostStats get_stats() override {
-    return impl_->get_stats();
+    return impl_->getStats();
   }
 
   void reset_accumulated_stats() override {
-    impl_->reset_accumulated_stats();
+    impl_->resetAccumulatedStats();
   }
 
   void reset_peak_stats() override {
-    impl_->reset_peak_stats();
+    impl_->resetPeakStats();
   }
 
   std::unique_ptr<T> impl_;
