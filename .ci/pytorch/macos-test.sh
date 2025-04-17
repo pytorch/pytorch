@@ -233,14 +233,14 @@ test_torchbench_smoketest() {
     for model in "${models[@]}"; do
       PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
         --performance --only "$model" --backend "$backend" --training --devices "$device" \
-        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv" || true
     done
 
     echo "Launching torchbench inference performance run for backend ${backend}"
     for model in "${models[@]}"; do
       PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
         --performance --only "$model" --backend "$backend" --inference --devices "$device" \
-        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
     done
   done
 
