@@ -28,6 +28,7 @@ from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
+from .cutlass_presets import PRESETS
 from .cutlass_python_evt import CutlassEVTCodegen
 from .cutlass_utils import torch_dtype_to_cutlass_type
 
@@ -867,10 +868,26 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return None
 
         # Apply regex filters at the end when configuration name doesn't change anymore
-        if inductor_cuda_config.cutlass_op_allowlist_regex is not None:
-            if not re.search(
-                inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
-            ):
+        if (
+            inductor_cuda_config.cutlass_op_allowlist_regex
+            or inductor_cuda_config.cutlass_presets
+        ):
+            patterns = []
+            if inductor_cuda_config.cutlass_op_allowlist_regex:
+                patterns.append(inductor_cuda_config.cutlass_op_allowlist_regex)
+            if inductor_cuda_config.cutlass_presets:
+                preset_nums = [
+                    int(x) for x in inductor_cuda_config.cutlass_presets.split(",")
+                ]
+                for preset_num in preset_nums:
+                    preset = PRESETS.get(preset_num, {}).get(
+                        inductor_cuda_config.cutlass_instantiation_level, []
+                    )
+
+                    patterns.extend(preset)
+
+            pattern = "|".join(patterns)
+            if pattern and not re.search(pattern, op.configuration_name()):
                 return None
         if inductor_cuda_config.cutlass_op_denylist_regex is not None:
             if re.search(
@@ -984,10 +1001,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
-        if not isinstance(X.layout, FixedLayout):
-            raise NotImplementedError("X.layout is not fixed")
-        if not isinstance(W.layout, FixedLayout):
-            raise NotImplementedError("W.layout is not fixed")
+        for input_node in self.input_nodes:
+            if not isinstance(X.layout, FixedLayout):
+                input_node.freeze_layout()
 
         Y = self.output_node
         if template_buffer_node is not None:
