@@ -425,6 +425,13 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
 
 
 def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]):
+    """
+    User-code friendly utility to check if a value is static or dynamic.
+    Returns true if given a constant, or a symbolic expression with a fixed value.
+
+    Args:
+        a (Union[SymBool, SymFloat, SymInt, bool, float, int]): Object to test
+    """
     assert isinstance(a, (SymBool, SymFloat, SymInt, bool, float, int))
     if (
         isinstance(a, (SymBool, bool)) and is_concrete_bool(a)
@@ -438,6 +445,8 @@ def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]):
         and (shape_env := fake_mode.shape_env)
     ):
         return shape_env.bound_sympy(a.node.expr).is_singleton()
+    else:
+        log.debug("Could not detect ShapeEnv in has_static_value(%s) call", a)
 
     return False
 
