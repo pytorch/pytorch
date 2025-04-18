@@ -115,7 +115,8 @@ class _InstanceNorm(_NormBase):
                 warnings.warn(
                     f"input's size at dim={feature_dim} does not match num_features. "
                     "Since affine=False, num_features is not used in the normalization process. "
-                    "You can safely ignore this warning."
+                    "You can safely ignore this warning.",
+                    stacklevel=4,
                 )
 
         if input.dim() == self._get_no_batch_dim():
