@@ -34,7 +34,7 @@ import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import identity
+from torch._dynamo.utils import detect_fake_mode, identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
@@ -45,7 +45,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
+from torch._subclasses.fake_tensor import get_schema_info, not_progapate_real_tensors
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -5080,7 +5080,7 @@ class ExternKernel(InputsKernel):
     def codegen_comment(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
-            wrapper.writeline(origin_str)
+            wrapper.make_comment(origin_str)
 
     def codegen(self, wrapper):  # type: ignore[no-untyped-def]
         raise NotImplementedError
@@ -5228,7 +5228,10 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
-        example_output = kernel(*new_args, **new_kwargs)
+
+        fake_mode = detect_fake_mode(example_args, ignore_context=True)
+        with not_progapate_real_tensors(fake_mode):
+            example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
@@ -5786,25 +5789,7 @@ class ExternKernel(InputsKernel):
 @ir_dataclass(frozen=False)
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
-        kernel_name = self.get_kernel_name()
-        if (
-            V.graph.cpp_wrapper
-            and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
-        ):
-            # For https://github.com/pytorch/pytorch/issues/128474
-            kernel_name = "aoti_torch__mm_plus_mm_out"
-        else:
-            kernel_name = self.get_kernel_name()
-        device = d.type if (d := self.get_device()) else V.graph.device_type
-        wrapper.generate_extern_kernel_out(
-            kernel_name,
-            self.codegen_reference(),
-            self.output_view.codegen_reference() if self.output_view else None,
-            args,
-            device,
-        )
+        wrapper.generate_extern_kernel_out(self)
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
@@ -5859,11 +5844,7 @@ class RandomSeeds(ExternKernelOut):
 
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs()]
-        V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
-        if isinstance(self.layout, Layout):
-            self.codegen_size_asserts(wrapper)
+        wrapper.generate_extern_kernel_alloc(self)
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
@@ -6616,7 +6597,7 @@ class AssertScalar(ExternKernel):
             sizevar = V.graph.wrapper_code.codegen_python_sizevar(
                 self.scalar, simplify=False
             )
-            wrapper.writeline(f"if not {sizevar}:")
+            wrapper.writeline(f"if not ({sizevar}):")
             wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
             # No one should ever use this buffer, but for uniformity
             # define the variable and assign it None
@@ -6979,7 +6960,7 @@ class FallbackKernel(ExternKernelAlloc):
                 # dispatch.
                 do_runtime_dispatch()
             else:
-                V.graph.wrapper_code.generate_fallback_kernel(self, args)
+                wrapper.generate_fallback_kernel(self)
                 if isinstance(self.layout, Layout):
                     self.codegen_size_asserts(wrapper)
                     self.codegen_alignment_asserts(wrapper)
@@ -7130,32 +7111,8 @@ class MultiOutputLayout(OutputSpec):
 
 
 class MultiOutput(ExternKernel):
-    # Given an input MultiOutputLayout buffer, indexes out an actual buffer
-    # from that result.  This doesn't actually produce multiple outputs,
-    # that's MultiOutputLayout!
-    def codegen_list_tuple_access(self, basename, indices):  # type: ignore[no-untyped-def]
-        if len(indices) > 0:
-            itype, i = indices[0]
-            if issubclass(itype, list):
-                return self.codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
-            elif issubclass(itype, tuple):
-                # cpp wrapper code needs to use std::get<> to access a tuple
-                tuple_access = V.graph.wrapper_code.codegen_tuple_access(
-                    basename, self.get_name(), str(i)
-                )
-                return self.codegen_list_tuple_access(tuple_access, indices[1:])
-            elif issubclass(itype, dict):
-                return self.codegen_list_tuple_access(f"{basename}['{i}']", indices[1:])
-            else:
-                raise AssertionError("non supported index type: ", itype)
-        else:
-            return basename
-
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        wrapper.codegen_multi_output(
-            self.get_name(),
-            self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
-        )
+        wrapper.codegen_multi_output(self)
         self.codegen_size_asserts(wrapper)
         self.codegen_alignment_asserts(wrapper)
 
