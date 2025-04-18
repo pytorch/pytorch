@@ -36,11 +36,11 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
     secrets: inherit
 
@@ -65,8 +65,8 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
     secrets: inherit
 
@@ -90,7 +90,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-halide", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
     secrets: inherit
 
@@ -114,7 +114,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
     secrets: inherit
 
@@ -138,10 +138,10 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_amx", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "inductor_amx", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "inductor_amx", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
+          { config: "inductor_amx", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
+          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
+          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
         ]}
     secrets: inherit
 
@@ -165,8 +165,8 @@ jobs:
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
     secrets: inherit
 

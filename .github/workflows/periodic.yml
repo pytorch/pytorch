@@ -182,14 +182,14 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 2, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 3, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 4, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 5, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 6, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 7, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
-          { config: "default", shard: 8, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
         ]}
     secrets: inherit
 
