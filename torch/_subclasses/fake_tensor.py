@@ -1072,21 +1072,30 @@ class _DispatchCacheKey:
                 v.strip_shape_env()
 
 
+# Default value for constant_value in _DispatchCacheEntryOutputInfo. This is
+# only for checking and differentiates from None.
+class SingletonConstant:
+    pass
+
+
 @dataclass_slots
 @dataclass(frozen=True)
 class _DispatchCacheEntryOutputInfo:
     """
-    Entry type for the FakeTensor dispatch cache for an output. Accounts for two
+    Entry type for the FakeTensor dispatch cache for an output. Accounts for three
     possibilities:
     1) The op is inplace, and a hit means we need to alias the argument at a
        given index.
     2) We need to synthesize a new FakeTensor given tensor metadata. For view
        ops, we further capture the index of the arg to alias.
+    3) if the tensor related fields are None, then it is a constant value (e.g.
+    None or integer)
     """
 
     inplace_idx: Optional[int]
     metadata: Optional[TensorMetadata]
     view_idx: Optional[int]
+    constant_value: Optional[Any] = SingletonConstant
 
 
 @dataclass_slots
@@ -1678,6 +1687,9 @@ class FakeTensorMode(TorchDispatchMode):
     ) -> None:
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
+        if isinstance(output, (int, type(None))):
+            return
+
         if not isinstance(output, FakeTensor):
             raise _BypassDispatchCache("non-FakeTensor output")
 
@@ -1708,6 +1720,11 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
         output: FakeTensor,
     ) -> _DispatchCacheEntryOutputInfo:
+        if isinstance(output, (int, type(None))):
+            return _DispatchCacheEntryOutputInfo(
+                inplace_idx=None, metadata=None, view_idx=None, constant_value=output
+            )
+
         # If this is an in-place op, the entry records which input arg is aliased.
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
@@ -1773,9 +1790,9 @@ class FakeTensorMode(TorchDispatchMode):
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
-        if output is None:
+        if isinstance(output, (int, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(
-                inplace_idx=None, metadata=None, view_idx=None
+                inplace_idx=None, metadata=None, view_idx=None, constant_value=output
             )
             return _DispatchCacheEntry(
                 output_infos=(output_info,), is_output_tuple=False
@@ -1818,6 +1835,13 @@ class FakeTensorMode(TorchDispatchMode):
         func: OpOverload,
         args: Sequence[object],
     ) -> Optional[FakeTensor]:
+        if (
+            entry.inplace_idx is None
+            and entry.metadata is None
+            and entry.view_idx is None
+        ):
+            assert entry.constant_value is not SingletonConstant
+            return entry.constant_value
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
@@ -1917,6 +1941,23 @@ class FakeTensorMode(TorchDispatchMode):
         Helper to validate that the output synthesized from the cache matches
         the output created by normal dispatch.
         """
+
+        def assert_helper(a: Any, b: Any) -> None:
+            if isinstance(a, tuple):
+                assert isinstance(b, tuple)
+                assert len(a) == len(b)
+                for l, r in zip(a, b):
+                    assert_helper(l, r)
+            elif isinstance(a, int):
+                assert isinstance(b, int) and a == b
+            elif a is None:
+                assert b is None
+            elif isinstance(a, torch.Tensor):
+                assert isinstance(b, torch.Tensor)
+                assert_metadata_eq(assert_eq, a, b)
+            else:
+                raise RuntimeError(f"Unsupported type {type(a)}")
+
         try:
             true_output = self._dispatch_impl(func, types, args, kwargs)
         except Exception as e:
@@ -1925,17 +1966,7 @@ class FakeTensorMode(TorchDispatchMode):
                 f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
             ) from e
         try:
-            if (true_output is not None) and (output is not None):
-                if isinstance(true_output, tuple):
-                    assert len(true_output) == len(output)
-                    for a, b in zip(true_output, output):
-                        assert_metadata_eq(assert_eq, a, b)
-                else:
-                    assert not isinstance(output, tuple)
-                    assert_metadata_eq(assert_eq, true_output, output)
-            else:
-                assert true_output is None
-                assert output is None
+            assert_helper(true_output, output)
         except Exception as e:
             raise RuntimeError(
                 f"FakeTensor cache crosscheck failure: func={func}, "
