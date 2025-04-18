@@ -19,7 +19,8 @@ def get_cuda_arch() -> Optional[str]:
             return str(major * 10 + minor)
         return str(cuda_arch)
     except Exception as e:
-        log.error("Error getting cuda arch: %s", e)
+        if torch.cuda._is_compiled():
+            log.error("Error getting cuda arch: %s", e)
         return None
 
 
