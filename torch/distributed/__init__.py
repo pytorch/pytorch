@@ -33,6 +33,7 @@ DistError = torch._C._DistError
 DistBackendError = torch._C._DistBackendError
 DistNetworkError = torch._C._DistNetworkError
 DistStoreError = torch._C._DistStoreError
+QueueEmptyError = torch._C._DistQueueEmptyError
 
 if is_available():
     from torch._C._distributed_c10d import (

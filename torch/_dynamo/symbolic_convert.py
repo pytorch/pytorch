@@ -1645,6 +1645,9 @@ class InstructionTranslatorBase(
                 hints=[],
             )
 
+    # fb internal 3.12 opcode
+    EAGER_IMPORT_NAME = IMPORT_NAME
+
     def IMPORT_FROM(self, inst):
         self.DUP_TOP(inst)
         self._load_attr(inst)
