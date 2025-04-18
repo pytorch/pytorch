@@ -1,0 +1,29 @@
+{
+  "capabilities": [
+    "apply",
+    "land",
+    "submit",
+    "suggest"
+  ],
+  "ule_land_enabled": true,
+  "project_id": "pytorch-git",
+  "land_modes": {},
+  "sandcastle_job_specs": [
+    {
+      "alias": "pytorch-git-target-determinator",
+      "capabilities": {
+        "vcs": "pytorch-git",
+        "type": "lego",
+      },
+      "command": "SandcastleGitHubYamlSpecParserCommand",
+      "scheduleType": "diff",
+      "args": {
+        "yaml_spec_file_path": ".ci/sandcastle/td.yml"
+      },
+      "metadata": {
+        "infra_errors_should_block_lands": true,
+      },
+      "priority": 0
+    }
+  ]
+}

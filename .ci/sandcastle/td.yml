@@ -1,0 +1,28 @@
+name: Target determinator for Sandcastle CI
+jobs:
+  pytorch-git-build-conda-env:
+    sandcastle:
+      command: SandcastlePyTorchGenAiStableImportBuildCondaEnvCommand
+      description: Build a conda env for PyTorch llama4 stable branch
+      args:
+        build_script_env:
+          BUILD_PYTORCH_TESTS: '1'
+          USE_OSS_PYTORCH: '2'
+          USE_RE: '1'
+          PYTORCH_BRANCH: scratch-cherry-picks-20250418
+          INTERNAL_PYTORCH_DIFF_VERSION: ${{ CI_PHABRICATOR_DIFF_VERSION }}
+        recipe_for_conda_env: conda/env_builder/recipes/xlformers/llama4.sh
+        config_for_conda_env: conda/env_builder/recipes/xlformers/flagship
+        xlformers_repo_branch: main
+        xlformers_repo_commit: master
+        pytorch_git_hash: ${{ CI_COMMIT_SHA }}
+        pytorch_git_pull_host: ${{ CI_PULL_HOST }}
+      capabilities:
+        tenant: fbcode_castle
+        type: fbcode
+        vcs: fbcode-fbsource
+      metadata:
+        infra_errors_should_block_lands: true
+      retries: 0
+      oncall: ai_devx
+      hash: master

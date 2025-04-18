@@ -14,7 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace && "$BUILD_ENVIRONMENT" != *sandcastle* ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -199,7 +199,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   xpu-smi discovery
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
+if [[ "$BUILD_ENVIRONMENT" != *-bazel-* && "$BUILD_ENVIRONMENT" != *sandcastle* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
@@ -212,7 +212,10 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export VALGRIND=OFF
 fi
 
-install_tlparse
+# For sandcastle, all pypi deps are defined in requirements.txt
+if [[ "$BUILD_ENVIRONMENT" != *sandcastle* ]]; then
+  install_tlparse
+fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
@@ -1067,6 +1070,44 @@ test_vulkan() {
   fi
 }
 
+test_genai() {
+  echo "Testing for genai stable import branch"
+  if [[ "$BUILD_ENVIRONMENT" == *sandcastle* ]]; then
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
+
+    # If python test/run_test.py command above doesn't work, you can directly run these
+    # cpp test binaries to work around python setup issues.
+    # /re_cwd/conda/conda/conda/lib/python3.10/site-packages/torch/bin/ProcessGroupNCCLErrorsTest
+    # /re_cwd/conda/conda/conda/lib/python3.10/site-packages/torch/bin/ProcessGroupNCCLTest
+    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
+    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
+
+    test_store_skip="not test_init_pg_and_rpc_with_same_file"
+    test_store_skip="${test_store_skip} and not test_init_pg_and_rpc_with_same_socket"
+    python test/run_test.py -i distributed/test_store.py -k "${test_store_skip}"
+
+    # OSS failures on H100
+    test_c10d_nccl_skip="not test_close_multi_pg_unordered"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_nan_assert_float8_e4m3fn"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_nan_assert_float8_e5m2"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_new_group_eager_init_True"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_non_blocking_init"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_nccl_propagate_error_reason"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_error_detection_and_propagation"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_nccl_timeout"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_restart_pg_after_error"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_intra_node_comm_all_reduce"
+    # other failures
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_ddp_complex_params"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_ddp_packed_sequence"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_nccl_user_buffer_registration"
+    test_c10d_nccl_skip="${test_c10d_nccl_skip} and not test_pass_nccl_options_config"
+    python test/run_test.py -i distributed/test_c10d_nccl.py -k "${test_c10d_nccl_skip}"
+  fi
+}
+
 test_distributed() {
   echo "Testing distributed python tests"
   # shellcheck disable=SC2086
@@ -1586,6 +1627,8 @@ elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
+elif [[ "$TEST_CONFIG" == genai ]]; then
+  test_genai
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   test_distributed
   # Only run RPC C++ tests on the first shard
