@@ -22,6 +22,9 @@ namespace {
 #endif
 }
 
+// TODO: replace DispatchKeyRange with std::views::iota |
+// std::views::transform (with a cast back to DispatchKey) once we
+// move to C++20.
 class DispatchKeyRangeIterator {
   using iterator_type = c10::detail::integer_iterator<uint16_t>;
  public:
@@ -78,17 +81,38 @@ static constexpr auto allDispatchKeysInFullSet() {
   return DispatchKeyRange(static_cast<DispatchKey>(1), DispatchKey::EndOfFunctionalityKeys);
 }
 
-// Returns
-// [(dispatch_key, getDispatchTableIndexForDispatchKey(dispatch_key))
-//  for all keys in DispatchKeySet(DispatchKeySet::FULL)]
+// Returns an array of the same size as the dispatch table, where each
+// entry is the DispatchKey that the corresponding index in the
+// dispatch table represents.
 static const auto& getDispatchTableIndexToKey() {
   static const auto result = ([]() {
-    std::array<DispatchKey, c10::num_runtime_entries> arr;
-    for (const auto dk: allDispatchKeysInFullSet()) {
+    using result_type = std::array<DispatchKey, c10::num_runtime_entries>;
+    result_type arr;
+    arr.fill(DispatchKey::Undefined);
+    const auto update_array_entry = [](result_type& arr_, DispatchKey dk) {
       const auto index = getDispatchTableIndexForDispatchKey(dk);
-      arr.at(index) = dk;
+      TORCH_INTERNAL_ASSERT(arr_.at(index) == DispatchKey::Undefined || arr_.at(index) == dk);
+      arr_.at(index) = dk;
+    };
+    for (const auto dk_outer: DispatchKeyRange(static_cast<DispatchKey>(1), static_cast<DispatchKey>(static_cast<uint16_t>(DispatchKey::EndOfAliasKeys) + 1))) {
+      for (const auto dk: c10::getRuntimeDispatchKeySet(dk_outer)) {
+        update_array_entry(arr, dk);
+      }
+      if (c10::isBackendDispatchKey(dk_outer)) {
+        DispatchKey autograd_key = getAutogradKeyFromBackend(toBackendComponent(dk_outer));
+        update_array_entry(arr, autograd_key);
+      }
     }
-    arr.at(getDispatchTableIndexForDispatchKey(DispatchKey::Undefined)) = DispatchKey::Undefined;
+    // Self-test. Should be plenty cheap enough to just run in prod
+    // builds. We just need to make sure that we have the dispatch key
+    // for every entry in the table, and we assert in
+    // update_array_entry above that we also don't have any conflicts
+    // during computation.
+    TORCH_INTERNAL_ASSERT(getDispatchTableIndexForDispatchKey(DispatchKey::Undefined) == 0);
+    TORCH_INTERNAL_ASSERT(arr[0] == DispatchKey::Undefined);
+    for (const auto index : c10::irange(1, arr.size())) {
+      TORCH_INTERNAL_ASSERT(arr[index] != DispatchKey::Undefined, "missing dispatch key at index ", index);
+    }
     return arr;
   })();
   return result;
