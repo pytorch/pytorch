@@ -206,7 +206,7 @@ html_context = {
     "language_bindings_links": language_bindings_links,
     "version": version,
     "date_info": {
-        "paths_to_skip": ["generated/"],
+        "paths_to_skip": ["generated/", "index"],
     },
 }
 
