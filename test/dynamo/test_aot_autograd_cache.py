@@ -948,6 +948,36 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(len(CompiledTritonKernels._cache), 0)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"strict_autograd_cache": True})
+    def test_dynamic_shapes_different_sizes(self):
+        # The forward and backward function have different symint inputs,
+        # but the same underlying symbols
+        def fn(x, y):
+            z = x * y
+            return (torch.cat((x, x), dim=0), z)
+
+        (x1, y1) = torch.randn(5, requires_grad=True), torch.randn(5)
+        compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
+        x_compiled, _ = compiled_fn(x1, y1)
+        x_compiled.sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self._clear_dynamo_and_codecache()
+
+        # Run a second time and see it cache hit instead of erroring
+        (x2, y2) = torch.randn(5, requires_grad=True), torch.randn(5)
+        x_compiled, _ = compiled_fn(x2, y2)
+        x_compiled.sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
 
 @inductor_config.patch("fx_graph_cache", True)
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
