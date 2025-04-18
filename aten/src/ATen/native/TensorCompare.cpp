@@ -460,7 +460,8 @@ Tensor isinf(const Tensor& self) {
 
 Tensor isfinite(const Tensor& self) {
   // Note: Integral tensor values are always finite
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
+      self.scalar_type() == kFloat8_e8m0fnu) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
@@ -568,7 +569,7 @@ static void isin_sorting(
 }
 
 template <typename... Args>
-Device out_device(Args&... inps) {
+static Device out_device(Args&... inps) {
   for (const auto& i : {inps...}) {
     if (i.device() != at::kCPU) {
       return i.device();
@@ -738,7 +739,7 @@ std::tuple<Tensor&, Tensor&> mode_out(
 }
 
 template <class Stub>
-void minmax_out_impl(
+static void minmax_out_impl(
     const Tensor& self,
     int64_t dim,
     bool keepdim,

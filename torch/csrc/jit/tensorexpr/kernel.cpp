@@ -483,7 +483,11 @@ ExprHandle TensorExprKernel::getVarForShape(const c10::ShapeSymbol& ss) {
   if (it == shapeSymbolToVar_.end()) {
     VarHandle var("ss" + std::to_string(-value), kLong);
     shapeSymbolToVar_.emplace(value, var);
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(var);
+#else
+    return var;
+#endif
   }
   return it->second;
 }
@@ -1020,7 +1024,11 @@ ExprHandle TensorExprKernel::getStrideArg(
         kLong);
     strideArgToVar_[std::pair<size_t, size_t>(
         tensor_input_index, stride_index)] = var;
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(var);
+#else
+    return var;
+#endif
   }
   return it->second;
 }
@@ -1234,7 +1242,7 @@ NNCLoweringFunction TensorExprKernel::getCustomLoweringFor(
 }
 
 template <typename T>
-std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
+static std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   // initialize original index locations
   std::vector<size_t> idx(v.size());
   iota(idx.begin(), idx.end(), 0);
@@ -1448,7 +1456,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
       ToDtype(scalar_type));
 
   if (!const_tensor.is_contiguous()) {
-    const_tensor = const_tensor.clone().contiguous();
+    const_tensor = const_tensor.clone(at::MemoryFormat::Contiguous);
     unpacked_constant_tensors_.push_back(const_tensor);
   }
 

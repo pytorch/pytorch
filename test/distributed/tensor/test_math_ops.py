@@ -7,13 +7,14 @@ from pprint import pformat
 from typing import NamedTuple
 
 import torch
-from torch.distributed._tensor import (
+from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
+    init_device_mesh,
 )
-from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.tensor._ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
@@ -22,7 +23,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -631,6 +632,67 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(so.full_tensor(), o)
 
     @with_comms
+    def test_foreach_norm_different_mesh(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("x", "y")
+        )
+
+        mesh_x = mesh_2d["x"]
+        mesh_y = mesh_2d["y"]
+
+        torch.manual_seed(0)
+
+        grad0 = torch.randn(12, 8)
+        grad1 = torch.randn(8, 8)
+
+        replica_grad0 = DTensor.from_local(grad0, mesh_x, [Replicate()])
+        replica_grad1 = DTensor.from_local(grad1, mesh_y, [Replicate()])
+
+        # could run sharded op without error
+        out_tuple = torch.ops.aten._foreach_norm([replica_grad0, replica_grad1], 2)
+
+        grad0_norm = out_tuple[0]
+        grad1_norm = out_tuple[1]
+        self.assertEqual(grad0_norm.device_mesh, mesh_x)
+        self.assertEqual(grad1_norm.device_mesh, mesh_y)
+
+    @with_comms
+    @skipIfRocm
+    def test_foreach_add_different_mesh(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("x", "y")
+        )
+
+        mesh_x = mesh_2d["x"]
+        mesh_y = mesh_2d["y"]
+
+        inp00 = torch.ones(4, 8) * 2
+        inp01 = torch.ones(8, 8) * 3
+        inp10 = torch.ones(4, 8) * 4
+        inp11 = torch.ones(8, 8) * 3
+
+        replica_inp00 = DTensor.from_local(inp00, mesh_x, [Shard(0)])
+        replica_inp01 = DTensor.from_local(inp01, mesh_x, [Replicate()])
+        replica_inp10 = DTensor.from_local(inp10, mesh_y, [Shard(0)])
+        replica_inp11 = DTensor.from_local(inp11, mesh_y, [Replicate()])
+
+        # zipped foreach, could run sharded op without error
+        out_tuple = torch.ops.aten._foreach_add(
+            [replica_inp00, replica_inp10], [replica_inp01, replica_inp11]
+        )
+
+        out0, out1 = out_tuple
+        self.assertEqual(out0.device_mesh, mesh_x)
+        self.assertEqual(out1.device_mesh, mesh_y)
+
+        with self.assertRaisesRegex(ValueError, "computation across different mesh"):
+            torch.ops.aten._foreach_add(
+                [replica_inp00, replica_inp01], [replica_inp10, replica_inp11]
+            )
+
+    @with_comms
     def test_linalg_eigh(self):
         A = torch.randn(2, 2, dtype=torch.float64)
         mesh = self.build_device_mesh()
@@ -665,6 +727,34 @@ class DistMathOpsTest(DTensorTestBase):
             result = m(input)
             dtensor_result = m(input_dtensor)
             self.assertEqual(result, dtensor_result.full_tensor())
+
+    @with_comms
+    def test_cumsum(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        inp = torch.rand(3, 5, device=self.device_type)
+
+        shard_dim = 0
+        input_dtensor = distribute_tensor(
+            inp, device_mesh=mesh, placements=[Shard(shard_dim)]
+        )
+
+        cumsum_dims = [0, 1]
+        for dim in cumsum_dims:
+            output = torch.cumsum(inp, dim=dim)
+            with comm_mode:
+                output_dtensor = torch.cumsum(input_dtensor, dim=dim)
+                if dim == shard_dim:
+                    self.assertEqual(comm_mode.get_total_counts(), 1)
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                        1,
+                    )
+                    self.assertTrue(output_dtensor.placements[0].is_replicate())
+                else:
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
+                self.assertEqual(output_dtensor.full_tensor(), output)
 
 
 if __name__ == "__main__":

@@ -64,18 +64,25 @@ class verbose:
         return False
 
 
-def set_flags(_enabled, _deterministic=None):
-    orig_flags = (torch._C._get_mkldnn_enabled(), torch._C._get_mkldnn_deterministic())
-    torch._C._set_mkldnn_enabled(_enabled)
+def set_flags(_enabled=None, _deterministic=None, _allow_tf32=None):
+    orig_flags = (
+        torch._C._get_mkldnn_enabled(),
+        torch._C._get_mkldnn_deterministic(),
+        torch._C._get_onednn_allow_tf32(),
+    )
+    if _enabled is not None:
+        torch._C._set_mkldnn_enabled(_enabled)
     if _deterministic is not None:
         torch._C._set_mkldnn_deterministic(_deterministic)
+    if _allow_tf32 is not None:
+        torch._C._set_onednn_allow_tf32(_allow_tf32)
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False, deterministic=False):
+def flags(enabled=False, deterministic=False, allow_tf32=True):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, deterministic)
+        orig_flags = set_flags(enabled, deterministic, allow_tf32)
     try:
         yield
     finally:
@@ -87,14 +94,21 @@ class MkldnnModule(PropModule):
     def __init__(self, m, name):
         super().__init__(m, name)
 
+    def is_available(self):
+        return is_available()
+
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
     deterministic = ContextProp(
         torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
+    )
+    allow_tf32 = ContextProp(
+        torch._C._get_onednn_allow_tf32, torch._C._set_onednn_allow_tf32
     )
 
 
 if TYPE_CHECKING:
     enabled: ContextProp
     deterministic: ContextProp
+    allow_tf32: ContextProp
 
 sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)

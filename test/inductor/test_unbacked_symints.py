@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -38,6 +38,10 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(
+        msg="The OP aten.nonzero implemented by XPU has different memory layout with fake tensor."
+        " Remove this skip after #146883 fixed."
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
@@ -385,9 +389,6 @@ class TestUnbackedSymints(InductorTestCase):
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
     def test_issue_143498(self, device):
-        if device == "cpu":
-            raise unittest.SkipTest("CPU Failure")
-
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -440,6 +441,33 @@ class TestUnbackedSymints(InductorTestCase):
         )
         model = Model()
         self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
+
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_einsum(self, device):
+        def fn(q, k, vector, scalar):
+            unbacked = scalar.item()
+            q = q.repeat(1, unbacked, 1, 1)
+            k = k.repeat(1, unbacked, 1, 1)
+
+            qk = torch.einsum("bcxd,bcyd->bcxy", (q, k))
+            qk2 = torch.einsum("b...,b...->b...", (q, k))
+            qvec = torch.einsum("b...,b->b...", (q, vector))
+            return qk, qk2, qvec
+
+        example_inputs = (
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.randn((12,), device=device),
+            torch.scalar_tensor(10, device=device, dtype=torch.int8),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)

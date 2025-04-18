@@ -53,7 +53,7 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
     return [
         f"""\
 struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
-void impl({', '.join(a.decl() for a in out_args)});
+void impl({", ".join(a.decl() for a in out_args)});
 }};
 """
     ]

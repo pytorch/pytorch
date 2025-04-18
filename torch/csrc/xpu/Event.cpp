@@ -126,7 +126,7 @@ static PyMethodDef THXPEvent_methods[] = {
     {(char*)"synchronize", THXPEvent_synchronize, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyTypeObject THXPEventType = {
+static PyTypeObject THXPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._XpuEventBase", /* tp_name */
     sizeof(THXPEvent), /* tp_basicsize */

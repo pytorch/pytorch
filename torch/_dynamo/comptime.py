@@ -1,10 +1,40 @@
 # mypy: allow-untyped-defs
-# This file establishes the public comptime interface to Dynamo.
-# This allows Dynamo users to execute arbitrary Python code while
-# Dynamo is symbolically evaluating their original programs.
-#
-# The goal of the public API is to give users rope, without actually
-# leaking private implementation details of Dynamo.
+
+"""
+This module provides the public comptime interface to TorchDynamo, enabling users to execute
+arbitrary Python code during symbolic evaluation of their programs.
+
+The comptime interface allows inspection and modification of TorchDynamo's compilation
+process while it is running. This can be useful for:
+
+- Debugging compilation issues
+- Inspecting intermediate state
+- Adding custom guards or graph breaks
+- Analyzing symbolic shapes and values
+
+Example usage:
+
+    import torch
+    from torch._dynamo.comptime import comptime
+
+    def my_model(x):
+        # Print the compile-time known information about x
+        comptime.print(x)
+
+        # Print the current FX graph being constructed
+        comptime.print_graph()
+
+        # Force a value to be treated as static
+        if comptime(lambda ctx: ctx.get_local("x").is_dynamic()):
+            comptime.force_static(x)
+
+        # Add a manual graph break
+        comptime.graph_break()
+
+Note: While this API provides significant flexibility, it intentionally avoids
+exposing internal implementation details of TorchDynamo to maintain compatibility
+across versions.
+"""
 
 import builtins
 import dis
@@ -15,7 +45,7 @@ from typing import Optional, Union
 import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
-from .exc import unimplemented
+from .exc import unimplemented_v2
 from .variables import CellVariable
 from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
@@ -161,7 +191,12 @@ class ComptimeContext:
         """
         Manually trigger a graph break
         """
-        unimplemented(msg)
+        unimplemented_v2(
+            gb_type="ComptimeContext graph break",
+            context=msg,
+            explanation=f"Manually triggered ComptimeContext graph break with message {msg}.",
+            hints=[],
+        )
 
     def graph(self):
         """
@@ -174,9 +209,9 @@ class ComptimeContext:
         """
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
-        assert (
-            not val.is_dynamic()
-        ), "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+        assert not val.is_dynamic(), (
+            "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+        )
 
     def print_graph(self, *, verbose=True, file=None):
         """
@@ -369,6 +404,7 @@ class _Comptime:
         this in your model code::
 
             from torch._dynamo.comptime import comptime
+
             comptime.breakpoint()
 
         And then, inside pdb, you can access 'ctx' to query things

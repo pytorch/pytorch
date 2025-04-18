@@ -1,8 +1,10 @@
 name: inductor-perf-nightly-rocm
 
 on:
+  push:
+    tags:
+      - ciflow/inductor-perf-test-nightly-rocm/*
   schedule:
-    - cron: 0 7 * * 1-6
     - cron: 0 7 * * 0
   # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
   # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
@@ -76,13 +78,12 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-focal-rocm6_3-py3_10-inductor-benchmark-build:
-    # TODO (huydhn): Remove this once https://github.com/pytorch/pytorch/pull/144594 lands
-    if: false
-    name: rocm6_3-py3_10-inductor-benchmark-build
+  linux-focal-rocm-py3_10-inductor-benchmark-build:
+    if: github.repository_owner == 'pytorch'
+    name: rocm-py3_10-inductor-benchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm6_3-py3_10
+      build-environment: linux-focal-rocm-py3_10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -101,18 +102,18 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm6_3-py3_10-inductor-benchmark-test:
+  linux-focal-rocm-py3_10-inductor-benchmark-test:
     permissions:
       id-token: write
       contents: read
-    name: rocm6_3-py3_10-inductor-benchmark-test
+    name: rocm-py3_10-inductor-benchmark-test
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm6_3-py3_10-inductor-benchmark-build
+    needs: linux-focal-rocm-py3_10-inductor-benchmark-build
     with:
-      build-environment: linux-focal-rocm6_3-py3_10
+      build-environment: linux-focal-rocm-py3_10
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
-      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-inductor-benchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
       disable-monitor: true

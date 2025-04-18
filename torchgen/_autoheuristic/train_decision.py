@@ -446,9 +446,9 @@ class AHTrainDecisionTree(AHTrain):
             for row in group.itertuples():
                 choice2time[row.choice] = row.median_execution_time
 
-            assert (
-                len(unique_choices) == len(group)
-            ), f"len(unique_choices) != len(group): {len(unique_choices)} != {len(group)}"
+            assert len(unique_choices) == len(group), (
+                f"len(unique_choices) != len(group): {len(unique_choices)} != {len(group)}"
+            )
 
             return pd.Series(
                 {
@@ -861,17 +861,16 @@ class DecisionEvaluator:
         """
 
         y_true = self.df["actual_winner"] if self.ranking else self.df["winner"]
-        i = 0
-        for pred, true, prob, leaf_id in zip(
-            self.predictions, y_true, self.probas, self.leaf_ids
+        for i, (pred, true, prob, leaf_id) in enumerate(
+            zip(self.predictions, y_true, self.probas, self.leaf_ids)
         ):
             avail_choices = self.df["avail_choices"].iloc[i]
             top_k_choices = self.top_k_classes(
                 self.model, prob, k=self.k, avail_choices=avail_choices
             )
-            assert (
-                true in avail_choices
-            ), f"Best choice {true} not in available choices {avail_choices}"
+            assert true in avail_choices, (
+                f"Best choice {true} not in available choices {avail_choices}"
+            )
             default_config = self.train.get_default_config(self.df.iloc[i])
             self.eval_prediction(
                 avail_choices,
@@ -884,7 +883,6 @@ class DecisionEvaluator:
                 i,
             )
             self.eval_ranking_prediction(true, top_k_choices, i)
-            i += 1
 
         total = len(self.predictions)
         if return_safe_proba:

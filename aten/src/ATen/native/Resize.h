@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/SymBool.h>
 
 #include <utility>
 
@@ -85,16 +86,28 @@ inline void checkInBoundsForStorage(
     T storage_offset,
     const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
-  T storage_size_bytes =
-      at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-  T storage_offset_bytes = storage_offset * data_type.itemsize();
-  if (storage_size_bytes == 0) {
+  T storage_size_bytes, storage_size_plus_offset_bytes;
+  if (stride.data()) {
+    storage_size_bytes =
+        at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytes(
+        size, stride, data_type.itemsize(), storage_offset);
+  } else {
+    storage_size_bytes =
+        at::detail::computeStorageNbytesContiguous(size, data_type.itemsize());
+    storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
+        size, data_type.itemsize(), storage_offset);
+  }
+  // It's ok to always evaluate to False for this early return for SymInts because
+  // (1) maybe_convert_symint below only installs guard for int64_t case
+  // (2) we check for this condition in the TORCH_MAYBE_SYM_CHECK below
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(storage_size_bytes, 0))) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
   T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
-  TORCH_CHECK(
-      storage_size_bytes + storage_offset_bytes <= new_storage_size_bytes,
+  TORCH_MAYBE_SYM_CHECK(
+      sym_eq(storage_size_bytes, 0) || sym_le(storage_size_plus_offset_bytes, new_storage_size_bytes),
       "setStorage: sizes ",
       size,
       ", strides ",
@@ -105,14 +118,14 @@ inline void checkInBoundsForStorage(
       ", and itemsize ",
       data_type.itemsize(),
       " requiring a storage size of ",
-      storage_size_bytes + storage_offset_bytes,
+      storage_size_plus_offset_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
 }
 
 template <typename T>
 inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
-                                   ArrayRef<T> size, ArrayRef<T> stride) {
+                                   ArrayRef<T> size, ArrayRef<T> stride, bool check_offset_in_bounds = true) {
   // FIXME: stride should be optional
   if (stride.data()) {
     TORCH_CHECK(size.size() == stride.size(), "unequal size length (", size.size(),
@@ -122,6 +135,28 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
 #ifdef DEBUG
   TORCH_CHECK(size.size() <= INT_MAX, "size length (", size.size(), ") greater than INT_MAX");
 #endif
+
+  // storageOffset
+  TORCH_CHECK(
+      storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+
+  // set_storage_{device} (except set_storage_meta__symint)
+  // will (unsafely) set the storage offset and then call resize_impl that
+  // handles resizing the storage However, resize_impl will only resize the
+  // storage if the sizes/strides changed. For the case that the sizes/strides
+  // remain unchanged, the storage offset is not properly validated, so we do
+  // that here.
+  if (check_offset_in_bounds) {
+    auto result_tensor_impl = result.unsafeGetTensorImpl();
+    bool size_unchanged = result_tensor_impl->generic_sizes<T>() == size;
+    bool stride_unchanged = stride.data()
+        ? result_tensor_impl->generic_strides<T>() == stride
+        : true;
+    if (size_unchanged && stride_unchanged) {
+      checkInBoundsForStorage(
+          size, stride, storage_offset, result.dtype(), storage);
+    }
+  }
 
   // storage: note this can't be replaced with result.set_(storage) as the semantics of that
   // function is to set the tensor size to be equal to the size of the storage.
@@ -139,9 +174,6 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
                 "\".  This is no longer allowed; the devices must match.");
     result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
-
-  // storageOffset
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 }
 
 /**

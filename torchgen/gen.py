@@ -499,7 +499,7 @@ def generate_static_dispatch_fallback_call(
         return f"return {ns}::{DispatchKey.CompositeImplicitAutogradNestedTensor.lower()}::{name}({exprs});"
     else:
         return f"""TORCH_CHECK(false, "Static dispatch does not support {name} for\
-{', '.join([str(index.dispatch_key)for index in backend_indices])} ");"""
+{", ".join([str(index.dispatch_key) for index in backend_indices])} ");"""
 
 
 def static_dispatch(
@@ -552,7 +552,7 @@ def static_dispatch(
         )
     if tensor_args != "":
         subexprs.append(f"c10::detail::multi_dispatch_key_set({tensor_args})")
-    stmts.append(f"""DispatchKeySet _dk_set = {' | '.join(subexprs)};""")
+    stmts.append(f"""DispatchKeySet _dk_set = {" | ".join(subexprs)};""")
     stmts.append("DispatchKey _dk = c10::highestPriorityBackendTypeId(_dk_set);")
 
     dispatch_code = []
@@ -1016,7 +1016,7 @@ C10_ALWAYS_INLINE
 {sig.defn(name)} {{
   {compute_dk}
   return at::_ops::{f.func.name.unambiguous_name()}::redispatch(
-      _dk, {', '.join(a.expr for a in dispatcher_exprs)});
+      _dk, {", ".join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:
@@ -1433,9 +1433,9 @@ def get_grouped_by_view_native_functions(
             assert kind not in grouped_by_views[schema]
             grouped_by_views[schema][kind] = f
         else:
-            assert (
-                view_kind not in grouped_by_views[schema]
-            ), f"{view_kind} already in {grouped_by_views[schema].keys()}"
+            assert view_kind not in grouped_by_views[schema], (
+                f"{view_kind} already in {grouped_by_views[schema].keys()}"
+            )
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
@@ -1483,9 +1483,9 @@ def get_ns_grouped_kernels(
                 native_function_namespaces.add(namespace)
             else:
                 namespace = DEFAULT_KERNEL_NAMESPACE
-            assert (
-                len(native_function_namespaces) <= 1
-            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
+            assert len(native_function_namespaces) <= 1, (
+                f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
+            )
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, backend_idx)
             )

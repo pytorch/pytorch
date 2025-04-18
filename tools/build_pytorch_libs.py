@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import os
 import platform
-from glob import glob
+import subprocess
+from pathlib import Path
 
 from .setup_helpers.cmake import CMake, USE_NINJA
 from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
+
+
+repo_root = Path(__file__).absolute().parent.parent
+third_party_path = os.path.join(repo_root, "third_party")
 
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
@@ -61,15 +66,6 @@ def _create_build_env() -> dict[str, str]:
     # you should NEVER add something to this list. It is bad practice to
     # have cmake read the environment
     my_env = os.environ.copy()
-    if (
-        "CUDA_HOME" in my_env
-    ):  # Keep CUDA_HOME. This env variable is still used in other part.
-        my_env["CUDA_BIN_PATH"] = my_env["CUDA_HOME"]
-    elif IS_WINDOWS:  # we should eventually make this as part of FindCUDA.
-        cuda_win = glob("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*")
-        if len(cuda_win) > 0:
-            my_env["CUDA_BIN_PATH"] = cuda_win[0]
-
     if IS_WINDOWS and USE_NINJA:
         # When using Ninja under Windows, the gcc toolchain will be chosen as
         # default. But it should be set to MSVC as the user's first choice.
@@ -77,6 +73,31 @@ def _create_build_env() -> dict[str, str]:
         my_env.setdefault("CC", "cl")
         my_env.setdefault("CXX", "cl")
     return my_env
+
+
+def read_nccl_pin() -> str:
+    nccl_file = "nccl-cu12.txt"
+    if os.getenv("DESIRED_CUDA", "").startswith("11") or os.getenv(
+        "CUDA_VERSION", ""
+    ).startswith("11"):
+        nccl_file = "nccl-cu11.txt"
+    nccl_pin_path = os.path.join(
+        repo_root, ".ci", "docker", "ci_commit_pins", nccl_file
+    )
+    with open(nccl_pin_path) as f:
+        return f.read().strip()
+
+
+def checkout_nccl() -> None:
+    release_tag = read_nccl_pin()
+    print(f"-- Checkout nccl release tag: {release_tag}")
+    nccl_basedir = os.path.join(third_party_path, "nccl")
+    if not os.path.exists(nccl_basedir):
+        subprocess.check_call(
+            ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
+            cwd=third_party_path,
+        )
+        subprocess.check_call(["git", "checkout", release_tag], cwd=nccl_basedir)
 
 
 def build_pytorch(
@@ -88,6 +109,8 @@ def build_pytorch(
     cmake: CMake,
 ) -> None:
     my_env = _create_build_env()
+    if os.getenv("USE_SYSTEM_NCCL", "0") == "0":
+        checkout_nccl()
     build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
         version, cmake_python_library, build_python, build_test, my_env, rerun_cmake

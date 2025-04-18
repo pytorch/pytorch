@@ -61,11 +61,7 @@ class basic_string_view final {
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
 
   constexpr basic_string_view& operator=(
-      const basic_string_view& rhs) noexcept {
-    begin_ = rhs.begin_;
-    size_ = rhs.size_;
-    return *this;
-  }
+      const basic_string_view& rhs) noexcept = default;
 
   constexpr operator ::std::basic_string_view<CharT>() const {
     return ::std::basic_string_view<CharT>(data(), size());

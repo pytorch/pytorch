@@ -200,9 +200,17 @@ class NestedTensor(torch.Tensor):
     def _max_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("max_seqlen", None)
 
+    @_max_seqlen_tensor.setter
+    def _max_seqlen_tensor(self, val: Optional[torch.Tensor]) -> None:
+        self._metadata_cache["max_seqlen"] = val
+
     @property
     def _min_seqlen_tensor(self) -> Optional[torch.Tensor]:
         return self._metadata_cache.get("min_seqlen", None)
+
+    @_min_seqlen_tensor.setter
+    def _min_seqlen_tensor(self, val: Optional[torch.Tensor]) -> None:
+        self._metadata_cache["min_seqlen"] = val
 
     # These are old private @property accessors that are kept around for internal BC
     # reasons. TODO: Remove these!
@@ -325,10 +333,17 @@ class NestedTensor(torch.Tensor):
 
         # Poor man's redispatch for composite ops. This becomes relevant under inference
         # mode, where disabling autograd key dispatch prevents decomposition.
-        dk = torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor
-        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
-            with torch.overrides.enable_reentrant_dispatch():
-                return func._op_dk(dk, *args, **kwargs)
+        all_dks = (
+            # We want to handle both the cases where NestedTensor overrides the
+            # composite implicit autograd kernel, and the case where it doesn't.
+            # Prioritize calling into NestedTensor's kernel if it exists.
+            torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor,
+            torch._C.DispatchKey.CompositeImplicitAutograd,
+        )
+        for dk in all_dks:
+            if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+                with torch.overrides.enable_reentrant_dispatch():
+                    return func._op_dk(dk, *args, **kwargs)
 
         raise NotImplementedError(func)
 

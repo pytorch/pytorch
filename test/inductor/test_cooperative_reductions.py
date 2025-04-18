@@ -20,6 +20,30 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+class TestingHeuristics(InductorChoices):
+    def __init__(self, *, cooperative: bool, persistent: bool, cfg: dict[str, int]):
+        super().__init__()
+        self.cooperative = cooperative
+        self.persistent = persistent
+        self.cfg = cfg
+        self.call_count = 0
+
+    def triton_kernel_kwargs(
+        self,
+        kernel_cls: type[TritonKernel],
+        features: SIMDKernelFeatures,
+        groups: list[sympy.Expr],
+        kernel_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.call_count += 1
+        return {
+            **kernel_kwargs,
+            "override_cooperative_reduction": self.cooperative,
+            "override_persistent_reduction": self.persistent,
+            "fixed_config": FixedTritonConfig(self.cfg),
+        }
+
+
 @config.patch(
     {
         "triton.cooperative_reductions": True,
@@ -113,7 +137,13 @@ class CooperativeReductionTests(TestCase):
         source_code = self.run_and_check(fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
-        self.assertEqual(source_code.count("triton_helpers.x_grid_barrier"), 16)
+
+        # With online softmax, the computation of max and sum are done
+        # jointly and they share a single barrier call.
+        expected_num_barrier = 8 if config.online_softmax else 16
+        self.assertEqual(
+            source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
+        )
         self.assertEqual(source_code.count("empty_strided_cuda"), 5)
 
     def test_reduce_split(self):
@@ -146,6 +176,19 @@ class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
 )
 @instantiate_parametrized_tests
 class TestFixedConfigs(TestCase):
+    def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
+        expected = fn(*args)
+        heuristic = TestingHeuristics(
+            persistent=persistent, cooperative=cooperative, cfg=cfg
+        )
+        with torch._inductor.virtualized.V.set_choices_handler(heuristic):
+            result, (source_code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), *args
+            )
+        self.assertEqual(result, expected)
+        self.assertEqual(heuristic.call_count, 1)
+        self.assertIn("@triton_heuristics.fixed_config(", source_code)
+
     @parametrize(
         "persistent,cooperative,cfg",
         [
@@ -157,52 +200,88 @@ class TestFixedConfigs(TestCase):
             (False, True, {"XBLOCK": 2, "R0_BLOCK": 128, "RSPLIT": 16}),
             (True, True, {"XBLOCK": 1, "RSPLIT": 16}),
             (True, True, {"XBLOCK": 2, "RSPLIT": 16}),
+            (False, True, {"XBLOCK": 1, "R0_BLOCK": 128, "RSPLIT": 17}),
+            (False, True, {"XBLOCK": 2, "R0_BLOCK": 128, "RSPLIT": 17}),
+            (True, True, {"XBLOCK": 1, "RSPLIT": 17}),
+            (True, True, {"XBLOCK": 2, "RSPLIT": 17}),
         ],
     )
     def test_fixed_configs(self, persistent, cooperative, cfg):
-        class MyHeuristics(InductorChoices):
-            def triton_kernel_kwargs(
-                self,
-                kernel_cls: type[TritonKernel],
-                features: SIMDKernelFeatures,
-                groups: list[sympy.Expr],
-                kernel_kwargs: dict[str, Any],
-            ) -> dict[str, Any]:
-                return {
-                    **kernel_kwargs,
-                    "override_cooperative_reduction": cooperative,
-                    "override_persistent_reduction": persistent,
-                    "fixed_config": FixedTritonConfig(cfg),
-                }
-
         def fn(x):
             return torch.softmax(x + 1, dim=-1) + x
 
         args = [torch.randn(8, 8000, device="cuda")]
-        with torch._inductor.virtualized.V.set_choices_handler(MyHeuristics()):
-            expected = fn(*args)
-            fn = torch.compile(fn, fullgraph=True)
-            result, (source_code,) = run_and_get_code(fn, *args)
-            self.assertEqual(result, expected)
-            self.assertIn("@triton_heuristics.fixed_config(", source_code)
+        self._check(fn, args, persistent=persistent, cooperative=cooperative, cfg=cfg)
+
+    @parametrize(
+        "persistent,x,r,rsplit",
+        [
+            (False, 1, 8000, 17),
+            (False, 4, 8123, 33),
+            (False, 9, 8000, 17),
+            (False, 1, 8192, 33),
+            (False, 3, 8192, 17),
+            (True, 1, 7567, 17),
+            (True, 4, 8000, 17),
+            (True, 9, 8000, 37),
+            (True, 1, 8192, 17),
+            (True, 3, 8192, 40),
+        ],
+    )
+    def test_welford_non_power_of_2_rsplit(self, persistent, x, r, rsplit):
+        def fn(x):
+            return torch.var_mean(x, dim=-1)
+
+        cfg = {"XBLOCK": 64, "RSPLIT": rsplit, "num_warps": 8}
+        if not persistent:
+            cfg["R0_BLOCK"] = 64
+        args = [torch.randn(x, r, device="cuda")]
+        self._check(fn, args, persistent=persistent, cfg=cfg)
+
+    @parametrize("persistent", [True, False])
+    def test_min_max_non_power_of_2_rsplit(self, persistent):
+        def fn(x):
+            return (
+                torch.amin(x, dim=-1),
+                torch.amax(x, dim=-1),
+                torch.argmin(x, dim=-1),
+                torch.argmax(x, dim=-1),
+            )
+
+        cfg = {"XBLOCK": 2, "RSPLIT": 33, "num_warps": 8}
+        if not persistent:
+            cfg["R0_BLOCK"] = 32
+
+        args = [
+            torch.stack(
+                [
+                    torch.arange(10, 4096, device="cuda"),
+                    -torch.arange(10, 4096, device="cuda"),
+                ]
+            )
+        ]
+        self._check(fn, args, persistent=persistent, cfg=cfg)
+        args = [
+            torch.stack(
+                [
+                    torch.tensor(
+                        [0.0] * 150 + [float("inf")] * 150,
+                        device="cuda",
+                        dtype=torch.float32,
+                    ),
+                    torch.tensor(
+                        [0.0] * 150 + [-float("inf")] * 150,
+                        device="cuda",
+                        dtype=torch.float32,
+                    ),
+                ]
+            )
+        ]
+        self._check(fn, args, persistent=persistent, cfg=cfg)
 
     @parametrize("persistent", [False, True])
-    def test_fixed_config_with_larger_xblock_than_xnumel(self, persistent):
-        class MyHeuristics(InductorChoices):
-            def triton_kernel_kwargs(
-                self,
-                kernel_cls: type[TritonKernel],
-                features: SIMDKernelFeatures,
-                groups: list[sympy.Expr],
-                kernel_kwargs: dict[str, Any],
-            ) -> dict[str, Any]:
-                return {
-                    **kernel_kwargs,
-                    "override_cooperative_reduction": True,
-                    "override_persistent_reduction": persistent,
-                    "fixed_config": FixedTritonConfig(cfg),
-                }
-
+    @parametrize("rsplit", [32, 33])
+    def test_fixed_config_with_larger_xblock_than_xnumel(self, persistent, rsplit):
         def fn(x, y):
             return [
                 torch.any(x == y),
@@ -212,16 +291,11 @@ class TestFixedConfigs(TestCase):
                 torch.mean(x + y),
             ]
 
-        cfg = {"XBLOCK": 128, "RSPLIT": 32, "num_warps": 16, "num_stages": 1}
+        cfg = {"XBLOCK": 128, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
         if not persistent:
             cfg["R0_BLOCK"] = 64
         args = [torch.randn(1024, device="cuda") for _ in range(2)]
-        with torch._inductor.virtualized.V.set_choices_handler(MyHeuristics()):
-            expected = fn(*args)
-            fn = torch.compile(fn, fullgraph=True)
-            result, (source_code,) = run_and_get_code(fn, *args)
-            self.assertEqual(result, expected)
-            self.assertIn("@triton_heuristics.fixed_config(", source_code)
+        self._check(fn, args, persistent=persistent, cfg=cfg)
 
 
 if __name__ == "__main__":

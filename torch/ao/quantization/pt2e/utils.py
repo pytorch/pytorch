@@ -4,6 +4,7 @@ import types
 from typing import Any, Callable, Optional, Union
 
 import torch
+import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
 
 # Makes sure that quantized_decomposed ops are registered
@@ -354,6 +355,7 @@ def _get_aten_graph_module_for_pattern(
         pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
+        strict=True,
     ).module()
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]

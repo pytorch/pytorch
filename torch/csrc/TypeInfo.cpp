@@ -123,16 +123,15 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
 }
 
 #define _AT_DISPATCH_FINFO_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND6(    \
-      at::kHalf,                                  \
-      at::ScalarType::BFloat16,                   \
-      at::ScalarType::Float8_e5m2,                \
-      at::ScalarType::Float8_e5m2fnuz,            \
-      at::ScalarType::Float8_e4m3fn,              \
-      at::ScalarType::Float8_e4m3fnuz,            \
+  AT_DISPATCH_V2(                                 \
       TYPE,                                       \
       NAME,                                       \
-      __VA_ARGS__)
+      AT_WRAP(__VA_ARGS__),                       \
+      AT_EXPAND(AT_FLOATING_TYPES),               \
+      AT_EXPAND(AT_COMPLEX_TYPES),                \
+      at::kHalf,                                  \
+      at::ScalarType::BFloat16,                   \
+      AT_EXPAND(AT_FLOAT8_TYPES))
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
   HANDLE_TH_ERRORS

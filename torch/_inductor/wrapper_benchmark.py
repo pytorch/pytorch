@@ -3,7 +3,7 @@ import datetime
 import tempfile
 from collections import defaultdict
 from types import ModuleType
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -14,8 +14,7 @@ from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
 
 
 class BenchmarkCallableType(Protocol):
-    def __call__(self, times: int, repeat: int) -> float:
-        ...
+    def __call__(self, times: int, repeat: int) -> float: ...
 
 
 _kernel_category_choices = [
@@ -73,7 +72,7 @@ def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
 
 
 def benchmark_all_kernels(
-    benchmark_name: str, benchmark_all_configs: Optional[Dict[Any, Any]]
+    benchmark_name: str, benchmark_all_configs: Optional[dict[Any, Any]]
 ) -> None:
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -138,9 +137,9 @@ def benchmark_all_kernels(
                 )
         else:
             ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
-            assert (
-                len(triton_kernel.launchers) == 1
-            ), "Autotuner should have selected the best config"
+            assert len(triton_kernel.launchers) == 1, (
+                "Autotuner should have selected the best config"
+            )
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
@@ -184,7 +183,7 @@ def parse_profile_event_list(
         """
         return ev.self_device_time_total / 1000 / nruns  # type: ignore[attr-defined]
 
-    all_events: Dict[str, list[ProfileEvent]] = defaultdict(list)
+    all_events: dict[str, list[ProfileEvent]] = defaultdict(list)
 
     def add_event(
         ev: torch.autograd.profiler_util.EventList,
@@ -256,9 +255,9 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert OrderedSet(all_events.keys()).issubset(
-            OrderedSet(category_list)
-        ), f"{list(all_events.keys())}"
+        assert OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)), (
+            f"{list(all_events.keys())}"
+        )
 
         per_category_wall_time = {}
         total_device_ms = 0.0

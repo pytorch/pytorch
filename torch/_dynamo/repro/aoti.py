@@ -1,4 +1,22 @@
 # mypy: allow-untyped-defs
+
+"""
+Utilities for debugging and reproducing issues in Ahead of Time with Inductor (AOTI) compilation.
+
+This file provides tools and utilities for:
+- Generating minimal reproducible test cases (minification)
+- Handling exported programs and graph modules
+- Creating debug repros for AOTI compilation issues
+- Supporting both accuracy testing and error reproduction
+- Managing configuration and environment for repro cases
+
+The main components include:
+- Minification tools to reduce test cases while preserving errors
+- Repro generation utilities for exported programs
+- Error handling specific to AOTI compilation
+- Command-line interface for running and managing repros
+"""
+
 import argparse
 import functools
 import io

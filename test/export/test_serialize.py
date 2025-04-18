@@ -16,15 +16,18 @@ from typing import NamedTuple
 
 import torch
 import torch._dynamo as torchdynamo
+import torch._export.serde.schema as schema
 import torch.export._trace
 import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _to_json_bytes,
     canonicalize,
     deserialize,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleSerializer,
     serialize,
     SerializeError,
 )
@@ -97,7 +100,7 @@ class TestSerialize(TestCase):
                 return torch.ops.aten.add.Tensor._schema
 
         inp = (torch.ones(10),)
-        ep = export_for_training(TestModule(), inp)
+        ep = export_for_training(TestModule(), inp, strict=True)
 
         # Register the custom op handler.
         foo_custom_op = FooExtensionOp()
@@ -162,7 +165,9 @@ class TestSerialize(TestCase):
 
         model = MyModule().eval()
         random_inputs = (torch.rand([2, 3]), torch.rand([2, 3]))
-        exp_program = export_for_training(model, random_inputs, {"use_p": True})
+        exp_program = export_for_training(
+            model, random_inputs, {"use_p": True}, strict=True
+        )
 
         output_buffer = io.BytesIO()
         # Tests that example inputs are preserved when saving and loading module.
@@ -181,7 +186,7 @@ class TestSerialize(TestCase):
             def forward(self, x):
                 return x.sin()
 
-        exp_program = export_for_training(M(), (torch.randn(4, 4),))
+        exp_program = export_for_training(M(), (torch.randn(4, 4),), strict=True)
 
         output_buffer = io.BytesIO()
         # Tests that example forward arg names are preserved when saving and loading module.
@@ -221,7 +226,7 @@ def forward(self, x):
         inp = (torch.ones(10),)
         # Module will only be able to roundtrip if metadata
         # can be correctly parsed.
-        ep = export_for_training(MyModule(), inp)
+        ep = export_for_training(MyModule(), inp, strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -285,7 +290,7 @@ def forward(self, x):
 
         # Check that module can be roundtripped, thereby confirming proper deserialization.
         inp = (torch.ones(10),)
-        ep = export_for_training(MyModule(), inp)
+        ep = export_for_training(MyModule(), inp, strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         loaded_ep = load(buffer)
@@ -315,6 +320,7 @@ def forward(self, x):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
+            strict=True,
         ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
@@ -352,7 +358,10 @@ def forward(self, x):
             "c": {0: dim0_ac, 1: dim1_bc},
         }
         exported_module = export_for_training(
-            DynamicShapeSimpleModel(), inputs, dynamic_shapes=dynamic_shapes
+            DynamicShapeSimpleModel(),
+            inputs,
+            dynamic_shapes=dynamic_shapes,
+            strict=True,
         ).run_decompositions()
         serialized = ExportedProgramSerializer().serialize(exported_module)
         sym_size_nodes = [
@@ -413,11 +422,25 @@ def forward(self, x):
             "c": {0: dim0_ac, 1: dim1_bc},
         }
         exported_module = export_for_training(
-            DynamicShapeSimpleModel(), inputs, dynamic_shapes=dynamic_shapes
+            DynamicShapeSimpleModel(),
+            inputs,
+            dynamic_shapes=dynamic_shapes,
+            strict=True,
         ).run_decompositions()
         serialized = ExportedProgramSerializer().serialize(exported_module)
         for v in serialized.exported_program.range_constraints.values():
             self.assertEqual(v.max_val, None)
+
+    def test_symint_list(self):
+        # This reflects the behavior from inductor's ExternFallbackNode
+        shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        symint = shape_env.create_unbacked_symint()
+        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        res = serializer.serialize_inputs(
+            torch.ops.aten.ones.default, ([1, symint, 3],), {}
+        )
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].arg._type, "as_sym_ints")
 
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
@@ -428,7 +451,9 @@ def forward(self, x):
                 return torch.split(x, 2)
 
         input = torch.arange(10.0).reshape(5, 2)
-        exported_module = export_for_training(MyModule(), (input,)).run_decompositions()
+        exported_module = export_for_training(
+            MyModule(), (input,), strict=True
+        ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -456,6 +481,26 @@ def forward(self, x):
             self.assertNotIn(name, seen)
             seen.add(name)
 
+    def test_infinity_inputs(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.add.Scalar(x, math.inf)
+
+        fn = Module()
+        ep = torch.export.export(
+            fn,
+            (torch.randn(3, 2),),
+        )
+        json_bytes = _to_json_bytes(
+            ExportedProgramSerializer().serialize(ep).exported_program
+        )
+        import json
+
+        def parse_constant(x):
+            raise RuntimeError(f"Invalid JSON float: {x}")
+
+        json.loads(json_bytes, parse_constant=parse_constant)
+
     def test_multi_return_some_unused(self) -> None:
         """
         Make sure the serialized output matches the op schema, even if some of
@@ -470,8 +515,7 @@ def forward(self, x):
                 return torch.ops.aten.var_mean.correction(x, [1])[0]
 
         exported_module = export_for_training(
-            MyModule(),
-            (torch.ones([512, 512], requires_grad=True),),
+            MyModule(), (torch.ones([512, 512], requires_grad=True),), strict=True
         ).run_decompositions()
 
         serialized = ExportedProgramSerializer().serialize(exported_module)
@@ -492,7 +536,7 @@ def forward(self, x):
                 return x + x
 
         ep = export_for_training(
-            M(), (torch.randn(4),), dynamic_shapes=({0: Dim("temp")},)
+            M(), (torch.randn(4),), dynamic_shapes=({0: Dim("temp")},), strict=True
         )
 
         range_constraints = list(ep.range_constraints.keys())
@@ -506,8 +550,12 @@ def forward(self, x):
         ep.range_constraints[symint] = ValueRanges(lower=lower_range, upper=upper_range)
 
         serialized = ExportedProgramSerializer().serialize(ep)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].min_val, 2)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].max_val, 3)
+        self.assertEqual(
+            serialized.exported_program.range_constraints[symint.name].min_val, 2
+        )
+        self.assertEqual(
+            serialized.exported_program.range_constraints[symint.name].max_val, 3
+        )
 
     def test_kwargs_default(self) -> None:
         """
@@ -523,7 +571,7 @@ def forward(self, x):
         f = Foo()
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export_for_training(f, (x,)).run_decompositions()
+        exported_module = export_for_training(f, (x,), strict=True).run_decompositions()
         serialized = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.exported_program.graph_module.graph.nodes[-1]
@@ -541,7 +589,9 @@ def forward(self, x):
                 b = x + y
                 return b + a
 
-        ep = export_for_training(Module(), (torch.randn(3, 2), torch.randn(3, 2)))
+        ep = export_for_training(
+            Module(), (torch.randn(3, 2), torch.randn(3, 2)), strict=True
+        )
         s = ExportedProgramSerializer().serialize(ep)
         c = canonicalize(s.exported_program)
         g = c.graph_module.graph
@@ -555,7 +605,7 @@ def forward(self, x):
             def forward(self, x):
                 return torch.ops.aten.sum.dim_IntList(x, [])
 
-        ep = torch.export.export_for_training(M(), (torch.randn(3, 2),))
+        ep = torch.export.export_for_training(M(), (torch.randn(3, 2),), strict=True)
         serialized = ExportedProgramSerializer().serialize(ep)
         for node in serialized.exported_program.graph_module.graph.nodes:
             if "aten.sum.dim_IntList" in node.target:
@@ -753,6 +803,46 @@ class TestDeserialize(TestCase):
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
 
+    def test_unbacked_bindings_serialize(self):
+        from torch._export.utils import _get_shape_env_from_gm
+        from torch.utils._sympy.symbol import prefix_str, symbol_is_type, SymT
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x += 2
+                n = x.item()
+                n = n * 2 + y.item()
+                return n + 2
+
+        inps = (
+            torch.tensor(4),
+            torch.tensor(5),
+        )
+        for _strict in [True, False]:
+            ep = torch.export.export(M(), inps, strict=_strict).run_decompositions()
+
+            # check bindings after deserialization
+            buffer = io.BytesIO()
+            save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = load(buffer)
+            bound = set()
+            for old_node, new_node in zip(ep.graph.nodes, loaded_ep.graph.nodes):
+                self.assertEqual(
+                    "unbacked_bindings" in old_node.meta,
+                    "unbacked_bindings" in new_node.meta,
+                )
+                bound.update(new_node.meta.get("unbacked_bindings", {}))
+
+            # check ShapeEnv counters
+            shape_env = _get_shape_env_from_gm(loaded_ep.graph_module)
+            next_index = next(shape_env.unbacked_symint_counter)
+            for symbol in bound:
+                self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
+                self.assertTrue(
+                    int(str(symbol)[len(prefix_str[SymT.UNBACKED_INT]) :]) < next_index
+                )
+
     def test_sym_bool_dynamic_shapes(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -841,6 +931,32 @@ class TestDeserialize(TestCase):
         inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(2))
         self.check_graph(Mod(), inp, use_pre_dispatch=False)
 
+    def test_none_input(self):
+        """
+        Testing a backwards-compatibility breakage where old models do not have
+        an input spec with the node name.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + z
+
+        ep = torch.export.export(M(), (torch.ones(3, 3), None, torch.ones(3, 3)))
+
+        serialized_program = ExportedProgramSerializer(None, 2).serialize(ep)
+        serialized_program.exported_program.graph_module.signature.input_specs[
+            1
+        ] = schema.InputSpec.create(
+            user_input=schema.UserInputSpec(arg=schema.Argument.create(as_none=True))
+        )
+        ep = ExportedProgramDeserializer(None).deserialize(
+            serialized_program.exported_program, {}, {}, {}
+        )
+        ep.graph_module.recompile()
+        unflattened = torch.export.unflatten(ep)
+        inp = (torch.rand(3, 3), None, torch.rand(3, 3))
+        self.assertEqual(unflattened(*inp), M()(*inp))
+
     def test_multi_return(self) -> None:
         """
         Test multiple return from a single node (ex. layer_norm has 2 outputs)
@@ -898,7 +1014,6 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
-    @unittest.expectedFailure  # T206587081
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1157,7 +1272,7 @@ class TestDeserialize(TestCase):
                 a = a * 2
                 return a, b
 
-        ep = torch.export.export_for_training(M(), (torch.ones(3),))
+        ep = torch.export.export_for_training(M(), (torch.ones(3),), strict=True)
 
         # insert another getitem node
         for node in ep.graph.nodes:
@@ -1303,7 +1418,7 @@ def forward(self, x):
             def forward(self):
                 return self.p * self.p
 
-        ep = torch.export.export_for_training(M(), ())
+        ep = torch.export.export_for_training(M(), (), strict=True)
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
@@ -1331,7 +1446,7 @@ class TestSchemaVersioning(TestCase):
                 return x + x
 
         f = Module()
-        ep = export_for_training(f, (torch.randn(1, 3),))
+        ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
 
         serialized_program = ExportedProgramSerializer().serialize(ep)
         serialized_program.exported_program.schema_version.major = -1
@@ -1367,7 +1482,7 @@ class TestSaveLoad(TestCase):
                 y = self.linear(y)
                 return y
 
-        ep = export_for_training(Module(), inp)
+        ep = export_for_training(Module(), inp, strict=True)
 
         buffer = io.BytesIO()
         save(ep, buffer)
@@ -1384,7 +1499,7 @@ class TestSaveLoad(TestCase):
         f = Foo()
 
         inp = (torch.randn(2, 2),)
-        ep = export_for_training(f, inp)
+        ep = export_for_training(f, inp, strict=True)
 
         with tempfile.NamedTemporaryFile() as f:
             save(ep, f)
@@ -1401,7 +1516,7 @@ class TestSaveLoad(TestCase):
         f = Foo()
 
         inp = (torch.tensor([6]), torch.tensor([7]))
-        ep = export_for_training(f, inp)
+        ep = export_for_training(f, inp, strict=True)
 
         with TemporaryFileName() as fname:
             path = Path(fname)
@@ -1419,7 +1534,7 @@ class TestSaveLoad(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, inp)
+        ep = export_for_training(f, inp, strict=True)
 
         buffer = io.BytesIO()
         save(ep, buffer, extra_files={"extra.txt": "moo"})
@@ -1437,7 +1552,7 @@ class TestSaveLoad(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, (torch.randn(1, 3),))
+        ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Serialized version .* does not match our current"
@@ -1463,7 +1578,7 @@ class TestSaveLoad(TestCase):
                 list_tensor = [torch.tensor(3), torch.tensor(4)]
                 return x + self.a + list_tensor[0] + list_tensor[1]
 
-        ep = export_for_training(Foo(), (torch.tensor(1),))
+        ep = export_for_training(Foo(), (torch.tensor(1),), strict=True)
         buffer = io.BytesIO()
         save(ep, buffer)
         buffer.seek(0)
@@ -1489,7 +1604,7 @@ class TestSerializeCustomClass(TestCase):
         f = Foo()
 
         inputs = (torch.zeros(4, 4),)
-        ep = export_for_training(f, inputs)
+        ep = export_for_training(f, inputs, strict=True)
 
         # Replace one of the values with an instance of our custom class
         for node in ep.graph.nodes:
@@ -1549,6 +1664,46 @@ class TestSerializeCustomClass(TestCase):
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
 
+    def test_custom_class_input_to_function(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+
+        with FakeTensorMode():
+            f = Foo()
+
+        inputs = (torch.zeros(2, 3),)
+        with enable_torchbind_tracing():
+            ep = export_for_training(f, inputs, strict=False)
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, obj_attr, x):
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(obj_attr, x);  obj_attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return (add,)""",
+        )
+        self.assertTrue(isinstance(ep.constants["attr"], torch.ScriptObject))
+        gm = ep.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    attr = self.attr
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+        )
+        self.assertTrue(isinstance(gm.attr, torch.ScriptObject))
+
     def test_custom_tag_metadata_serialization(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1557,7 +1712,7 @@ class TestSerializeCustomClass(TestCase):
         f = Foo()
 
         inputs = (torch.zeros(4, 4),)
-        ep = export_for_training(f, inputs)
+        ep = export_for_training(f, inputs, strict=True)
 
         new_gm = copy.deepcopy(ep.graph_module)
         new_gm.meta["custom"] = {}
@@ -1592,7 +1747,7 @@ class TestSerializeCustomClass(TestCase):
         f = Foo()
 
         inputs = (torch.ones(2, 2),)
-        ep = export_for_training(f, inputs)
+        ep = export_for_training(f, inputs, strict=True)
 
         new_gm = copy.deepcopy(ep.graph_module)
         new_gm.meta["custom"] = {}
@@ -1628,7 +1783,7 @@ class TestSerializeCustomClass(TestCase):
         f = Foo()
 
         inputs = (torch.zeros(4, 4),)
-        ep = export_for_training(f, inputs)
+        ep = export_for_training(f, inputs, strict=True)
 
         new_gm = copy.deepcopy(ep.graph_module)
         new_gm.meta["custom"] = {}

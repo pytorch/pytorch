@@ -133,9 +133,9 @@ class OperatorBase:
                 return fn
 
             assert isinstance(k, DispatchKey)
-            assert (
-                k != DispatchKey.Python
-            ), "Please register a mode for the DispatchKey.Python key instead."
+            assert k != DispatchKey.Python, (
+                "Please register a mode for the DispatchKey.Python key instead."
+            )
 
             if k in self.py_kernels:
                 raise RuntimeError(
@@ -306,6 +306,25 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
         return super().py_impl(k)
 
+    def py_autograd_impl(
+        self,
+        fn: Callable[_P, _T],
+    ) -> Callable[_P, _T]:
+        def maybe_run_autograd(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            if not torch.is_grad_enabled() or pytree.tree_all_only(
+                torch.Tensor,
+                lambda t: not t.requires_grad,  # type: ignore[union-attr]
+                (*args, kwargs),
+            ):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return self(*args, **kwargs)
+
+            return fn(*args, **kwargs)
+
+        self.py_impl(DispatchKey.Autograd)(maybe_run_autograd)
+
+        return fn
+
     @property
     def namespace(self):
         return self._ns
@@ -422,12 +441,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 DispatchKey.Python
             ):
                 curr_mode = _get_current_dispatch_mode_pre_dispatch()
-                assert (
-                    curr_mode is not None
-                ), "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
-                assert (
-                    type(curr_mode) in self.python_key_table
-                ), f"Current active mode {curr_mode} not registered"
+                assert curr_mode is not None, (
+                    "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
+                )
+                assert type(curr_mode) in self.python_key_table, (
+                    f"Current active mode {curr_mode} not registered"
+                )
                 handler = self.python_key_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
@@ -469,6 +488,26 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             )
 
         return wrapper()
+
+    # NOTE [HigherOrderOprator Schema]
+    # Each invocation of a HigherOrderOperator (hop) should have its own schema because
+    # the subgraphs and the arguments can be different even for the same hop.
+    #
+    # Each hop should implement its own gen_schema method, which should
+    # take the same input as the __call__ method and returns a FunctionSchema.
+    # The schema provides a unified way to check if the hop mutates its inputs,
+    # which can be useful in implementing optimizations.
+    #
+    # If the hop doesn't implement the gen_schema method,
+    # we expect it to be functional. It should not mutate its inputs and there
+    # are no input, output aliasing via views or direct referencing.
+    def gen_schema(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"HigherOrderOperator {self._name} does not implement a gen_schema. "
+            f"This is OK as long as the hop is functional. "
+            f"e.g. it should not mutate its inputs and there are no input, output aliasing "
+            f"via views or direct referencing."
+        )
 
     def __str__(self):
         return f"{self.name()}"
@@ -828,13 +867,15 @@ class OpOverload(OperatorBase):
                 # TODO: We also need to handle tensor subclasses here
                 # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
                 curr_mode = type(_get_current_dispatch_mode())
-                assert (
-                    curr_mode is not None
-                ), "Illegal invocation of dispatch on DispatchKey.Python without a mode."
+                assert curr_mode is not None, (
+                    "Illegal invocation of dispatch on DispatchKey.Python without a mode."
+                )
 
                 if curr_mode not in self.python_key_table:
                     if isinstance(self, TorchBindOpOverload):
-                        with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
+                        with (
+                            torch.utils._python_dispatch._pop_mode_temporarily() as mode
+                        ):
                             return torch._library.utils.handle_dispatch_mode(
                                 mode, self, *args, **kwargs
                             )
@@ -1084,7 +1125,7 @@ class OpOverloadPacket:
             for overload_name in self._overload_names
         }
 
-    def __getattr__(self, key):
+    def __getattr__(self, key) -> Any:
         # It is not a valid op_name when __file__ is passed in
         if key == "__file__":
             return "torch.ops"
@@ -1244,7 +1285,7 @@ class _OpNamespace(types.ModuleType):
     def __iter__(self):
         return iter(self._dir)
 
-    def __getattr__(self, op_name):
+    def __getattr__(self, op_name) -> Any:
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"

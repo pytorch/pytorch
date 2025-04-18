@@ -25,7 +25,7 @@
 namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
-int wmkstemps(wchar_t* tmpl, int suffix_len) {
+inline int wmkstemps(wchar_t* tmpl, int suffix_len) {
   int len;
   wchar_t* name;
   int fd = -1;

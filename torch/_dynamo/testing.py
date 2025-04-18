@@ -1,3 +1,18 @@
+"""Testing utilities and infrastructure for Dynamo.
+
+This module provides a comprehensive set of testing utilities including:
+- Test result collection and validation
+- Graph manipulation and comparison tools
+- Test case management and execution helpers
+- Specialized test decorators for different Python versions and features
+- RNG state management
+- Compilation counting and monitoring
+- Debug utilities for bytecode transformation
+
+The utilities in this module are used across Dynamo's test suite to ensure
+consistent testing patterns and proper test isolation.
+"""
+
 import contextlib
 import dis
 import functools
@@ -26,7 +41,7 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
-from .types import DynamoFrameType
+from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import same
 
 
@@ -125,15 +140,13 @@ def requires_bwd_pass(out: Any) -> bool:
 
 
 @overload
-def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
-    ...
+def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]]
-) -> float:
-    ...
+    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]],
+) -> float: ...
 
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
@@ -174,7 +187,7 @@ def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
 
 def debug_insert_nops(
     frame: DynamoFrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
-) -> Optional[GuardedCode]:
+) -> ConvertFrameReturn:
     """used to debug jump updates"""
 
     def insert_nops(instructions: list[Any], code_options: Any) -> None:
@@ -184,7 +197,7 @@ def debug_insert_nops(
     metrics_context = torch._dynamo.utils.get_metrics_context()
     with torch._dynamo.utils.dynamo_timed("debug_insert_nops"), metrics_context:
         if is_generator(frame.f_code):
-            return None
+            return ConvertFrameReturn()
 
         debug_checks(frame.f_code)
         code = transform_code_object(frame.f_code, insert_nops)
@@ -202,10 +215,12 @@ def debug_insert_nops(
             torch_function_mode_stack=[],
         )
 
-        return GuardedCode(
-            code,
-            CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
-            CompileId(frame_id=0, frame_compile_id=0),
+        return wrap_guarded_code(
+            GuardedCode(
+                code,
+                CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+                CompileId(frame_id=0, frame_compile_id=0),
+            )
         )
 
 
@@ -450,31 +465,31 @@ def make_test_cls_with_patches(
 
 
 # test Python 3.11+ specific features
-def skipIfNotPy311(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
 
 
-def skipIfNotPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
 
 
-def xfailIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
     return fn
 
 
-def skipIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
 
 
-def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
+def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 10):
         return fn
     else:
@@ -483,19 +498,19 @@ def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
-def expectedFailureDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
-def expectedFailureCodegenDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureCodegenDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_codegen_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls test generated in test/inductor/test_cpp_wrapper.py
-def expectedFailureDynamicWrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn
 
@@ -509,3 +524,9 @@ def reset_rng_state(use_xla: bool = False) -> None:
         import torch_xla.core.xla_model as xm
 
         xm.set_rng_state(1337, str(xm.xla_device()))
+
+
+def _skipped_function_for_test_reconstruct(
+    f: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> _T:
+    return f(*args, **kwargs)

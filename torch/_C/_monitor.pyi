@@ -3,7 +3,7 @@
 import datetime
 from enum import Enum
 from types import TracebackType
-from typing import Callable, Optional, Type
+from typing import Callable, Optional
 
 class Aggregation(Enum):
     VALUE = ...
@@ -48,7 +48,7 @@ class _WaitCounterTracker:
     def __enter__(self) -> None: ...
     def __exit__(
         self,
-        exec_type: Optional[Type[BaseException]] = None,
+        exec_type: Optional[type[BaseException]] = None,
         exec_value: Optional[BaseException] = None,
         traceback: Optional[TracebackType] = None,
     ) -> None: ...

@@ -94,7 +94,7 @@ def load_spmv_dataset(dataset_path, hidden_size, sparsity, device, n_limit=math.
             x_files.append(f.as_posix())
         if size[0] == hidden_size:
             y_files.append(f.as_posix())
-        index += 1
+        index += 1  # noqa: SIM113
     print()
 
     for fx, fy in zip(x_files, y_files):
@@ -136,7 +136,7 @@ def load_spmm_dataset(
             x_files.append(f.as_posix())
         if size[0] == hidden_size:
             y_files.append(f.as_posix())
-        index += 1
+        index += 1  # noqa: SIM113
     print()
 
     for fx, fy in zip(x_files, y_files):

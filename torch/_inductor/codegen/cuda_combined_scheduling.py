@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -114,7 +114,7 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def benchmark_fused_nodes(
         self, nodes: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, str]:
+    ) -> tuple[float, str]:
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
     def benchmark_codegened_module(self, module):
@@ -129,5 +129,5 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> tuple[float, float, List[Optional[str]]]:
+    ) -> tuple[float, float, list[Optional[str]]]:
         return self._triton_scheduling.benchmark_combo_kernel(node_list)

@@ -87,7 +87,7 @@ class Library:
 
     Args:
         ns: library name
-        kind: "DEF", "IMPL" (default: "IMPL"), "FRAGMENT"
+        kind: "DEF", "IMPL", "FRAGMENT"
         dispatch_key: PyTorch dispatch key (default: "")
     """
 
@@ -127,6 +127,7 @@ class Library:
             _defs,
             self._op_defs,
             self._registration_handles,
+            self.m,
         )
 
     def __repr__(self):
@@ -184,7 +185,7 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def _register_fake(self, op_name, fn, _stacklevel=1):
+    def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=False):
         r"""Registers the fake impl for an operator defined in the library."""
         if torch._running_with_deploy():
             _library.utils.warn_deploy()
@@ -211,7 +212,9 @@ class Library:
         else:
             func_to_register = fn
 
-        handle = entry.fake_impl.register(func_to_register, source)
+        handle = entry.fake_impl.register(
+            func_to_register, source, lib=self, allow_override=allow_override
+        )
         self._registration_handles.append(handle)
 
     def _register_torch_dispatch_rule(self, op_name, torch_dispatch_class, fn):
@@ -290,7 +293,9 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def impl(self, op_name, fn, dispatch_key="", *, with_keyset=False):
+    def impl(
+        self, op_name, fn, dispatch_key="", *, with_keyset=False, allow_override=False
+    ):
         r"""Registers the function implementation for an operator defined in the library.
 
         Args:
@@ -301,6 +306,11 @@ class Library:
                           the dispatch key that the library was created with.
             with_keyset: flag controlling if the current dispatcher call keyset should be passed as the first argument
                          to :attr:`fn` when calling. This should be used to create the appropriate keyset for redispatch calls.
+            allow_override: Flag controlling if we want to override an
+                         existing registered kernel implementation. This is by
+                         default off, and will error you're trying to register a
+                         kernel to a dispatch key with a kernel already
+                         registered.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -332,7 +342,7 @@ class Library:
             )
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if key in _impls:
+        if (not allow_override) and key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
             raise RuntimeError(
@@ -442,11 +452,30 @@ def _del_library(
     captured_defs,
     op_defs,
     registration_handles,
+    m,
 ):
+    import torch.fx
+
+    for op_def in op_defs:
+        name = op_def
+        overload_name = ""
+        if "." in op_def:
+            name, overload_name = op_def.split(".")
+        if (
+            name,
+            overload_name,
+        ) in torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE:
+            del torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE[
+                (name, overload_name)
+            ]
+
     captured_impls -= op_impls
     captured_defs -= op_defs
     for handle in registration_handles:
         handle.destroy()
+
+    if m is not None:
+        m.reset()
 
 
 @contextlib.contextmanager
@@ -916,6 +945,7 @@ def register_fake(
     *,
     lib: Optional[Library] = None,
     _stacklevel: int = 1,
+    allow_override: bool = False,
 ):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
@@ -939,6 +969,18 @@ def register_fake(
 
     For a detailed guide on custom ops, please see
     https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html
+
+    Args:
+        op_name: Operator name (along with the overload) or OpOverload object.
+        func: Fake tensor implementation.
+        lib (Optional[Library]): Library to register the fake tensor to.
+        allow_override: Flag controlling if we want to override an
+                        existing registered fake impl. This is by default off,
+                        and will error you're trying to register a fake impl to
+                        an operator that already has a fake impl. This also only
+                        applies if the custom operator was not created via
+                        torch.library.custom_op, as overriding and existing fake
+                        impl is already allowed.
 
     Examples:
         >>> import torch
@@ -1020,7 +1062,9 @@ def register_fake(
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        use_lib._register_fake(op_name, func, _stacklevel=stacklevel + 1)
+        use_lib._register_fake(
+            op_name, func, _stacklevel=stacklevel + 1, allow_override=allow_override
+        )
         return func
 
     if func is None:
@@ -1449,6 +1493,8 @@ def opcheck(
     *,
     test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
     raise_exception: bool = True,
+    atol=None,
+    rtol=None,
 ) -> dict[str, str]:
     """Given an operator and some sample arguments, tests if the operator is
     registered correctly.
@@ -1507,6 +1553,14 @@ def opcheck(
         raise_exception: If we should raise an exception on the first
             error. If False, we will return a dict with information
             on if each test passed or not.
+        rtol (Optional[float]): Relative tolerance for floating point comparisons.
+            If specified ``atol`` must also be specified.
+            If omitted, default values based on the ``dtype`` are selected
+            (see the table in :func:`torch.testing.assert_close`).
+        atol (Optional[float]): Absolute tolerance for floating point comparisons.
+            If specified ``rtol`` must also be specified.
+            If omitted, default values based on the ``dtype`` are selected
+            (see the table in :func:`torch.testing.assert_close`).
 
     .. warning::
 
@@ -1552,5 +1606,11 @@ def opcheck(
     import torch.testing._internal.optests as optests
 
     return optests.opcheck(
-        op, args, kwargs, test_utils=test_utils, raise_exception=raise_exception
+        op,
+        args,
+        kwargs,
+        test_utils=test_utils,
+        raise_exception=raise_exception,
+        rtol=rtol,
+        atol=atol,
     )

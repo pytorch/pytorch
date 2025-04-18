@@ -12,6 +12,7 @@ import traceback
 import unittest.mock
 import weakref
 from abc import abstractmethod
+from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import (
@@ -230,6 +231,7 @@ class SLoc:
 class ShapeGuard(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
+    size_oblivious: bool
 
 
 @dataclass_slots
@@ -584,14 +586,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
             func(args)
 
 
-"""
-A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
-directly outside of it. For passing around internal state representations of this object,
-prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
-"""
-
-
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
@@ -630,8 +624,20 @@ class GuardsSet:
                 self.add(g, skip=1)
 
     def remove_guards_with_source(self, source):
-        """Delete all guards with a given source"""
-        self.inner = {g for g in self.inner if g.originating_source != source}
+        """Delete all guards that contains a given source"""
+        from ._dynamo.source import is_from_source
+
+        self.inner = {
+            g for g in self.inner if not is_from_source(g.originating_source, source)
+        }
+
+
+"""
+A GuardsContext is a checkpointable representation of all the guards in the current tracing
+context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+directly outside of it. For passing around internal state representations of this object,
+prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
+"""
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
@@ -650,10 +656,10 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
-    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str): ...
 
     @abstractmethod
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]: ...
 
     @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable): ...
@@ -667,18 +673,25 @@ class HopSubgraphCache:
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str): ...
 
+    @abstractmethod
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule): ...
+
+    @abstractmethod
+    def get_lazy_bwd_entry(self, identifier: str): ...
+
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
-        self.dynamo_identifiers: dict[str, str] = {}
+        self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
+        self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
 
-    def add_dynamo_identifier(self, cache_key: str, identifier: str):
-        self.dynamo_identifiers[cache_key] = identifier
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str):
+        self.dynamo_installed_submodules[fn_id].append(identifier)
 
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
-        return self.dynamo_identifiers.get(cache_key, None)
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]:
+        return self.dynamo_installed_submodules.get(fn_id, [])
 
     def add_autograd_key_entry(self, identifier: str, key: Callable):
         self.autograd_cache[identifier] = key
@@ -691,6 +704,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule):
+        self.lazy_bwd_cache[identifier] = gmod
+
+    def get_lazy_bwd_entry(self, identifier: str):
+        return self.lazy_bwd_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:
@@ -866,9 +885,10 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        with unittest.mock.patch.object(
-            tc, "frame_summary_stack", []
-        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+        with (
+            unittest.mock.patch.object(tc, "frame_summary_stack", []),
+            unittest.mock.patch.object(tc, "loc_in_frame", None),
+        ):
             try:
                 yield
             except Exception as e:
@@ -1015,6 +1035,12 @@ class ChainedSource(Source):
 
     def is_ephemeral(self):
         return self.base.is_ephemeral()
+
+    def get_base(self) -> Source:
+        current: Source = self
+        while isinstance(current, ChainedSource):
+            current = current.base
+        return current
 
 
 def detect_fake_mode(inputs: Any = None):

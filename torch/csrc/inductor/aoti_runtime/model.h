@@ -20,6 +20,7 @@
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #endif
+#include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
@@ -42,7 +43,13 @@ extern uint8_t _binary_constants_bin_start[];
 // NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_end[];
 
-#define AOTI_CONST_GPU_ALIGNMENT 64
+#if defined(USE_CUDA) || defined(USE_XPU)
+// Compute required blob size with 64-alignment if on GPU.
+#define AOTI_CONST_ALIGNMENT 64
+#else
+// Use 64-alignment (use something >=64)for better performance on CPU.
+#define AOTI_CONST_ALIGNMENT 64
+#endif
 
 namespace {
 
@@ -57,9 +64,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#endif // USE_CUDA
-
-#ifdef USE_XPU
+#elif defined(USE_XPU)
 
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   sycl::queue* queue_ptr = nullptr;
@@ -69,20 +74,25 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#endif // USE_XPU
+#else
+
+RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
+  void* data_ptr = std::malloc(num_bytes);
+  if (!data_ptr) {
+    throw std::bad_alloc();
+  }
+  auto deleter = [](void* ptr) { std::free(ptr); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+#endif // USE_CUDA
 
 } // anonymous namespace
 
 namespace torch::aot_inductor {
-enum ConstantType : uint8_t {
-  Unknown = 0,
-  Parameter = 1,
-  Buffer = 2,
-  TensorConstant = 3,
-  FoldedConstant = 4,
-};
 
-using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
+using ConstantMap =
+    std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future
@@ -216,6 +226,24 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+  // environment :)
+  void run_single_threaded(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    // don't bother with any of the run_finished stuff; this is unsafe to call
+    // in a threaded context
+    auto* model = static_cast<Model*>(this);
+    model->run_impl(input_handles, output_handles, stream, proxy_executor);
+  }
+
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,
@@ -257,16 +285,18 @@ class AOTInductorModelBase {
 
   void load_constants() {
     size_t num_constants = this->num_constants();
+    size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
 
-    std::vector<size_t> constants_internal_offset(num_constants);
-    if (device_type_ != aoti_torch_device_type_cpu()) {
-      size_t blob_size = 0;
-      compute_gpu_constant_blob(blob_size, constants_internal_offset);
+    std::vector<size_t> constants_internal_offset(
+        num_constants - num_folded_constants);
+    size_t blob_size = 0;
+    compute_constant_blob(blob_size, constants_internal_offset);
 #if defined(USE_CUDA) || defined(USE_XPU)
-      constant_blob_ = RAII_gpuMalloc(blob_size);
+    constant_blob_ = RAII_gpuMalloc(blob_size);
+#else
+    constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif
-    }
     if (!include_weights) {
       return;
     }
@@ -274,12 +304,9 @@ class AOTInductorModelBase {
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
-#if not defined(USE_XPU) && not defined(USE_CUDA)
       if (from_folded) {
-        // We do not reallocate and copy for CPU.
         continue;
       }
-#endif // USE_CUDA
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
       uint8_t* internal_ptr = (data_size != 0)
@@ -287,7 +314,7 @@ class AOTInductorModelBase {
                 constants_internal_offset[i],
                 bytes_read,
                 data_size,
-                from_folded)
+                /* skip_copy = */ false)
           : nullptr;
       bytes_read += data_size;
 
@@ -343,10 +370,8 @@ class AOTInductorModelBase {
       size_t bytes_read,
       size_t data_size,
       bool skip_copy) {
-#if defined(USE_CUDA) || defined(USE_XPU)
     auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
     uint8_t* internal_ptr = constants_ptr + constant_offset;
-    // Copy data to GPU memory
     // TODO: Handle shared storage case.
     if (!skip_copy) {
 #ifdef USE_XPU
@@ -355,41 +380,37 @@ class AOTInductorModelBase {
       queue_ptr
           ->memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size)
           .wait();
-
-#else
+#elif USE_CUDA
       AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
           internal_ptr,
           _get_constants_start() + bytes_read,
           data_size,
           cudaMemcpyHostToDevice));
+#else
+      memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
 #endif
     }
     return internal_ptr;
-
-#else
-    // get pointer to constant which is packed in model during compile time.
-    AOTI_RUNTIME_CHECK(!skip_copy, "pure cpu mode doesn't support skip copy");
-    return _get_constants_start() + bytes_read;
-#endif // USE_CUDA
   }
 
-  void compute_gpu_constant_blob(
+  void compute_constant_blob(
       size_t& blob_size,
       std::vector<size_t>& constants_internal_offset) {
-#if defined(USE_CUDA) || defined(USE_XPU)
     size_t num_constants = this->num_constants();
-    // Compute required blob size with 64-alignment if on GPU.
     blob_size = 0;
+    size_t curr_idx = 0;
     for (size_t i = 0; i < num_constants; i++) {
-      size_t data_size = this->constant_data_size(i);
-      if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
-        data_size = AOTI_CONST_GPU_ALIGNMENT +
-            (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
+      if (this->constant_from_folded(i)) {
+        continue;
       }
-      constants_internal_offset[i] = blob_size;
+      size_t data_size = this->constant_data_size(i);
+      if (data_size % AOTI_CONST_ALIGNMENT) {
+        data_size = AOTI_CONST_ALIGNMENT +
+            (data_size / AOTI_CONST_ALIGNMENT) * AOTI_CONST_ALIGNMENT;
+      }
+      constants_internal_offset[curr_idx++] = blob_size;
       blob_size += data_size;
     }
-#endif // USE_CUDA
   }
 
   size_t num_inputs() const {
@@ -402,6 +423,17 @@ class AOTInductorModelBase {
 
   size_t num_constants() const {
     return constants_info_.size();
+  }
+
+  size_t num_folded_constants() const {
+    size_t total_consts = this->num_constants();
+    size_t folded_consts = 0;
+    for (size_t i = 0; i < total_consts; i++) {
+      if (this->constant_from_folded(i)) {
+        folded_consts++;
+      }
+    }
+    return folded_consts;
   }
 
   const char* input_name(int64_t idx) const {

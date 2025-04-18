@@ -18,8 +18,7 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
 
  public:
   NormImplBase(const DerivedOptions& options_) : options(options_) {
-    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-    reset();
+    NormImplBase::reset();
   }
 
   void reset() override {

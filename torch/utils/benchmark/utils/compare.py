@@ -36,7 +36,7 @@ class _Column:
         highlight_warnings: bool,
     ):
         self._grouped_results = grouped_results
-        self._flat_results = list(it.chain(*grouped_results))
+        self._flat_results = [*it.chain.from_iterable(grouped_results)]
         self._time_scale = time_scale
         self._time_unit = time_unit
         self._trim_significant_figures = trim_significant_figures

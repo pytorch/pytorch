@@ -3,6 +3,7 @@ import functools
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -10,6 +11,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import config
 from ...ir import Layout
@@ -19,6 +21,8 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 
 
 log = logging.getLogger(__name__)
+
+CUTLASS_OPERATION_KIND: str = "gemm"
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -55,9 +59,9 @@ def try_import_cutlass() -> bool:
             "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
         )
         cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
-        assert os.path.isdir(
-            cutlass_library_dir
-        ), f"{cutlass_library_dir} is not a directory"
+        assert os.path.isdir(cutlass_library_dir), (
+            f"{cutlass_library_dir} is not a directory"
+        )
         config.cuda.cutlass_dir = os.path.abspath(
             os.path.join(
                 cutlass_library_dir,
@@ -74,31 +78,74 @@ def try_import_cutlass() -> bool:
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
-    cutlass_py_full_path = os.path.abspath(
-        os.path.join(config.cuda.cutlass_dir, "python/cutlass_library")
-    )
-    tmp_cutlass_py_full_path = os.path.abspath(
-        os.path.join(cache_dir(), "torch_cutlass_library")
-    )
-    dst_link = os.path.join(tmp_cutlass_py_full_path, "cutlass_library")
+    # TODO(mlazos): epilogue visitor tree currently lives in python/cutlass,
+    # but will be moved to python/cutlass_library in the future (later 2025)
+    def path_join(path0, path1):
+        return os.path.abspath(os.path.join(path0, path1))
 
-    if os.path.isdir(cutlass_py_full_path):
-        if tmp_cutlass_py_full_path not in sys.path:
-            if os.path.exists(dst_link):
-                assert os.path.islink(
-                    dst_link
-                ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
-                assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
-                    cutlass_py_full_path
-                ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
-            else:
-                os.makedirs(tmp_cutlass_py_full_path, exist_ok=True)
-                os.symlink(cutlass_py_full_path, dst_link)
-            sys.path.append(tmp_cutlass_py_full_path)
+    # contains both cutlass and cutlass_library
+    # we need cutlass for eVT
+    cutlass_python_path = path_join(config.cuda.cutlass_dir, "python")
+    torch_root = os.path.abspath(os.path.dirname(torch.__file__))
+    mock_src_path = os.path.join(
+        torch_root,
+        "_inductor",
+        "codegen",
+        "cuda",
+        "cutlass_lib_extensions",
+        "cutlass_mock_imports",
+    )
+
+    cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
+    cutlass_src_path = path_join(cutlass_python_path, "cutlass")
+    pycute_src_path = path_join(cutlass_python_path, "pycute")
+
+    tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
+
+    dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
+    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
+
+    # mock modules to import cutlass
+    mock_modules = ["cuda", "scipy", "pydot"]
+
+    if os.path.isdir(cutlass_python_path):
+        if tmp_cutlass_full_path not in sys.path:
+
+            def link_and_append(dst_link, src_path, parent_dir):
+                if os.path.exists(dst_link):
+                    assert os.path.islink(dst_link), (
+                        f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                    )
+                    assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
+                        src_path,
+                    ), f"Symlink at {dst_link} does not point to {src_path}"
+                else:
+                    os.makedirs(parent_dir, exist_ok=True)
+                    os.symlink(src_path, dst_link)
+
+                if parent_dir not in sys.path:
+                    sys.path.append(parent_dir)
+
+            link_and_append(
+                dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
+            )
+            link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
+            link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
+
+            for module in mock_modules:
+                link_and_append(
+                    path_join(tmp_cutlass_full_path, module),  # dst_link
+                    path_join(mock_src_path, module),  # src_path
+                    tmp_cutlass_full_path,  # parent
+                )
+
         try:
+            import cutlass  # noqa: F401
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
+            import pycute  # type: ignore[import-not-found]  # noqa: F401
 
             return True
         except ImportError as e:
@@ -109,13 +156,24 @@ def try_import_cutlass() -> bool:
     else:
         log.debug(
             "Failed to import CUTLASS packages: CUTLASS repo does not exist: %s",
-            cutlass_py_full_path,
+            cutlass_python_path,
         )
     return False
 
 
+@functools.lru_cache(8)
 def _normalize_cuda_arch(arch: str) -> str:
-    if int(arch) >= 90:
+    if int(arch) >= 100:
+        log.warning(
+            "Detected CUDA architecture >= 100: %s. We will generate operations with "
+            "GenerateSM100 (if available) and GenerateSM90. Please file an "
+            "issue for any problems and feedback. ",
+            arch,
+        )
+
+    if int(arch) >= 100:
+        return "100"
+    elif int(arch) >= 90:
         return "90"
     elif int(arch) >= 80:
         return "80"
@@ -136,8 +194,8 @@ class CUTLASSArgs:
     architectures: Optional[str] = None
     cuda_version: Optional[str] = None
     instantiation_level: Optional[str] = None
+    operations: Optional[str] = None
 
-    operations = "all"
     build_dir = ""
     curr_build_dir = ""
     generator_target = ""
@@ -159,8 +217,9 @@ class CUTLASSArgs:
         self.architectures = _normalize_cuda_arch(self.architectures)
 
 
+@clear_on_fresh_inductor_cache
 @functools.lru_cache(None)
-def _gen_ops_cached(arch, version) -> list[Any]:
+def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
@@ -176,17 +235,24 @@ def _gen_ops_cached(arch, version) -> list[Any]:
             arch,
             version,
         )
-        return []
+        return {}
     arch = _normalize_cuda_arch(arch)
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
         cuda_version=version,
         instantiation_level=instantiation_level,
+        operations=CUTLASS_OPERATION_KIND,
     )
     manifest = cutlass_manifest.Manifest(args)
 
-    if arch == "90":
+    start_time = time.time()
+    if arch == "100":
+        if hasattr(cutlass_generator, "GenerateSM100"):
+            cutlass_generator.GenerateSM100(manifest, args.cuda_version)
+        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
+        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
+    elif arch == "90":
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
         cutlass_generator.GenerateSM80(manifest, args.cuda_version)
     else:
@@ -197,10 +263,16 @@ def _gen_ops_cached(arch, version) -> list[Any]:
             raise NotImplementedError(
                 "Arch " + arch + " is not supported by current cutlass lib."
             ) from e
+
+    log.info(
+        "CUTLASS library generated a dict of %d operation kinds in %.2f seconds",
+        len(manifest.operations),
+        time.time() - start_time,
+    )
     return manifest.operations
 
 
-def gen_ops() -> list[Any]:
+def gen_ops() -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """
@@ -279,11 +351,6 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype == torch.half:
-        if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
-            return torch_dtype
-        else:
-            return torch.float
     if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
@@ -369,10 +436,11 @@ class CUDACompileSourceCapturingContext:
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
-        return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        return self
 
     def __exit__(self, *args, **kwargs):
-        return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
 
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):

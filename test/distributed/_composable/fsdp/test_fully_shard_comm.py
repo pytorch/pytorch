@@ -267,6 +267,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             reduce_scatter_reduce_op=None,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
+            all_reduce_hook=None,
             all_reduce_grads=True,
             partial_reduce_output=None,
         )
@@ -420,6 +421,64 @@ class TestFullyShardCommunication(FSDPTest):
             optim.zero_grad()
             self.assertEqual(ref_loss, loss)
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reshard_after_forward(self):
+        """
+        Tests that FSDP issues the expected number of all-gathers and
+        reduce-scatters during a train step when setting reshard_after_forward.
+        comm_count should perform same as test_fully_shard_communication_count.
+        """
+        self.run_subtests(
+            {"set_reshard_after_forward": [True, False], "recurse": [True, False]},
+            self._test_set_reshard_after_forward_by_communication_count,
+        )
+
+    def _test_set_reshard_after_forward_by_communication_count(
+        self,
+        set_reshard_after_forward: bool,
+        recurse: bool,
+    ):
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        fully_shard_fn = functools.partial(
+            fully_shard, reshard_after_forward=not set_reshard_after_forward
+        )
+        num_blocks = 0
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard_fn(module)
+                num_blocks += 1
+        fully_shard_fn(model)
+        num_fsdp_modules = sum(
+            isinstance(module, FSDPModule) for module in model.modules()
+        )
+        model.set_reshard_after_forward(
+            reshard_after_forward=set_reshard_after_forward, recurse=recurse
+        )
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        with CommDebugMode() as fwd_comm_mode:
+            loss = model(inp)
+        fwd_comm_counts = fwd_comm_mode.get_comm_counts()
+        self.assertEqual(len(fwd_comm_counts), 1)
+        self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_fsdp_modules)
+
+        with CommDebugMode() as bwd_comm_mode:
+            loss.sum().backward()
+        bwd_comm_counts = bwd_comm_mode.get_comm_counts()
+        # If recurse is False, set_reshard_after_forward only affects the root module,
+        # resulting in comm_counts identical to those without set_reshard_after_forward.
+        if recurse == set_reshard_after_forward:
+            self.assertEqual(len(bwd_comm_counts), 2)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
+        else:
+            self.assertEqual(len(bwd_comm_counts), 1)
+        self.assertEqual(
+            bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
+        )
 
 
 class TestFullyShardPrefetch(FSDPTest):

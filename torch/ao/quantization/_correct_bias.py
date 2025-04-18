@@ -119,19 +119,18 @@ def bias_correction(
         float_model, quantized_model, _supported_modules, MeanShadowLogger
     )
 
-    uncorrected_modules = {}
-    for name, submodule in quantized_model.named_modules():
-        if type(submodule) in target_modules:
-            uncorrected_modules[name] = submodule
+    uncorrected_modules = {
+        name: submodule
+        for name, submodule in quantized_model.named_modules()
+        if type(submodule) in target_modules
+    }
 
     for uncorrected_module in uncorrected_modules:
         quantized_submodule = get_module(quantized_model, uncorrected_module)
         bias = get_param(quantized_submodule, "bias")
         if bias is not None:
-            count = 0
-            for data in img_data:
+            for count, data in enumerate(img_data, start=1):
                 quantized_model(data[0])
-                count += 1
                 if count == neval_batches:
                     break
             ob_dict = ns.get_logger_dict(quantized_model)

@@ -188,18 +188,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             for idx in range(gemm_grouped_num)
         ]
 
-    @staticmethod
-    def _fake_get_dtype(fake_outs: list[ir.Buffer]) -> Callable[[str], torch.dtype]:
-        _get_dtype_real = V.graph.get_dtype
-
-        def get_dtype(name: str) -> torch.dtype:
-            for fake_out in fake_outs:
-                if name == fake_out.get_name():
-                    return fake_out.get_dtype()
-            return _get_dtype_real(name)
-
-        return get_dtype
-
     @classmethod
     def add_choices(
         cls,
@@ -321,9 +309,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 for W_node in W_nodes:
                     assert W_node.get_name() in V.graph.constants
                     W_tensor.append(V.graph.constants[W_node.get_name()])
-                new_input_nodes[
-                    wgt_start_idx : wgt_start_idx + gemm_grouped_num
-                ] = W_tensor  # type: ignore[assignment]
+                new_input_nodes[wgt_start_idx : wgt_start_idx + gemm_grouped_num] = (
+                    W_tensor  # type: ignore[assignment]
+                )
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
@@ -333,9 +321,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                     W_packed = new_input_nodes[idx]
                     assert isinstance(W_packed, torch.Tensor)
                     W_packed_constant = V.graph.add_tensor_constant(W_packed)
-                    template_buffer.inputs[
-                        idx
-                    ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
+                    template_buffer.inputs[idx] = (
+                        ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
+                    )
             return output
 
         template = DataProcessorTemplateWrapper(
@@ -431,9 +419,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 ir.Buffer(name=gemm_output_name, layout=template_buffer.layout)
             )
 
-        assert (
-            not self.epilogue_creator
-        ), "epilogue_creator is not supported yet in Grouped GEMM Template"
+        assert not self.epilogue_creator, (
+            "epilogue_creator is not supported yet in Grouped GEMM Template"
+        )
 
         kernel_args: dict[str, Optional[ir.IRNode]] = {}
         for x_idx in range(wgt_start_idx):

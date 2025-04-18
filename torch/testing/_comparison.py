@@ -953,7 +953,7 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        # Compressed and plain indices in the CSR / CSC / BSR / BSC sparse formates can be `torch.int32` _or_
+        # Compressed and plain indices in the CSR / CSC / BSR / BSC sparse formats can be `torch.int32` _or_
         # `torch.int64`. While the same dtype is enforced for the compressed and plain indices of a single tensor, it
         # can be different between two tensors. Thus, we need to convert them to the same dtype, or the comparison will
         # fail.

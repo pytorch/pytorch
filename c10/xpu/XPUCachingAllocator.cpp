@@ -9,6 +9,7 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
+using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
 // newly allocated memory with 512-byte alignment.
@@ -509,7 +510,7 @@ class DeviceCachingAllocator {
   }
 };
 
-void local_raw_delete(void* ptr);
+static void local_raw_delete(void* ptr);
 
 class XPUAllocator : public Allocator {
  private:

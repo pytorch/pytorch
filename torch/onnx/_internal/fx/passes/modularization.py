@@ -9,7 +9,7 @@ from typing import Any, Final, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass
 from torch.utils import _pytree as pytree
 
 
@@ -66,8 +66,7 @@ class _ModuleMeta:
         """
         # E.g., from 'L__self___h_1_mlp_c_proj' to 'h_1_mlp_c_proj'.
         name = self.module_name
-        if name.startswith("L__self___"):
-            name = name[len("L__self___") :]
+        name = name.removeprefix("L__self___")
         return name
 
     @property
@@ -794,7 +793,6 @@ class Modularize(_pass.Transform):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
         >>> import torch
         >>> from torch.onnx._internal.fx import passes
-        >>> from torch.onnx._internal.diagnostics import infra
         >>>
         >>> class CustomModule(torch.nn.Module):
         >>>     def __init__(self) -> None:
@@ -823,18 +821,19 @@ class Modularize(_pass.Transform):
         ... )
         >>> gm.print_readable()
 
-        >>> gm = passes.Modularize(infra.DiagnosticContext("test_context", "1.0"), gm).run()
+        >>> gm = passes.Modularize(
+        ...     gm,
+        ... ).run()
         >>> gm.print_readable()
 
     """
 
     def __init__(
         self,
-        diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         is_exported_program: bool = False,
     ):
-        super().__init__(diagnostic_context, module)
+        super().__init__(module)
         self.module = module
         self.is_exported_program = is_exported_program
 

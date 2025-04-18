@@ -17,7 +17,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C
@@ -60,7 +60,52 @@ try:
         if not _version.hip:
             import pynvml  # type: ignore[import]
         else:
-            import amdsmi  # type: ignore[import]
+            import ctypes
+            from pathlib import Path
+
+            # In ROCm (at least up through 6.3.2) there're 2 copies of libamd_smi.so:
+            # - One at lib/libamd_smi.so
+            # - One at share/amd_smi/amdsmi/libamd_smi.so
+            #
+            # The amdsmi python module hardcodes loading the second one in share-
+            # https://github.com/ROCm/amdsmi/blob/1d305dc9708e87080f64f668402887794cd46584/py-interface/amdsmi_wrapper.py#L174
+            #
+            # See also https://github.com/ROCm/amdsmi/issues/72.
+            #
+            # This creates an ODR violation if the copy of libamd_smi.so from lib
+            # is also loaded (via `ld` linking, `LD_LIBRARY_PATH` or `rpath`).
+            #
+            # In order to avoid the violation we hook CDLL and try using the
+            # already loaded version of amdsmi, or any version in the processes
+            # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
+            # of the .so.
+            class _amdsmi_cdll_hook:
+                def __init__(self) -> None:
+                    self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
+                    paths = ["libamd_smi.so"]
+                    if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
+                        paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
+                    self.paths: list[str] = paths
+
+                def hooked_CDLL(
+                    self, name: Union[str, Path, None], *args: Any, **kwargs: Any
+                ) -> ctypes.CDLL:
+                    if name and Path(name).name == "libamd_smi.so":
+                        for path in self.paths:
+                            try:
+                                return self.original_CDLL(path, *args, **kwargs)
+                            except OSError:
+                                pass
+                    return self.original_CDLL(name, *args, **kwargs)  # type: ignore[arg-type]
+
+                def __enter__(self) -> None:
+                    ctypes.CDLL = self.hooked_CDLL  # type: ignore[misc,assignment]
+
+                def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
+                    ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
+
+            with _amdsmi_cdll_hook():
+                import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -114,7 +159,13 @@ def _nvml_based_avail() -> bool:
 
 
 def is_available() -> bool:
-    r"""Return a bool indicating if CUDA is currently available."""
+    r"""
+    Return a bool indicating if CUDA is currently available.
+
+    .. note:: This function will NOT poison fork if the environment variable
+        ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set. For more details, see
+        :ref:`multiprocessing-poison-fork-note`.
+    """
     if not _is_compiled():
         return False
     if _nvml_based_avail():
@@ -145,11 +196,7 @@ def is_bf16_supported(including_emulation: bool = True):
     # Check for CUDA version and device compute capability.
     # This is a fast way to check for it.
     cuda_version = torch.version.cuda
-    if (
-        cuda_version is not None
-        and int(cuda_version.split(".")[0]) >= 11
-        and torch.cuda.get_device_properties(device).major >= 8
-    ):
+    if cuda_version is not None and torch.cuda.get_device_properties(device).major >= 8:
         return True
 
     if not including_emulation:
@@ -187,8 +234,7 @@ def _sleep(cycles):
 def _extract_arch_version(arch_string: str):
     """Extracts the architecture string from a CUDA version"""
     base = arch_string.split("_")[1]
-    if base.endswith("a"):
-        base = base[:-1]
+    base = base.removesuffix("a")
     return int(base)
 
 
@@ -563,6 +609,7 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
+
     cur_stream: Optional["torch.cuda.Stream"]
 
     def __init__(self, stream: Optional["torch.cuda.Stream"]):
@@ -939,7 +986,12 @@ _cached_device_count: Optional[int] = None
 
 
 def device_count() -> int:
-    r"""Return the number of GPUs available."""
+    r"""
+    Return the number of GPUs available.
+
+    .. note:: This API will NOT posion fork if NVML discovery succeeds.
+        See :ref:`multiprocessing-poison-fork-note` for more details.
+    """
     global _cached_device_count
     if not _is_compiled():
         return 0
@@ -1169,8 +1221,7 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
 
 
 def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
+    handle = _get_amdsmi_handler(device)
     # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
     mem_mega_bytes = amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
     mem_bytes = mem_mega_bytes * 1024 * 1024
@@ -1178,16 +1229,12 @@ def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) 
 
 
 def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
 
 
 def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
 
 
@@ -1319,7 +1366,7 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 
 def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Return the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
+    r"""Return the clock speed of the GPU SM in MHz (megahertz) over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -1716,6 +1763,8 @@ __all__ = [
     "graphs",
     "has_half",
     "has_magma",
+    "host_memory_stats",
+    "host_memory_stats_as_nested_dict",
     "init",
     "initial_seed",
     "ipc_collect",
@@ -1752,9 +1801,11 @@ __all__ = [
     "nvtx",
     "profiler",
     "random",
+    "reset_accumulated_host_memory_stats",
     "reset_accumulated_memory_stats",
     "reset_max_memory_allocated",
     "reset_max_memory_cached",
+    "reset_peak_host_memory_stats",
     "reset_peak_memory_stats",
     "seed",
     "seed_all",
