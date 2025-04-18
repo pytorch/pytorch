@@ -206,13 +206,6 @@ class FloorDiv(sympy.Function):
         divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"({base}//{divisor})"
 
-    def _eval_expand_floordiv(self, **hints):
-        """
-        Expands FloorDiv(x, y) into floor(x / y).
-        """
-        num, denom = self.args
-        return sympy.floor(num / denom)
-
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
@@ -302,32 +295,6 @@ class FloorDiv(sympy.Function):
         base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
         divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"floor({base}/{divisor})"
-
-    @staticmethod
-    def rewrite(expr: sympy.Expr) -> sympy.Expr:
-        """
-        Finds instances of floor(x / y) and replaces them with FloorDiv(x, y).
-        """
-
-        def replace(arg: sympy.Expr) -> sympy.Expr:
-            if isinstance(arg, sympy.core.mul.Mul):
-                for arg_idx, frac in enumerate(arg.args):
-                    other_arg = arg.args[1 - arg_idx]
-                    if isinstance(frac, sympy.Rational):
-                        # Look for floor(x * (y / z)). This becomes FloorDiv(x * y, z).
-                        numerator = other_arg * frac.numerator
-                        return FloorDiv(numerator, frac.denominator)
-                    elif isinstance(frac, sympy.Pow):
-                        # Look for floor(x * (y ** -n)). This becomes FloorDiv(x, y ** n).
-                        base, power = frac.args
-                        if power.is_negative:
-                            return FloorDiv(other_arg, base**-power)
-            elif isinstance(arg, sympy.Rational):
-                return FloorDiv(arg.numerator, arg.denominator)
-
-            return sympy.floor(arg)
-
-        return expr.replace(sympy.floor, replace)
 
 
 class ModularIndexing(sympy.Function):
@@ -567,6 +534,10 @@ class CeilToInt(sympy.Function):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
+
+    def _ccode(self, printer):
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"ceil({number})"
 
 
 class FloorToInt(sympy.Function):
@@ -1159,6 +1130,11 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(float(base) / float(divisor))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
+
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        return f"((int){base}/(int){divisor})"
 
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
