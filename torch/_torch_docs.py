@@ -50,6 +50,11 @@ reduceops_common_args = merge_dicts(
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
 """
     ),
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+"""
+    },
 )
 
 multi_dim_common = merge_dicts(
@@ -70,12 +75,12 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
     {
         "opt_dim": """
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
-        If ``None``, all dimensions are reduced.
 """
     },
     {
-        "opt_keepdim": """
-    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+        "opt_dim_all_reduce": """
+    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+        If ``None``, all dimensions are reduced.
 """
     },
 )
@@ -87,6 +92,17 @@ single_dim_common = merge_dicts(
     dim (int): the dimension to reduce.
 """
     ),
+    {
+        "opt_dim": """
+    dim (int, optional): the dimension to reduce.
+"""
+    },
+    {
+        "opt_dim_all_reduce": """
+    dim (int, optional): the dimension to reduce.
+        If ``None``, all dimensions are reduced.
+"""
+    },
     {
         "keepdim_details": """If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -804,8 +820,8 @@ returns `True` if all elements in the row evaluate to `True` and `False` otherwi
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -859,8 +875,8 @@ returns `True` if any element in the row evaluate to `True` and `False` otherwis
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -5636,7 +5652,7 @@ Args:
     {input}
     k (int): k for the k-th smallest element
     dim (int, optional): the dimension to find the kth value along
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor)
@@ -6255,8 +6271,8 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {dim}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -6496,7 +6512,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
     {opt_keepdim}
 
 Keyword args:
@@ -6609,8 +6625,8 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -6664,8 +6680,8 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmax of the flattened input is returned.
-    {keepdim}
+    {opt_dim} If ``None``, the argmax of the flattened input is returned.
+    {opt_keepdim}
 
 Example::
 
@@ -6756,8 +6772,8 @@ reduce over all of them.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6802,8 +6818,8 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 
 Args:
     input (Tensor): the input tensor, either of floating point or complex dtype
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6885,8 +6901,8 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6942,8 +6958,8 @@ median of the non-``NaN`` elements. If all the elements in a reduced row are ``N
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6990,8 +7006,8 @@ equal to the size of :attr:`q`, the remaining dimensions are what remains from t
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
-    {dim}
-    {keepdim}
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7048,8 +7064,8 @@ that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7111,8 +7127,8 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the tuple of two output tensors (min, min_indices)
@@ -7214,8 +7230,8 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -7311,8 +7327,8 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim}
+    {opt_dim} If ``None``, the argmin of the flattened input is returned.
+    {opt_keepdim}
 
 Example::
 
@@ -7501,8 +7517,8 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
@@ -8588,8 +8604,8 @@ dimension :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -10485,7 +10501,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10495,7 +10511,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -10540,7 +10556,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10550,7 +10566,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
@@ -10648,8 +10664,8 @@ reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -10700,8 +10716,8 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -11831,7 +11847,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -11841,7 +11857,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -11885,7 +11901,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -11895,7 +11911,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
@@ -12703,7 +12719,7 @@ trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_ along
 :attr:`dim`. By default the spacing between elements is assumed to be 1, but
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
-used to specify arbitrary spacing along :attr:`dim`.
+used to specify arbitrary spacing along :attr:`dim`. Only one of :attr:`x` or :attr:`dx` should be specified.
 
 
 Assuming :attr:`y` is a one-dimensional tensor with elements :math:`{y_0, y_1, ..., y_n}`,
