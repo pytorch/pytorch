@@ -3246,7 +3246,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
 
         out_paged, lse_paged = self.run_paged_attention(
-            score_mod=_identity, q=query, k=key, v=value, dtype=dtype
+            score_mod=_identity, q=query, k=key, v=value, dtype=dtype, device=device
         )
 
         torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
@@ -3419,7 +3419,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             inv_dist = torch.exp(-dist / scale)
             return inv_dist * score
 
-        self.run_test(euclidean_dist_pos_embed, torch.bfloat16)
+        self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device=device)
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip test on CPU only as error_message on cuda")
@@ -5610,9 +5610,9 @@ class TestLearnableBiases(InductorTestCase):
             sliding_window, val=torch.randn((), device=device)
         )
         opt_fn = torch.compile(create_block_mask, fullgraph=True)
-        create_block_mask(sliding_window2, None, None, 1024, 1024)
+        create_block_mask(sliding_window2, None, None, 1024, 1024, device=device)
         # checks that the compile is working
-        opt_fn(sliding_window2, None, None, 1024, 1024)
+        opt_fn(sliding_window2, None, None, 1024, 1024, device=device)
 
 
 instantiate_device_type_tests(
