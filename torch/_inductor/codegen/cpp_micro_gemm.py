@@ -1419,7 +1419,7 @@ inline void {{kernel_name}}_kernel(
     int64_t ldb,
     int64_t ldc,
     int64_t q_group_size,
-    const at:BFloat16* {{restrict_keyword}} ScaleAndZeros,
+    const bfloat16* {{restrict_keyword}} ScaleAndZeros,
     int64_t lds, // leading dimension of ScaleAndZeros
     int64_t k_start) {
   constexpr int BLOCK_K = {{block_k}};
@@ -1557,7 +1557,7 @@ inline void {{kernel_name}}_kernel(
     def get_kernel_extra_args_declare(self) -> str:
         return (
             "const int64_t q_group_size,\n"
-            "    const at:BFloat16* __restrict__ ScaleAndZeros,\n"
+            "    const bfloat16* __restrict__ ScaleAndZeros,\n"
             "    const int64_t lds,\n"
             "    int64_t k_start,"
         )
@@ -1710,7 +1710,10 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
     auto dequantize_B = [&](int n) {
         constexpr int64_t ldb_int4 = BLOCK_N / 2; // 32
         for (int k = 0, kb = 0; k < K; k += 2) {
-            if ({{kernel_name}}_is_block_start(k, k_start, q_group_size)) {
+            // Since block_k must be 32 for AMX microkernels, k_start may not be
+            // a multiple of q_group_size. In that case, we need to load scales
+            // and zero points immediately when k == 0 here
+            if ({{kernel_name}}_is_block_start(k, k_start, q_group_size) || k == 0) {
                 c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
             }
 

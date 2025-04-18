@@ -1567,10 +1567,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (4, 6, 8))
-    @parametrize("in_features", (128, 256))
-    @parametrize("out_features", (128, 256))
-    @parametrize("group_size", (32, 64))
+    @parametrize("batch_size", (4, 6))
+    @parametrize("in_features", (128, 1024))
+    @parametrize("out_features", (128, 1024))
+    @parametrize("group_size", (32, 64, 128))
     def test_int4_woq_mm_amx(
         self, dtype, batch_size, in_features, out_features, group_size
     ):
