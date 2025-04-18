@@ -1511,6 +1511,11 @@ utils_device.CURRENT_DEVICE == None""".split(
                 x -= 1
             else:
                 x += 1
+            torch._check(x.shape[0] >= 10)
+            if statically_known_true(x.shape[0] > 9):
+                x += 1
+            else:
+                x -= 1
             if has_static_value(x.shape[0]):
                 x -= 1
             else:
@@ -1519,7 +1524,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.zeros(10)
         torch._dynamo.mark_dynamic(x, 0)
-        self.assertEqual(f(x).sum(), 20)
+        self.assertEqual(f(x).sum(), 30)
 
         @torch.compile(fullgraph=True, dynamic=True)
         def g(x, y):

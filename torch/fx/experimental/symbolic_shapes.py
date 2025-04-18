@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sympy
 from sympy import Add, S
+from torch._prims_common import IntLike
 
 
 """
@@ -66,6 +67,7 @@ from torch.fx.experimental.recording import (
     ShapeEnvEvent,
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.types import BoolLikeType, FloatLikeType, IntLikeType, py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
@@ -432,27 +434,19 @@ def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> b
     Args:
         a (Union[SymBool, SymFloat, SymInt, bool, float, int]): Object to test
     """
-    assert isinstance(a, (SymBool, SymFloat, SymInt, bool, float, int))
+    assert isinstance(a, py_sym_types + (bool, float, int))
     if (
-        isinstance(a, (SymBool, bool))
+        isinstance(a, BoolLikeType)
         and is_concrete_bool(a)  # type: ignore[arg-type]
-        or isinstance(a, (SymBool, float))
+        or isinstance(a, FloatLikeType)
         and is_concrete_float(a)  # type: ignore[arg-type]
-        or isinstance(a, (SymBool, int))
+        or isinstance(a, IntLikeType)
         and is_concrete_int(a)  # type: ignore[arg-type]
     ):
         return True
 
-    if (
-        (fake_mode := torch._guards.detect_fake_mode()) and (
-            shape_env := fake_mode.shape_env
-        )
-    ):
-        return shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
-    else:
-        log.debug("Could not detect ShapeEnv in has_static_value(%s) call", a)
-
-    return False
+    assert isinstance(a, py_sym_types)
+    return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
 
 
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
