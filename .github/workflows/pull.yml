@@ -10,6 +10,58 @@ on:
       - release/*
       - landchecks/*
   workflow_dispatch:
+    inputs:
+      training:
+        description: Run training (on by default)?
+        required: false
+        type: boolean
+        default: true
+      inference:
+        description: Run inference (on by default)?
+        required: false
+        type: boolean
+        default: true
+      default:
+        description: Run inductor_default?
+        required: false
+        type: boolean
+        default: false
+      dynamic:
+        description: Run inductor_dynamic_shapes?
+        required: false
+        type: boolean
+        default: false
+      cppwrapper:
+        description: Run inductor_cpp_wrapper?
+        required: false
+        type: boolean
+        default: false
+      cudagraphs:
+        description: Run inductor_cudagraphs?
+        required: false
+        type: boolean
+        default: true
+      freezing_cudagraphs:
+        description: Run inductor_cudagraphs with freezing for inference?
+        required: false
+        type: boolean
+        default: false
+      aotinductor:
+        description: Run aot_inductor for inference?
+        required: false
+        type: boolean
+        default: false
+      maxautotune:
+        description: Run inductor_max_autotune?
+        required: false
+        type: boolean
+        default: false
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: inductor_huggingface_perf_cuda_h100,inductor_timm_perf_cuda_h100,inductor_torchbench_perf_cuda_h100
+
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
 
@@ -546,4 +598,52 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
+    secrets: inherit
+
+  # NB: Keep this in sync with trunk.yml
+  build-on-test-runner:
+    name: build-on-test-runner
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner: pytorch-ci-runner-set
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks
+      cuda-arch-list: '9.0'
+      test-matrix: |
+        { include: [
+          { config: "inductor_huggingface_perf_cuda_h100", shard: 1, num_shards: 5, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_huggingface_perf_cuda_h100", shard: 2, num_shards: 5, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_huggingface_perf_cuda_h100", shard: 3, num_shards: 5, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_huggingface_perf_cuda_h100", shard: 4, num_shards: 5, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_huggingface_perf_cuda_h100", shard: 5, num_shards: 5, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 1, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 2, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 3, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 4, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 5, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 6, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 1, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 2, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 3, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 4, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 5, num_shards: 6, runner: "pytorch-ci-runner-set" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 6, num_shards: 6, runner: "pytorch-ci-runner-set" },
+        ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
+    secrets: inherit
+
+  test-on-test-runner:
+    name: test-on-test-runner
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build-on-test-runner
+    if: github.event_name == 'workflow_dispatch'
+    with:
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
+      docker-image: ${{ needs.build-on-test-runner.outputs.docker-image }}
+      test-matrix: ${{ needs.build-on-test-runner.outputs.test-matrix }}
+      timeout-minutes: 720
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
