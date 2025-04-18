@@ -3768,6 +3768,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         a.numel() == shape_numel,
         f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
+    deferred: list[Callable[[], bool]] = []
 
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
@@ -3807,8 +3808,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # Gathers enough original dimensions such that this new dimension can be created
         # Note that this accumulation will terminate because we've verified a and the shape
         # specify the same number of elements above
-        deferred: list[Callable[[], bool]] = []
-
         def maybe_throw_dde():
             # NOTE: if you've hit a data-dependent error here, it's because in trying to accumulate input
             # tensor dimensions to match the target shape (length), we've hit data-dependent errors testing
