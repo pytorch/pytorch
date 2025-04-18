@@ -87,7 +87,6 @@ def scaled_grouped_mm_configs():
 
 def early_config_prune(configs, named_args):
     dtsize = 1
-
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
@@ -99,11 +98,11 @@ def early_config_prune(configs, named_args):
             config.num_warps,
             getattr(config, "num_consumer_groups", 0),
         )
-        G, M_PER_GROUP, N_PER_GROUP, K = (
+        G, M_PER_GROUP, N_PER_GROUP, K_PER_GROUP = (
             named_args["G"],
             named_args["M_PER_GROUP"],
             named_args["N_PER_GROUP"],
-            named_args["K"],
+            named_args["K_PER_GROUP"],
         )
 
         # 1. make sure we have enough smem
@@ -146,7 +145,7 @@ def early_config_prune(configs, named_args):
             continue
 
         # 6. make sure K can be evenly divided
-        if K % BLOCK_K != 0:
+        if K_PER_GROUP % BLOCK_K != 0:
             continue
 
         # 7. make sure we can partition for ws
@@ -167,7 +166,7 @@ def early_config_prune(configs, named_args):
 
 # Copied from fbgemm grouped_gemm.py
 triton_scaled_grouped_mm_source = r"""
-{% if A_IS_2D or B_IS_2D  %}
+{% if M_IS_DYNAMIC or N_IS_DYNAMIC or K_IS_DYNAMIC %}
 {{def_kernel("a_ptr", "b_ptr", "a_scale_ptr", "b_scale_ptr", "offsets_ptr")}}
 {% else %}
 {{def_kernel("a_ptr", "b_ptr", "a_scale_ptr", "b_scale_ptr")}}
@@ -200,37 +199,49 @@ triton_scaled_grouped_mm_source = r"""
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
-{% if A_IS_2D %}
-    M_end_offset = 0
+{% if M_IS_DYNAMIC %}
+    m_end_offset = 0
 {% endif %}
-{% if B_IS_2D %}
-    N_end_offset = 0
+{% if N_IS_DYNAMIC %}
+    n_end_offset = 0
+{% endif %}
+{% if K_IS_DYNAMIC %}
+    k_end_offset = 0
 {% endif %}
     iterated_tiles = 0
     for g in tl.range(G):
-{% if A_IS_2D %}
+{% if M_IS_DYNAMIC %}
         # Move across groups
-        M_start_offset = M_end_offset
-        M_end_offset = tl.load(offsets_ptr + g)
-        m_size = M_end_offset - M_start_offset
-        M_scale_start_offset = M_start_offset
+        m_start_offset = m_end_offset
+        m_end_offset = tl.load(offsets_ptr + g)
+        m_size = m_end_offset - m_start_offset
+        m_scale_start_offset = m_start_offset
 {% else %}
-        M_start_offset = g.to(tl.int64) * A_GLOBAL_OFF_M
+        m_start_offset = g.to(tl.int64) * A_GLOBAL_OFF_M
         m_size = M
-        M_scale_start_offset = g.to(tl.int64) * M
+        m_scale_start_offset = g.to(tl.int64) * M
 {% endif %}
 
         if m_size > 0:
-{% if B_IS_2D %}
+{% if N_IS_DYNAMIC %}
             # Move across groups
-            N_start_offset = N_end_offset
-            N_end_offset = tl.load(offsets_ptr + g)
-            n_size = N_end_offset - N_start_offset
-            N_scale_start_offset = N_start_offset
+            n_start_offset = n_end_offset
+            n_end_offset = tl.load(offsets_ptr + g)
+            n_size = n_end_offset - n_start_offset
+            n_scale_start_offset = n_start_offset
 {% else %}
-            N_start_offset = g.to(tl.int64) * B_GLOBAL_OFF_N
+            n_start_offset = g.to(tl.int64) * B_GLOBAL_OFF_N
             n_size = N
-            N_scale_start_offset = g.to(tl.int64) * N
+            n_scale_start_offset = g.to(tl.int64) * N
+{% endif %}
+{% if K_IS_DYNAMIC %}
+            # Move across groups
+            k_start_offset = k_end_offset
+            k_end_offset = tl.load(offsets_ptr + g)
+            k_size = k_end_offset - k_start_offset
+{% else %}
+            k_start_offset = 0
+            k_size = K
 {% endif %}
 
             num_m_tiles = tl.cdiv(m_size, BLOCK_M)
@@ -245,20 +256,23 @@ triton_scaled_grouped_mm_source = r"""
                 tile_n_idx = gidx // num_m_tiles
 
                 accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+{% if not K_IS_DYNAMIC %}
                 tl.static_assert(K % BLOCK_K == 0)
+{% endif %}
                 if USE_TMA_LOAD:
-                    m_offset = (M_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
-                    n_offset = (N_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
-                    for k_offset in range(0, K, BLOCK_K):
+                    m_offset = (m_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
+                    n_offset = (n_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
+
+                    for k_offset in range(0, k_size, BLOCK_K):
                         a = tl._experimental_descriptor_load(
                             a_desc_ptr,
-                            [m_offset, k_offset],
+                            [m_offset, k_start_offset + k_offset],
                             [BLOCK_M, BLOCK_K],
                             dtype,
                         )
                         b = tl._experimental_descriptor_load(
                             b_desc_ptr,
-                            [n_offset, k_offset],
+                            [n_offset, k_start_offset + k_offset],
                             [BLOCK_N, BLOCK_K],
                             dtype,
                         )
@@ -269,60 +283,56 @@ triton_scaled_grouped_mm_source = r"""
                 else:
                     offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                     offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-                    offs_k = tl.arange(0, BLOCK_K)
+                    offs_k = k_start_offset + tl.arange(0, BLOCK_K)
                     a_ptrs = (
                         a_ptr
-                        + (M_start_offset + offs_am[:, None]) * A_GLOBAL_SIZE_K
+                        + (m_start_offset + offs_am[:, None]) * A_GLOBAL_SIZE_K
                         + offs_k[None, :]
                     )
                     b_ptrs = (
                         b_ptr
-                        + (N_start_offset + offs_bn[:, None]) * B_GLOBAL_SIZE_K
+                        + (n_start_offset + offs_bn[:, None]) * B_GLOBAL_SIZE_K
                         + offs_k[None, :]
                     )
-                    for k_offset in range(0, K, BLOCK_K):
+                    for k_offset in range(0, k_size, BLOCK_K):
                         a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
                         b = tl.load(b_ptrs, mask=offs_bn[:, None] < n_size)
-                        accumulator += tl.dot(a, b.T)
+                        if USE_FAST_ACCUM:
+                            accumulator = tl.dot(a, b.T, accumulator)
+                        else:
+                            accumulator += tl.dot(a, b.T)
                         a_ptrs += BLOCK_K
                         b_ptrs += BLOCK_K
 
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
                 a_scale = tl.load(
-                    a_scale_ptr + M_scale_start_offset + offs_am[:, None],
+                    a_scale_ptr + m_scale_start_offset + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
                 )
                 b_scale = tl.load(
-                    b_scale_ptr + N_scale_start_offset + offs_bn[None, :],
+                    b_scale_ptr + n_scale_start_offset + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
                 )
                 c = accumulator.to(tl.float32) * a_scale * b_scale
 
-{% if A_IS_2D %}
-                idx_m = (M_start_offset + offs_am[:, None])
+{% if M_IS_DYNAMIC %}
+                idx_m = (m_start_offset + offs_am[:, None])
 {% else %}
                 idx_m = offs_am[:, None]
 {% endif %}
-{% if B_IS_2D %}
-                idx_n = (N_start_offset + offs_bn[None, :])
+{% if N_IS_DYNAMIC %}
+                idx_n = (n_start_offset + offs_bn[None, :])
 {% else %}
                 idx_n = offs_bn[None, :]
 {% endif %}
 
                 mask = offs_am[:, None] < m_size and offs_bn[None, :] < n_size
 
-{% if A_IS_2D %}
-  {% if B_IS_2D %}
-  {% else %}
+{% if M_IS_DYNAMIC or N_IS_DYNAMIC %}
                 {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
-  {% endif %}
 {% else %}
-  {% if B_IS_2D %}
-                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
-  {% else %}
                 {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16)}}
-  {% endif %}
 {% endif %}
                 tidx += NUM_SMS
 
@@ -409,7 +419,7 @@ def can_use_triton_kernel(
 
     if len(m1_size) == 2:
         if len(m2_size) == 2:
-            return False  # fixme for 2d/2d
+            return offs is not None and m2_size[-1] >= 32
         else:
             return offs is not None and m1_size[-1] >= 32 and m2_size[-2] >= 32
     else:
@@ -471,69 +481,59 @@ def tuned_scaled_grouped_mm(
     if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias):
         if len(m1_size) == 2:
             if len(m2_size) == 2:
-                # fixme for 2d/2d
-                # (silence mypy until 2d/2d implemented)
-                g = m = n = k = 0
-                a_is_2d = b_is_2d = True
+                g = offs.layout.size[0]
+                m, k1 = m1_size
+                k2, n = m2_size
+                k = V.graph.sizevars.guard_equals(k1, k2)
+                m_is_dynamic, n_is_dynamic, k_is_dynamic = False, False, True
             else:
                 m, k1 = m1_size
                 g, k2, n = m2_size
                 k = V.graph.sizevars.guard_equals(k1, k2)
-                a_is_2d = True
-                b_is_2d = False
+                m_is_dynamic, n_is_dynamic, k_is_dynamic = True, False, False
         else:
             if len(m2_size) == 2:
                 g, m, k1 = m1_size
                 k2, n = m2_size
                 k = V.graph.sizevars.guard_equals(k1, k2)
-                a_is_2d = False
-                b_is_2d = True
+                m_is_dynamic, n_is_dynamic, k_is_dynamic = False, True, False
             else:
                 g1, m, k1 = m1_size
                 g2, k2, n = m2_size
                 g = V.graph.sizevars.guard_equals(g1, g2)
                 k = V.graph.sizevars.guard_equals(k1, k2)
-                a_is_2d = False
-                b_is_2d = False
+                m_is_dynamic, n_is_dynamic, k_is_dynamic = False, False, False
         kwargs = {
             "G": g,
             "M": m,
-            "M_PER_GROUP": next_power_of_2(m) // g if a_is_2d else m,
             "N": n,
-            "N_PER_GROUP": next_power_of_2(n) // g if b_is_2d else n,
             "K": k,
-            "A_IS_2D": a_is_2d,
-            "B_IS_2D": b_is_2d,
+            "M_IS_DYNAMIC": m_is_dynamic,
+            "N_IS_DYNAMIC": n_is_dynamic,
+            "K_IS_DYNAMIC": k_is_dynamic,
             "NUM_SMS": get_num_sms(),
             "USE_TMA_LOAD": True,
             "USE_FAST_ACCUM": use_fast_accum,
+            "M_PER_GROUP": next_power_of_2(m) // g if m_is_dynamic else m,
+            "N_PER_GROUP": next_power_of_2(n) // g if n_is_dynamic else n,
+            "K_PER_GROUP": next_power_of_2(k) // g if k_is_dynamic else k,
         }
-        if a_is_2d:
-            if b_is_2d:
-                pass  # fixme for 2d/2d
-            else:
-                kwargs["A_GLOBAL_SIZE_M"] = m
-                kwargs["A_GLOBAL_SIZE_K"] = mat_a.layout.stride[0]
-                kwargs["A_GLOBAL_OFF_M"] = -1  # offs are used for stepping along M mode
-                kwargs["B_GLOBAL_SIZE_N"] = mat_b.layout.stride[0]
-                kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[2]
-                kwargs["B_GLOBAL_OFF_N"] = (
-                    mat_b.layout.stride[0] // mat_b.layout.stride[2]
-                )
+        if m_is_dynamic or k_is_dynamic:
+            kwargs["A_GLOBAL_SIZE_M"] = m
+            kwargs["A_GLOBAL_SIZE_K"] = mat_a.layout.stride[0]
+            kwargs["A_GLOBAL_OFF_M"] = 0  # if stepping along M mode, offs are used here
         else:
             kwargs["A_GLOBAL_SIZE_M"] = mat_a.layout.stride[0]
             kwargs["A_GLOBAL_SIZE_K"] = mat_a.layout.stride[1]
             kwargs["A_GLOBAL_OFF_M"] = mat_a.layout.stride[0] // mat_a.layout.stride[1]
-            if b_is_2d:
-                kwargs["B_GLOBAL_SIZE_N"] = n
-                kwargs["B_GLOBAL_SIZE_K"] = mat_a.layout.stride[1]
-                kwargs["B_GLOBAL_OFF_N"] = -1  # offs are used for stepping along N mode
-            else:
-                kwargs["B_GLOBAL_SIZE_N"] = mat_b.layout.stride[0]
-                kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[2]
-                kwargs["B_GLOBAL_OFF_N"] = (
-                    mat_b.layout.stride[0] // mat_b.layout.stride[2]
-                )
+        if n_is_dynamic or k_is_dynamic:
+            kwargs["B_GLOBAL_SIZE_N"] = n
+            kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[1]
+            kwargs["B_GLOBAL_OFF_N"] = 0  # if stepping along N mode, offs are used here
+        else:
+            kwargs["B_GLOBAL_SIZE_N"] = mat_b.layout.stride[0]
+            kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[2]
+            kwargs["B_GLOBAL_OFF_N"] = mat_b.layout.stride[0] // mat_b.layout.stride[2]
 
         for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
             triton_scaled_grouped_mm_template.maybe_append_choice(

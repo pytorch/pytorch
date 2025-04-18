@@ -1374,6 +1374,11 @@ class InstructionTranslatorBase(
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
 
+                    # Note that this call maybe redundant if compile_subgraph is
+                    # called. This is ok, because calling exit stack close()
+                    # twice is not an issue (second stop is a no op).
+                    self.output.mark_bytecode_tracing_stop()
+
     def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
@@ -1640,6 +1645,9 @@ class InstructionTranslatorBase(
                 hints=[],
             )
 
+    # fb internal 3.12 opcode
+    EAGER_IMPORT_NAME = IMPORT_NAME
+
     def IMPORT_FROM(self, inst):
         self.DUP_TOP(inst)
         self._load_attr(inst)
@@ -1708,34 +1716,6 @@ class InstructionTranslatorBase(
     def WITH_CLEANUP_FINISH(self, inst):
         self.popn(2)
         self.push(None)
-
-    def CALL_FINALLY(self, inst):
-        """
-        pushes the address of the next instruction onto the stack and increments
-        bytecode counter by delta
-        """
-        # Python 3.8 only
-        addr = self.indexof[self.next_instruction]
-        self.push(ConstantVariable.create(addr))
-        self.jump(inst)
-
-    def END_FINALLY(self, inst):
-        # Python 3.8 only
-        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
-        tos = self.pop()
-        if isinstance(tos, ConstantVariable):
-            self.instruction_pointer = tos.as_python_constant()
-        else:
-            pass
-
-    def POP_FINALLY(self, inst):
-        # Python 3.8 only
-        preserve_tos = inst.argval
-        if preserve_tos:
-            tos = self.pop()
-        _ = self.pop()
-        if preserve_tos:
-            self.push(tos)  # type: ignore[possibly-undefined]
 
     def FOR_ITER(self, inst):
         it = self.pop().realize()

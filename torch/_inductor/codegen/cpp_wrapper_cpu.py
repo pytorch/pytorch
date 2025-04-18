@@ -102,7 +102,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
 
-    def generate_kernel_call(
+    def _generate_kernel_call_helper(
         self,
         kernel_name: str,
         call_args,
@@ -113,6 +113,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
         original_fxnode_name=None,
     ):
         """
@@ -908,7 +909,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.splice(aot_mode_decls)
         self.prefix.splice(prior)
 
-    def define_kernel(
+    def _define_kernel_helper(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -1117,11 +1118,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         debug_printer_manager.set_printer_args(
             debug_args if debug_args is not None else args, kernel, None, None, "extern"
         )
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            self.writeline(
+            shim_fn_codes = (
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
+            if enable_kernel_profile:
+                shim_fn_codes = textwrap.dedent(
+                    f"""
+                    {{
+                      RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
+                      {shim_fn_codes}
+                    }}
+                    """
+                )
+            self.writeline(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
@@ -1146,7 +1161,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         if getattr(extern_kernel, "outputs", None):
             # ir.ExternKernelAlloc may have outputs if it returns a tuple
             self.generate_c_shim_fallback_kernel(extern_kernel, args)
@@ -1195,10 +1210,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
-    def generate_fallback_kernel(self, fallback_kernel, args):
-        self.generate_c_shim_fallback_kernel(fallback_kernel, args)
-
-    def generate_extern_kernel_out(
+    def _generate_extern_kernel_out_helper(
         self,
         kernel: str,
         out: str,
@@ -1638,7 +1650,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
-    def codegen_multi_output(self, name, value):
+    def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
         pass
@@ -2023,7 +2035,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 codegen_args,
                 op_overload,
                 raw_args,
-                output_args,
+                output_args,  # type: ignore[arg-type]
                 outputs,
             )
 
@@ -2178,7 +2190,7 @@ if (!custom_op_wrapper) {
         codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
-        output_args: Optional[list[str]] = None,
+        output_args: Optional[list[Optional[str]]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
@@ -2222,9 +2234,9 @@ if (!custom_op_wrapper) {
             """
         )
 
-        if len(output_args) == 1:
+        if len(output_args) == 1 and (output := output_args[0]) is not None:
             # result is a single tensor
-            lines += f"{output_args[0]} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
+            lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
             # result is a tuple of tensors
             for idx, output_arg in enumerate(output_args):
