@@ -154,7 +154,7 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
       ")");
   TORCH_CHECK(
       self.dtype() == mat2.dtype(),
-      "expected self and mat2 to have the same dtype, but got: ",
+      "expected mat1 and mat2 to have the same dtype, but got: ",
       self.dtype(),
       " != ",
       mat2.dtype())
