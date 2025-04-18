@@ -7,6 +7,9 @@
 #endif
 
 #include <ATen/ATen.h>
+#if defined(USE_ROCM)
+#include <hip/hip_bf16.h>
+#endif
 #if !defined(USE_ROCM)
 #include <cuda_bf16.h>
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
@@ -49,6 +52,9 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ref(*addr);
   ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
   return compare;
+#elif defined(USE_ROCM)
+  __atomic_compare_exchange_n(addr, &compare, val, false, Sem, Sem);
+  return compare;
 #else
   CUDA_KERNEL_ASSERT(false);
   return 0;
@@ -57,7 +63,10 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 
 __device__ __forceinline__ void trap() {
 #if defined(USE_ROCM)
-  assert(0);
+  // abort() calls trap() under the covers. However, on ROCm, the trap is
+  // handled differently inside hip runtime. It collects a gpu core dump and
+  // causes linux kernerl to create a core dump of the host application.
+  abort();
 #else
   __trap();
 #endif
@@ -65,8 +74,8 @@ __device__ __forceinline__ void trap() {
 
 __device__ __forceinline__ size_t global_timer_ns() {
 #if defined(USE_ROCM)
-  CUDA_KERNEL_ASSERT(false);
-  return 0;
+  static constexpr double MI300_FREQ_GHZ = 2.1;
+  return __builtin_amdgcn_s_memtime() / MI300_FREQ_GHZ;
 #else
   size_t val;
   asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");
@@ -289,8 +298,20 @@ __device__ __inline__ void multimem_st(T* mc_ptr, Vec<Alignment>& vec) {
 
 template <int Alignment, typename T>
 __device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
+#elif defined(USE_ROCM)
+  Vec<Alignment> vec;
+  if constexpr (Alignment == 16) {
+    vec.u128 = *reinterpret_cast<const uint4*>(addr);
+  } else if constexpr (Alignment == 8) {
+    vec.u64 = *reinterpret_cast<const uint64_t*>(addr);
+  } else if constexpr (Alignment == 4) {
+    vec.u32 = *reinterpret_cast<const uint32_t*>(addr);
+  } else {
+    static_assert(dependent_false<T>);
+  }
+  return vec;
 #else
   Vec<Alignment> vec;
   if constexpr (Alignment == 16) {
@@ -314,8 +335,19 @@ __device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
 
 template <int Alignment, typename T>
 __device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
+#elif defined(USE_ROCM)
+  if constexpr (Alignment == 16) {
+    reinterpret_cast<uint64_t*>(addr)[0] = vec.u64[0];
+    reinterpret_cast<uint64_t*>(addr)[1] = vec.u64[1];
+  } else if constexpr (Alignment == 8) {
+    *reinterpret_cast<uint64_t*>(addr) = vec.u64;
+  } else if constexpr (Alignment == 4) {
+    *reinterpret_cast<uint32_t*>(addr) = vec.u32;
+  } else {
+    static_assert(dependent_false<T>);
+  }
 #else
   if constexpr (Alignment == 16) {
     asm("st.global.v4.u32 [%0], {%1,%2,%3,%4};"
@@ -339,14 +371,10 @@ __device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
 #endif
 }
 
-#if defined(USE_ROCM)
-using __nv_bfloat162 = uint32_t;
-#endif
-
 template <typename T>
 __device__ __inline__ T add_bf16x2(T a, T b) {
   static_assert(sizeof(T) == 4);
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
   return T{};
 #else
