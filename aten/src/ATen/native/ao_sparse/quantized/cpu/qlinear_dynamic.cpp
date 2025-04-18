@@ -6,6 +6,7 @@
 #include <c10/util/accumulate.h>
 
 #include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/library.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
@@ -19,8 +20,6 @@
 #endif
 
 namespace ao::sparse {
-
-int register_linear_params();
 
 #ifdef USE_PYTORCH_QNNPACK
 template <>
