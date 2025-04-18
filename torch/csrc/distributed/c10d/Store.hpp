@@ -106,7 +106,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
     C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
   }
 
-  virtual std::vector<uint8_t> queuePop(const std::string& key) {
+  virtual std::vector<uint8_t> queuePop(const std::string& key, bool block) {
     C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
   }
 
