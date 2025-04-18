@@ -552,10 +552,7 @@ class VariableBuilder:
         def build_key_value(k, v):
             key = ConstantVariable.create(k)
             source_key = k
-            source_value = GetItemSource(
-                self.get_source(),
-                source_key,
-            )
+            source_value = GetItemSource(self.get_source(), source_key)
             res_value = LazyVariableTracker.create(v, source_value)
 
             return key, res_value
@@ -707,10 +704,7 @@ class VariableBuilder:
                 else:
                     source_key = ConstDictKeySource(base, i)
                     key = LazyVariableTracker.create(k, source_key)
-                source_value = DictGetItemSource(
-                    base,
-                    source_key,
-                )
+                source_value = DictGetItemSource(base, source_key)
                 res_value = LazyVariableTracker.create(v, source_value)
 
                 return key, res_value
@@ -792,10 +786,7 @@ class VariableBuilder:
                 args.append(
                     VariableBuilder(
                         self.tx,
-                        GetItemSource(
-                            args_source,
-                            i,
-                        ),
+                        GetItemSource(args_source, i),
                     )(arg)
                 )
 
@@ -811,10 +802,7 @@ class VariableBuilder:
                     )
                 keywords[k] = VariableBuilder(
                     self.tx,
-                    DictGetItemSource(
-                        keywords_source,
-                        k,
-                    ),
+                    DictGetItemSource(keywords_source, k),
                 )(v)
 
             install_guard(
@@ -884,10 +872,7 @@ class VariableBuilder:
                     saved_tensors.append(
                         VariableBuilder(
                             self.tx,
-                            GetItemSource(
-                                saved_tensors_source,
-                                i,
-                            ),
+                            GetItemSource(saved_tensors_source, i),
                         )(v)
                     )
             install_guard(*guards)
@@ -1360,10 +1345,7 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = DictGetItemSource(
-                    base,
-                    source_key,
-                )
+                source_value = DictGetItemSource(base, source_key)
                 res_value = LazyVariableTracker.create(v, source_value)
 
                 return key, res_value
@@ -1401,10 +1383,7 @@ class VariableBuilder:
             output = [
                 LazyVariableTracker.create(
                     tuple.__getitem__(value, i),
-                    source=GetItemSource(
-                        self.get_source(),
-                        i,
-                    ),
+                    source=GetItemSource(self.get_source(), i),
                 )
                 for i in range(tuple.__len__(value))
             ]
@@ -1425,10 +1404,7 @@ class VariableBuilder:
             output = [
                 LazyVariableTracker.create(
                     list.__getitem__(value, i),
-                    source=ListGetItemSource(
-                        self.get_source(),
-                        i,
-                    ),
+                    source=ListGetItemSource(self.get_source(), i),
                 )
                 for i in range(list.__len__(value))
             ]
@@ -1500,10 +1476,7 @@ class VariableBuilder:
         output = [
             LazyVariableTracker.create(
                 item,
-                source=GetItemSource(
-                    self.get_source(),
-                    i,
-                ),
+                source=GetItemSource(self.get_source(), i),
             )
             for i, item in enumerate(value)
         ]
@@ -1541,11 +1514,7 @@ class VariableBuilder:
 
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
-                source_i = GetItemSource(
-                    base=source,
-                    index=i,
-                    index_is_slice=False,
-                )
+                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
@@ -1578,10 +1547,7 @@ class VariableBuilder:
         output = [
             VariableBuilder(
                 self.tx,
-                TupleIteratorGetItemSource(
-                    self.get_source(),
-                    i,
-                ),
+                TupleIteratorGetItemSource(self.get_source(), i),
             )(tuple_iterator_getitem(value, i))
             for i in range(tuple_iterator_len(value))
         ]
@@ -2436,10 +2402,7 @@ def _dataclasses_fields_lambda(obj):
         source = None
         if obj.source:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
-            source = DictGetItemSource(
-                base_src,
-                field.name,
-            )
+            source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
     return TupleVariable(items)
 
@@ -2709,9 +2672,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
-                        base=source,
-                        index=i,
-                        index_is_slice=False,
+                        base=source, index=i, index_is_slice=False
                     )
                 else:
                     # use the same options object as parent
