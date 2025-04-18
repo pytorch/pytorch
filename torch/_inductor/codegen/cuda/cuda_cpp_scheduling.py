@@ -8,8 +8,13 @@ from torch.utils._ordered_set import OrderedSet
 from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
-from ...ir import CUDATemplateBuffer
-from ...scheduler import BaseSchedulerNode, BaseScheduling, SchedulerNode
+from ...ir import Buffer, ComputedBuffer, CUDATemplateBuffer, IRNode, Pointwise
+from ...scheduler import (
+    BaseSchedulerNode,
+    BaseScheduling,
+    FusedSchedulerNode,
+    SchedulerNode,
+)
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
@@ -40,9 +45,32 @@ class CUDACPPScheduling(BaseScheduling):
             node.node, CUDATemplateBuffer
         )
 
+    def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
+        return isinstance(node, FusedSchedulerNode) and self.is_cuda_cpp_template(node)
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        if self.is_cuda_cpp_template(node1) and isinstance(node2, SchedulerNode):
+            assert node1.node, "node1.node should not be None"
+            assert node2.node, "node2.node should not be None"
+            return self._can_fuse_epilogue_impl(
+                cast(CUDATemplateBuffer, node1.node),
+                [],
+                node2.node,  # type: ignore[arg-type]
+            )
+        elif self.is_cuda_cpp_fused_template(node1) and isinstance(
+            node2, SchedulerNode
+        ):
+            assert node1.node, "node1.node should not be None"
+            assert node2.node, "node2.node should not be None"
+            fnode1 = cast(FusedSchedulerNode, node1)
+            return self._can_fuse_epilogue_impl(
+                fnode1.get_template_node(),  # type: ignore[arg-type]
+                self._unwrap_epilogue_nodes(fnode1),
+                node2.node,  # type: ignore[arg-type]
+            )
+
         return False
 
     def define_kernel(self, src_code: str, node_schedule) -> str:
@@ -94,13 +122,19 @@ class CUDACPPScheduling(BaseScheduling):
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
-        kernel, render = ctb.make_kernel_render(ctb)
+        epilogue_ir_nodes: list[Buffer] = [n.node for n in epilogue_nodes]  # type: ignore[misc]
+        assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
+            "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        )
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+
         with kernel:
-            template_node.mark_run()
+            for node in [template_node, *epilogue_nodes]:
+                node.mark_run()
             src_code = render()
 
         with V.set_kernel_handler(kernel):
-            node_schedule = [template_node]
+            node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule)
 
         # debug printing values of intermediate tensors
@@ -114,3 +148,89 @@ class CUDACPPScheduling(BaseScheduling):
 
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
+
+    @staticmethod
+    def _unwrap_epilogue_nodes(fused_node: FusedSchedulerNode) -> list[IRNode]:
+        nodes = list(fused_node.get_nodes())
+        template_node = fused_node.get_template_node()
+        assert all(n.node is not None for n in nodes), (
+            "All epilogue nodes should have an IRNode"
+        )
+        return cast(
+            list[IRNode], [n.node for n in nodes if n.node is not template_node]
+        )
+
+    def _can_fuse_epilogue_impl(
+        self,
+        cuda_template_buffer: CUDATemplateBuffer,
+        epilogue_nodes: list[IRNode],
+        additional_node: IRNode,
+    ) -> bool:
+        """
+        Check if the given node can be fused with the epilogue. At the moment, Kernels
+        support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
+
+        Args:
+            cuda_template_buffer : A CUDATemplateBuffer object representing the CUDA template and it's result buffer
+            epilogue_nodes : List[ir.Buffer]: The list of already fused epilogue nodes.
+            additional_node: The ir.Buffer node to be checked if it can be fused with the epilogue.
+        Returns:
+        - bool: True if the given node can be fused with the epilogue, False otherwise.
+
+        """
+        if not isinstance(cuda_template_buffer, CUDATemplateBuffer):
+            return False
+        # if not cuda_template_buffer.template.can_fuse_epilogue:
+        #    # The used GEMM op does not support fusing epilogues
+        #    return False
+        if not isinstance(additional_node, ComputedBuffer):
+            return False
+        if not isinstance(additional_node.data, Pointwise):
+            return False
+        # We can fuse a Pointwise op that depends on the last fused epilogue node
+        # if any. If there is no epilogue node yet, it needs to depend on the template
+        # node
+        node_name = additional_node.get_computed_buffer_name()  # type: ignore[attr-defined]
+        if node_name is None:
+            return False
+
+        if len(epilogue_nodes) == 0:
+            if cuda_template_buffer.name not in additional_node.get_read_names():
+                return False
+        else:
+            last_epilogue_node = epilogue_nodes[-1]
+            assert isinstance(last_epilogue_node, ComputedBuffer)  # for mypy
+            last_epilogue_name = (
+                last_epilogue_node.name
+                if last_epilogue_node.name is not None
+                else last_epilogue_node.data.name  # type: ignore[attr-defined]
+            )
+            if last_epilogue_name not in additional_node.get_read_names():
+                return False
+        if additional_node.layout != cuda_template_buffer.layout:
+            return False
+
+        try:
+            from torch._inductor.codegen.cuda.cutlass_python_evt import (
+                CutlassEVTCodegen,
+            )
+
+            CutlassEVTCodegen.ir_to_evt_python_code(
+                cast(str, cuda_template_buffer.name), epilogue_nodes + [additional_node]
+            )
+
+        except NotImplementedError as e:
+            not_implemented_op = str(e)
+            if not_implemented_op.startswith("_op_"):
+                not_implemented_op = not_implemented_op[4:]
+                log.warning(
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
+                )
+                return False
+            else:  # Likely due to unsupported dtype.
+                log.warning(
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
+                )
+                return False
+
+        return True
