@@ -477,30 +477,30 @@ def _create_matrices(
             matA = torch.full((rowsA, lda), fillA, dtype=dtypeB, device=deviceid)
             matB = torch.full((rowsB, ldb), fillB, dtype=dtypeB, device=deviceid)
 
-        subA = matA[:k, :m].t() if transB else matA[:m, :k]
-        subB = matB[:n, :k].t() if transA else matB[:k, :n]
+        subA = matA[:k, :m].t() if transA else matA[:m, :k]
+        subB = matB[:n, :k].t() if transB else matB[:k, :n]
         return subA, subB
     else:
         if randn:
             matA = (
                 torch.rand(k, m, dtype=dtypeA, device=deviceid).t()
-                if transB
+                if transA
                 else torch.rand(m, k, dtype=dtypeA, device=deviceid)
             )
             matB = (
                 torch.rand(n, k, dtype=dtypeB, device=deviceid).t()
-                if transA
+                if transB
                 else torch.rand(k, n, dtype=dtypeB, device=deviceid)
             )
         else:
             matA = (
                 torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
-                if transB
+                if transA
                 else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
             )
             matB = (
                 torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
-                if transA
+                if transB
                 else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
             )
         return matA, matB
@@ -535,22 +535,22 @@ def _create_batch_matrices(
         matA = torch.randn(b, rowsA, lda, dtype=dtype, device=deviceid)
         matB = torch.randn(b, rowsB, ldb, dtype=dtype, device=deviceid)
 
-        subA = matA[:b, :k, :m].transpose(1, 2) if transB else matA[:b, :m, :k]
-        subB = matB[:b, :n, :k].transpose(1, 2) if transA else matB[:b, :k, :n]
+        subA = matA[:b, :k, :m].transpose(1, 2) if transA else matA[:b, :m, :k]
+        subB = matB[:b, :n, :k].transpose(1, 2) if transB else matB[:b, :k, :n]
         return subA, subB
     else:
         matA = (
             torch.rand(b, k, m, dtype=dtype, device=deviceid)
-            if transB
+            if transA
             else torch.rand(b, m, k, dtype=dtype, device=deviceid)
         )
         matB = (
             torch.rand(b, n, k, dtype=dtype, device=deviceid)
-            if transA
+            if transB
             else torch.rand(b, k, n, dtype=dtype, device=deviceid)
         )
-        matA = matA.transpose(1, 2) if transB else matA
-        matB = matB.transpose(1, 2) if transA else matB
+        matA = matA.transpose(1, 2) if transA else matA
+        matB = matB.transpose(1, 2) if transB else matB
         return matA, matB
 
 
@@ -589,8 +589,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     # simplified further.
     if underscore_count == 2:
         [op_sig, data_type, layout] = untuned_gemm[0].split("_")
-        transA = layout[0] == "T"
-        transB = layout[1] == "T"
+        transB = layout[0] == "T"
+        transA = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
         if data_type == "tf32":
             # User must still set HIPBLASLT_ALLOW_TF32=1
@@ -611,8 +611,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
         else:
             data_typeC = untuned_gemm_temp[5]
-        transA = untuned_gemm_temp[count][0] == "T"
-        transB = untuned_gemm_temp[count][1] == "T"
+        transB = untuned_gemm_temp[count][0] == "T"
+        transA = untuned_gemm_temp[count][1] == "T"
         dtypeA = dtype_dict.get(data_typeA)
         dtypeB = dtype_dict.get(data_typeB)
         dtypeC = dtype_dict.get(data_typeC)
@@ -637,7 +637,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         if m == 1 or n == 1 or k == 1:
             if (not transA) and (not transB):
                 pass  # case is supported
-            elif transB and n == 1:
+            elif transA and n == 1:
                 pass  # case is supported
             else:
                 warnings.warn(
@@ -687,8 +687,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
         # Only combination supported by PyTorch
-        assert transA is True
-        assert transB is False
+        assert transB is True
+        assert transA is False
 
         # Resolve linter issue
         if dtypeA is None or not isinstance(dtypeA, torch.dtype):
@@ -718,12 +718,12 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         if rowwise:
             scaleA = (
                 torch.ones((1, m), device=deviceid)
-                if transB
+                if transA
                 else torch.ones((m, 1), device=deviceid)
             )
             scaleB = (
                 torch.ones((1, n), device=deviceid)
-                if transA
+                if transB
                 else torch.ones((n, 1), device=deviceid)
             )
         else:
@@ -740,7 +740,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
             bias = (
                 torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
-                if transA
+                if transB
                 else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
             )
             torch._scaled_mm(
