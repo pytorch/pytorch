@@ -4634,7 +4634,6 @@ class TestLinalg(TestCase):
         clone_a = clone_a.to(torch.int)
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
-        
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
@@ -4645,8 +4644,7 @@ class TestLinalg(TestCase):
             out = torch.empty(0, dtype=dtype, device=device)
             clone_a = torch.empty_like(a).to(wrong_device)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                torch.triangular_solve(b, a, out=(out, clone_a))
-        
+                torch.triangular_solve(b, a, out=(out, clone_a)) 
         # Trigger the WARN_ONCE deprecation error
         torch.triangular_solve(b, a)
 
