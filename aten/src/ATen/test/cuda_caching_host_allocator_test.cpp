@@ -173,7 +173,7 @@ TEST(CachingHostAllocatorTest, check_raw_allocation) {
     return;
   }
 
-  auto data_ptr = at::cuda::getCachingHostAllocator()->allocate(N);
+  auto data_ptr = at::getHostAllocator(at::kCUDA)->allocate(N);
   class UserDataDeleter {
    public:
     explicit UserDataDeleter(std::unique_ptr<void, c10::DeleterFnPtr> ptr)
