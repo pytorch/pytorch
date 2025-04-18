@@ -606,7 +606,7 @@ class TORCH_API Library final {
   /// ```
 
   Library& def(
-      c10::FunctionSchema s,
+      c10::FunctionSchema&& s,
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
     return _def(std::move(s), nullptr, tags, rv);
@@ -616,8 +616,7 @@ class TORCH_API Library final {
       const char* raw_schema,
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    c10::FunctionSchema s = schema(raw_schema);
-    return _def(std::move(s), nullptr, tags, rv);
+    return _def(schema(raw_schema), nullptr, tags, rv);
   }
 
   /// Declares that for all operators that are subsequently def'ed, their
