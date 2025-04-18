@@ -3848,6 +3848,9 @@ class CommonTemplate:
         }
     )
     def test_linear_dynamic_maxautotune(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         @torch.compile(dynamic=True)
         class Model(torch.nn.Module):
             def __init__(self) -> None:
