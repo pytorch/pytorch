@@ -72,7 +72,7 @@ class TestMemoryPlanning(TestCase):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_0)"
+            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_2, int_array_3, &tmp_tensor_handle_0)"
         ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
             "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_1);"
         ).run(
@@ -97,17 +97,17 @@ class TestMemoryPlanning(TestCase):
         )
 
         FileCheck().check(
-            "int64_t int_array_2[] = {24L + align(12L*s77), };"
-        ).check_next("int64_t int_array_3[] = {1L, };").check_next(
+            "int64_t int_array_0[] = {24L + align(12L*s77), };"
+        ).check_next("int64_t int_array_1[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
-            "aoti_torch_empty_strided(1, int_array_2, int_array_3,"
+            "aoti_torch_empty_strided(1, int_array_0, int_array_1,"
         ).check_next(
             "RAIIAtenTensorHandle pool1(pool1_handle);"
         ).check_next(
-            "int64_t int_array_4[] = {s77, 3L};"
+            "int64_t int_array_2[] = {s77, 3L};"
         ).check_next(
-            "int64_t int_array_5[] = {3L, 1L};"
+            "int64_t int_array_3[] = {3L, 1L};"
         ).check_next(
             "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next(
