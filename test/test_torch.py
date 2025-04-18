@@ -1817,14 +1817,16 @@ else:
                 'put_',
                 torch.device(device).type == 'cuda')
 
+    @dtypes(torch.float32)
+    @dtypesIfCUDA(torch.float32, torch.int32)
     @skipIfMPS
-    def test_nondeterministic_alert_histc(self, device):
-        a = torch.tensor([], device=device)
+    def test_nondeterministic_alert_histc(self, device, dtype):
+        a = torch.tensor([], device=device, dtype=dtype)
         for op_call in [torch.histc, torch.Tensor.histc]:
             self.check_nondeterministic_alert(
                 lambda: op_call(a, min=0, max=3),
                 '_histc_cuda',
-                torch.device(device).type == 'cuda')
+                torch.device(device).type == 'cuda' and dtype.is_floating_point)
 
     @skipIfMPS
     def test_nondeterministic_alert_bincount(self, device):
