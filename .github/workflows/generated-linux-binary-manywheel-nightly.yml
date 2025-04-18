@@ -3754,7 +3754,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@csl/calculate_docker_image_custom_script_path
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
