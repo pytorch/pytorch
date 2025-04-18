@@ -6,6 +6,7 @@ from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
+from torch._prims_common import DimsType
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -226,8 +227,8 @@ def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
 
 def dim_movedim(
     ndim: int,
-    input: Union[int, Sequence[int]],
-    destination: Union[int, Sequence[int]],
+    input: DimsType,
+    destination: DimsType,
 ) -> DimMap:
     input = normalize_dims(input, ndim)
     destination = normalize_dims(destination, ndim)
