@@ -2535,7 +2535,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
+        from torch._higher_order_ops.flex_attention import flex_attention
+        from . import TensorVariable
 
         from .builder import wrap_fx_proxy
 
@@ -2559,6 +2560,31 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, query, mask_fn, "mask_fn"
         )
 
+        def unwrap_proxy_to_faketensor(x):
+            if isinstance(x, TupleVariable):
+                return pytree.tree_map(unwrap_proxy_to_faketensor, x.items)
+            if isinstance(x, (TensorVariable, SymNodeVariable)):
+                x_proxy = x.as_proxy()
+                return x_proxy.node.meta['example_value']
+            else:
+                return x.as_python_constant()
+
+        # use all of the args for faketensor prop
+        vt_full_args = [
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask,
+            scale,
+            kernel_options,
+        ]
+        all_fake_args = pytree.tree_map(unwrap_proxy_to_faketensor, vt_full_args)
+
+        with torch._guards.TracingContext.try_get().fake_mode:
+            out_meta, lse_meta = flex_attention(*all_fake_args)
+        example_value = (out_meta, lse_meta)
+
         proxied_args = [
             query,
             key,
@@ -2572,12 +2598,6 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Norm_kwargs contains the score_function and we dont want to proxy this because
         # Proxying user defined functions is not supported.
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
-
-        query_meta = query.as_proxy().node.meta["example_value"]
-        value_meta = value.as_proxy().node.meta["example_value"]
-        with torch._guards.TracingContext.try_get().fake_mode:
-            out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
-        example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
         # - inp_args: [query, key, value, block_mask, scale, kernel_options]
