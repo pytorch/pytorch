@@ -572,6 +572,12 @@ class SymNode:
             _advise_is_size(SymInt(self))
         return r
 
+    def statically_known_true(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        assert self.is_bool()
+        return statically_known_true(SymBool(self))
+
     def guard_size_oblivious(self, file, line):
         """
         Like guard_bool, but if we encounter unbacked symbols, if those symbols
