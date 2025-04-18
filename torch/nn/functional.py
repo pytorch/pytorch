@@ -3,7 +3,6 @@
 import importlib
 import math
 import warnings
-from collections.abc import Sequence
 from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -16,6 +15,7 @@ from torch._jit_internal import (
     BroadcastingList2,
     BroadcastingList3,
 )
+from torch._prims_common import DimsType
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
 from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
@@ -5543,7 +5543,7 @@ def triplet_margin_with_distance_loss(
 def normalize(
     input: Tensor,
     p: float = 2.0,
-    dim: Union[int, Sequence[int]] = 1,
+    dim: DimsType = 1,
     eps: float = 1e-12,
     out: Optional[Tensor] = None,
 ) -> Tensor:

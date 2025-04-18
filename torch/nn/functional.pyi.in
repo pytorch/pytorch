@@ -13,6 +13,7 @@ from typing import (
 
 from torch import Tensor
 from torch.types import _dtype, _int, _size
+from torch._prims_common import DimsType
 
 from .common_types import (
     _ratio_any_t,
@@ -539,7 +540,7 @@ def triplet_margin_with_distance_loss(
 def normalize(
     input: Tensor,
     p: float = ...,
-    dim: Union[int, Sequence[int]] = ...,
+    dim: DimsType = ...,
     eps: float = ...,
     out: Optional[Tensor] = ...,
 ) -> Tensor: ...
