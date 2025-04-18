@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
@@ -516,7 +517,10 @@ class CUDATemplateCaller(ChoiceCaller):
         category: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
+        make_kernel_render: Callable[
+            [CUDATemplateBuffer, Optional[list[IRNode]]],
+            tuple[CUDATemplateKernel, functools.partial[str]],
+        ],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
