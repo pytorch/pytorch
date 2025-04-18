@@ -7,6 +7,8 @@ from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
     try_import_cutlass,
 )
+from torch._inductor.ir import ComputedBuffer, Pointwise
+from torch._inductor.virtualized import ops
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -88,7 +90,61 @@ if try_import_cutlass():
         return name_to_buffer
 
 
+class MockData(Pointwise):
+    @staticmethod
+    def _index(a):  # typing: ignore
+        return None
+
+
+class MockIRNode(ComputedBuffer):
+    def __init__(self, name, inner_fn):
+        self.name = name
+        self.data = MockData(device=None, dtype=None, inner_fn=inner_fn, ranges=None)
+
+    def get_name(self):
+        return self.name
+
+
 class TestCutlassEVT(TestCase):
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_cutlass_py_codegen(self):
+        from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
+
+        # buf0 is acc
+        # buf1 is external
+        def inner_fn_buf3(index):
+            acc = ops.load("acc", index)
+            buf1 = ops.load("buf1", index)
+            buf2 = ops.load("buf2", index)
+            return acc * buf1 + buf2
+
+        def inner_fn_buf4(index):
+            acc = ops.load("acc", index)
+            buf3 = ops.load("buf3", index)
+            return acc + buf3
+
+        buf3_node = MockIRNode("buf3", inner_fn_buf3)
+        buf4_node = MockIRNode("buf4", inner_fn_buf4)
+        reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+            "acc", [buf3_node, buf4_node]
+        )
+        self.assertExpectedInline(reads, """['acc', 'buf1', 'buf2']""")
+        self.assertExpectedInline(writes, """['buf3', 'buf4']""")
+        self.assertExpectedInline(
+            renames, """{'buf3': 'D', 'buf4': 'tmp_2', 'acc': 'accum'}"""
+        )
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum, buf1, buf2):
+    tmp_0 = accum * buf1
+    tmp_1 = tmp_0 + buf2
+    D = tmp_1
+    tmp_2 = accum + D
+    return D, tmp_2
+""",
+        )
+
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
