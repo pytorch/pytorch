@@ -1223,12 +1223,9 @@ static ConvBackend _select_conv_backend(
       return ConvBackend::Cudnn;
     } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value())) {
       return ConvBackend::MiopenDepthwise;
-    } else if (params.use_mkldnn(input, weight)) {
-      if (params.transposed) {
-        return ConvBackend::MkldnnTranspose;
-      } else {
-        return ConvBackend::Mkldnn;
-      }
+    } else if (input.is_xpu() || weight.is_xpu()){
+      // XPU uses Overrideable backend and treats depthwise conv as normal conv with groups=ic.
+      return ConvBackend::Overrideable;
     } else {
       if (input.ndimension() == 4) {
         return ConvBackend::CudaDepthwise2d;
