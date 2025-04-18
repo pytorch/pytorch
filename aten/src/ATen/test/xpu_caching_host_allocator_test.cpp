@@ -72,7 +72,7 @@ TEST(CachingHostAllocatorTest, testRawAllocation) {
     return;
   }
 
-  auto data_ptr = at::xpu::getCachingHostAllocator()->allocate(N);
+  auto data_ptr = at::getHostAllocator(at::kXPU)->allocate(N);
   class UserDataDeleter {
    public:
     explicit UserDataDeleter(std::unique_ptr<void, c10::DeleterFnPtr> ptr)
