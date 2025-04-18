@@ -4634,7 +4634,7 @@ class TestLinalg(TestCase):
         clone_a = clone_a.to(torch.int)
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             torch.triangular_solve(b, a, out=(out, clone_a))
-
+        
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
@@ -4646,7 +4646,7 @@ class TestLinalg(TestCase):
             clone_a = torch.empty_like(a).to(wrong_device)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.triangular_solve(b, a, out=(out, clone_a))
-
+        
         # Trigger the WARN_ONCE deprecation error
         torch.triangular_solve(b, a)
 
@@ -4661,6 +4661,13 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
+        #Input Devices should match
+        if torch.cuda.is_available():
+            A = torch.normal(torch.zeros(2,2), torch.ones(2,2)).to(device=torch.device("cuda"))
+            B = torch.eye(A.shape[0], device=torch.device('cpu'))
+            with self.assertRaisesRegex(RuntimeError,"tensors to be on the same device"):
+                torch.linalg.solve_triangular(A, B, upper=True)
+        
     def check_single_matmul(self, x, y):
 
         def assertEqual(answer, expected):
