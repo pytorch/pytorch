@@ -220,7 +220,8 @@ def clip_grad_norm_(
         parameters = list(parameters)
         if is_generator and len(parameters) == 0:
             warnings.warn(
-                "`parameters` is an empty generator, no gradient clipping will occur."
+                "`parameters` is an empty generator, no gradient clipping will occur.",
+                stacklevel=3,
             )
     grads = [p.grad for p in parameters if p.grad is not None]
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
