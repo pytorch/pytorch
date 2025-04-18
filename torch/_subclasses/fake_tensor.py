@@ -1449,7 +1449,6 @@ class FakeTensorMode(TorchDispatchMode):
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
-            print(func, e.reason)
             if self._raise_on_failure_to_cache:
                 raise
 
