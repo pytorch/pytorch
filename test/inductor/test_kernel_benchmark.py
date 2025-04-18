@@ -149,13 +149,11 @@ class TestKernelBenchmark(TestCase):
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
-
         M = 12544
         N = 256
         K = 64
@@ -469,17 +467,15 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch("triton.unique_kernel_names", True)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_remove_inductor_deps_templates(self):
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
-
         @torch.compile
         def f(a):
             a = torch.mm(a, a)

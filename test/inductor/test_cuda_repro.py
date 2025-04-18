@@ -1097,6 +1097,9 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
@@ -1118,10 +1121,6 @@ class CudaReproTests(TestCase):
         autotuner from catching failures. And set compile_threads=1 so that compile
         failures aren't caught by the asyn runner infra.
         """
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
 
         def fn(x: torch.Tensor, y: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
             z = torch.mm(x, y)
