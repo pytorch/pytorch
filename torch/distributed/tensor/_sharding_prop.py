@@ -73,6 +73,7 @@ class ShardingPropagator:
             aten.new_zeros.default: 1,
             aten.new_empty_strided.default: (1, 2),
             # view ops
+            aten.as_strided.default: (1, 2),
             aten.expand.default: 1,
             aten.reshape.default: 1,
             aten.view.default: 1,

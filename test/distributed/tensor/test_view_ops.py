@@ -1,7 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import functools
 import itertools
+import operator
 from typing import cast
 
 import torch
@@ -594,6 +596,36 @@ class TestViewOps(DTensorTestBase):
         self.assertNotEqual(
             dtensor_x.to_local().data_ptr(), dtensor_y.to_local().data_ptr()
         )
+
+    @with_comms
+    def test_as_strided_fake_impl(self):
+        """
+        This tests simple as_strided use in `flex_attention_fake_impl` where
+        size=input.size() and storage_offset=None.
+        """
+
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        placements_list = [
+            (Replicate(),),
+            (Shard(0),),
+            (Shard(1),),
+            (Shard(2),),
+        ]
+        for size in [(2,), (4,), (6,), (8,)]:
+            size *= 3  # 3D tensor
+            numel = functools.reduce(operator.mul, size, 1)
+            tensor_x = torch.arange(numel, device=self.device_type).view(size)
+            stride = tensor_x.stride()
+
+            for placements in placements_list:
+                dtensor_x = distribute_tensor(tensor_x, mesh, placements)
+
+                for target_stride in itertools.permutations(stride):
+                    dtensor_y = dtensor_x.as_strided(size, target_stride)
+                    tensor_y = tensor_x.as_strided(size, target_stride)
+                    self.assertEqual(dtensor_y.shape, tensor_y.shape)
+                    self.assertEqual(dtensor_y.stride(), tensor_y.stride())
 
 
 if __name__ == "__main__":
