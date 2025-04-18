@@ -3717,7 +3717,8 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+    from torch._dynamo.exc import UserError, UserErrorType
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3726,7 +3727,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape = utils.infer_size(shape, a.numel())
 
     # Special-cases tensors with no elements
-    if guard_size_oblivious(a.numel() == 0):
+    if guard_or_false(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
@@ -3762,6 +3763,12 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             return torch.as_strided(a, [dim0, dim1], [dim1, 1])
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+    shape_numel = reduce(operator.mul, shape, 1)
+    torch._check(
+        a.numel() == shape_numel,
+        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+    )
+    deferred: list[Callable[[], bool]] = []
 
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
@@ -3794,16 +3801,30 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        if guard_size_oblivious(length == a_.shape[idx]):
+        if guard_or_false(length == a_.shape[idx]):
             idx = idx + 1
             continue
 
         # Gathers enough original dimensions such that this new dimension can be created
         # Note that this accumulation will terminate because we've verified a and the shape
         # specify the same number of elements above
+        def maybe_throw_dde():
+            # NOTE: if you've hit a data-dependent error here, it's because in trying to accumulate input
+            # tensor dimensions to match the target shape (length), we've hit data-dependent errors testing
+            # divisibility (accum % length != 0), and have deferred raising them, in the hope that we'd
+            # figure out a valid reshape later in the loop.
+            # But we failed, either by running out of dimensions, or we couldn't figure out the strides,
+            # and we've decided to re-raise to either graph break out, or provide the exact guard so the user
+            # can torch._check() to avoid this.
+            for f in deferred:
+                f()
+
         accum = a_.shape[idx]
         end = idx
-        while guard_size_oblivious(accum % length != 0):
+        while guard_or_true(accum % length != 0):
+            deferred.append(lambda: bool(accum % length != 0))
+            if end == a_.ndim - 1:
+                maybe_throw_dde()
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
@@ -3817,13 +3838,15 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
+                maybe_throw_dde()
                 msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
                 raise ValueError(msg)
 
             a_ = flatten(a_, idx, end)
 
-        # Splits the (possibly flattened) dimension to create the desired dim length
-        if guard_size_oblivious(accum != length):
+        # Splits the (possibly flattened) dimension to create the desired dim length.
+        # guard_or_true is safe due to the tail unsqueeze routine.
+        if guard_or_true(accum != length):
             a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1
@@ -6301,7 +6324,7 @@ def _dot_check_wrapper(fn):
 
 
 @register_decomposition(aten.dot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
@@ -6321,7 +6344,7 @@ def dot(self, other):
 
 
 @register_decomposition(aten.vdot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
