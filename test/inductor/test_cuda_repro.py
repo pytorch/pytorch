@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
@@ -1119,6 +1120,9 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
