@@ -2549,7 +2549,7 @@ class GridExpr:
         if self.mode == "python":
             # Use FloorDiv instead of // so we can get better sympy expressions for
             # dynamic shapes.
-            return f"-FloorDiv({numel}, -({block}))"
+            return f"-FloorDiv(({numel}), -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
