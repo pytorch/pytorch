@@ -215,6 +215,79 @@ class AOTInductorTestsTemplate:
             actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
             self.assertTrue(same(model(*example_inputs), actual))
 
+    def test_constant_folding_with_update(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with torch.no_grad(), config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(4, 4, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Update with new weights on active buffer
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(4, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, False, False)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Update with new weights on inactive buffer
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(4, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, True, False)
+        new_output = runner_call(test_inputs)
+        # We have not yet swapped the buffer, new_output should be the same as the old one.
+        self.assertEqual(output, new_output)
+        # Swap the buffer, should get the correct result now.
+        runner.swap_constant_buffer()
+        new_output = runner_call(test_inputs)
+        self.assertEqual(expected, new_output)
+
     @requires_gpu
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
