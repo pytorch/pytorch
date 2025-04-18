@@ -245,7 +245,7 @@ class Sequential(Module):
             input = module(input)
         return input
 
-    def append(self, module: Module) -> Sequential:
+    def append(self, module: Module) -> Self:
         r"""Append a given module to the end.
 
         Args:
@@ -254,7 +254,7 @@ class Sequential(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def insert(self, index: int, module: Module) -> Sequential:
+    def insert(self, index: int, module: Module) -> Self:
         if not isinstance(module, Module):
             raise AssertionError(f"module should be of type: {Module}")
         n = len(self._modules)
@@ -267,7 +267,7 @@ class Sequential(Module):
         self._modules[str(index)] = module
         return self
 
-    def extend(self, sequential) -> Sequential:
+    def extend(self, sequential) -> Self:
         for layer in sequential:
             self.append(layer)
         return self
@@ -408,7 +408,7 @@ class ModuleList(Module):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self, module: Module) -> ModuleList:
+    def append(self, module: Module) -> Self:
         r"""Append a given module to the end of the list.
 
         Args:
@@ -670,7 +670,7 @@ class ParameterList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def append(self, value: Any) -> ParameterList:
+    def append(self, value: Any) -> Self:
         """Append a given value at the end of the list.
 
         Args:
