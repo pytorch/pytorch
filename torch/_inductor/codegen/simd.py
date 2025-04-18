@@ -1939,7 +1939,15 @@ class SIMDScheduling(BaseScheduling):
                     dims = match_result[0] if match_result is not None else [numel]
                     index_tiling.extend(dims)
 
-                node_tilings.append(index_tiling)
+                # Prune dimensions of size 1.
+                index_tiling = [
+                    dim
+                    for dim in index_tiling
+                    if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
+                ]
+
+                if len(index_tiling) > 0:
+                    node_tilings.append(index_tiling)
 
             # Flatten leading dimensions, assigning labels to each dim.
             for node_tiling in node_tilings:

@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
+    has_free_symbols,
     hint_int,
     is_symbolic,
     ShapeEnv,
@@ -3013,6 +3014,16 @@ class TestGuardsExpressions(TestCase):
 
         func(torch.tensor([5]), torch.tensor([100]))
         func(torch.tensor([100]), torch.tensor([5]))
+
+    def test_has_free_symbols(self):
+        self.assertFalse(has_free_symbols(sympy.S.true))
+        self.assertFalse(has_free_symbols(sympy.Max(1, 10, evaluate=False)))
+
+        self.assertFalse(has_free_symbols(sympy.sympify("1")))
+        self.assertFalse(has_free_symbols(sympy.sympify("1.1")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
 
 if __name__ == "__main__":

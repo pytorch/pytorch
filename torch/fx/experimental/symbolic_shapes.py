@@ -849,7 +849,7 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
 
 def has_free_symbols(val: IterateExprs) -> bool:
     """Faster version of bool(free_symbols(val))"""
-    return not all(e.is_number for e in _iterate_exprs(val))
+    return not all((e.is_number or e.is_Boolean) for e in _iterate_exprs(val))
 
 
 def has_free_unbacked_symbols(x: IterateExprs) -> bool:
