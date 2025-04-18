@@ -787,12 +787,8 @@ class FxGraphHashDetails:
         # Node meta will not be part of gm's reduce function, so lets remember
         # the kernel source code separately
         self.user_defined_triton_source: list[Any] = []
-        self.saved_tensors_hooks_fx_wrap_cache_hashes: tuple[list[str], list[str]] = (
-            [],
-            [],
-        )
         if gm is not None:
-            for name, module in gm.named_modules():
+            for module in gm.modules():
                 if not isinstance(module, torch.fx.GraphModule):
                     continue
                 for node in itertools.chain(
@@ -828,15 +824,6 @@ class FxGraphHashDetails:
                     self.user_defined_triton_source.append(
                         (kernel_source, constant_args, configs)
                     )
-
-                if "saved_tensors_hooks" in name:
-                    _idx = 0 if "_pack" in name else 1
-                    _list_to_append = self.saved_tensors_hooks_fx_wrap_cache_hashes[
-                        _idx
-                    ]
-                    for node in module.graph.nodes:
-                        if node.meta and node.meta.get("is_wrapped", False):
-                            _list_to_append.append(node.meta["user_cache_hash"])
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check

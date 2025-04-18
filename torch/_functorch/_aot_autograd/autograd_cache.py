@@ -287,6 +287,27 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.disable_amp = torch._C._is_any_autocast_enabled()
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
+        self.saved_tensors_hooks_fx_wrap_cache_hashes: tuple[list[str], list[str]] = (
+            [],
+            [],
+        )
+
+        if hasattr(gm, "saved_tensors_hooks_pack_0"):
+
+            def _add_wrapped_user_cache_hashes(_gm, _l):
+                for node in _gm.graph.nodes:
+                    if node.meta and node.meta.get("is_wrapped", False):
+                        _l.append(node.meta["user_cache_hash"])
+
+            _add_wrapped_user_cache_hashes(
+                gm.saved_tensors_hooks_pack_0,
+                self.saved_tensors_hooks_fx_wrap_cache_hashes[0],
+            )
+            _add_wrapped_user_cache_hashes(
+                gm.saved_tensors_hooks_unpack_0,
+                self.saved_tensors_hooks_fx_wrap_cache_hashes[1],
+            )
+
         try:
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
