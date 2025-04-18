@@ -275,10 +275,6 @@ class HalideOverrides(OpOverrides):
         return f"hl.fast_exp(hl.cast(hl.Float(32), {x})) if {x.name}.type().bits() <= 32 else hl.exp({x})"
 
     @staticmethod
-    def libdevice_exp(x):
-        return f"hl.exp({x})"  # higher precision that ops.exp
-
-    @staticmethod
     def sqrt(x):
         return f"hl.sqrt({x})"
 
