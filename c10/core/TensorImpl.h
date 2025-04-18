@@ -1834,6 +1834,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         MemoryFormat::Contiguous); // calls refresh_contiguous()
   }
 
+  C10_ALWAYS_INLINE const impl::SizesAndStrides& sizes_and_strides() {
+    return sizes_and_strides_;
+  }
+
   /**
    * Set the sizes and strides of a tensor.
    *
