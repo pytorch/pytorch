@@ -970,11 +970,6 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_abs(x):
-        return f"libdevice.abs({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def exp(x):
         """
         When use_fast_math, use the ftz (flushing to zero) variant
@@ -990,11 +985,6 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_exp(x):
-        return f"libdevice.exp({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def exp2(x):
         return f"libdevice.exp2({x})"
 
@@ -1006,11 +996,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
-        return f"libdevice.sqrt({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_sqrt(x):
         return f"libdevice.sqrt({x})"
 
     @staticmethod
@@ -1060,18 +1045,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_cos(x):
-        return f"libdevice.cos({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def sin(x):
         return f"tl_math.sin({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_sin(x):
-        return f"libdevice.sin({x})"
 
     @classmethod
     def index_expr(cls, expr, dtype):
@@ -1278,11 +1253,6 @@ class TritonOverrides(OpOverrides):
         return f"tl_math.log({x})"
 
     @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_log(x):
-        return f"libdevice.log({x})"
-
-    @staticmethod
     @maybe_upcast_float32(convert_output=False)
     def isinf(x):
         return f"libdevice.isinf({x}).to(tl.int1)"
@@ -1346,6 +1316,51 @@ class TritonKernelOverrides(TritonOverrides):
     the body of the main triton kernel and so it may use indexing and mask
     variables which are assumed to already be defined in the current scope.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # happens in __init__ unlike _initialize_pointwise_overrides
+        # because the libdevice registrations are populated during lowerings
+        self._setup_libdevice_routing()
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _setup_libdevice_routing(cls):
+        """Set up routing to libdevice implementations for fp64 inputs."""
+
+        from torch._inductor.codegen.common import OpDecompositions
+
+        for fn_name in torch._inductor.utils.op_requires_libdevice_fp64:
+            assert hasattr(cls, fn_name)
+            original_impl = getattr(cls, fn_name)
+
+            def decomposition_router(x, _original_impl, _fn_name):
+                if x.dtype != torch.float64:
+                    return _original_impl(x)
+                else:
+                    return getattr(OpDecompositions, _fn_name)(x).value
+
+            if fn_name == "sigmoid":
+                assert hasattr(OpDecompositions, "sigmoid")
+                fn = functools.partial(
+                    decomposition_router, _original_impl=original_impl, _fn_name=fn_name
+                )
+                fn.__name__ = fn_name  # type: ignore[attr-defined]
+                setattr(cls, fn_name, staticmethod(fn))
+                continue
+
+            def dtype_router(x, _original_impl, _fn_name):
+                if x.dtype == torch.float64:
+                    return f"libdevice.{_fn_name}({x})"
+                else:
+                    return _original_impl(x)
+
+            fn = functools.partial(
+                dtype_router, _original_impl=original_impl, _fn_name=fn_name
+            )
+            fn.__name__ = fn_name  # type: ignore[attr-defined]
+            setattr(cls, fn_name, staticmethod(fn))
 
     @classmethod
     def constant(cls, value, dtype):
