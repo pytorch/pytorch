@@ -665,6 +665,11 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             return
 
         [b] = [int(g) for g in untuned_gemm_temp[5:6]]
+
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
         matA, matB = _create_batch_matrices(
             m,
             n,
