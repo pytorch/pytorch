@@ -112,6 +112,12 @@ def register_onednn_fusion_ops():
             has_out_variant=False,
             kernel_creator=mkldnn_ir.LinearBinary.create,
         )
+        aten_mkldnn_linear_binary_inplace = ExternKernelChoice(
+            torch.ops.mkldnn._linear_pointwise_.binary,
+            "mkldnn::_linear_pointwise_",
+            has_out_variant=False,
+            kernel_creator=mkldnn_ir.LinearBinaryInplace.create,
+        )
         aten_mkldnn_qlinear_unary = ExternKernelChoice(
             torch.ops.onednn.qlinear_pointwise,
             "onednn::qlinear_pointwise",
@@ -350,6 +356,68 @@ def register_onednn_fusion_ops():
                 "linear_binary",
                 choices,
                 [x, y, w] if b is None else [x, y, w, b],
+                layout,
+                input_gen_fns=input_gen_fns,
+            )
+            if len(x_size) > 2:
+                result = view(result, (*x_size[:-1], result.get_size()[-1]))
+            return result
+
+        @register_lowering(torch.ops.mkldnn._linear_pointwise_.binary)
+        def linear_binary_inplace(
+            x: TensorBox, other: TensorBox, w: TensorBox, b: TensorBox, attr, layout=None
+        ):
+            x_size = x.get_size()
+            if len(x_size) > 2:
+                # GEMM template needs 2D input, normalize input shape here
+                x = view(x, [-1, x_size[-1]])
+            other_size = other.get_size()
+            if len(other_size) > 2:
+                other = view(other, [-1, other_size[-1]])
+            if b is not None:
+                b = ir.ExternKernel.realize_input(b)
+            choices: list[ChoiceCaller] = []
+            if use_max_autotune():
+                transposed_w = permute(w, [1, 0])
+                *_, layout, x, transposed_w, other = mm_args(
+                    x, transposed_w, other, layout=layout
+                )
+                if use_cpp_gemm_template(layout, x, transposed_w):
+
+                    def epilogue_creator(buf):
+                        return create_epilogue_with_attr(buf, attr, other=y)
+
+                    kwargs = dict(
+                        has_bias=b is not None,
+                        trans_w=True,
+                        epilogue_creator=epilogue_creator,
+                    )
+                    kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
+                    CppGemmTemplate.add_choices(
+                        choices,
+                        layout,
+                        [x, y, w] if b is None else [x, y, w, b],
+                        **kwargs,  # type: ignore[arg-type]
+                    )
+            if len(choices) == 0 or use_aten_gemm_kernels():
+                kwargs = dict(attr=attr)
+                if b is None:
+                    kwargs["B"] = None
+                choices.append(
+                    aten_mkldnn_linear_binary_inplace.bind(
+                        [x, other, w] if b is None else [x, other, w, b],
+                        layout,
+                        **kwargs,
+                    )
+                )
+            assert w.get_name() in V.graph.constants
+            input_gen_fns = {
+                2: lambda x: V.graph.constants[x.get_name()],
+            }
+            result = autotune_select_algorithm(
+                "linear_binary",
+                choices,
+                [x, other, w] if b is None else [x, other, w, b],
                 layout,
                 input_gen_fns=input_gen_fns,
             )

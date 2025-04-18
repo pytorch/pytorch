@@ -181,7 +181,7 @@ static bool get_onednn_matmul_binary_attr(
         attr_update.append_post_eltwise(
             1.f, 1.f / beta, 0.f, attr.kind_with_linear);
       }
-      attr_update.append_post_binary(algo, binary_final);
+      attr_update.append_post_binary<true>(algo, binary_final);
       if (beta != 1.f) {
         attr_update.append_post_eltwise(1.f, beta, 0.f, attr.kind_with_linear);
       }
@@ -196,7 +196,7 @@ static bool get_onednn_matmul_binary_attr(
       // binary_gt: result = gt((m1 x m2), binary) * beta;
       // binary_le: result = le((m1 x m2), binary) * beta;
       // binary_lt: result = lt((m1 x m2), binary) * beta;
-      attr_update.append_post_binary(algo, binary_final);
+      attr_update.append_post_binary<true>(algo, binary_final);
       if (beta != 1.f)
         attr_update.append_post_eltwise(1.f, beta, 0.f, attr.kind_with_linear);
     }

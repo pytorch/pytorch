@@ -913,6 +913,59 @@ class LinearBinary(ExternKernelAlloc):
     def apply_constraint(self):
         pass
 
+class LinearBinaryInplace(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._linear_pointwise_.binary"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ) -> None:
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            op_overload=torch.ops.mkldnn._linear_pointwise_.binary,
+            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary_",
+        )
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        super().codegen(wrapper)
+
+    @classmethod
+    def create(cls, x, y, w, B, attr):
+        x = cls.require_contiguous(cls.realize_input(x))
+        y = cls.require_contiguous(cls.realize_input(y))
+        w = cls.require_contiguous(cls.realize_input(w))
+
+        *m, _ic = x.get_size()
+        oc, _ic = w.get_size()
+        output_size = list(m) + [oc]
+        inputs = [x, y, w]
+        constant_args = [attr]
+        if B is not None:
+            B = cls.require_contiguous(cls.realize_input(B))
+            inputs.append(B)
+        else:
+            constant_args.insert(0, B)
+
+        packed = LinearBinaryInplace(
+            layout=FixedLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=output_size,
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+        )
+        return _create_output_node(packed)
+
+    def apply_constraint(self):
+        pass
+
 
 class QLinearPointwisePT2E(ExternKernelAlloc):
     def __init__(

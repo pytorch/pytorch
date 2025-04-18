@@ -86,21 +86,6 @@ onednn::Attr construct_unary_attr(
   }
 }
 
-onednn::Attr construct_binary_attr(
-    c10::string_view binary,
-    c10::optional<at::Scalar> alpha,
-    const Tensor& other,
-    onednn::Attr attr = Attr()) {
-  if (binary == "mul") {
-    attr.append_post_binary(attr.kind_with_binary_mul, other);
-  } else if (binary == "sub") {
-    attr.append_post_binary(attr.kind_with_binary_sub, other);
-  } else if (binary == "div") {
-    attr.append_post_binary(attr.kind_with_binary_div, other);
-  } else if (binary == "add") {
-    attr.append_post_binary(attr.kind_with_binary_add, other);
-  }
-  return attr;
-}
+
 
 } // namespace at::native::xpu

@@ -8,6 +8,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
+import os 
 
 from .. import ir
 from ..lowering import lowerings as L
@@ -780,7 +781,6 @@ if torch._C._has_mkldnn:
             ):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
-
         return fn
 
     computation_ops = [
@@ -887,49 +887,55 @@ if torch._C._has_mkldnn:
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
-        inplace_fusion_op = mkldnn._convolution_pointwise_.binary
-        outplace_fusion_op = mkldnn._convolution_pointwise.binary
+        inplace_fusion_ops = [mkldnn._convolution_pointwise_.binary, mkldnn._linear_pointwise_.binary]
+        outplace_fusion_ops = [mkldnn._convolution_pointwise.binary, mkldnn._linear_pointwise.binary]
         conv_call = _conv_call(users=1)
-        conv_op = computation_ops[0]
+        linear_call = _linear_call(users=1)
+        op_calls = [conv_call, linear_call]
+        compute_ops = [computation_ops[0], computation_ops[1]]
         for binary_op in binary_ops:
-            binary_v1 = _binary_fusion_v1(conv_call, binary_op)
-            binary_unary_v1 = _combined_fusion(binary_v1, aten.relu)
-            _register_binary_unary_maybe_inplace_fusion_lowering(
-                binary_unary_v1,
-                conv_op,
-                binary_op,
-                inplace_fusion_op,
-                outplace_fusion_op,
-                other_index=0,
-                unary_attr=UnaryAttr("relu"),
-            )
-            _register_binary_unary_maybe_inplace_fusion_lowering(
-                binary_v1,
-                conv_op,
-                binary_op,
-                inplace_fusion_op,
-                outplace_fusion_op,
-                other_index=0,
-            )
-            binary_v2 = _binary_fusion_v2(conv_call, binary_op)
-            binary_unary_v2 = _combined_fusion(binary_v2, aten.relu)
-            _register_binary_unary_maybe_inplace_fusion_lowering(
-                binary_unary_v2,
-                conv_op,
-                binary_op,
-                inplace_fusion_op,
-                outplace_fusion_op,
-                other_index=1,
-                unary_attr=UnaryAttr("relu"),
-            )
-            _register_binary_unary_maybe_inplace_fusion_lowering(
-                binary_v2,
-                conv_op,
-                binary_op,
-                inplace_fusion_op,
-                outplace_fusion_op,
-                other_index=1,
-            )
+            for compute_op in compute_ops:
+                assert len(op_calls) == 2 # Only conv and linear are supported.
+                idx = 0 if compute_op == computation_ops[0] else 1
+                op_call = op_calls[idx]
+                binary_v1 = _binary_fusion_v1(op_call, binary_op)
+                binary_unary_v1 = _combined_fusion(binary_v1, aten.relu)
+                _register_binary_unary_maybe_inplace_fusion_lowering(
+                    binary_unary_v1,
+                    compute_op,
+                    binary_op,
+                    inplace_fusion_ops[idx],
+                    outplace_fusion_ops[idx],
+                    other_index=0,
+                    unary_attr=UnaryAttr("relu"),
+                )
+                _register_binary_unary_maybe_inplace_fusion_lowering(
+                    binary_v1,
+                    compute_op,
+                    binary_op,
+                    inplace_fusion_ops[idx],
+                    outplace_fusion_ops[idx],
+                    other_index=0,
+                )
+                binary_v2 = _binary_fusion_v2(op_call, binary_op)
+                binary_unary_v2 = _combined_fusion(binary_v2, aten.relu)
+                _register_binary_unary_maybe_inplace_fusion_lowering(
+                    binary_unary_v2,
+                    compute_op,
+                    binary_op,
+                    inplace_fusion_ops[idx],
+                    outplace_fusion_ops[idx],
+                    other_index=1,
+                    unary_attr=UnaryAttr("relu"),
+                )
+                _register_binary_unary_maybe_inplace_fusion_lowering(
+                    binary_v2,
+                    compute_op,
+                    binary_op,
+                    inplace_fusion_ops[idx],
+                    outplace_fusion_ops[idx],
+                    other_index=1,
+                )
 
     def _register_binary_fusion():
         binary_ops = [aten.add, ops.add, aten.sub, ops.sub]
