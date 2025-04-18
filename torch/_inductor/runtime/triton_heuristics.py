@@ -85,7 +85,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Hashable, Sequence
+    from collections.abc import Container, Hashable
 
     from torch._guards import CompileId
 
@@ -2526,7 +2526,9 @@ class GridExpr:
 
     inductor_meta: dict[str, Any]
     mode: Literal["python", "cpp"] = "python"
-    prefix: Sequence[str] = ()
+    prefix: list[str] = dataclasses.field(
+        default_factory=lambda: ["from torch.utils._sympy.functions import FloorDiv"]
+    )
     x_grid: Union[str, int] = 1
     y_grid: Union[str, int] = 1
     z_grid: Union[str, int] = 1
@@ -2545,7 +2547,9 @@ class GridExpr:
         if isinstance(numel, int) and isinstance(block, int):
             return ceildiv(numel, block)  # constant fold
         if self.mode == "python":
-            return f"-(({numel}) // -({block}))"
+            # Use FloorDiv instead of // so we can get better sympy expressions for
+            # dynamic shapes.
+            return f"-FloorDiv({numel}, -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
@@ -2628,12 +2632,16 @@ class Grid3D(GridExpr):
 class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.prefix = [
-            self.assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
-            self.assign_tmp(
-                "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
-            ),
-        ]
+        self.prefix.extend(
+            [
+                self.assign_tmp(
+                    "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
+                ),
+                self.assign_tmp(
+                    "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
+                ),
+            ]
+        )
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
 

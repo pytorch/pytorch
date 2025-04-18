@@ -14,7 +14,6 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 )
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
-from torch.utils._sympy.functions import FloorDiv
 
 
 aten = torch.ops.aten
@@ -518,9 +517,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         call_args, grid = tuner._interpret_args_grid(call_args, config)
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
         call_kwargs.update(config.kwargs)
-
-        # Convert floor(x/y) to FloorDiv. This prints to FX-friendly code.
-        grid = [FloorDiv.rewrite(x) if isinstance(x, sympy.Expr) else x for x in grid]
 
         # Convert sympy expressions to symints.
         for name, val in call_kwargs.items():
