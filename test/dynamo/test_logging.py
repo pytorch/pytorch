@@ -508,6 +508,28 @@ LoweringException: AssertionError:
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    def test_invalid_artifact_flag_error_msg(self):
+        env = dict(os.environ)
+        env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"
+        _, stderr = self.run_process_no_exception(
+            "import torch",
+            env=env,
+        )
+        lines = stderr.decode().split("\n")
+        # This is a sanity assert that our error is not spammy.
+        # As of this test creation this was 18.
+        # See this issue for the purpose o this test:
+        # https://github.com/pytorch/pytorch/issues/151055
+        self.assertTrue(len(lines) < 50)
+        # The other sanity assert - check that the last few lines
+        # map to the actual error message we want to raise
+        # (I could use an expecttest here, although it would break
+        #  whenever someone adds a new logging artifact)
+        self.assertEqual(
+            lines[-5], 'For more info on various settings, try TORCH_LOGS="help"'
+        )
+        self.assertEqual(lines[-4], "Valid settings:")
+
     @requires_distributed()
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
