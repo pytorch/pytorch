@@ -504,7 +504,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         k_dist = distribute_tensor(k, device_mesh, [Replicate()])
         v_dist = distribute_tensor(v, device_mesh, [Replicate()])
 
-        dist_out = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
+        with CPMode():
+            dist_out = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
 
         assert isinstance(dist_out, DTensor)
         torch.testing.assert_close(
@@ -512,6 +513,15 @@ class RingFlexAttentionTest(DTensorTestBase):
         )
 
 
+class CPMode(TorchDispatchMode):
+    def __init__(self):
+        super().__init__()
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        return func(*args, **kwargs)
+
+
+@flex_attention_hop.py_impl(CPMode)
 @flex_attention_hop.py_impl(DTensor)
 def cp_flex_attention(
     mode,
