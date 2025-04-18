@@ -814,7 +814,7 @@ def maybe_log_graph(
     gm_str = gm.print_readable(
         print_output=False, include_stride=True, include_device=True
     )
-    if out_structured_logs:
+    if out_structured_logs is not None:
         out_structured_logs.append(f"{structured_log_prefix_fn()}:{gm_str}")
     else:
         trace_structured(
@@ -882,17 +882,20 @@ def maybe_inline_graph_saved_tensors_hooks(
 
     pack_hook_gm, unpack_hook_gm = hooks
 
+    structured_logs: list[str] = []
     maybe_log_graph(
         fw_module,
         "Forward graph pre saved_tensors_hooks inlining",
         aot_config,
         lambda: "aot_forward_graph_pre_saved_tensors_hooks",
+        structured_logs,
     )
     maybe_log_graph(
         fw_module,
         "Backward graph pre saved_tensors_hooks inlining",
         aot_config,
         lambda: "aot_backward_graph_pre_saved_tensors_hooks",
+        structured_logs,
     )
     fw_g = fw_module.graph
     bw_g = bw_module.graph
@@ -905,8 +908,6 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_outs_saved_tensors_unchanged = []  # type: ignore[var-annotated]
     fw_outs_packed_tensors = []
     fw_outs_packed_syms = []
-
-    structured_logs: list[str] = []
 
     static_inputs = set()
     if static_input_indices:
@@ -1104,7 +1105,11 @@ def maybe_inline_graph_saved_tensors_hooks(
 
     if aot_config.enable_log:
         trace_structured(
-            "aot_saved_tensors_hooks_graphs",
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aot_saved_tensors_hooks_graphs",
+                "encoding": "string",
+            },
             payload_fn=lambda: "\n".join(structured_logs),
         )
 

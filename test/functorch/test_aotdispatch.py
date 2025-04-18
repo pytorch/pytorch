@@ -6683,7 +6683,9 @@ metadata incorrectly.
     def test_saved_tensors_hooks(self):
         ctx = torch.autograd.graph.saved_tensors_hooks
 
-        def _test_pack_hooks(fn, inp_fn, hooks, symbolic_tracing=True):
+        def _test_pack_hooks(
+            fn, inp_fn, hooks, symbolic_tracing=True, pre_compile_fn=None
+        ):
             torch._dynamo.reset()
             with ExitStack() as stack:
                 # All hooks in eager to get ref
@@ -6702,6 +6704,8 @@ metadata incorrectly.
 
                 ref_y = fn(*ref_x)
                 ref_y.sum().backward()
+            if pre_compile_fn:
+                pre_compile_fn()
 
             with ExitStack() as stack:
                 for hook, inline in hooks:
@@ -6774,16 +6778,19 @@ metadata incorrectly.
 
         def simple_fn(x, y):
             x = x + 1
+            x = x.t()
+            x = x.relu()
+            x = x.t()
             x = SAF.apply(x, y)
             return x
 
         device = torch.device("cuda:0")
 
         def inp_fn():
-            x = torch.ones(2, 3, device=device, requires_grad=True)
+            x = torch.ones(2, 2, device=device, requires_grad=True)
             torch._dynamo.mark_dynamic(x, 0)
             torch._dynamo.mark_dynamic(x, 1)
-            y = torch.zeros(2, 3, device=device, dtype=torch.int64)
+            y = torch.zeros(2, 2, device=device, dtype=torch.int64)
             return x, y
 
         def pack_dev_sym_cpu(x):
@@ -6872,6 +6879,32 @@ metadata incorrectly.
             #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
             # )
 
+        lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
+        logged_shapes = []
+        lib.define("log_shapes(Tensor x) -> Tensor")
+
+        def log_shapes_impl(x):
+            logged_shapes.append(list(x.shape))
+            return x.clone()
+
+        def log_shapes_meta(x):
+            return x.clone()
+
+        for backend in ["CPU", "CUDA"]:
+            lib.impl(
+                "log_shapes",
+                log_shapes_impl,
+                backend,
+            )
+        lib.impl("log_shapes", log_shapes_meta, "Meta")
+
+        def pack_fp8_with_scale_and_shape_log(x):
+            torch.ops._test_aotdispatch_lib.log_shapes(x)
+            return _pack_fp8_with_scale_wrap(x)
+
+        def unpack_fp8_with_scale_and_shape_log(packed):
+            return _unpack_fp8_with_scale_wrap(packed)
+
         def m_inp_fn():
             x = torch.ones(2, 2, 2, device=device, requires_grad=True)
             torch._dynamo.mark_dynamic(x, 0)
@@ -6886,17 +6919,30 @@ metadata incorrectly.
                 self.fc2 = nn.Linear(2, 2)
 
             def forward(self, x):
-                out = self.fc1(x)
-                out = self.relu(out)
-                out = self.fc2(out)
-                return out
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.fc2(x)
+                return x
 
         m = M().to(device=device)
         _test_pack_hooks(
             m,
             m_inp_fn,
-            [((pack_fp8_with_scale, unpack_fp8_with_scale), True)],
+            [
+                (
+                    (
+                        pack_fp8_with_scale_and_shape_log,
+                        unpack_fp8_with_scale_and_shape_log,
+                    ),
+                    True,
+                )
+            ],
+            pre_compile_fn=lambda: logged_shapes.clear(),
         )
+        # Check that hooks were not applied to Parameters
+        self.assertFalse([2, 2] in logged_shapes)
+        self.assertFalse([2, 1] in logged_shapes)
+        self.assertTrue([2, 2, 2] in logged_shapes)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
