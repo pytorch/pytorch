@@ -2730,6 +2730,13 @@ def register_op_dtype_propagation_rules(
     )
 
 
+op_requires_libdevice_fp64: OrderedSet[str] = OrderedSet()
+
+
+def register_op_requires_libdevice_fp64(name: str) -> None:
+    op_requires_libdevice_fp64.add(name)
+
+
 def get_current_backend() -> str:
     from torch._inductor.virtualized import V
 
