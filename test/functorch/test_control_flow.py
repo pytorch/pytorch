@@ -7385,6 +7385,9 @@ class GraphModule(torch.nn.Module):
 
         out_x: "f32[s77, s27]" = while_loop[1];  while_loop = None
 
+        gt: "Sym(u1 > 0)" = getitem_4 > 0
+        _check = torch._check(gt);  gt = _check = None
+
         add: "Sym(u1 + 1)" = getitem_4 + 1
 
         add_1: "f32[s77, s27]" = getitem_4 + out_x;  out_x = None
