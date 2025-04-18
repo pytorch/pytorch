@@ -159,6 +159,9 @@ if __name__ == "__main__":
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
 
+    @unittest.skipIf(
+        IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
+    )
     def test_lazy_init(self):
         """Validate that no XPU calls are made during `import torch` call"""
 
