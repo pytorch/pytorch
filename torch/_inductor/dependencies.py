@@ -149,9 +149,14 @@ class MemoryDep(Dep):
         this method does not reorder loops while normalize_with_stride_order reorder
         loops based on stride order.
         """
+        index, var_names, sizes, replacement = _RecordLoadStoreInner._normalize(
+            self.index, self.ranges
+        )
         return MemoryDep(
             self.name,
-            *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
+            index,
+            var_names,
+            sizes,
             self.mode,
         )
 
@@ -449,6 +454,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._index_exprs: OrderedSet[IndexExprDep] = OrderedSet()
         self._var_ranges: VarRanges = var_ranges
         self._should_normalize: bool = normalize
+        self.mem_dep_replacements: dict[Dep, dict[sympy.Symbol, sympy.Symbol]] = {}
+        self.replacements: dict[sympy.Symbol, sympy.Symbol] = {}
 
     @staticmethod
     def drop_unused_symbols(
@@ -471,7 +478,12 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     @classmethod
     def _normalize(
         cls, index: sympy.Expr, var_ranges: VarRanges
-    ) -> tuple[sympy.Expr, tuple[sympy.Symbol, ...], tuple[sympy.Expr, ...]]:
+    ) -> tuple[
+        sympy.Expr,
+        tuple[sympy.Symbol, ...],
+        tuple[sympy.Expr, ...],
+        Union[tuple[()], tuple[tuple[sympy.Symbol, sympy.Symbol], ...]],
+    ]:
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
@@ -492,11 +504,16 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
         cls.drop_unused_symbols(index, new_vars, new_sizes)
-        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
+        return index, tuple(new_vars), tuple(new_sizes), tuple(replacement.items())  # type: ignore[arg-type]
 
     def canonicalize(
         self, index: sympy.Expr
-    ) -> tuple[sympy.Expr, tuple[sympy.Symbol, ...], tuple[sympy.Expr, ...]]:
+    ) -> tuple[
+        sympy.Expr,
+        tuple[sympy.Symbol, ...],
+        tuple[sympy.Expr, ...],
+        Union[tuple[()], tuple[tuple[sympy.Symbol, sympy.Symbol], ...]],
+    ]:
         if not self._should_normalize:
             sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
             var_names = [k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1]
@@ -504,7 +521,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
             self.drop_unused_symbols(index, var_names, sizes)
 
-            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
+            return index, tuple(var_names), tuple(sizes), tuple()  # type: ignore[return-value, arg-type]
         var_ranges = {
             k: V.graph.sizevars.simplify(v)
             for k, v in self._var_ranges.items()
@@ -514,7 +531,10 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self._normalize(index, var_ranges)
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        self._reads.add(MemoryDep(name, *self.canonicalize(index)))
+        index, var_names, sizes, replacement = self.canonicalize(index)
+        load_dep = MemoryDep(name, index, var_names, sizes)
+        self._reads.add(load_dep)
+        self.mem_dep_replacements[load_dep] = dict(replacement)
         return f"load({name}, {sympy_str(index)})"
 
     def load_seed(self, name: str, index: int) -> str:
@@ -524,14 +544,18 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def store(
         self, name: str, index: sympy.Expr, value: str, mode: Optional[str] = None
     ) -> str:
-        self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
+        index, var_names, sizes, replacement = self.canonicalize(index)
+        store_dep = MemoryDep(name, index, var_names, sizes, mode=mode)
+        self._writes.add(store_dep)
+        self.mem_dep_replacements[store_dep] = dict(replacement)
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> str:
         return self.store(name, index, f"store_reduction({value})")
 
     def index_expr(self, index: sympy.Expr, dtype: Optional[torch.dtype]) -> str:
-        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
+        index, var_names, sizes, _ = self.canonicalize(index)
+        self._index_exprs.add(IndexExprDep(index, var_names, sizes))
         return f"index_expr({sympy_str(index)}, {dtype})"
 
     def bucketize(
@@ -639,12 +663,15 @@ def extract_loop_body_with_args(
     from .loop_body import MemoryUsageType
 
     # Fast path to avoid tracing when we already have a LoopBody
+
     inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
     name_to_index = fn.indexing_from_args(args)
+
     if fn.indirect_vars:
         # mimic the `tmpX` naming tracing gives us
         repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
         name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
+        fn.replacements.update(repl)
     for entry in fn.memory_usage[MemoryUsageType.LOAD]:
         inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
@@ -674,6 +701,10 @@ def extract_loop_body_with_args(
             None,  # type: ignore[arg-type]
             None,  # type: ignore[arg-type]
         )
+    for mem_dep, replacement in inner.mem_dep_replacements.items():
+        # check before update to avoid overriding by empty replacements
+        if replacement:
+            fn.mem_dep_replacements.setdefault(mem_dep, {}).update(replacement)
     # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     return inner
 
