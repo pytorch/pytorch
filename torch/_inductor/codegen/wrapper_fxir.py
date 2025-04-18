@@ -1,6 +1,5 @@
 import dataclasses
 import operator
-import random
 import textwrap
 from collections import Counter
 from typing import Any, Callable, Optional, Union
@@ -477,30 +476,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # Does nothing. Comm buffers are handled by the respective allocate/free lines.
 
     def _generate_comm_buffer_allocate(self, line: Line) -> None:
-        assert isinstance(line, CommBufferFreeLine)
-
-        buf = line.node
-        assert buf.get_name() not in V.graph.removed_buffers
-        device = torch.device(f"cuda:{self.node.get_device().index}")
-        dtype = buf.get_dtype()
-        shape = tuple(buf.get_size())
-        stride = tuple(buf.get_stride())
-
-        if self.comm_buffer_type != ir.CommBufferType.SYMM_MEM:
-            raise NotImplementedError(
-                f"Unsupported comm buffer type: {self.comm_buffer_type}"
-            )
-
-        # Distributed is not always avaliable. Only import it if used.
-        from torch._C._distributed_c10d import _SymmetricMemory  # noqa: F401
-
-        alloc_id = random.randint(0, 2**64 - 1)
-        node = self.gm.graph.call_function(
-            _SymmetricMemory.empty_strided_p2p,
-            args=(shape, stride, dtype, device, self.group_name, alloc_id),
-        )
-        self._create_meta_from_buffer(node, buf)
-        self._record_allocation(buf, node)
+        assert isinstance(line, CommBufferAllocateLine)
+        raise NotImplementedError("Comm buffer allocation is not yet supported")
 
     def _generate_comm_buffer_free(self, line: Line) -> None:
         assert isinstance(line, CommBufferFreeLine)
