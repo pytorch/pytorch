@@ -26,6 +26,7 @@ __all__ = [
     "ModuleDict",
     "ParameterList",
     "ParameterDict",
+    "BufferDict",
 ]
 
 T = TypeVar("T", bound=Module)
@@ -967,5 +968,207 @@ class ParameterDict(Module):
         return copy
 
     def __ior__(self, other: ParameterDict) -> Self:
+        self.update(other)
+        return self
+
+
+class BufferDict(Module):
+    def __init__(self, buffers: Any = None) -> None:
+        super().__init__()
+        self._keys: dict[str, None] = {}
+        if buffers is not None:
+            self.update(buffers)
+
+    def _key_to_attr(self, key: str) -> str:
+        if not isinstance(key, str):
+            raise TypeError(
+                "Index given to BufferDict cannot be used as a key as it is "
+                f"not a string (type is '{type(key).__name__}'). Open an issue on "
+                "github if you need non - string keys."
+            )
+        else:
+            # Use the key as - is so that `.named_buffers()` returns the right thing
+            return key
+
+    def __getitem__(self, key: str) -> Any:
+        attr = self._key_to_attr(key)
+        return getattr(self, attr)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._keys[key] = None
+        attr = self._key_to_attr(key)
+        if isinstance(value, torch.Tensor):
+            self.register_buffer(attr, value)
+        else:
+            setattr(self, attr, value)
+
+    def __delitem__(self, key: str) -> None:
+        del self._keys[key]
+        attr = self._key_to_attr(key)
+        if hasattr(self, attr):
+            delattr(self, attr)
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._keys)
+
+    def __reversed__(self) -> Iterator[str]:
+        return reversed(list(self._keys))
+
+    def copy(self) -> "BufferDict":
+        """Return a copy of this :class:`~torch.nn.BufferDict` instance."""
+        return BufferDict(OrderedDict((k, self[k]) for k in self._keys))
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._keys
+
+    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
+        """Set the default for a key in the BufferDict.
+
+        If key is in the BufferDict, return its value.
+        If not, insert `key` with a buffer `default` and return `default`.
+        `default` defaults to `None`.
+
+        Args:
+            key (str): key to set default for
+            default (Any): the buffer set to the key
+        """
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def clear(self) -> None:
+        """Remove all items from the BufferDict."""
+        for k in self._keys.copy():
+            del self[k]
+
+    def pop(self, key: str) -> Any:
+        r"""Remove key from the BufferDict and return its buffer.
+
+        Args:
+            key (str): key to pop from the BufferDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    def popitem(self) -> tuple[str, Any]:
+        """Remove and return the last inserted `(key, buffer)` pair from the BufferDict."""
+        k, _ = self._keys.popitem()
+        # We need the key in the _keys to be able to access/del
+        self._keys[k] = None
+        val = self[k]
+        del self[k]
+        return k, val
+
+    def get(self, key: str, default: Optional[Any] = None) -> Any:
+        r"""Return the buffer associated with key if present. Otherwise return default if provided, None if not.
+
+        Args:
+            key (str): key to get from the BufferDict
+            default (Tensor, optional): value to return if key not present
+        """
+        return self[key] if key in self else default
+
+    def fromkeys(
+        self, keys: Iterable[str], default: Optional[Any] = None
+    ) -> "BufferDict":
+        r"""Return a new BufferDict with the keys provided.
+
+        Args:
+            keys (iterable, string): keys to make the new BufferDict from
+            default (Tensor, optional): value to set for all keys
+        """
+        return BufferDict((k, default) for k in keys)
+
+    def keys(self) -> Iterable[str]:
+        r"""Return an iterable of the BufferDict keys."""
+        return self._keys.keys()
+
+    def items(self) -> Iterable[tuple[str, Any]]:
+        r"""Return an iterable of the BufferDict key/value pairs."""
+        return ((k, self[k]) for k in self._keys)
+
+    def values(self) -> Iterable[Any]:
+        r"""Return an iterable of the BufferDict values."""
+        return (self[k] for k in self._keys)
+
+    def update(self, buffers: Union[Mapping[str, Any], "BufferDict"]) -> None:
+        r"""Update the :class:`~torch.nn.BufferDict` with key - value pairs from ``buffers``, overwriting existing keys.
+
+        .. note::
+            If :attr:`buffers` is an ``OrderedDict``, a :class:`~torch.nn.BufferDict`, or
+            an iterable of key - value pairs, the order of new elements in it is preserved.
+
+        Args:
+            buffers (iterable): a mapping (dictionary) from string to
+                :class:`~torch.Tensor`, or an iterable of
+                key - value pairs of type (string, :class:`~torch.Tensor`)
+        """
+        if not isinstance(buffers, container_abcs.Iterable):
+            raise TypeError(
+                "BufferDict.update should be called with an "
+                "iterable of key/value pairs, but got " + type(buffers).__name__
+            )
+
+        if isinstance(buffers, (OrderedDict, BufferDict)):
+            for key, buffer in buffers.items():
+                self[key] = buffer
+        elif isinstance(buffers, container_abcs.Mapping):
+            for key, buffer in sorted(buffers.items()):
+                self[key] = buffer
+        else:
+            for j, p in enumerate(buffers):
+                if not isinstance(p, container_abcs.Iterable):
+                    raise TypeError(
+                        "BufferDict update sequence element "
+                        "#" + str(j) + " should be Iterable; is" + type(p).__name__
+                    )
+                if not len(p) == 2:
+                    raise ValueError(
+                        "BufferDict update sequence element "
+                        "#" + str(j) + " has length " + str(len(p)) + "; 2 is required"
+                    )
+                self[p[0]] = p[1]  # type: ignore[assignment]
+
+    def extra_repr(self) -> str:
+        child_lines = []
+        for k, p in self.items():
+            if isinstance(p, torch.Tensor):
+                size_str = "x".join(str(size) for size in p.size())
+                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                    device_str = f" ({p.device})"
+                else:
+                    device_str = ""
+                parastr = "{} containing: [{} of size {}{}]".format(
+                    "Buffer" if isinstance(p, torch.Tensor) else "Object",
+                    torch.typename(p),
+                    size_str,
+                    device_str,
+                )
+                child_lines.append("  (" + str(k) + "): " + parastr)
+            else:
+                child_lines.append(
+                    "  (" + str(k) + "): Object of type: " + type(p).__name__
+                )
+        tmpstr = "\n".join(child_lines)
+        return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError("BufferDict should not be called.")
+
+    def __or__(self, other: "BufferDict") -> "BufferDict":
+        copy = self.copy()
+        copy.update(other)
+        return copy
+
+    def __ror__(self, other: "BufferDict") -> "BufferDict":
+        copy = other.copy()
+        copy.update(self)
+        return copy
+
+    def __ior__(self, other: "BufferDict") -> Self:
         self.update(other)
         return self
