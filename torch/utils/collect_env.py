@@ -37,6 +37,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'nvidia_driver_version',
     'nvidia_gpu_models',
     'cudnn_version',
+    'is_xpu_available',
     'pip_version',  # 'pip' or 'pip3'
     'pip_packages',
     'conda_packages',
@@ -165,6 +166,10 @@ def get_nvidia_driver_version(run_lambda):
 
 
 def get_gpu_info(run_lambda):
+    return get_nvidia_gpu_info(run_lambda)
+
+
+def get_nvidia_gpu_info(run_lambda):
     if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(torch.version, 'hip') and torch.version.hip is not None):
         if TORCH_AVAILABLE and torch.cuda.is_available():
             if torch.version.hip is not None:
@@ -241,6 +246,128 @@ def get_nvidia_smi():
                 smi = '"{}"'.format(candidate_smi)
                 break
     return smi
+
+
+def get_pkg_version(run_lambda, pkg):
+    ret = ""
+    index = -1
+    if get_platform() == "linux":
+        mgr_name = ""
+        for mgr_name in ["dpkg", "dnf", "yum", "zypper", ""]:
+            if mgr_name == "":
+                continue
+            rc, _, _ = run(f"which {mgr_name}")
+            if rc == 0:
+                break
+        if mgr_name != "":
+            cmd = ""
+            # 0: centos/suse
+            # 1: ubuntu
+            pkg_names = {0: {"intel_opencl": "intel-opencl",
+                             "level_zero": "level-zero"},
+                         1: {"intel_opencl": "intel-opencl-icd",
+                             "level_zero": "libze1"}}
+            if mgr_name in ["dnf", "yum", "zypper"]:
+                pkg_name = pkg_names[0][pkg]
+                if mgr_name in ["dnf", "yum"]:
+                    index = 1
+                    cmd = f"{mgr_name} list | grep {pkg_name}"
+                if mgr_name in ["zypper"]:
+                    index = 2
+                    cmd = f"{mgr_name} info {pkg_name} | grep Version"
+            if mgr_name == "dpkg":
+                index = 2
+                pkg_name = pkg_names[1][pkg]
+                cmd = f"{mgr_name} -l | grep {pkg_name}"
+            if cmd != "":
+                ret = run_and_read_all(run_lambda, cmd)
+    lst: list[str] = []
+    if ret:
+        lst += re.sub(" +", " ", ret).split(" ")
+    if len(lst) > index and index != -1:
+        ret = lst[index]
+    else:
+        ret = "N/A"
+    return ret
+
+
+def get_intel_gpu_driver_version(run_lambda):
+    lst: list[str] = []
+    platform = get_platform()
+    if platform == "linux":
+        for pkg in ["intel_opencl", "level_zero"]:
+            lst.append(f"* {pkg}:\t{get_pkg_version(run_lambda, pkg)}")
+    if platform == "win32" or platform == "cygwin":
+        txt = run_and_read_all(
+            run_lambda,
+            'powershell.exe "gwmi -Class Win32_PnpSignedDriver | where{$_.DeviceClass -eq \\"DISPLAY\\"\
+            -and $_.Manufacturer -match \\"Intel\\"} | Select-Object -Property DeviceName,DriverVersion,DriverDate\
+            | ConvertTo-Json"',
+        )
+        try:
+            obj = json.loads(txt)
+            if type(obj) is list:
+                for o in obj:
+                    lst.append(
+                        f'* {o["DeviceName"]}: {o["DriverVersion"]} ({o["DriverDate"]})'
+                    )
+            else:
+                lst.append(f'* {obj["DriverVersion"]} ({obj["DriverDate"]})')
+        except ValueError as e:
+            lst.append(txt)
+            lst.append(str(e))
+    return "\n".join(lst)
+
+
+def get_intel_gpu_onboard(run_lambda):
+    lst: list[str] = []
+    platform = get_platform()
+    if platform == "linux":
+        txt = run_and_read_all(run_lambda, "xpu-smi discovery -j")
+        if txt:
+            try:
+                obj = json.loads(txt)
+                device_list = obj.get("device_list", [])
+                if isinstance(device_list, list) and device_list:
+                    lst.extend(f'* {device["device_name"]}' for device in device_list)
+                else:
+                    lst.append("N/A")
+            except (ValueError, TypeError) as e:
+                lst.append(txt)
+                lst.append(str(e))
+        else:
+            lst.append("N/A")
+    if platform == "win32" or platform == "cygwin":
+        txt = run_and_read_all(
+            run_lambda,
+            'powershell.exe "gwmi -Class Win32_PnpSignedDriver | where{$_.DeviceClass -eq \\"DISPLAY\\"\
+            -and $_.Manufacturer -match \\"Intel\\"} | Select-Object -Property DeviceName | ConvertTo-Json"',
+        )
+        if txt:
+            try:
+                obj = json.loads(txt)
+                if isinstance(obj, list) and obj:
+                    lst.extend(f'* {device["DeviceName"]}' for device in obj)
+                else:
+                    lst.append(f'* {obj.get("DeviceName", "N/A")}')
+            except ValueError as e:
+                lst.append(txt)
+                lst.append(str(e))
+        else:
+            lst.append("N/A")
+    return "\n".join(lst)
+
+
+def get_intel_gpu_detected(run_lambda):
+    if not TORCH_AVAILABLE:
+        return "N/A"
+
+    device_count = torch.xpu.device_count()
+    if device_count == 0:
+        return "N/A"
+
+    devices = [f"* [{i}] {torch.xpu.get_device_properties(i)}" for i in range(device_count)]
+    return "\n".join(devices)
 
 
 # example outputs of CPU infos
@@ -329,7 +456,7 @@ def get_cpu_info(run_lambda):
             | ConvertTo-Json"'
         )
         if rc == 0:
-            lst = []
+            lst: list[str] = []
             try:
                 obj = json.loads(out)
                 if type(obj) is list:
@@ -504,6 +631,13 @@ def get_env_info():
         debug_mode_str = str(torch.version.debug)
         cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
+        xpu_available_str = str(torch.xpu.is_available())
+        if torch.xpu.is_available():
+            xpu_available_str = f'{xpu_available_str}\n' + \
+                                f'XPU used to build PyTorch: {torch.version.xpu}\n' + \
+                                f'Intel GPU driver version:\n{get_intel_gpu_driver_version(run_lambda)}\n' + \
+                                f'Intel GPU models onboard:\n{get_intel_gpu_onboard(run_lambda)}\n' + \
+                                f'Intel GPU models detected:\n{get_intel_gpu_detected(run_lambda)}'
         if not hasattr(torch.version, 'hip') or torch.version.hip is None:  # cuda version
             hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
         else:  # HIP version
@@ -517,7 +651,7 @@ def get_env_info():
             cuda_version_str = 'N/A'
             hip_compiled_version = torch.version.hip
     else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
+        version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = 'N/A'
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
 
     sys_version = sys.version.replace("\n", " ")
@@ -533,9 +667,10 @@ def get_env_info():
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
         cuda_module_loading=get_cuda_module_loading_config(),
-        nvidia_gpu_models=get_gpu_info(run_lambda),
+        nvidia_gpu_models=get_nvidia_gpu_info(run_lambda),
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
+        is_xpu_available=xpu_available_str,
         hip_compiled_version=hip_compiled_version,
         hip_runtime_version=hip_runtime_version,
         miopen_runtime_version=miopen_runtime_version,
@@ -572,6 +707,7 @@ CUDA_MODULE_LOADING set to: {cuda_module_loading}
 GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
+Is XPU available: {is_xpu_available}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
