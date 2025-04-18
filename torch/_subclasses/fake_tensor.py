@@ -1539,6 +1539,21 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("data dependent output")
 
         if torch.Tag.dynamic_output_shape in func.tags:
+            if func is aten.index.Tensor:
+                _, new_kwargs = normalize_function(  # type: ignore[misc]
+                    func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                )
+                for index in new_kwargs["indices"]:
+                    # index calls nonzero for bool or int8 tensors, and
+                    # therefore has a dynamic shape output. For other dtypes,
+                    # the output shape depends on the input shape (and not data)
+                    if isinstance(index, torch.Tensor) and index.dtype in (
+                        torch.bool,
+                        torch.int8,
+                    ):
+                        raise _BypassDispatchCache("dynamic output shape")
+                return
+
             raise _BypassDispatchCache("dynamic output shape")
 
         if torch.Tag.inplace_view in func.tags:
@@ -1618,7 +1633,9 @@ class FakeTensorMode(TorchDispatchMode):
                 # Special case for AOT Dispatcher first pass, where the fake
                 # tensor is called on the functional wrapper of the subgraph.
                 result.append(hash(arg))
-                id_hashed_objects.append(arg)
+                # functional wrapper is destroyed after fake tensor prop. We
+                # need to put the finalizer on the subgraph.
+                id_hashed_objects.append(arg.subgraph)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
@@ -3098,3 +3115,15 @@ def inferred_fake_kernel_from_real_out(
 
     fake_flat_out = [_infer_fake_from_real_tensor(mode, op, t) for t in real_flat_out]
     return pytree.tree_unflatten(fake_flat_out, spec)
+
+
+@contextlib.contextmanager
+def not_progapate_real_tensors(
+    fake_mode: FakeTensorMode,
+) -> Generator[None, None, None]:
+    original_value = fake_mode.propagate_real_tensors
+    fake_mode.propagate_real_tensors = False
+    try:
+        yield
+    finally:
+        fake_mode.propagate_real_tensors = original_value
