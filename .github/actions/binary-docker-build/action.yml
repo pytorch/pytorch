@@ -53,6 +53,7 @@ runs:
 
         DOCKER_IMAGE_NAME_PREFIX=docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}
 
+        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}
         docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
         docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
         docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
@@ -62,6 +63,7 @@ runs:
         set +x
         if [[ ${WITH_PUSH:-false} == "true" ]]; then
           echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          docker push ${DOCKER_IMAGE_NAME_PREFIX}
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
           docker push ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}

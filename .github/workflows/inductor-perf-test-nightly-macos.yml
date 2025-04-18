@@ -1,5 +1,4 @@
-name: perf-nightly-macos
-# Technically not an inductor test, but uses it as a template for tracking macos performance
+name: inductor-perf-nightly-macos
 
 on:
   schedule:
@@ -24,6 +23,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/inductor-perf-test-nightly-macos.yml
+      - .ci/pytorch/macos-test.sh
 
 concurrency:
   group:  ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
