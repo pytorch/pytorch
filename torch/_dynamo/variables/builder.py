@@ -100,8 +100,10 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
-    is_from_flattened_input,
+    is_from_global_source,
+    is_from_nonlocal_source,
     is_from_optimizer_source,
+    is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
@@ -550,11 +552,9 @@ class VariableBuilder:
         def build_key_value(k, v):
             key = ConstantVariable.create(k)
             source_key = k
-            base = self.get_source()
             source_value = GetItemSource(
-                base,
+                self.get_source(),
                 source_key,
-                is_flattened_input_src=is_from_flattened_input(value, base),
             )
             res_value = LazyVariableTracker.create(v, source_value)
 
@@ -710,7 +710,6 @@ class VariableBuilder:
                 source_value = DictGetItemSource(
                     base,
                     source_key,
-                    is_flattened_input_src=is_from_flattened_input(value, base),
                 )
                 res_value = LazyVariableTracker.create(v, source_value)
 
@@ -796,9 +795,6 @@ class VariableBuilder:
                         GetItemSource(
                             args_source,
                             i,
-                            is_flattened_input_src=is_from_flattened_input(
-                                value, args_source
-                            ),
                         ),
                     )(arg)
                 )
@@ -818,9 +814,6 @@ class VariableBuilder:
                     DictGetItemSource(
                         keywords_source,
                         k,
-                        is_flattened_input_src=is_from_flattened_input(
-                            value, keywords_source
-                        ),
                     ),
                 )(v)
 
@@ -894,9 +887,6 @@ class VariableBuilder:
                             GetItemSource(
                                 saved_tensors_source,
                                 i,
-                                is_flattened_input_src=is_from_flattened_input(
-                                    value, saved_tensors_source
-                                ),
                             ),
                         )(v)
                     )
@@ -1373,7 +1363,6 @@ class VariableBuilder:
                 source_value = DictGetItemSource(
                     base,
                     source_key,
-                    is_flattened_input_src=is_from_flattened_input(value, base),
                 )
                 res_value = LazyVariableTracker.create(v, source_value)
 
@@ -1407,16 +1396,14 @@ class VariableBuilder:
         elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            base = self.get_source()
             # NB - Be careful in not triggering user code. Guards also work on
             # the underlying tuple data structure.
             output = [
                 LazyVariableTracker.create(
                     tuple.__getitem__(value, i),
                     source=GetItemSource(
-                        base,
+                        self.get_source(),
                         i,
-                        is_flattened_input_src=is_from_flattened_input(value, base),
                     ),
                 )
                 for i in range(tuple.__len__(value))
@@ -1435,14 +1422,12 @@ class VariableBuilder:
 
             # NB - Be careful in not triggering user code. Guards also work on
             # the underlying list data structure.
-            base = self.get_source()
             output = [
                 LazyVariableTracker.create(
                     list.__getitem__(value, i),
                     source=ListGetItemSource(
-                        base,
+                        self.get_source(),
                         i,
-                        is_flattened_input_src=is_from_flattened_input(value, base),
                     ),
                 )
                 for i in range(list.__len__(value))
@@ -1512,12 +1497,12 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
 
-        base = self.get_source()
         output = [
             LazyVariableTracker.create(
                 item,
                 source=GetItemSource(
-                    base, i, is_flattened_input_src=is_from_flattened_input(value, base)
+                    self.get_source(),
+                    i,
                 ),
             )
             for i, item in enumerate(value)
@@ -1560,7 +1545,6 @@ class VariableBuilder:
                     base=source,
                     index=i,
                     index_is_slice=False,
-                    is_flattened_input_src=is_from_flattened_input(value, source),
                 )
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
@@ -1591,12 +1575,12 @@ class VariableBuilder:
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
         self.install_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
-        base = self.get_source()
         output = [
             VariableBuilder(
                 self.tx,
                 TupleIteratorGetItemSource(
-                    base, i, is_flattened_input_src=is_from_flattened_input(value, base)
+                    self.get_source(),
+                    i,
                 ),
             )(tuple_iterator_getitem(value, i))
             for i in range(tuple_iterator_len(value))
@@ -1822,11 +1806,14 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
-        # Install any tensors which are not explicitly input or nested from flattenable
-        # object (such as in dict, lists, etc)
-        should_install_graph_params = config.install_params_as_graph_attr and not (
-            (isinstance(source, LocalSource) and source.is_input)
-            or source.is_flattened_input()
+        # Install any tensors which are:
+        # 1. Globals
+        # 2. NonLocals
+        # 3. tensors that are attributes of nn module
+        should_install_graph_params = config.install_params_as_graph_attr and (
+            is_from_global_source(source)
+            or is_from_nonlocal_source(source)
+            or is_from_unspecialized_nn_module_source(source)
         )
 
         make_graph_attribute = is_static_input and (
@@ -2452,7 +2439,6 @@ def _dataclasses_fields_lambda(obj):
             source = DictGetItemSource(
                 base_src,
                 field.name,
-                is_flattened_input_src=is_from_flattened_input(value, base_src),
             )
         items.append(UserDefinedObjectVariable(field, source=source))
     return TupleVariable(items)
@@ -2726,9 +2712,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                         base=source,
                         index=i,
                         index_is_slice=False,
-                        is_flattened_input_src=is_from_flattened_input(
-                            example_value, source
-                        ),
                     )
                 else:
                     # use the same options object as parent

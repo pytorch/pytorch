@@ -332,15 +332,6 @@ class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
         )
 
 
-class WrapperModule(torch.nn.Module):
-    def __init__(self, fn: Callable) -> None:
-        super().__init__()
-        self.fn = fn
-
-    def forward(self, *args) -> torch.Tensor:
-        return self.fn(args)
-
-
 class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     @torch._dynamo.config.patch(install_params_as_graph_attr=True)
@@ -359,24 +350,6 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         actual_num_inputs = get_num_input_nodes(out_graph)
         self.assertEqual(actual_num_inputs, expected_num_exported_inputs)
         self.assertEqual(out_graph(*example_inputs), fn_to_export(*example_inputs))
-
-        # # TODO: Add this back once we have identical install and inline semantics
-        # # to dynamo
-        # # Now check against nonstrict dynamo mode if possible
-        # if isinstance(fn_to_export, torch.nn.Module):
-        #     mod = fn_to_export
-        # else:
-        #     mod = WrapperModule(fn_to_export)
-        # nonstrict_ep = torch.export.export(mod, tuple(example_inputs), strict=False)
-        # nonstrict_ep_graph = nonstrict_ep.graph_module
-        # nonstrict_inputs = get_num_input_nodes(nonstrict_ep_graph)
-        # import logging
-
-        # logging.warning(f"nonstrict_ep is {nonstrict_ep_graph} ep is {out_graph}")
-        # self.assertEqual(actual_num_inputs, nonstrict_inputs)
-        # self.assertEqual(
-        #     out_graph(*example_inputs), nonstrict_ep_graph(*example_inputs)
-        # )
 
     def test_simple_linear(self) -> None:
         net = SimpleLinearModule()
@@ -568,6 +541,20 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         z = torch.randn((3, 1))
 
         self.check_export_matches_expectation(fn, 2, (UserDefinedTestClass(x, y), z))
+
+    def test_tensors_as_nn_attr(self) -> None:
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.ones((5, 5))
+                self.b = torch.ones((5, 5))
+
+            def forward(self, x):
+                return self.a + self.b + x
+
+        mod = Mod()
+        inp = torch.randn(5, 5)
+        self.check_export_matches_expectation(mod, 1, (inp,))
 
 
 if __name__ == "__main__":

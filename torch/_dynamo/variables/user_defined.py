@@ -1066,7 +1066,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from . import ConstantVariable
 
         source = AttrSource(self.source, name) if self.source else None
-
+        # if name == "running_mean":
+        #     breakpoint()
+        # if name == "_buffers":
+        #     breakpoint()
         if object_has_getattribute(self.value):
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -1248,7 +1251,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 else:
                     return trace_rules.lookup(func)(func)
-
+        if name == "running_mean":
+            breakpoint()
         if (
             # wrap the source only if inline_inbuilt_nn_modules is set or fsdp modules. This is a temporary solution to
             # keep Dynamo behavior compatible with no inlining, as there will be some delay to turn on the flag in
@@ -1261,7 +1265,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and isinstance(self, variables.UnspecializedNNModuleVariable)
             # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
             # usecase for now.
-            and not tx.output.export
+            and (
+                not tx.output.export
+                or torch._dynamo.config.install_params_as_graph_attr
+            )
         ):
             # Recalculate source for params/buffers
             if name in ("_buffers", "_parameters"):
