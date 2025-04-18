@@ -57,7 +57,8 @@ class TORCH_API Reducer {
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
       std::unordered_map<size_t, std::string> param_names,
-      int64_t first_bucket_bytes_cap);
+      int64_t first_bucket_bytes_cap,
+      bool skip_all_reduce_unused_params);
 
   ~Reducer() noexcept(false);
 
@@ -431,6 +432,8 @@ class TORCH_API Reducer {
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
+  // track the number of buckets that have been reduced.
+  int num_buckets_reduced_;
 
   // Timing information.
   int64_t backward_compute_start_time_ = -1;
@@ -492,6 +495,8 @@ class TORCH_API Reducer {
 
   bool static_graph_;
 
+  bool skip_all_reduce_unused_params_;
+
   // Key: size_t (index), Value: the number of times that a variable's
   // autograd_hook() should be triggered before marking this variable's grad as
   // ready for communication. Map will not change after 1st iteration.
@@ -521,6 +526,9 @@ class TORCH_API Reducer {
   bool dynamic_graph_find_unused();
   bool static_graph_first_iteration();
   bool static_graph_after_first_iteration();
+
+  bool is_unused_bucket(Bucket& bucket);
+  bool should_skip_all_reduce_bucket(Bucket& bucket);
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
