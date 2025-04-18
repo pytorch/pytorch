@@ -38,7 +38,7 @@ jobs:
     uses: ./.github/workflows/_mac-build.yml
     with:
       sync-tag: macos-perf-py3-arm64-build
-      build-environment: macos-py3-arm64
+      build-environment: macos-py3-arm64-distributed
       runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
