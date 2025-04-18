@@ -32,7 +32,7 @@ pip_install \
 pip_install coloredlogs packaging
 
 pip_install onnxruntime==1.18.1
-pip install -i https://test.pypi.org/simple/ onnx==1.18.0rc1
+pip_install -i https://test.pypi.org/simple/ onnx==1.18.0rc1
 pip_install onnxscript==0.2.2 --no-deps
 # required by onnxscript
 pip_install ml_dtypes
