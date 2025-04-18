@@ -6504,7 +6504,8 @@ class ShapeEnv:
                             # We have Mod(i0, q / c) == 0, which means we can
                             # rewrite i0 as (q / gcd(q, c)) * i1
                             d = q / sympy.gcd(q, c)  # TODO: CleanDiv?
-                            i1 = self.create_unbacked_symint().node.expr
+                            with self.ignore_fresh_unbacked_symbols():
+                                i1 = self.create_unbacked_symint().node.expr
                             # Propagate the value ranges.  It doesn't really
                             # matter if we use truediv or floordiv, because we
                             # have established divisibility.
