@@ -5752,7 +5752,7 @@ class TestLinalg(TestCase):
             # Cover GEMM+bias case. Also mostly a subset of the regular
             # GEMM case but with a implicit transpose which makes code
             #  path slightly different.
-            # 'TN' case
+            # 'TN'
             X = torch.rand(ldc, lda, dtype=dtype, device=device)
             matA = torch.rand(ldc, ldb, dtype=dtype, device=device)
 
@@ -5762,7 +5762,7 @@ class TestLinalg(TestCase):
 
             torch.nn.functional.linear(subX, subA, bias)
 
-            # 'NT' case
+            # 'NT'
             X = torch.rand(ldc, lda, dtype=dtype, device=device).t()
             matA = torch.rand(ldc, ldb, dtype=dtype, device=device).t()
 
