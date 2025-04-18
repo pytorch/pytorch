@@ -500,14 +500,17 @@ class RingFlexAttentionTest(DTensorTestBase):
             mesh_dim_names=("cp",),
         )
 
-        # q_dist = distribute_tensor(q, device_mesh, [Replicate()])
-        # k_dist = distribute_tensor(k, device_mesh, [Replicate()])
-        # v_dist = distribute_tensor(v, device_mesh, [Replicate()])
-        # assert isinstance(q_dist, DTensor)
-        with CPMode():
-            out = flex_attention(q, k, v, block_mask=block_mask)
+        q_dist = distribute_tensor(q, device_mesh, [Replicate()])
+        k_dist = distribute_tensor(k, device_mesh, [Replicate()])
+        v_dist = distribute_tensor(v, device_mesh, [Replicate()])
 
-        torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
+        with CPMode():
+            dist_out = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
+
+        assert isinstance(dist_out, DTensor)
+        torch.testing.assert_close(
+            dist_out.full_tensor(), expect_out, atol=1e-1, rtol=1e-2
+        )
 
 
 class CPMode(TorchDispatchMode):
@@ -519,11 +522,12 @@ class CPMode(TorchDispatchMode):
 
 
 @flex_attention_hop.py_impl(CPMode)
+@flex_attention_hop.py_impl(DTensor)
 def cp_flex_attention(
-    mode: CPMode,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
+    mode,
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
     score_mod: Callable,
     block_mask: tuple,
     scale: float,
@@ -533,16 +537,20 @@ def cp_flex_attention(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     print("Congrats! Flex attention is successfully dispatched!")
 
-    return flex_attention_hop(
-        query,
-        key,
-        value,
+    out = flex_attention_hop(
+        query.to_local(),
+        key.to_local(),
+        value.to_local(),
         score_mod=score_mod,
         block_mask=block_mask,
         scale=scale,
         kernel_options=kernel_options,
         score_mod_other_buffers=score_mod_other_buffers,
         mask_mod_other_buffers=mask_mod_other_buffers,
+    )
+    return (
+        DTensor.from_local(out[0], query.device_mesh, query.placements),
+        DTensor.from_local(out[1], query.device_mesh, query.placements),
     )
 
 
