@@ -2755,6 +2755,7 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
+        return True
         if not config.benchmark_fusion and not is_multi_template:
             return True
 

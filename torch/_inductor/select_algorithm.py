@@ -1723,6 +1723,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+        choices = choices[5:7]
 
         if config.test_configs.autotune_choice_name_regex is not None:
             choices = [
