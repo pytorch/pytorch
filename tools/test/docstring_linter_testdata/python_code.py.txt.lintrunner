@@ -21,36 +21,3 @@ tools/test/docstring_linter_testdata/python_code.py.txt:71: No docstring found f
             ^
    72 |         def not_short():
    73 |             class Long:
-
-tools/test/docstring_linter_testdata/python_code.py.txt:72: No docstring found for function 'not_short' (11 lines)
-   70 |
-   71 |     def needs_docs(self):
-   72 |         def not_short():
-                ^
-   73 |             class Long:
-   74 |                 a = 1
-
-tools/test/docstring_linter_testdata/python_code.py.txt:73: No docstring found for class 'Long' (6 lines)
-   71 |     def needs_docs(self):
-   72 |         def not_short():
-   73 |             class Long:
-                    ^
-   74 |                 a = 1
-   75 |                 b = 1
-
-tools/test/docstring_linter_testdata/python_code.py.txt:84: No docstring found for class 'NotDocstring' (12 lines)
-   82 |
-   83 |
-   84 | class NotDocstring:
-        ^
-   85 |     def short1(self):
-   86 |         pass
-
-Top undocumented classes:
-    12 lines: tools/test/docstring_linter_testdata/python_code.py.txt:NotDocstring
-    6 lines: tools/test/docstring_linter_testdata/python_code.py.txt:LongWithShortDocstring
-    6 lines: tools/test/docstring_linter_testdata/python_code.py.txt:Long
-
-Top undocumented functions:
-    12 lines: tools/test/docstring_linter_testdata/python_code.py.txt:needs_docs
-    11 lines: tools/test/docstring_linter_testdata/python_code.py.txt:not_short

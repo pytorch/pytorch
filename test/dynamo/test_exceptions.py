@@ -177,7 +177,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     @make_dynamo_test
     def test_raise_match(self):
         a = AttributeError
@@ -259,7 +258,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_exception_with_ctx_manager(self):
         def fn(x):
             x = torch.cos(x)
@@ -853,7 +851,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         t = torch.randn(2)
         fn(t)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_user_defined_exception_with_args(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -889,6 +886,12 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_exceptions.py
+    def setUp(self):
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     @make_dynamo_test
     def testChainingAttrs(self):
@@ -976,7 +979,6 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         assert exc is oe
         assert exc.__context__ is ve
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_raise_does_not_create_context_chain_cycle(self):
         A = AssertionError
@@ -1015,7 +1017,6 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(c.__context__, b)
         self.assertIsNone(b.__context__)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_no_hang_on_context_chain_cycle1(self):
         # See issue 25782. Cycle in context chain.
@@ -1071,7 +1072,6 @@ class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIs(b.__context__, a)
         self.assertIs(a.__context__, c)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_no_hang_on_context_chain_cycle3(self):
         # See issue 25782. Longer context chain with cycle.
