@@ -129,6 +129,13 @@ class PaddedTensor(torch.Tensor):
             requires_grad=tensor.requires_grad,
         )
 
+        ## Mark dynamic
+        # for dim in padded_tensor.shape:
+        #    torch._dynamo.mark_dynamic(padded_tensor, dim)
+
+        # for dim in original_tensor.shape:
+        #    torch._dynamo.mark_dynamic(original_tensor, dim)
+
         return PaddedTensor(padded_tensor, multipliers, original_tensor)
 
     def __repr__(self):

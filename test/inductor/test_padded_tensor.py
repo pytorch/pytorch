@@ -1,3 +1,5 @@
+import time
+
 import torch
 from torch._inductor.experimental.padded_tensor import PaddedTensor
 from torch._inductor.test_case import run_tests, TestCase
@@ -81,7 +83,7 @@ class PaddedTensorFunctionalTests(TestCase):
         for i in range(3, 9):
             # Set error_on_recompile to True after 3rd iteration.
             # TODO: We don't need this if we mark padded dimensions as dynamic.
-            if i == 5:
+            if i == 4:
                 torch._dynamo.config.error_on_recompile = True
 
             a = PaddedTensor.from_tensor(torch.randn([3, 5]), multipliers)
@@ -286,7 +288,24 @@ class ModelTests(TestCase):
         # Create csv header
         out_file = "transformer_padded_tensor_bench.csv"
         with open(out_file, "w") as f:
-            f.write("seqlen,method,time_ms")
+            f.write("seqlen,method,time_first_runs_ms,time_min_ms")
+
+        def do_bench(model, inputs):
+            torch.cuda.synchronize()
+
+            t_first_runs = 0
+            for _ in range(3):
+                t0 = time.time()
+                model(*inputs)
+                t_first_runs += time.time() - t0
+
+            # Convert t_min_run from s to ms
+            t_first_runs = t_first_runs * 1000
+
+            torch.cuda.synchronize()
+            t_min = benchmarker.benchmark_gpu(lambda: model(*inputs))
+
+            return t_first_runs, t_min
 
         def run_compile(bsz, seqlen_max, bound_max, model_name):
             with torch.device("cuda"), torch.no_grad():
@@ -304,11 +323,11 @@ class ModelTests(TestCase):
                         torch.arange(0, seqlen, dtype=torch.int32),
                     )
 
-                    t = benchmarker.benchmark_gpu(lambda: transformer(*inputs))
-                    print(t)
+                    t_first_runs, t_min = do_bench(transformer, inputs)
+                    print(t_first_runs, t_min)
 
                     with open(out_file, "a") as f:
-                        f.write(f"\n{seqlen},compile,{t}")
+                        f.write(f"\n{seqlen},compile,{t_first_runs},{t_min}")
 
         def run_reduce_overhead(bsz, seqlen_max, bound_max, model_name):
             with torch.device("cuda"), torch.no_grad():
@@ -328,13 +347,12 @@ class ModelTests(TestCase):
                         torch.arange(0, seqlen, dtype=torch.int32),
                     )
 
-                    # 3 iterations warmup
                     torch.compiler.cudagraph_mark_step_begin()
-                    t = benchmarker.benchmark_gpu(lambda: transformer(*inputs))
-                    print(t)
+                    t_first_runs, t_min = do_bench(transformer, inputs)
+                    print(t_first_runs, t_min)
 
                     with open(out_file, "a") as f:
-                        f.write(f"\n{seqlen},reduce_overhead,{t}")
+                        f.write(f"\n{seqlen},reduce_overhead,{t_first_runs},{t_min}")
 
         def run_reduce_overhead_padded(
             bsz, seqlen_max, bound_max, seqlen_multiple, model_name
@@ -369,24 +387,25 @@ class ModelTests(TestCase):
                     ]
 
                     torch.compiler.cudagraph_mark_step_begin()
-
-                    t = benchmarker.benchmark_gpu(lambda: transformer(*inputs_p))
-                    print(t)
+                    t_first_runs, t_min = do_bench(transformer, inputs_p)
+                    print(t_first_runs, t_min)
 
                     with open(out_file, "a") as f:
-                        f.write(f"\n{seqlen},reduce_overhead_padded,{t}")
+                        f.write(
+                            f"\n{seqlen},reduce_overhead_padded-{seqlen_multiple},{t_first_runs},{t_min}"
+                        )
 
-        bsz, seqlen_max = 1, 128
-        seqlen_multiple = 16
+        bsz, seqlen_max = 1, 256
 
         bound_max = 128
         model_name = "llama-3-8b"
 
         run_compile(bsz, seqlen_max, bound_max, model_name)
         run_reduce_overhead(bsz, seqlen_max, bound_max, model_name)
-        run_reduce_overhead_padded(
-            bsz, seqlen_max, bound_max, seqlen_multiple, model_name
-        )
+
+        run_reduce_overhead_padded(bsz, seqlen_max, bound_max, 4, model_name)
+        run_reduce_overhead_padded(bsz, seqlen_max, bound_max, 8, model_name)
+        run_reduce_overhead_padded(bsz, seqlen_max, bound_max, 16, model_name)
 
 
 if __name__ == "__main__":
