@@ -7007,7 +7007,15 @@ class MockFXGraphCache:
         return gm
 
     def load_with_key(
-        self, key, debug_lines, inputs, local, remote_cache, is_backward, constants, evaluate_guards
+        self,
+        key,
+        debug_lines,
+        inputs,
+        local,
+        remote_cache,
+        is_backward,
+        constants,
+        evaluate_guards,
     ):
         gm = self.cache.get(key)
         if gm is not None:
