@@ -52,6 +52,13 @@ class TORCH_API PrefixStore : public Store {
   // Returns true if this store support append, multiGet and multiSet
   bool hasExtendedApi() const override;
 
+  void queuePush(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
+
+  int64_t queueLen(const std::string& key) override;
+
   c10::intrusive_ptr<Store> getUnderlyingStore();
 
   // Recursively to fetch the store before layers of wrapping with PrefixStore.
