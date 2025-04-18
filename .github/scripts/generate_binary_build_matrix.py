@@ -130,7 +130,7 @@ def read_nccl_pin(arch_version: str) -> str:
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
     nccl_release_tag = read_nccl_pin(arch_version)
-    wheel_ver = get_nccl_wheel_version(arch_version)
+    wheel_ver = get_nccl_wheel_version(arch_version).split('.post')[0]
     if not nccl_release_tag.startswith(f"v{wheel_ver}"):
         raise RuntimeError(
             f"{arch_version} NCCL release tag version {nccl_release_tag} does not correspond to wheel version {wheel_ver}"
