@@ -3838,6 +3838,9 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(
         {
             "max_autotune": True,
@@ -3845,11 +3848,6 @@ class CommonTemplate:
         }
     )
     def test_linear_dynamic_maxautotune(self):
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
-
         @torch.compile(dynamic=True)
         class Model(torch.nn.Module):
             def __init__(self) -> None:
