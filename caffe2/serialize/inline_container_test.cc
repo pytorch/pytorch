@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/Logging.h>
+#include "c10/core/CPUAllocator.h"
 #include "c10/util/irange.h"
 #include "caffe2/serialize/inline_container.h"
 
@@ -430,6 +431,199 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
   SetAPIUsageMetadataLogger(
       [&](const std::string& context,
           const std::map<std::string, std::string>& metadata_map) {});
+}
+
+class TestAllocator : public at::Allocator {
+ public:
+
+  explicit TestAllocator(at::Allocator* allocator): baseAllocator_(allocator) {}
+  at::DataPtr allocate(size_t nbytes) override {
+  allocatedBytes_ += nbytes;
+  return baseAllocator_->allocate(nbytes);
+  }
+  at::DeleterFnPtr raw_deleter() const override {
+    return baseAllocator_->raw_deleter();
+  }
+  void copy_data(void* dest, const void* src, std::size_t count) const override {
+    default_copy_data(dest, src, count);
+  }
+  size_t getAllocatedBytes() {
+    return allocatedBytes_;
+  }
+ private:
+  at::Allocator* baseAllocator_;
+  size_t allocatedBytes_{0};
+};
+
+TEST(PyTorchStreamWriterAndReader, SaveAndLoadWithAllocator) {
+  // create two test allocators, ones is supposed to be the default allocator
+  // the other one is only used when user specifies it
+  auto defaultAllocator = at::GetCPUAllocator();
+  TestAllocator overrideAllocator(defaultAllocator);
+  TestAllocator baseAllocator(defaultAllocator);
+  c10::SetCPUAllocator(&baseAllocator, 10 /* priority */);
+
+  std::ostringstream oss;
+  // write records through writers
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+  const size_t kBytes1 = 127;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes1> data1;
+  // Inplace memory buffer
+  std::vector<uint8_t> buf(data1.size());
+
+  for (auto i : c10::irange(data1.size())) {
+    data1[i] = data1.size() - i;
+  }
+  writer.writeRecord("key1", data1.data(), data1.size());
+
+  const size_t kBytes2 = 64;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes2> data2;
+  for (auto i : c10::irange(data2.size())) {
+    data2[i] = data2.size() - i;
+  }
+  writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
+
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = oss.str();
+  const char* file_name = "output.zip";
+  std::ofstream foo(file_name);
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  std::istringstream iss(the_file);
+
+  // read records through readers
+  PyTorchStreamReader reader(&iss);
+  ASSERT_TRUE(reader.hasRecord("key1"));
+  ASSERT_TRUE(reader.hasRecord("key2"));
+  ASSERT_FALSE(reader.hasRecord("key2000"));
+  // get the bytes allocated byfore read
+  const auto allocBytes = baseAllocator.getAllocatedBytes();
+  at::DataPtr data_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t size;
+  // allocated with override allocator
+  std::tie(data_ptr, size) = reader.getRecord("key1", &overrideAllocator);
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes);
+  // allcoate with base allocator
+  std::tie(data_ptr, size) = reader.getRecord("key1");
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1);
+
+  std::tie(data_ptr, size) = reader.getRecord("key2", &overrideAllocator);
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1 + kBytes2);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1);
+  std::tie(data_ptr, size) = reader.getRecord("key2");
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1 + kBytes2);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1 + kBytes2);
+  std::tie(data_ptr, size) = reader.getRecord("key2", &baseAllocator);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1 + 2 * kBytes2);
+}
+
+
+TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreadsWithAllocator) {
+  auto defaultAllocator = at::GetCPUAllocator();
+  TestAllocator overrideAllocator(defaultAllocator);
+  TestAllocator baseAllocator(defaultAllocator);
+  c10::SetCPUAllocator(&baseAllocator, 10 /* priority */);
+  std::ostringstream oss;
+  // write records through writers
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+
+  const size_t kBytes1 = 127;
+  const size_t kBytes2 = 64;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes1> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes2> data2;
+  for (auto i : c10::irange(data1.size())) {
+    data1[i] = data1.size() - i;
+  }
+  writer.writeRecord("key1", data1.data(), data1.size());
+
+  for (auto i : c10::irange(data2.size())) {
+    data2[i] = data2.size() - i;
+  }
+  writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
+
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = oss.str();
+  const char* file_name = "output.zip";
+  std::ofstream foo(file_name);
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  // read records through pytorchStreamReader
+  std::istringstream iss(the_file);
+  PyTorchStreamReader reader(&iss);
+  reader.setAdditionalReaderSizeThreshold(0);
+  // before testing, sanity check
+  int64_t size1, size2, ret;
+  at::DataPtr data_ptr;
+  std::tie(data_ptr, size1) = reader.getRecord("key1");
+  std::tie(data_ptr, size2) = reader.getRecord("key2");
+
+  // Test getRecord(name, additional_readers)
+  std::vector<std::shared_ptr<ReadAdapterInterface>> additionalReader;
+  size_t allocatedBytes = 0;
+  auto baseAllocBytes = baseAllocator.getAllocatedBytes();
+  for (int i = 0; i < 10; ++i) {
+    // Test various sized additional readers.
+    std::tie(data_ptr, ret) = reader.getRecord("key1", additionalReader, &overrideAllocator);
+    ASSERT_EQ(ret, size1);
+    allocatedBytes += size1;
+    EXPECT_EQ(overrideAllocator.getAllocatedBytes(), allocatedBytes);
+    EXPECT_EQ(baseAllocator.getAllocatedBytes(), baseAllocBytes);
+    ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), size1), 0);
+
+    baseAllocBytes += size2;
+    std::tie(data_ptr, ret) = reader.getRecord("key2", additionalReader);
+    ASSERT_EQ(ret, size2);
+    ASSERT_EQ(memcmp(data_ptr.get(), data2.data(), size2), 0);
+    EXPECT_EQ(overrideAllocator.getAllocatedBytes(), allocatedBytes);
+    EXPECT_EQ(baseAllocator.getAllocatedBytes(), baseAllocBytes);
+  }
+
+  // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
+  additionalReader.clear();
+  std::vector<uint8_t> dst1(size1), dst2(size2);
+  for (int i = 0; i < 10; ++i) {
+    // Test various sizes of read threads
+    additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
+
+    ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
+    ASSERT_EQ(ret, size1);
+
+    ret = reader.getRecord("key2", dst2.data(), size2, additionalReader);
+    ASSERT_EQ(ret, size2);
+  }
+  // clean up
+  remove(file_name);
 }
 
 class ChunkRecordIteratorTest : public ::testing::TestWithParam<int64_t> {};
