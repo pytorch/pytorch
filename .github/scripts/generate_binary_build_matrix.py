@@ -30,7 +30,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 # NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
-ROCM_ARCHES = ["6.2.4", "6.3"]
+ROCM_ARCHES = ["6.3", "6.4"]
 
 XPU_ARCHES = ["xpu"]
 

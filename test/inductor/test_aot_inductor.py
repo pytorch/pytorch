@@ -27,11 +27,7 @@ from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQu
 from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import (
-    IS_SM89,
-    PLATFORM_SUPPORTS_FP8,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     skipCUDAIf,
@@ -53,7 +49,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
 from torch.utils import _pytree as pytree
@@ -513,6 +509,9 @@ class AOTInductorTestsTemplate:
                 model = LinearModel(device=self.device)
                 self.check_model(model, example_inputs)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_linear_dynamic_maxautotune(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
@@ -631,6 +630,9 @@ class AOTInductorTestsTemplate:
             actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
             self.assertTrue(same(model(*example_inputs), actual))
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @skip("Test was marked as expected failure, but does not fail always anymore.")
     def test_dynamic_smem_above_default_limit(self):
         if self.device == "cpu":
@@ -956,8 +958,7 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        IS_SM89,
-        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     def test_addmm_multiple_dynamic(self):
         if self.device == "cpu":
@@ -1000,8 +1001,7 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        IS_SM89,
-        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     def test_bmm_multiple_dynamic(self):
         if self.device == "cpu":
@@ -3128,6 +3128,9 @@ class AOTInductorTestsTemplate:
         inputs = (torch.randn(4, 4, device=self.device),)
         self.check_model(Model(), inputs)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_convolution(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
@@ -3579,6 +3582,41 @@ class AOTInductorTestsTemplate:
             optimized = torch._inductor.aoti_load_package(pt2_file)
 
             self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
+
+    def test_aoti_data_dependent_extern_kernel_op(self):
+        # Skip GPY because custom op only implemented for cpu
+        if self.device == GPU_TYPE:
+            raise unittest.SkipTest("skips for GPU")
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                assert a[0] != 0
+                return a + b
+
+            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            def foo_fake_impl(a, b):
+                return a + b
+
+            class Model(torch.nn.Module):
+                def forward(self, a, b):
+                    res = torch.ops.mylib.foo(a, b)
+                    return res
+
+            example_inputs = (torch.ones(10), torch.randn(10))
+            from torch._functorch import config as functorch_config
+
+            # use this config to mimic FakeTensors resulting from
+            # draft export
+            with functorch_config.patch({"fake_tensor_propagate_real_tensors": True}):
+                self.check_model(Model(), example_inputs)
 
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
