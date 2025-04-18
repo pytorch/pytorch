@@ -211,10 +211,13 @@ def _check_bf16_tensor_supported(device: _device_t):
 
 def is_tf32_supported() -> bool:
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
-    # For AMD GPUs, tf32 is supported on mi300.
     if torch.version.hip:
-        prop = torch.cuda.get_device_properties()
-        return "gfx94" in prop.gcnArchName
+        prop_name = torch.cuda.get_device_properties().gcnArchName
+        archs = ("gfx94", "gfx95")
+        for arch in archs:
+            if arch in prop_name:
+                return True
+        return False
 
     # Otherwise, tf32 is supported on CUDA platforms that natively (i.e. no emulation)
     # support bfloat16.
