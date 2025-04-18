@@ -1,5 +1,5 @@
 # @lint-ignore-every FBCODEBZLADDLOADS
-load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("@fbsource//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
 # shared by internal and OSS BUCK
 def define_tools_targets(

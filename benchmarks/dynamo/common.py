@@ -81,6 +81,7 @@ log = logging.getLogger(__name__)
 
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
 
 # Suppress torch.profiler spam
 os.environ["KINETO_LOG_LEVEL"] = "5"
@@ -1395,9 +1396,11 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
+                # This will cause memory stats to be overshadowed by this eager run.
+                # To fix that, memory stats will be reset later.
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
-            if pytree._is_namedtuple_instance(example_outputs):
+            if pytree.is_namedtuple_instance(example_outputs):
                 typ = type(example_outputs)
                 pytree._register_namedtuple(
                     typ,
@@ -1410,6 +1413,14 @@ class AOTInductorModelCache:
             dynamic_shapes = _tree_map_with_path(
                 _produce_dynamic_shapes_for_export, combined_args
             )
+
+            # delete example_outputs and reset memory stats here
+            del example_outputs
+            if current_device == "cuda":
+                torch.cuda.reset_peak_memory_stats()
+                empty_gpu_cache(current_device)
+            elif current_device == "hpu":
+                torch.hpu.reset_peak_memory_stats()
 
             ep = torch.export.export(
                 model,
@@ -3542,21 +3553,14 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
+        if args.devices == ["xpu"]:
+            torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        # TODO(eqy): revisit when cuBLASLt workspace size is bumped
-        # if args.only is not None and args.only in {
-        #     "DebertaForQuestionAnswering",
-        #     "RobertaForQuestionAnswering",
-        #     "nvidia_deeprecommender",
-        #     "volo_d1_224",
-        # }:
-        #     # These seem unhappy with numerics of larger cuBLASLt workspace
-        #     # sizes following #145130 (due to enabling split-k?)
-        #     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
 
         torch.backends.mkldnn.deterministic = True
 

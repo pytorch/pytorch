@@ -13,12 +13,18 @@ import os
 import pickle
 import shutil
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
-from torch._dynamo.utils import CompileEventLogger, counters
+from torch._dynamo.utils import (
+    CHROMIUM_EVENT_LOG,
+    CompileEventLogger,
+    counters,
+    dynamo_timed,
+)
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -139,6 +145,12 @@ def check_node_safe(node: Node):
     def is_safe_torch_function(target):
         """Allowlisted torch functions"""
         function_name = f"{target.__module__}.{target.__name__}"
+        # Allow torch.autograd.function.FunctionCtx if custom autograd functions are allowed
+        if function_name == "torch.autograd.function.FunctionCtx":
+            return (
+                torch._functorch.config.autograd_cache_allow_custom_autograd_functions
+            )
+
         # Functions in torch_non_c_binding_in_graph_functions
         # are guaranteed to be cache safe.
         # See NOTE: [Cacheability of in-graph torch functions]
@@ -152,6 +164,10 @@ def check_node_safe(node: Node):
             return True
         if is_public_torch_api(target):
             return True
+        # Technically, FXGraphCache._check_for_hop already checks this,
+        # but better to error earlier anyway
+        if isinstance(target, torch._ops.HigherOrderOperator):
+            return target.cacheable()
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
         if is_builtin_fun_or_type:
             return True
@@ -265,7 +281,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
-            raise BypassAOTAutogradCache from e
+            raise BypassAOTAutogradCache(str(e)) from e
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
@@ -344,7 +360,7 @@ def autograd_cache_key(
 
 @dataclass
 class FXGraphCacheLoadable:
-    fx_graph_cache_key: str
+    fx_graph_cache_info: tuple[str, list[str]]
 
     def is_backward(self) -> bool:
         return False
@@ -363,14 +379,16 @@ class FXGraphCacheLoadable:
         # so we can call it only after we're sure both forward and backward have
 
         # TODO: We don't cache debug lines for now, but we should for improved debugging
+        # Clear CompiledTritonKernels before loading from FXGraphCache
+        torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
         remote_cache = None
         constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
             remote_cache = FxGraphCache.get_remote_cache()
-
+        (cache_key, debug_lines) = self.fx_graph_cache_info
         result, cache_info = FxGraphCache.load_with_key(
-            self.fx_graph_cache_key,
-            [],
+            cache_key,
+            debug_lines,
             example_inputs,
             local=True,
             remote_cache=remote_cache,
@@ -378,7 +396,7 @@ class FXGraphCacheLoadable:
             constants=constants,
         )
         if result is None:
-            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
+            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_info)
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
@@ -470,6 +488,9 @@ class AOTAutogradCacheEntry:
     forward_time_taken_ns: int
     backward_time_taken_ns: int
 
+    # Used by standalone_compile
+    sanitized_aot_config: AOTConfig
+
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
@@ -537,45 +558,45 @@ class AOTAutogradCacheEntry:
                 torch._logging.trace_structured(
                     "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
                 )
+        with dynamo_timed("AOTAutogradCache.inductor_load"):
+            compiled_fw_func = self.compiled_fw.load(args)
+            compiled_bw_func = None
+            if self.compiled_bw is not None:
+                compiled_bw_func = self.compiled_bw.load(args)
+                needs_autograd = True
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile", dispatch_mode="autograd"
+                )
+                # Now that we've loaded forward and backward, call post compile on both
+                # This avoids setting things like BoxedBools in fx_config until
+                # after both forward and backward cache hit
+                fw_fx_config: _CompileFxKwargs = {
+                    **fx_config,
+                    "is_backward": False,
+                }
+                bw_fx_config: _CompileFxKwargs = {
+                    **fx_config,
+                    "is_backward": True,
+                }
+                compiled_fw_func = self.compiled_fw.post_compile(
+                    compiled_fw_func, fw_fx_config
+                )
+                compiled_bw_func = self.compiled_bw.post_compile(
+                    compiled_bw_func, bw_fx_config
+                )
+            else:
+                inference_fx_config: _CompileFxKwargs = {
+                    **fx_config,
+                    "is_backward": False,
+                }
 
-        compiled_fw_func = self.compiled_fw.load(args)
-        compiled_bw_func = None
-        if self.compiled_bw is not None:
-            compiled_bw_func = self.compiled_bw.load(args)
-            needs_autograd = True
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile", dispatch_mode="autograd"
-            )
-            # Now that we've loaded forward and backward, call post compile on both
-            # This avoids setting things like BoxedBools in fx_config until
-            # after both forward and backward cache hit
-            fw_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": False,
-            }
-            bw_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": True,
-            }
-            compiled_fw_func = self.compiled_fw.post_compile(
-                compiled_fw_func, fw_fx_config
-            )
-            compiled_bw_func = self.compiled_bw.post_compile(
-                compiled_bw_func, bw_fx_config
-            )
-        else:
-            inference_fx_config: _CompileFxKwargs = {
-                **fx_config,
-                "is_backward": False,
-            }
-
-            needs_autograd = False
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile", dispatch_mode="inference"
-            )
-            compiled_fw_func = self.compiled_fw.post_compile(
-                compiled_fw_func, inference_fx_config
-            )
+                needs_autograd = False
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile", dispatch_mode="inference"
+                )
+                compiled_fw_func = self.compiled_fw.post_compile(
+                    compiled_fw_func, inference_fx_config
+                )
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -588,7 +609,7 @@ class AOTAutogradCacheEntry:
         )
 
         req_subclass_dispatch = self.maybe_subclass_meta is not None
-        CompileEventLogger.pt2_compile(
+        CompileEventLogger.try_add_pt2_compile(
             "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
@@ -806,6 +827,10 @@ class AOTAutogradCache:
                 cache_state = "bypass"
                 cache_event_time = time.time_ns()
                 cache_info["cache_bypass_reason"] = str(e)
+                cache_info["cache_bypass_exception_type"] = type(e).__name__
+                cache_info["cache_bypass_traceback"] = traceback.format_exc().split(
+                    "\n"
+                )
                 # TODO: this gets logged implicitly by cache_bypass_reason,
                 # and here we explicitly log it into tlparse.
                 # We may want to log this as an extra column in Scuba, though.
@@ -831,21 +856,22 @@ class AOTAutogradCache:
                     "components": debug_lines,
                 }
             )
-            CompileEventLogger.instant(
-                f"autograd_cache_{cache_state}",
-                metadata=cache_info,
-                time_ns=cache_event_time,
-            )
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile",
-                cache_state=cache_state,
-                cache_event_time=cache_event_time,
-                key=cache_info.get("key"),
-                components=cache_info.get("components"),
-                cache_bypass_reason=cache_info.get("cache_bypass_reason"),
-                remote_cache_enabled=remote,
-                local_cache_enabled=local,
-            )
+            if CHROMIUM_EVENT_LOG:
+                CompileEventLogger.instant(
+                    f"autograd_cache_{cache_state}",
+                    metadata=cache_info,
+                    time_ns=cache_event_time,
+                )
+                CompileEventLogger.try_add_pt2_compile(
+                    "backend_compile",
+                    cache_state=cache_state,
+                    cache_event_time=cache_event_time,
+                    key=cache_info.get("key"),
+                    components=cache_info.get("components"),
+                    cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+                    remote_cache_enabled=remote,
+                    local_cache_enabled=local,
+                )
 
             torch._logging.trace_structured(
                 "artifact",

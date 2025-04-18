@@ -6,7 +6,7 @@ from torch._C import _add_docstr as add_docstr
 from torch._torch_docs import parse_kwargs, reproducibility_notes
 
 
-def add_docstr_all(method, docstr):
+def add_docstr_all(method: str, docstr: str) -> None:
     add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
@@ -5196,6 +5196,13 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
     has the correct :class:`torch.dtype` and :class:`torch.device`, then ``self`` is returned.
     Otherwise, the returned tensor is a copy of ``self`` with the desired
     :class:`torch.dtype` and :class:`torch.device`.
+
+.. note::
+
+    If ``self`` requires gradients (``requires_grad=True``) but the target
+    ``dtype`` specified is an integer type, the returned tensor will implicitly
+    set ``requires_grad=False``. This is because only tensors with
+    floating-point or complex dtypes can require gradients.
 
 Here are the ways to call ``to``:
 

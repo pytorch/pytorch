@@ -5941,8 +5941,8 @@ class TestAOTModuleSimplified(AOTTestCase):
         self.assertExpectedInline(
             shape_env.format_guards(),
             """\
- - Eq(s1, 20)
- - Eq(s2, 30)""",
+ - Eq(s49, 20)
+ - Eq(s70, 30)""",
         )
 
         assert torch.allclose(ref[0], res[0])
@@ -6495,6 +6495,7 @@ metadata incorrectly.
     @parametrize("dynamic_shapes", [True, False])
     @parametrize("test_subclasses", [True, False])
     @parametrize("device", ["cuda", "cpu"])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_noncontig_nonmemformat_tangents(
         self, dynamic_shapes, test_subclasses, device
     ):
@@ -6560,6 +6561,7 @@ metadata incorrectly.
 
             self.assertEqual(ref_x.grad, x.grad)
 
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
@@ -7011,7 +7013,8 @@ class MockFXGraphCache:
         if gm is not None:
             gm = make_boxed_func(gm)
             gm = MockFXGraphCacheOutput(gm)
-            gm._fx_graph_cache_key = key
+            gm._fx_graph_cache_key = key  # (cache_key, debug lines)
+            gm._fx_graph_cache_debug_lines = []
             gm._time_taken_ns = 0
         return gm, {}
 
