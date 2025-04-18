@@ -136,6 +136,12 @@ class IterationRanges:
 
 
 class IterationRangesRoot(IterationRanges):
+    """
+    Root of a iteration range tree that represents a single
+    tiled dimension in the output kernel. It contains muliple
+    sets of iteration represented with IterationRangesEntry.
+    """
+
     def __init__(
         self,
         name: str,
