@@ -22,6 +22,7 @@ GPU_ARCH_VERSION=${GPU_ARCH_VERSION:-}
 MANY_LINUX_VERSION=${MANY_LINUX_VERSION:-}
 DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
 WITH_PUSH=${WITH_PUSH:-}
+OPENBLAS_VERSION=${OPENBLAS_VERSION:-}
 
 case ${GPU_ARCH_TYPE} in
     cpu)
@@ -50,6 +51,7 @@ case ${GPU_ARCH_TYPE} in
         GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11 --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
+        OPENBLAS_VERSION="v0.3.29"
         ;;
     cpu-cxx11-abi)
         TARGET=final
@@ -133,6 +135,7 @@ fi
     DOCKER_BUILDKIT=1 docker build  \
         ${DOCKER_GPU_BUILD_ARG} \
         --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
+        --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION}" \
         --target "${TARGET}" \
         -t "${DOCKER_IMAGE}" \
         $@ \
