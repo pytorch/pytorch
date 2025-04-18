@@ -2,6 +2,11 @@
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
+#include <c10/util/irange.h>
+
+#include <algorithm>
+#include <array>
+#include <utility>
 
 namespace c10::impl {
 
@@ -15,6 +20,78 @@ namespace {
     }
   }
 #endif
+}
+
+class DispatchKeyRangeIterator {
+  using iterator_type = c10::detail::integer_iterator<uint16_t>;
+ public:
+  using iterator_category = iterator_type::iterator_category;
+  using value_type = DispatchKey;
+  using difference_type = iterator_type::difference_type;
+  using reference = value_type;
+  using pointer = void; // omit operator->
+
+  explicit constexpr DispatchKeyRangeIterator(DispatchKey value) : it_(static_cast<uint16_t>(value)) {}
+
+  constexpr reference operator*() const {
+    return static_cast<reference>(*it_);
+  }
+
+  constexpr DispatchKeyRangeIterator& operator++() {
+    ++it_;
+    return *this;
+  };
+
+  constexpr DispatchKeyRangeIterator operator++(int) {
+    const auto copy = *this;
+    ++(*this);
+    return copy;
+  }
+
+  constexpr bool operator==(const DispatchKeyRangeIterator& rhs) const {
+    return it_ == rhs.it_;
+  }
+
+  constexpr bool operator!=(const DispatchKeyRangeIterator& rhs) const {
+    return it_ != rhs.it_;
+  }
+
+  iterator_type it_;
+};
+
+class DispatchKeyRange {
+ public:
+  constexpr DispatchKeyRange(DispatchKey begin, DispatchKey end) : begin_(begin), end_(end) {}
+  constexpr DispatchKeyRangeIterator begin() const {
+    return begin_;
+  }
+
+  constexpr DispatchKeyRangeIterator end() const {
+    return end_;
+  }
+ private:
+  DispatchKeyRangeIterator begin_;
+  DispatchKeyRangeIterator end_;
+};
+
+static constexpr auto allDispatchKeysInFullSet() {
+  return DispatchKeyRange(static_cast<DispatchKey>(1), DispatchKey::EndOfFunctionalityKeys);
+}
+
+// Returns
+// [(dispatch_key, getDispatchTableIndexForDispatchKey(dispatch_key))
+//  for all keys in DispatchKeySet(DispatchKeySet::FULL)]
+static const auto& getDispatchTableIndexToKey() {
+  static const auto result = ([]() {
+    std::array<DispatchKey, c10::num_runtime_entries> arr;
+    for (const auto dk: allDispatchKeysInFullSet()) {
+      const auto index = getDispatchTableIndexForDispatchKey(dk);
+      arr.at(index) = dk;
+    }
+    arr.at(getDispatchTableIndexForDispatchKey(DispatchKey::Undefined)) = DispatchKey::Undefined;
+    return arr;
+  })();
+  return result;
 }
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
@@ -31,8 +108,25 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
-  // OperatorEntry being created
-  updateDispatchTableFull_(c10::Dispatcher::singleton());
+  // OperatorEntry being created.
+
+  // We are essentially directly implementing
+  // updateDispatchTableFull_, taking into account that we know
+  // kernels_ is empty() and therefore
+  // computeDispatchTableEntryWithDebug cases 1 and 2.1 through 2.5
+  // won't do anything.
+  const auto& dispatcher = c10::Dispatcher::singleton();
+  const auto& dispatch_table_index_to_key = getDispatchTableIndexToKey();
+  for (const auto dispatch_ix: c10::irange(dispatcher.backendFallbackKernels_.size())) {
+    const auto& bfk = dispatcher.backendFallbackKernels_[dispatch_ix];
+    if (bfk.kernel.isValid()) {
+      dispatchTable_[dispatch_ix] = bfk.kernel;
+      if (bfk.kernel.isFallthrough()) {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dispatch_ix < dispatch_table_index_to_key.size());
+        dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_table_index_to_key[dispatch_ix], true);
+      }
+    }
+  }
 }
 
 namespace {
@@ -452,7 +546,7 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   // or CompositeImplicitAutograd alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, CompositeImplicitAutograd)
   // should return true, it returns false because Undefined cannot be represented in a DispatchKeySet.
   updateDispatchTable_(dispatcher, DispatchKey::Undefined);
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+  for (auto k : allDispatchKeysInFullSet()) {
     updateDispatchTable_(dispatcher, k);
   }
 }
@@ -466,7 +560,7 @@ void OperatorEntry::checkInvariants() const {
   for (const auto& kv : kernels_) {
     TORCH_INTERNAL_ASSERT(!kv.second.empty(), dumpState());
   }
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+  for (auto k : allDispatchKeysInFullSet()) {
     auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), k);
     auto idx = getDispatchTableIndexForDispatchKey(k);
     if (C10_UNLIKELY(idx == -1)) {
@@ -483,7 +577,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   str << "[";
 
   bool has_kernels = false;
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+  for (auto k : allDispatchKeysInFullSet()) {
     auto iter = getDispatchTableIndexForDispatchKey(k);
     if (iter == -1 || !dispatchTable_[iter].isValid()) {
       continue;
@@ -569,7 +663,7 @@ std::string OperatorEntry::dumpComputedTable() const {
   // Need to handle Undefined separately, because its a runtime key that can't be represented
   // in a DispatchKeySet.
   std::vector<DispatchKey> runtime_keys = {DispatchKey::Undefined};
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) runtime_keys.push_back(k);
+  for (auto k : allDispatchKeysInFullSet()) runtime_keys.push_back(k);
 
   for (auto k : runtime_keys) {
     auto kernel_prov = computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
