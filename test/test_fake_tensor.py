@@ -200,6 +200,7 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(torch.ones([10]), out[0])
 
+    @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_throw_in_zero_dim_cpu_tensor(self):
         # eager mode doesn't consider zero dim cpu tensor case, so this test case is to block addition of that case.
