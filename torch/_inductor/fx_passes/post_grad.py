@@ -485,6 +485,21 @@ def lazy_init():
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
+    if torch.distributed.is_available():
+
+        def check():
+            # This is a wait node, and `other_node`` is some collective node.
+            # Eager semantics allow waits to be issued in a different order than
+            # the collectives. Reordering this wait node might reorder collectives
+            # which cause hangs. Once we have SPMD mode, we can safely reorder them.
+            # However, increasing the locality between a collective and its wait node
+            # is generally worse for performance.
+            return node.target != torch.ops._c10d_functional.wait_tensor.default
+    else:
+
+        def check():
+            return True
+
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -492,6 +507,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
+            and check()
         ):
             # move node's producers right before it
             node.prepend(other_node)
@@ -813,9 +829,14 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
+
+    slice_dim_size = self.shape[dim]
     if (
         statically_known_true(sym_eq(start, 0))
-        and statically_known_true(end >= 2**63 - 1)
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_dim_size)
+        )
         and statically_known_true(sym_eq(step, 1))
     ):
         return True
@@ -828,7 +849,16 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         start = 0
     if end is None:
         end = 2**63 - 1
-    if start == 0 and end >= 2**63 - 1 and step == 1:
+    slice_scatter_dim_size = self.shape[dim]
+    if (
+        self.shape == src.shape
+        and start == 0
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_scatter_dim_size)
+        )
+        and step == 1
+    ):
         return True
     return False
 
@@ -868,9 +898,14 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp(aten.view)
-def view_noop(arg, size):
-    return arg.shape == size
+@register_noop_decomp(aten.view.default)
+def view_default_noop(arg, size):
+    return statically_known_true(sym_eq(arg.shape, tuple(size)))
+
+
+@register_noop_decomp(aten.view.dtype)
+def view_dtype_noop(arg, dtype):
+    return arg.dtype == dtype
 
 
 # Note, we also always have a check for identical metadata, which is why these

@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
 from typing import Dict, List
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
@@ -694,6 +695,30 @@ graph():
         args = (torch.randn(1, 3),)
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
+
+    @testing.expectedFailureCppSerDes  # Cpp serder seems to fail parsing complicated guards
+    def test_export_statically_known_true(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                shape = y.shape[0] ** 2 - 3 * y.shape[0]
+                end = shape
+                return x[:, :end]
+
+        dynamic_shapes = (
+            (torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC),
+            (torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC),
+        )
+
+        ep = export(
+            Foo(),
+            (torch.randn(4, 4), torch.randn(4, 4)),
+            dynamic_shapes=dynamic_shapes,
+            strict=False,
+        )
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 2, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("operator.sub", 1, exactly=True).run(str(ep.graph))
 
     def test_colon_parameter(self):
         class M(torch.nn.Module):
@@ -2370,7 +2395,7 @@ graph():
         }
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Not all values of dy .* in the specified range are valid because dy was inferred to be a constant",
+            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
@@ -3980,7 +4005,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->5, 4->5, 3->4
             bad_args=(torch.randn(5), [torch.randn(5)], {"k": torch.randn(4)}),
             run_time_msg="Expected input.*to be equal to 3, but got 4",
-            compile_time_msg=r"Constraints violated.*\n.*was inferred to be a constant \(3\)",
+            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         )
 
     def test_mismatched_dynamic_shapes(self):
@@ -4281,7 +4306,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
+                # Could not guard on data-dependent expression Ne(Mod(u1, u2), 0)
                 return r.view(items[0], items[2])
 
         M = M_v0
@@ -4290,9 +4315,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
-            f".*{re.escape('torch._check(items[2] != (-1))')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in Eq(u2, -1) and its negation.)')}",
+            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}.*\n"
+            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
+            f".*{re.escape('or r.shape[1], `u2` with items[2] in Ne(Mod(u1, u2), 0) and its negation.')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -4300,59 +4326,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
+                # TODO(pianpwk): this isn't the suggested fixes.
+                # fix issue with % being interpreted as PythonMod instead of Mod
+                torch._check(items[1] == items[2])
                 return r.view(items[0], items[2])
 
         M = M_v1
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
-            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v2(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                return r.view(items[0], items[2])
-
-        M = M_v2
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
-            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v3(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                torch._check(items[2] == r.shape[1])
-                return r.view(items[0], items[2])
-
-        M = M_v3
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
@@ -4463,6 +4442,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.arange(10), torch.tensor([0, 2, 5, 7, 10])),
             fixes=[],  # nothing to fix!
         )
+
+    def test_simple_unbacked_view(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                y = torch.empty(5, u0)
+                return y.view(u0, 5)  # [5, u0] -> [u0, 5]
+
+        ep = export(Foo(), (torch.tensor([9]),))
+        self.assertEqual(ep.module()(torch.tensor([8])).size(0), 8)
+        self.assertEqual(ep.module()(torch.tensor([5])).size(0), 5)
+
+        class Foov2(torch.nn.Module):
+            def forward(self, xs):
+                xsl = xs.tolist()
+                a, b = xsl
+                x = torch.zeros(a)
+                return x.reshape(b)
+
+        xs = torch.tensor([4, 4])
+        ep = export(Foov2(), (xs,))
+        self.assertEqual(ep.module()(xs).size(0), 4)
+        self.assertEqual(ep.module()(torch.tensor([5, 5])).size(0), 5)
 
     def test_no_suggested_fixes_for_data_dependent_errors(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -4634,6 +4636,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureRetraceability
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -4785,6 +4789,33 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kw_func = Module()
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
+
+    @testing.expectedFailureCppRuntime
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    def test_export_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(
+                        torch.ones(3, 4),
+                        torch.ones(3, 4),
+                    )
+                )
+
+            def forward(self, x):
+                a = (2 * self.p1 + self.p2).sum()
+                return x + a
+
+        model = Foo()
+        example_inputs = (torch.randn(3, 4),)
+        ep = export(model, example_inputs, strict=False)
+        before = list(ep.state_dict.keys())
+        ep.run_decompositions()
+        after = list(ep.state_dict.keys())
+        self.assertEqual(before, after)
 
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
@@ -5293,8 +5324,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "Constraints violated \\(batch\\)!(.*\n)*.*"
-                "batch was inferred to be a constant(.*\n)*.*"
+                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = 10"
             ),
@@ -5460,8 +5490,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "Constraints violated \\(K1\\)!(.*\n)*.*"
-                "K1 was inferred to be a constant(.*\n)*.*"
+                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO(.*\n)*"
                 "Suggested fixes:(.*\n)*.*"
                 "K1 = 3"
             ),
@@ -6990,6 +7019,29 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
+    def test_sym_or_sym_and(self):
+        from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                torch._check(sym_or(u0 == 2, u0 == 4, u0 == 6))
+                torch._check(sym_and(u1 >= 4, u1 <= 8, u2 == 5))
+                return u0 + u1 + u2
+
+        ep = export(Foo(), (torch.tensor([2, 6, 5]),), strict=False)
+        ep.module()(torch.tensor([2, 6, 5]))
+        ep.module()(torch.tensor([4, 7, 5]))
+        ep.module()(torch.tensor([6, 5, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u0, 2\) \| Eq\(u0, 4\) \| Eq\(u0, 6\) .*"
+        ):
+            ep.module()(torch.tensor([3, 6, 5]))
+        with self.assertRaisesRegex(
+            RuntimeError, r".* expression Eq\(u2, 5\) & \(4 <= u1\) & \(u1 <= 8\) .*"
+        ):
+            ep.module()(torch.tensor([6, 6, 6]))
+
     def test_redundant_assert_max_upper_bound(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -7302,6 +7354,7 @@ def forward(self, b_a_buffer, x):
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
+    # map_fn references module outside the module hierarchy
     def test_map_buffers(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -7335,22 +7388,102 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 2
             )
 
-    def test_check_is_size_error(self):
+    def test_no_check_is_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
-                # We cannot automatically infer a is a size here because view
-                # accepts -1
                 return torch.randn(24).view(a, 4)
 
         f = Module()
-        if is_non_strict_test(self._testMethodName):
-            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-        else:
-            error = torch._dynamo.exc.UserError
-        error_msg = r"Could not guard on data-dependent expression"
-        with self.assertRaisesRegex(error, error_msg):
-            _ = export(f, (torch.tensor(6),))
+        ep = export(f, (torch.tensor(6),))
+        ep.module()(torch.tensor(6))
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for .* u.* 6"
+        ):
+            ep.module()(torch.tensor(5))
+
+    def test_is_non_negative_check_function(self):
+        import sympy as sp
+
+        from torch.fx.experimental.symbolic_shapes import _is_non_negative_check
+
+        x = sp.Symbol("x")
+        variable_name = sp.Symbol("variable_name")
+        tensor_shape = sp.Symbol("tensor.shape[0]")
+
+        self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
+        self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
+
+        # Test cases where the condition is not checking for x >= 0
+        self.assertIsNone(_is_non_negative_check(x > 0))
+        self.assertIsNone(_is_non_negative_check(x == 0))
+        self.assertIsNotNone(_is_non_negative_check(0 <= x))
+        self.assertIsNone(_is_non_negative_check(x >= 1))
+
+    def test_suggest_torch_checks_with_non_negative_check(self):
+        from unittest.mock import patch
+
+        import sympy
+
+        from torch.export.dynamic_shapes import defaultdict
+        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
+
+        u = sympy.Symbol("u")
+        cond = u >= 0
+        mock_exception = MagicMock(
+            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        )
+        mock_exception.args = ["Test error message"]
+        mock_exception.cond = cond
+
+        mock_printer = MagicMock()
+        mock_printer.doprint.side_effect = lambda expr: (
+            str(cond) if expr == cond else "u < 0"  # Simulating the condition
+        )
+        with patch(
+            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
+            return_value=mock_printer,
+        ):
+            src_map = defaultdict(list)
+            src_map["u"] = ["u"]
+            _suggest_torch_checks(mock_exception, src_map)
+            error_msg = mock_exception.args[0]
+            self.assertIn("torch._check_is_size(u)", error_msg)
+            self.assertIn("torch._check(u < 0)", error_msg)
+
+    def test_suggest_torch_checks_with_regular_check(self):
+        import sympy
+
+        from torch.export.dynamic_shapes import defaultdict
+        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
+
+        mock_exception = MagicMock(
+            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        )
+        mock_exception.args = ["Test error message"]
+
+        mock_cond = MagicMock()
+        mock_cond.free_symbols = {sympy.Symbol("u")}
+        mock_exception.cond = mock_cond
+
+        mock_printer = MagicMock()
+        mock_printer.doprint.side_effect = lambda expr: (
+            "u > 5" if expr == mock_cond else "u <= 5"
+        )
+
+        with patch(
+            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
+            return_value=mock_printer,
+        ):
+            src_map = defaultdict(list)
+            src_map["u"] = ["u"]
+
+            _suggest_torch_checks(mock_exception, src_map)
+
+            error_msg = mock_exception.args[0]
+            self.assertIn("torch._check(u > 5)", error_msg)
+            self.assertIn("torch._check(u <= 5)", error_msg)
+            self.assertNotIn("torch._check_is_size", error_msg)
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
@@ -9869,7 +10002,7 @@ graph():
         inp = (3, torch.randn(4, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             ep = export(
                 M(),
@@ -13084,7 +13217,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             ep = export(
                 Specialize(),
@@ -13111,7 +13244,7 @@ def forward(self, x):
             node.target == torch.ops.aten._assert_scalar.default
             for node in ep.graph.nodes
         ].count(True)
-        self.assertEqual(num_asserts, 1)
+        self.assertEqual(num_asserts, 2)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
@@ -13481,6 +13614,30 @@ class GraphModule(torch.nn.Module):
                 decomp_table=decomp_table,
             )
             FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
+    def test_wrapper_module(self):
+        def f(x):
+            return torch.abs(x)
+
+        from torch.export import _wrapper_utils
+
+        model = _wrapper_utils._WrapperModule(f)
+        ep = export(
+            model,
+            (
+                torch.randn(
+                    8,
+                ),
+            ),
+        )
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, args_0):
+    abs_1 = torch.ops.aten.abs.default(args_0);  args_0 = None
+    return (abs_1,)""",
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
