@@ -944,16 +944,6 @@ class DistributedTestBase(MultiProcessTestCase):
         except OSError:
             pass
 
-    def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device :   # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else :
-            return "gloo"
-
     def create_pg(self, device):
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
@@ -963,7 +953,7 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store
         )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        if "nccl" in c10d.get_default_backend_for_device(device) or "xccl" in c10d.get_default_backend_for_device(device):
             torch.accelerator.set_device_index(self.rank)
         return torch.distributed.distributed_c10d._get_default_group()
 
