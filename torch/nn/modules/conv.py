@@ -922,7 +922,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: _size_1_t = 0,
+        padding: Union[str, _size_1_t] = 0,
         output_padding: _size_1_t = 0,
         groups: int = 1,
         bias: bool = True,
@@ -1124,7 +1124,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = _pair(padding)
+        padding = padding if isinstance(padding, str) else _pair(padding)
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
         super().__init__(
@@ -1156,7 +1156,6 @@ class ConvTranspose2d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose2d"
             )
 
-        assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 2

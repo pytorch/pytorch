@@ -1136,6 +1136,7 @@
     "_convert_indices_from_csr_to_coo",
     "_convolution",
     "_convolution_mode",
+    "_convolution_transpose_mode",
     "_copy_from",
     "_copy_from_and_resize",
     "_ctc_loss",
