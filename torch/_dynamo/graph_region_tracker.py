@@ -397,7 +397,7 @@ def _populate_recursive_ancestor_map(graph: torch.fx.Graph) -> dict[Node, set[No
                 node_to_recursive_ancestors[node].update(
                     node_to_recursive_ancestors[arg]
                 )
-                node_to_recursive_ancestors[node].add(node)
+                node_to_recursive_ancestors[node].add(arg)
     return node_to_recursive_ancestors
 
 
