@@ -200,6 +200,16 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
   auto sourceComm = source->getNcclComm();
+
+#ifdef NCCL_COMM_SPLIT_GROUP_RANKS_SUPPORTED
+  // pass group_ranks info to nccl through nccl_config
+  config.splitGroupSize = ranks_ull.size();
+  config.splitGroupRanks = new int[ranks_ull.size()];
+  for (int i = 0; i < ranks_ull.size(); ++i) {
+    config.splitGroupRanks[i] = ranks_ull[i];
+  }
+#endif
+
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
@@ -232,6 +242,11 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   // comm->ncclComm_ should have valid ptr by now, but not necessarily
   // initialized. Rely on getNcclComm() to wait for its initialization.
 #endif
+
+#ifdef NCCL_COMM_SPLIT_GROUP_RANKS_SUPPORTED
+  delete[] config.splitGroupRanks;
+#endif
+
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
   // Child comm should be on the same device as parent comm
