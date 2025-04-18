@@ -245,7 +245,9 @@ def async_save(
         pg = process_group or _get_default_group()
         assert (
             torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
-        ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
+        ), (
+            "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
+        )
 
     storage_writer = cast(
         StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
