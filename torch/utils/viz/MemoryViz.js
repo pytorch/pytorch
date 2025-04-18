@@ -113,7 +113,7 @@ function formatSize(num) {
   return `${num.toFixed(1)}YiB`;
 }
 function formatAddr(event) {
-  const prefix = event.action.startsWith('segment') ? 's' : 'b';
+  const prefix = event.action.startsWith('segment') ? 's\'' : 'b\'';
   return `${prefix}${event.addr.toString(16)}_${event.version}`;
 }
 function formatEvent(event) {

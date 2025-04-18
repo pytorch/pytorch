@@ -15,10 +15,11 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, cast, NamedTuple, Optional, Union
 
 import pkg_resources
 
@@ -29,7 +30,6 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
-    IS_WINDOWS,
     retry_shell,
     set_cwd,
     shell,
@@ -171,346 +171,74 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "distributed/_shard/checkpoint/test_checkpoint"
-    "distributed/_shard/checkpoint/test_file_system_checkpoint"
-    "distributed/_shard/sharding_spec/test_sharding_spec",
-    "distributed/_shard/sharded_tensor/ops/test_embedding",
-    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
-    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
-    "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/tensor/test_attention",
 ]
 
-# whitelist of tests for s390x
-S390X_TESTLIST = [
-    "backends/xeon/test_launch.py",
-    "benchmark_utils/test_benchmark_utils.py",
-    "cpp/apply_utils_test",
-    "cpp/atest",
-    "cpp/basic",
-    "cpp/broadcast_test",
-    "cpp/cpu_generator_test",
-    "cpp/Dict_test",
-    "cpp/Dimname_test",
-    "cpp/dlconvertor_test",
-    "cpp/extension_backend_test",
-    "cpp/lazy_tensor_test",
-    "cpp/legacy_vmap_test",
-    "cpp/NamedTensor_test",
-    "cpp/native_test",
-    "cpp/operators_test",
-    "cpp/scalar_tensor_test",
-    "cpp/scalar_test",
-    "cpp/tensor_iterator_test",
-    "cpp/test_api",
-    "cpp/undefined_tensor_test",
-    "cpp/wrapdim_test",
-    "distributions/test_constraints",
-    "doctests",
-    "dynamo/test_activation_checkpointing",
-    "dynamo/test_after_aot",
-    "dynamo/test_aot_autograd",
-    "dynamo/test_aot_autograd_cache",
-    "dynamo/test_autograd_function",
-    "dynamo/test_backends",
-    "dynamo/test_backward_higher_order_ops",
-    "dynamo/test_base_output",
-    "dynamo/test_bytecode_utils",
-    "dynamo/test_compile",
-    "dynamo/test_comptime",
-    "dynamo/test_config",
-    "dynamo/test_ctx_manager",
-    "dynamo/test_cudagraphs",
-    "dynamo/test_cudagraphs_expandable_segments",
-    "dynamo/test_debug_utils",
-    "dynamo/test_decorators",
-    "dynamo/test_deviceguard",
-    "dynamo/test_export",
-    "dynamo/test_export_mutations",
-    "dynamo/test_frame_init",
-    "dynamo/test_fx_passes_pre_grad",
-    "dynamo/test_global",
-    "dynamo/test_guard_manager",
-    "dynamo/test_higher_order_ops",
-    "dynamo/test_hooks",
-    "dynamo/test_input_attr_tracking",
-    "dynamo/test_interop",
-    "dynamo/test_logging",
-    "dynamo/test_minifier",
-    "dynamo/test_model_output",
-    "dynamo/test_modes",
-    "dynamo/test_modules",
-    "dynamo/test_nops",
-    "dynamo/test_optimizers",
-    "dynamo/test_pre_dispatch",
-    "dynamo/test_profiler",
-    "dynamo/test_python_autograd",
-    "dynamo/test_recompiles",
-    "dynamo/test_recompile_ux",
-    "dynamo/test_reconstruct",
-    "dynamo/test_reorder_logs",
-    "dynamo/test_repros",
-    "dynamo/test_resume",
-    "dynamo/test_sdpa",
-    "dynamo/test_skip_non_tensor",
-    "dynamo/test_sources",
-    "dynamo/test_structured_trace",
-    "dynamo/test_subclasses",
-    "dynamo/test_subgraphs",
+S390X_BLOCKLIST = [
+    # these tests fail due to various reasons
+    "dynamo/test_misc",
+    "inductor/test_cpu_repro",
+    "inductor/test_cpu_select_algorithm",
+    "inductor/test_aot_inductor_arrayref",
+    "inductor/test_torchinductor_codegen_dynamic_shapes",
+    "lazy/test_meta_kernel",
+    "onnx/test_utility_funs",
+    "profiler/test_profiler",
+    "test_ao_sparsity",
+    "test_cpp_extensions_open_device_registration",
+    "test_jit",
+    "test_metal",
+    "test_mps",
     "dynamo/test_torchrec",
-    "dynamo/test_unspec",
-    "dynamo/test_utils",
-    "dynamo/test_verify_correctness",
-    "dynamo/test_view",
-    "export/test_db",
-    "export/test_experimental",
-    "export/test_export",
-    "export/test_export_nonstrict",
-    "export/test_export_training_ir_to_run_decomp",
-    "export/test_functionalized_assertions",
-    "export/test_hop",
-    "export/test_lift_unlift",
-    "export/test_passes",
-    "export/test_pass_infra",
-    "export/test_retraceability",
-    "export/test_schema",
-    "export/test_serdes",
-    "export/test_serialize",
-    "export/test_sparse",
-    "export/test_swap",
-    "export/test_tools",
-    "export/test_torchbind",
-    "export/test_tree_utils",
-    "export/test_unflatten",
-    "export/test_unflatten_training_ir",
-    "export/test_verifier",
-    "functorch/test_ac",
-    "functorch/test_control_flow",
-    "functorch/test_eager_transforms",
-    "functorch/test_logging",
-    "functorch/test_minifier",
-    "higher_order_ops/test_with_effects.py",
-    "inductor/test_auto_functionalize",
-    "inductor/test_autoheuristic",
-    "inductor/test_b2b_gemm",
-    "inductor/test_benchmarking",
-    "inductor/test_ck_backend",
-    "inductor/test_codecache",
-    "inductor/test_codegen_triton",
-    "inductor/test_combo_kernels",
-    "inductor/test_compiled_autograd",
-    "inductor/test_compiled_optimizers",
-    "inductor/test_compile_worker",
-    "inductor/test_config",
-    "inductor/test_control_flow",
+    "inductor/test_aot_inductor_utils",
     "inductor/test_coordinate_descent_tuner",
-    "inductor/test_cpp_wrapper_hipify",
+    "test_jiterator",
     "inductor/test_cpu_cpp_wrapper",
-    "inductor/test_cudagraph_trees",
-    "inductor/test_cudagraph_trees_expandable_segments",
-    "inductor/test_cuda_repro",
-    "inductor/test_custom_lowering",
-    "inductor/test_cutlass_backend",
-    "inductor/test_debug_trace",
-    "inductor/test_decompose_mem_bound_mm",
-    "inductor/test_dependencies",
-    "inductor/test_distributed_patterns",
-    "inductor/test_efficient_conv_bn_eval",
-    "inductor/test_extension_backend",
-    "inductor/test_external_callables",
-    "inductor/test_flex_attention",
-    "inductor/test_flex_decoding",
-    "inductor/test_foreach",
-    "inductor/test_fp8",
-    "inductor/test_fx_fusion",
-    "inductor/test_graph_transform_observer",
-    "inductor/test_group_batch_fusion",
-    "inductor/test_gpu_cpp_wrapper",
-    "inductor/test_halide",
-    "inductor/test_indexing",
+    "export/test_converter",
     "inductor/test_inductor_freezing",
-    "inductor/test_loop_ordering",
-    "inductor/test_memory",
-    "inductor/test_memory_planning",
-    "inductor/test_metrics",
-    "inductor/test_minifier",
-    "inductor/test_minifier_isolate",
-    "inductor/test_mmdecomp",
-    "inductor/test_padding",
-    "inductor/test_pad_mm",
-    "inductor/test_profiler",
-    "inductor/test_scatter_optimization",
-    "inductor/test_smoke",
-    "inductor/test_standalone_compile",
-    "inductor/test_torchbind",
-    "inductor/test_triton_cpu_backend",
-    "inductor/test_triton_extension_backend",
-    "inductor/test_triton_heuristics",
-    "inductor/test_triton_kernels",
-    "inductor/test_utils",
-    "inductor/test_xpu_basic",
-    "lazy/test_bindings",
-    "lazy/test_debug_util",
-    "lazy/test_extract_compiled_graph",
-    "lazy/test_functionalization",
-    "lazy/test_generator",
-    "lazy/test_reuse_ir",
-    "lazy/test_step_closures",
-    "lazy/test_ts_opinfo",
-    "nn/test_convolution.py",
-    "nn/test_dropout.py",
-    "nn/test_embedding.py",
-    "nn/test_init.py",
-    "nn/test_lazy_modules.py",
-    "nn/test_load_state_dict.py",
-    "nn/test_module_hooks.py",
-    "nn/test_multihead_attention.py",
-    "nn/test_packed_sequence.py",
-    "nn/test_parametrization.py",
-    "nn/test_pooling.py",
-    "nn/test_pruning.py",
-    "optim/test_lrscheduler",
-    "optim/test_swa_utils",
-    "profiler/test_cpp_thread",
-    "profiler/test_execution_trace",
-    "profiler/test_memory_profiler",
-    "profiler/test_record_function",
-    "profiler/test_torch_tidy",
-    "test_autocast",
-    "test_autograd",
-    "test_autograd_fallback",
-    "test_autoload",
-    "test_autoload_disable",
-    "test_autoload_enable",
-    "test_bundled_inputs",
-    "test_comparison_utils",
-    "test_compile_benchmark_util",
-    "test_complex",
-    "test_content_store",
-    "test_cpp_api_parity",
-    "test_cpp_extensions_aot_ninja",
-    "test_cpp_extensions_aot_no_ninja",
-    "test_cpp_extensions_jit",
-    "test_cpp_extensions_mtia_backend",
-    "test_cpp_extensions_stream_and_event",
-    "test_cuda",
-    "test_cuda_expandable_segments",
-    "test_cuda_multigpu",
-    "test_cuda_nvml_based_avail",
-    "test_cuda_primary_ctx",
-    "test_cuda_sanitizer",
-    "test_cuda_trace",
-    "test_custom_ops",
-    "test_datapipe",
-    "test_deploy",
-    "test_dispatch",
-    "test_dlpack",
-    "test_dynamic_shapes",
-    "test_expanded_weights",
-    "test_fake_tensor",
-    "test_file_check",
-    "test_flop_counter",
-    "test_functionalization",
-    "test_functionalization_of_rng_ops",
-    "test_functional_optim",
-    "test_function_schema",
-    "test_futures",
-    "test_hub",
-    "test_import_stats",
-    "test_indexing",
-    "test_itt",
-    "test_legacy_vmap",
-    "test_logging",
-    "test_masked",
-    "test_maskedtensor",
-    "test_matmul_cuda",
-    "test_mkldnn",
-    "test_mkldnn_fusion",
-    "test_mkldnn_verbose",
-    "test_mkl_verbose",
-    "test_mobile_optimizer",
+    "dynamo/test_utils",
+    "test_nn",
+    "functorch/test_ops",
+    # these tests run long and fail in addition to that
+    "dynamo/test_dynamic_shapes",
+    "test_quantization",
+    "inductor/test_torchinductor",
+    "inductor/test_torchinductor_dynamic_shapes",
+    "inductor/test_torchinductor_opinfo",
+    "test_binary_ufuncs",
+    "test_unary_ufuncs",
+    # these tests fail when cuda is not available
+    "inductor/test_aot_inductor",
+    "inductor/test_cudacodecache",
+    "inductor/test_inductor_utils",
+    "inductor/test_inplacing_pass",
+    "inductor/test_kernel_benchmark",
+    "inductor/test_max_autotune",
+    "inductor/test_move_constructors_to_cuda",
+    "inductor/test_multi_kernel",
+    "inductor/test_pattern_matcher",
+    "inductor/test_perf",
+    "inductor/test_select_algorithm",
+    "inductor/test_snode_runtime",
+    "inductor/test_triton_wrapper",
+    # these tests fail when mkldnn is not available
+    "inductor/test_custom_post_grad_passes",
+    "inductor/test_mkldnn_pattern_matcher",
+    # lacks quantization support
+    "onnx/test_models_quantized_onnxruntime",
+    "onnx/test_pytorch_onnx_onnxruntime",
+    # https://github.com/pytorch/pytorch/issues/102078
+    "test_decomp",
+    # https://github.com/pytorch/pytorch/issues/146698
     "test_model_exports_to_core_aten",
-    "test_module_tracker",
-    "test_monitor",
-    "test_namedtuple_return_api",
-    "test_native_mha",
-    "test_nestedtensor",
-    "test_numba_integration",
-    "test_numpy_interop",
-    "test_openmp",
-    "test_out_dtype_op",
-    "test_overrides",
-    "test_package",
-    "test_per_overload_api",
-    "test_prims",
-    "test_pruning_op",
-    "test_python_dispatch",
-    "test_scatter_gather_ops",
-    "test_segment_reductions",
-    "test_serialization",
-    "test_set_default_mobile_cpu_allocator",
-    "test_shape_ops",
-    "test_show_pickle",
-    "test_sort_and_select",
-    "test_spectral_ops",
-    "test_stateless",
-    "test_subclass",
-    "test_tensorboard",
-    "test_tensor_creation_ops",
-    "test_tensorexpr",
-    "test_tensorexpr_pybind",
-    "test_torch",
-    "test_transformers",
-    "test_type_hints",
-    "test_type_info",
-    "test_type_promotion",
-    "test_typing",
-    "test_utils",
-    "test_view_ops",
-    "test_vulkan",
-    "test_weak",
-    "test_xnnpack_integration",
-    "torch_np/numpy_tests/core/test_dlpack",
-    "torch_np/numpy_tests/core/test_dtype",
-    "torch_np/numpy_tests/core/test_einsum",
-    "torch_np/numpy_tests/core/test_getlimits",
-    "torch_np/numpy_tests/core/test_indexing",
-    "torch_np/numpy_tests/core/test_numeric",
-    "torch_np/numpy_tests/core/test_numerictypes",
-    "torch_np/numpy_tests/core/test_scalar_ctors",
-    "torch_np/numpy_tests/core/test_scalarinherit",
-    "torch_np/numpy_tests/core/test_scalarmath",
-    "torch_np/numpy_tests/core/test_scalar_methods",
-    "torch_np/numpy_tests/core/test_shape_base",
-    "torch_np/numpy_tests/fft/test_helper",
-    "torch_np/numpy_tests/fft/test_pocketfft",
-    "torch_np/numpy_tests/lib/test_arraypad",
-    "torch_np/numpy_tests/lib/test_arraysetops",
-    "torch_np/numpy_tests/lib/test_function_base",
-    "torch_np/numpy_tests/lib/test_histograms",
-    "torch_np/numpy_tests/lib/test_index_tricks",
-    "torch_np/numpy_tests/lib/test_shape_base_",
-    "torch_np/numpy_tests/lib/test_twodim_base",
-    "torch_np/numpy_tests/lib/test_type_check",
-    "torch_np/numpy_tests/linalg/test_linalg",
-    "torch_np/test_basic",
-    "torch_np/test_binary_ufuncs",
-    "torch_np/test_dtype",
-    "torch_np/test_function_base",
-    "torch_np/test_ndarray_methods",
-    "torch_np/test_nep50_examples",
-    "torch_np/test_random",
-    "torch_np/test_reductions",
-    "torch_np/test_scalars_0D_arrays",
-    "torch_np/test_ufuncs_basic",
-    "torch_np/test_unary_ufuncs",
-    "xpu/test_conv.py",
-    "xpu/test_gemm.py",
+    # runs very long, skip for now
+    "inductor/test_layout_optim",
+    "test_fx",
+    # some false errors
+    "doctests",
 ]
 
 XPU_BLOCKLIST = [
@@ -530,6 +258,7 @@ XPU_TEST = [
 
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
+    "test_extension_utils",
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
@@ -614,25 +343,21 @@ if dist.is_available():
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG["mpi"] = {
             "WORLD_SIZE": "3",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-mpi",
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
             "WORLD_SIZE": f"{torch.cuda.device_count()}",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-nccl",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
             "WORLD_SIZE": f"{torch.cuda.device_count()}",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
     #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
     #         "WORLD_SIZE": f"{torch.cuda.device_count()}",
-    #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
     #         "UCX_TLS": "tcp,cuda",
     #         "UCC_TLS": "nccl,ucp,cuda",
     #         "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
@@ -688,6 +413,9 @@ TESTS_NOT_USING_GRADCHECK = [
     "test_ops",
     "test_ops_jit",
     "dynamo/test_recompile_ux",
+    "inductor/test_compiled_optimizers",
+    "inductor/test_cutlass_backend",
+    "inductor/test_select_algorithm",
     "inductor/test_smoke",
     "test_quantization",
 ]
@@ -757,7 +485,7 @@ def run_test(
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
-        unittest_args.append(f'-{"v" * options.verbose}')  # in case of pytest
+        unittest_args.append(f"-{'v' * options.verbose}")  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
@@ -932,10 +660,10 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
 
 
 @contextlib.contextmanager
-def extend_python_path(install_directory):
+def extend_python_path(install_directories):
     python_path = os.environ.get("PYTHONPATH", "")
     try:
-        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
+        os.environ["PYTHONPATH"] = os.pathsep.join(install_directories + [python_path])
         yield
     finally:
         os.environ["PYTHONPATH"] = python_path
@@ -1075,9 +803,12 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if return_code != 0:
         return return_code
     if sys.platform != "win32":
-        exts_to_build = [(install_cmd, "no_python_abi_suffix_test")]
+        exts_to_build = [
+            (install_cmd, "no_python_abi_suffix_test"),
+        ]
         if TEST_CUDA:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -1095,17 +826,24 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         test_directory + "/test_cpp_extensions_aot.py",
         test_directory + "/" + test_module + ".py",
     )
+
     try:
         cpp_extensions = os.path.join(test_directory, "cpp_extensions")
-        install_directory = ""
+        install_directories = []
         # install directory is the one that is named site-packages
         for root, directories, _ in os.walk(os.path.join(cpp_extensions, "install")):
             for directory in directories:
                 if "-packages" in directory:
-                    install_directory = os.path.join(root, directory)
+                    install_directories.append(os.path.join(root, directory))
 
-        assert install_directory, "install_directory must not be empty"
-        with extend_python_path(install_directory):
+        for root, directories, _ in os.walk(
+            os.path.join(cpp_extensions, "libtorch_agnostic_extension", "install")
+        ):
+            for directory in directories:
+                if "-packages" in directory:
+                    install_directories.append(os.path.join(root, directory))
+
+        with extend_python_path(install_directories):
             return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
     finally:
         if os.path.exists(test_directory + "/" + test_module + ".py"):
@@ -1137,7 +875,7 @@ def _test_autoload(test_directory, options, enable=True):
 
     try:
         os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
-        with extend_python_path(install_directory):
+        with extend_python_path([install_directory]):
             cmd = [sys.executable, "test_autoload.py"]
             return_code = shell(cmd, cwd=test_directory, env=os.environ)
             return return_code
@@ -1153,7 +891,7 @@ def run_test_with_openreg(test_module, test_directory, options):
     if return_code != 0:
         return return_code
 
-    with extend_python_path(install_dir):
+    with extend_python_path([install_dir]):
         return run_test(test_module, test_directory, options)
 
 
@@ -1175,9 +913,9 @@ def test_distributed(test_module, test_directory, options):
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
+            init_method = "file" if with_init_file else "env"
             if options.verbose:
-                init_str = "with {} init_method"
-                with_init = init_str.format("file" if with_init_file else "env")
+                with_init = f"with {init_method} init_method"
                 print_to_stderr(
                     f"Running distributed tests for the {backend} backend {with_init}"
                 )
@@ -1185,6 +923,9 @@ def test_distributed(test_module, test_directory, options):
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
             os.environ.update(env_vars)
+            report_tag = f"dist-{backend}" if backend != "test" else ""
+            report_tag += f"-init-{init_method}"
+            os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -1439,9 +1180,9 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
 
 
 def run_ci_sanity_check(test: ShardedTest, test_directory, options):
-    assert (
-        test.name == "test_ci_sanity_check_fail"
-    ), f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    assert test.name == "test_ci_sanity_check_fail", (
+        f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    )
     ret_code = run_test(test, test_directory, options, print_log=False)
     # This test should fail
     if ret_code != 1:
@@ -1481,7 +1222,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
-    "test_transformers": run_test_with_openreg,
+    "test_transformers_privateuse1": run_test_with_openreg,
 }
 
 
@@ -1501,21 +1242,12 @@ def parse_args():
         default=0,
         help="Print verbose information and test-by-test results",
     )
-    if sys.version_info >= (3, 9):
-        parser.add_argument(
-            "--showlocals",
-            action=argparse.BooleanOptionalAction,
-            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
-            help="Show local variables in tracebacks (default: True)",
-        )
-    else:
-        parser.add_argument(
-            "--showlocals",
-            action="store_true",
-            default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
-            help="Show local variables in tracebacks (default: True)",
-        )
-        parser.add_argument("--no-showlocals", dest="showlocals", action="store_false")
+    parser.add_argument(
+        "--showlocals",
+        action=argparse.BooleanOptionalAction,
+        default=strtobool(os.environ.get("TEST_SHOWLOCALS", "False")),
+        help="Show local variables in tracebacks (default: True)",
+    )
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
@@ -1635,11 +1367,7 @@ def parse_args():
         default=IS_CI
         and (
             TEST_WITH_CROSSREF
-            or TEST_WITH_ASAN
-            or (TEST_CONFIG == "distributed" and TEST_CUDA)
-            or (IS_WINDOWS and not TEST_CUDA)
-            or TEST_CONFIG == "nogpu_AVX512"
-            or TEST_CONFIG == "nogpu_NO_AVX2"
+            or TEST_CONFIG == "distributed"
             or TEST_CONFIG == "default"
         )
         and get_pr_number() is not None
@@ -1762,12 +1490,8 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[str]:
+def get_selected_tests(options) -> list[str]:
     selected_tests = options.include
-
-    # for s390x, override defaults
-    if IS_S390X and selected_tests == TESTS:
-        selected_tests = S390X_TESTLIST
 
     # filter if there's JIT only and distributed only test options
     if options.jit:
@@ -1808,6 +1532,7 @@ def get_selected_tests(options) -> List[str]:
             "test_view_ops",
             "test_nn",
             "inductor/test_mps_basic",
+            "inductor/test_torchinductor",
         ]
     else:
         # Exclude all mps tests otherwise
@@ -1876,6 +1601,7 @@ def get_selected_tests(options) -> List[str]:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, "on ROCm")
 
     elif IS_S390X:
+        selected_tests = exclude_tests(S390X_BLOCKLIST, selected_tests, "on s390x")
         selected_tests = exclude_tests(
             DISTRIBUTED_TESTS,
             selected_tests,
@@ -1902,8 +1628,7 @@ def get_selected_tests(options) -> List[str]:
         selected_tests = exclude_tests(
             TESTS_NOT_USING_GRADCHECK,
             selected_tests,
-            "Running in slow gradcheck mode, skipping tests "
-            "that don't use gradcheck.",
+            "Running in slow gradcheck mode, skipping tests that don't use gradcheck.",
             exact_match=True,
         )
 
@@ -1911,7 +1636,7 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def load_test_times_from_file(file: str) -> Dict[str, Any]:
+def load_test_times_from_file(file: str) -> dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
@@ -1921,47 +1646,52 @@ def load_test_times_from_file(file: str) -> Dict[str, Any]:
         return {}
 
     with open(path) as f:
-        test_times_file = cast(Dict[str, Any], json.load(f))
-    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+        test_times_file = cast(dict[str, Any], json.load(f))
+    job_name = os.environ.get("JOB_NAME")
+    if job_name is None or job_name == "":
+        # If job name isn't available, use build environment as a backup
+        job_name = os.environ.get("BUILD_ENVIRONMENT")
+    else:
+        job_name = job_name.split(" / test (")[0]
     test_config = os.environ.get("TEST_CONFIG")
-    if test_config in test_times_file.get(build_environment, {}):
+    if test_config in test_times_file.get(job_name, {}):
         print_to_stderr("Found test times from artifacts")
-        return test_times_file[build_environment][test_config]
+        return test_times_file[job_name][test_config]
     elif test_config in test_times_file["default"]:
         print_to_stderr(
-            f"::warning:: Gathered no stats from artifacts for {build_environment} build env"
-            f" and {test_config} test config. Using default build env and {test_config} test config instead."
+            f"::warning:: Gathered no stats from artifacts for {job_name} build env"
+            f" and {test_config} test config. Using default job name and {test_config} test config instead."
         )
         return test_times_file["default"][test_config]
     else:
         print_to_stderr(
-            f"::warning:: Gathered no stats from artifacts for build env {build_environment} build env"
-            f" and {test_config} test config. Using default build env and default test config instead."
+            f"::warning:: Gathered no stats from artifacts for job name {job_name} build env"
+            f" and {test_config} test config. Using default job name and default test config instead."
         )
         return test_times_file["default"]["default"]
 
 
 def load_test_file_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
-) -> Dict[str, float]:
-    return cast(Dict[str, float], load_test_times_from_file(file))
+) -> dict[str, float]:
+    return cast(dict[str, float], load_test_times_from_file(file))
 
 
 def load_test_class_times(
     file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_CLASS_TIMES_FILE,
-) -> Dict[str, Dict[str, float]]:
-    return cast(Dict[str, Dict[str, float]], load_test_times_from_file(file))
+) -> dict[str, dict[str, float]]:
+    return cast(dict[str, dict[str, float]], load_test_times_from_file(file))
 
 
-def get_sharding_opts(options) -> Tuple[int, int]:
+def get_sharding_opts(options) -> tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
         which_shard, num_shards = options.shard
-        assert (
-            which_shard <= num_shards
-        ), "Selected shard must be less than or equal to total number of shards"
+        assert which_shard <= num_shards, (
+            "Selected shard must be less than or equal to total number of shards"
+        )
 
     return (which_shard, num_shards)
 
@@ -1969,10 +1699,10 @@ def get_sharding_opts(options) -> Tuple[int, int]:
 def do_sharding(
     options,
     selected_tests: Sequence[TestRun],
-    test_file_times: Dict[str, float],
-    test_class_times: Dict[str, Dict[str, float]],
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]],
     sort_by_time: bool = True,
-) -> Tuple[float, List[ShardedTest]]:
+) -> tuple[float, list[ShardedTest]]:
     which_shard, num_shards = get_sharding_opts(options)
 
     # Do sharding
@@ -2004,9 +1734,9 @@ def run_test_module(
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
-        assert isinstance(return_code, int) and not isinstance(
-            return_code, bool
-        ), f"While running {str(test)} got non integer return code {return_code}"
+        assert isinstance(return_code, int) and not isinstance(return_code, bool), (
+            f"While running {str(test)} got non integer return code {return_code}"
+        )
         if return_code == 0:
             return None
 
@@ -2022,10 +1752,10 @@ def run_test_module(
 
 
 def run_tests(
-    selected_tests: List[ShardedTest],
+    selected_tests: list[ShardedTest],
     test_directory: str,
     options,
-    failures: List[TestFailure],
+    failures: list[TestFailure],
 ) -> None:
     if len(selected_tests) == 0:
         return
@@ -2182,8 +1912,8 @@ def main():
         """Defines a set of tests with similar priority that should be run together on the current shard"""
 
         name: str
-        sharded_tests: List[ShardedTest]
-        failures: List[TestFailure]
+        sharded_tests: list[ShardedTest]
+        failures: list[TestFailure]
 
         def __init__(
             self, name: str, raw_tests: Sequence[TestRun], should_sort_shard: bool

@@ -47,10 +47,6 @@ on:
         required: false
         type: string
         description: Desired libtorch variant (for libtorch builds only)
-      DESIRED_DEVTOOLSET:
-        required: false
-        type: string
-        description: Desired dev toolset
       DESIRED_PYTHON:
         required: false
         type: string
@@ -92,11 +88,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
-      DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
-      # Needed for conda builds
       ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
-      ANACONDA_USER: pytorch
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
       BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
@@ -120,11 +113,9 @@ jobs:
             echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
             echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
             echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
-            echo "DESIRED_DEVTOOLSET=${{ env.DESIRED_DEVTOOLSET }}"
             echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
 
             echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
-            echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
             echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"

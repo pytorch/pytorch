@@ -8,7 +8,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import requires_gpu, requires_triton
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    requires_gpu,
+    requires_triton,
+)
 
 
 @instantiate_parametrized_tests
@@ -20,8 +24,8 @@ class TestAsyncCompile(TestCase):
         def fn(x, y):
             return x + y
 
-        x = torch.rand(10).cuda()
-        y = torch.rand(10).cuda()
+        x = torch.rand(10).to(GPU_TYPE)
+        y = torch.rand(10).to(GPU_TYPE)
 
         with config.patch("worker_start_method", method):
             shutdown_compile_workers()

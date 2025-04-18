@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Dict, List, Type, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.nn as nn
@@ -28,8 +28,8 @@ __all__ = [
 
 def get_pattern_to_dtype_configs(
     backend_config: BackendConfig,
-) -> Dict[Pattern, List[DTypeConfig]]:
-    pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = {}
+) -> dict[Pattern, list[DTypeConfig]]:
+    pattern_to_dtype_configs: dict[Pattern, list[DTypeConfig]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         pattern_to_dtype_configs[pattern] = config.dtype_configs
     return pattern_to_dtype_configs
@@ -55,8 +55,8 @@ def get_fused_module_classes(backend_config: BackendConfig) -> tuple[type, ...]:
 
 def get_pattern_to_input_type_to_index(
     backend_config: BackendConfig,
-) -> Dict[Pattern, Dict[str, int]]:
-    pattern_to_input_type_to_index: Dict[Pattern, Dict[str, int]] = {}
+) -> dict[Pattern, dict[str, int]]:
+    pattern_to_input_type_to_index: dict[Pattern, dict[str, int]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         pattern_to_input_type_to_index[pattern] = config._input_type_to_index
     return pattern_to_input_type_to_index
@@ -64,8 +64,8 @@ def get_pattern_to_input_type_to_index(
 
 def get_root_module_to_quantized_reference_module(
     backend_config: BackendConfig,
-) -> Dict[Type[torch.nn.Module], Type[torch.nn.Module]]:
-    mapping: Dict[Type[torch.nn.Module], Type[torch.nn.Module]] = {}
+) -> dict[type[torch.nn.Module], type[torch.nn.Module]]:
+    mapping: dict[type[torch.nn.Module], type[torch.nn.Module]] = {}
     for config in backend_config.configs:
         if (
             config.root_module is not None
@@ -77,8 +77,8 @@ def get_root_module_to_quantized_reference_module(
 
 def get_fuser_method_mapping(
     backend_config: BackendConfig,
-) -> Dict[Pattern, Union[nn.Sequential, Callable]]:
-    fuser_method_mapping: Dict[Pattern, Union[nn.Sequential, Callable]] = {}
+) -> dict[Pattern, Union[nn.Sequential, Callable]]:
+    fuser_method_mapping: dict[Pattern, Union[nn.Sequential, Callable]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:
             # Note: both the fuser method and the pattern are specified in forward order in the
@@ -91,8 +91,8 @@ def get_fuser_method_mapping(
 
 def get_module_to_qat_module(
     backend_config: BackendConfig,
-) -> Dict[Pattern, Type[torch.nn.Module]]:
-    module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]] = {}
+) -> dict[Pattern, type[torch.nn.Module]]:
+    module_to_qat_module: dict[Pattern, type[torch.nn.Module]] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.qat_module is not None:
             module_to_qat_module[pattern] = config.qat_module
@@ -101,7 +101,7 @@ def get_module_to_qat_module(
 
 def get_fusion_pattern_to_root_node_getter(
     backend_config: BackendConfig,
-) -> Dict[Pattern, Callable]:
+) -> dict[Pattern, Callable]:
     """Get a map from fusion pattern to a function that returns the root node
     from the fusion pattern, e.g. the most common one is:
     def get_root_node(node_pattern):
@@ -111,7 +111,7 @@ def get_fusion_pattern_to_root_node_getter(
     This can work for all patterns whose root node is the "last node" in the pattern,
     e.g. (torch.add, MatchAllNode, (torch.ReLU, torch.Conv2d))
     """
-    root_node_getter_mapping: Dict[Pattern, Callable] = {}
+    root_node_getter_mapping: dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config._root_node_getter is not None:
             root_node_getter_mapping[pattern] = config._root_node_getter
@@ -120,7 +120,7 @@ def get_fusion_pattern_to_root_node_getter(
 
 def get_fusion_pattern_to_extra_inputs_getter(
     backend_config: BackendConfig,
-) -> Dict[Pattern, Callable]:
+) -> dict[Pattern, Callable]:
     """Get a map from fusion pattern to a function that returns extra input nodes
     from the fusion pattern, in the order required by the root node. This is optional,
     if not specified, we will not copy over any extra inputs for the root node.
@@ -134,7 +134,7 @@ def get_fusion_pattern_to_extra_inputs_getter(
         add, extra_input, conv_pattern = pattern
         return [extra_input]
     """
-    extra_inputs_getter_mapping: Dict[Pattern, Callable] = {}
+    extra_inputs_getter_mapping: dict[Pattern, Callable] = {}
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config._extra_inputs_getter is not None:
             extra_inputs_getter_mapping[pattern] = config._extra_inputs_getter

@@ -29,7 +29,8 @@ python fr_trace.py <dump dir containing trace files> [-o <output file>]
 """
 
 import pickle
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 from tools.flight_recorder.components.builder import build_db
 from tools.flight_recorder.components.config_manager import JobConfig

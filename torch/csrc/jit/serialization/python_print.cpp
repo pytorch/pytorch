@@ -1585,7 +1585,7 @@ struct PythonPrintImpl {
     } else if (auto enumType = type->cast<EnumType>()) {
       body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
 
-      std::string value_wrapper = "";
+      std::string value_wrapper;
       if (enumType->getValueType() == StringType::get()) {
         value_wrapper = "\"";
       }

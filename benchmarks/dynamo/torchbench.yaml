@@ -34,7 +34,6 @@ tolerance:
     - vgg16
     - mobilenet_v3_large
     - nvidia_deeprecommender
-    - timm_efficientdet
 
   # These models need >1e-3 tolerance
   even_higher:
@@ -42,6 +41,7 @@ tolerance:
     - tacotron2
     - yolov3
     - timm_efficientdet
+    - timm_efficientnet
     - squeezenet1_1
 
   higher_fp16:
@@ -54,10 +54,19 @@ tolerance:
     - drq
     - hf_Whisper
 
+  freezing:
+    # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
+    # the conv-batchnorm fusion used under freezing may cause relatively
+    # large numerical difference. We need are larger tolerance.
+    # Check https://github.com/pytorch/pytorch/issues/120545 for context
+    even_higher:
+      - mobilenet_v2
+
   cosine: []
 
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
+  - timm_efficientnet
 
 # These benchmarks took >600s on an i9-11900K CPU
 very_slow: &VERY_SLOW_MODELS
@@ -100,6 +109,12 @@ non_deterministic:
   # https://github.com/pytorch/pytorch/issues/98355
   - mobilenet_v3_large
   - sam_fast
+
+
+disable_cudagraph:
+  # tts_angular is flaky with cudagraphs. Its speedup
+  # oscillates from .05 to 1.05
+  - tts_angular
 
 
 dtype:
@@ -226,6 +241,16 @@ skip:
     - hf_T5_generate
     - opacus_cifar10
     - speech_transformer
+
+  export_not_supported:
+    - doctr_reco_predictor
+    - doctr_det_predictor
+    - drq
+    - llama
+    - sam_fast
+    - soft_actor_critic
+    - timm_efficientdet
+    - vision_maskrcnn
 
   # Models that should only run in --multiprocess mode
   multiprocess:

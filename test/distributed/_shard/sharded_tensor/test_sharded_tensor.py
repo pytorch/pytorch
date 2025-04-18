@@ -6,7 +6,6 @@ import itertools
 import math
 import pickle
 import sys
-from typing import List
 
 import torch
 import torch.distributed as dist
@@ -3186,7 +3185,7 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
             ],
             size=torch.Size([4, 2]),
         )
-        st_local_shards: List[Shard] = []
+        st_local_shards: list[Shard] = []
         for shard_metadata in st_metadata.shards_metadata:
             st_local_shards.append(
                 Shard(
@@ -3215,7 +3214,7 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
             ],
             size=torch.Size([4, 2]),
         )
-        st_local_shards: List[Shard] = []
+        st_local_shards: list[Shard] = []
         src = torch.randn(4, 2)
         for shard_metadata in st_metadata.shards_metadata:
             offsets = shard_metadata.shard_offsets

@@ -62,11 +62,11 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
   # which is provided in libstdcxx 12 and up.
-  conda_install libstdcxx-ng=12.3.0 -c conda-forge
+  conda_install libstdcxx-ng=12.3.0 --update-deps -c conda-forge
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
-    conda_install "openblas==0.3.28=*openmp*"
+    conda_install "openblas==0.3.29=*openmp*"
   else
     conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
   fi

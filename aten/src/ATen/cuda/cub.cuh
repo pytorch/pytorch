@@ -37,11 +37,10 @@
 // handle the temporary storage and 'twice' calls for cub API
 #define CUB_WRAPPER(func, ...) do {                                       \
   size_t temp_storage_bytes = 0;                                          \
-  func(nullptr, temp_storage_bytes, __VA_ARGS__);                         \
+  AT_CUDA_CHECK(func(nullptr, temp_storage_bytes, __VA_ARGS__));          \
   auto& caching_allocator = *::c10::cuda::CUDACachingAllocator::get();    \
   auto temp_storage = caching_allocator.allocate(temp_storage_bytes);     \
-  func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__);              \
-  AT_CUDA_CHECK(cudaGetLastError());                                      \
+  AT_CUDA_CHECK(func(temp_storage.get(), temp_storage_bytes, __VA_ARGS__));\
 } while (false)
 
 #ifdef USE_ROCM
@@ -478,7 +477,7 @@ constexpr int block_threads(){
 
 template<typename scalar_t, typename ScanOpT>
 inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * output, ScanOpT scan_op, int64_t num_items) {
-  static_assert(std::is_same<ScanOpT, std::plus<scalar_t>>::value, "");
+  static_assert(std::is_same_v<ScanOpT, std::plus<scalar_t>>, "");
   constexpr int BLOCK_THREADS = block_threads<sizeof(scalar_t)>();
   constexpr int ITEMS_PER_THREAD = 16;
   auto grid_size = (num_items + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);

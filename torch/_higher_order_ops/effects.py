@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 from weakref import WeakKeyDictionary
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -71,9 +72,9 @@ class WithEffects(HigherOrderOperator):
         self,
         token,
         op: OpType,
-        *args: Tuple[Any, ...],
-        **kwargs: Dict[str, Any],
-    ) -> Tuple[Any, ...]:
+        *args: tuple[Any, ...],
+        **kwargs: dict[str, Any],
+    ) -> tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert has_effects(op, args, kwargs)
@@ -116,7 +117,14 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
         return SIDE_EFFECTS[op]
 
     for arg in args:
-        if isinstance(arg, torch.ScriptObject):
+        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
+            # Add it to the table so that next time we see the same op we don't
+            # have to parse through the args again
+            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            return _EffectType.ORDERED
+
+    for arg in kwargs.values():
+        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
             # Add it to the table so that next time we see the same op we don't
             # have to parse through the args again
             SIDE_EFFECTS[op] = _EffectType.ORDERED
@@ -133,11 +141,17 @@ def new_token_tensor() -> torch.Tensor:
 def with_effects_dense(
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     out = op(*args, **kwargs)
     new_token = new_token_tensor()
+    # [NOTE: with_effects return type]
+    # Note that we should only do *out for tuple type, but not list type.
+    # This is to match the schema of the op.
+    # For tuple output, the length of schema output is the same as the length of out.
+    # For list output, the length of schema output is 1 (e.g. Tensor[]) regardless of the
+    # length of the list.
     if isinstance(out, tuple):
         return (new_token, *out)
     return (new_token, out)
@@ -148,9 +162,9 @@ def with_effects_fake(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     with mode:
         result = with_effects_dense(token, op, *args, **kwargs)
         return result
@@ -161,9 +175,9 @@ def with_effects_proxy(
     mode,
     token: torch.Tensor,
     op: torch._ops.OpOverload,
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> Tuple[torch.Tensor, ...]:
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
     with disable_proxy_modes_tracing():
         out = with_effects(token, op, *args, **kwargs)
 
@@ -202,10 +216,10 @@ def _get_schema(op, args) -> torch.FunctionSchema:
 
 def handle_effects(
     allow_token_discovery: bool,
-    tokens: Dict[_EffectType, torch.Tensor],
+    tokens: dict[_EffectType, torch.Tensor],
     op: OpType,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> Any:
     """
     Args:

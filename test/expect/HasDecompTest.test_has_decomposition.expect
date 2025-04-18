@@ -75,6 +75,7 @@ aten::_ctc_loss.out
 aten::_ctc_loss_backward
 aten::_ctc_loss_backward.Tensor
 aten::_ctc_loss_backward.out
+aten::_cudnn_attention_forward
 aten::_cudnn_ctc_loss
 aten::_cudnn_ctc_loss.Tensor
 aten::_cudnn_ctc_loss.out
@@ -370,6 +371,7 @@ aten::_fused_adamw_.tensor_lr
 aten::_fused_moving_avg_obs_fq_helper
 aten::_fused_moving_avg_obs_fq_helper.out
 aten::_fused_moving_avg_obs_fq_helper_functional
+aten::_fused_rms_norm
 aten::_fused_sdp_choice
 aten::_fused_sgd
 aten::_fused_sgd.out
@@ -382,6 +384,7 @@ aten::_fw_primal_copy
 aten::_fw_primal_copy.out
 aten::_grid_sampler_2d_cpu_fallback
 aten::_grid_sampler_2d_cpu_fallback.out
+aten::_grouped_mm
 aten::_has_same_storage_numel
 aten::_histogramdd_bin_edges
 aten::_histogramdd_bin_edges.out
@@ -517,6 +520,7 @@ aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_dot_product_fused_attention_overrideable
 aten::_scaled_dot_product_fused_attention_overrideable_backward
+aten::_scaled_grouped_mm
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -648,6 +652,7 @@ aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
 aten::_weight_int4pack_mm_for_cpu
+aten::_weight_int4pack_mm_with_scales_and_zeros
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
@@ -1072,8 +1077,6 @@ aten::rand.names
 aten::rand.names_out
 aten::rand.out
 aten::rand_like
-aten::rand_like.generator
-aten::rand_like.generator_out
 aten::rand_like.out
 aten::randint
 aten::randint.generator
@@ -1084,10 +1087,6 @@ aten::randint.low_generator_out
 aten::randint.low_out
 aten::randint.out
 aten::randint_like
-aten::randint_like.generator
-aten::randint_like.generator_out
-aten::randint_like.generator_with_low_dtype
-aten::randint_like.generator_with_low_dtype_out
 aten::randint_like.low_dtype
 aten::randint_like.low_dtype_out
 aten::randint_like.out
@@ -1097,8 +1096,6 @@ aten::randn.generator_with_names_out
 aten::randn.names
 aten::randn.names_out
 aten::randn_like
-aten::randn_like.generator
-aten::randn_like.generator_out
 aten::randn_like.out
 aten::random
 aten::random.from
@@ -1316,8 +1313,6 @@ aten::topk.values
 aten::transpose_
 aten::triangular_solve
 aten::triangular_solve.X
-aten::unbind_copy.int
-aten::unbind_copy.int_out
 aten::unique_consecutive
 aten::unique_consecutive.out
 aten::unique_dim

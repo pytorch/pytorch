@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import collections
 import operator
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx
@@ -18,11 +19,11 @@ __all__ = [
     "legalize_graph",
 ]
 
-Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
+Tensors = Union[tuple[torch.Tensor], list[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
-NodeList = List[torch.fx.Node]
-NodeSet = Set[torch.fx.Node]
-Names = List[str]
+NodeList = list[torch.fx.Node]
+NodeSet = set[torch.fx.Node]
+Names = list[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 
@@ -172,8 +173,8 @@ class FxNetAccFusionsFinder:
 
         return False
 
-    def __call__(self) -> Dict[torch.fx.Node, NodeSet]:
-        result: Dict[torch.fx.Node, NodeSet] = {}
+    def __call__(self) -> dict[torch.fx.Node, NodeSet]:
+        result: dict[torch.fx.Node, NodeSet] = {}
         acc_nodes = list(self.acc_nodes)
 
         for node in acc_nodes:
@@ -294,7 +295,7 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     for node in gm.graph.nodes:
         if indeg[node] == 0:
             queue.append(node)
-    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+    env: dict[torch.fx.Node, torch.fx.Node] = {}
     # Pop nodes from the queue, and add nodes that have had all their
     # dependencies fulfilled
     while len(queue) > 0:

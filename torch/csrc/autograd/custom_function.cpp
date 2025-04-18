@@ -309,9 +309,13 @@ static optional_variable_list _process_backward_mode_ad(
       }
       // No need to mark as modified Tensors that are not inputs.
       if (!is_input) {
-        TORCH_WARN(
-            "Only input Tensors should be given to ctx.mark_dirty(). If a Tensor is not an input, there"
-            " is no need to pass it to mark_dirty().");
+        const char* mark_dirty_error_msg =
+            "ctx.mark_dirty() received a tensor that was not an input. "
+            "Only input Tensors that have been mutated should be passed to "
+            "ctx.mark_dirty().";
+        // We reach this path in the view of intermediate case
+        TORCH_CHECK(!var.is_view(), mark_dirty_error_msg);
+        TORCH_WARN(mark_dirty_error_msg);
       }
       // If the input is a view, the rebase will need to rewrite the graph and
       // this only works if we have a single output to this Function.
@@ -503,6 +507,16 @@ void check_variable_result(
   }
 }
 
+AutogradContext::AutogradContext(PackedArgs& packed_args) {
+  saved_data = packed_args.unpack_saved_data();
+  saved_variables_override_ = packed_args.unpack<variable_list>();
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+  materialize_grads_ = packed_args.unpack<bool>();
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+  has_freed_buffers_ = packed_args.unpack<bool>();
+  needs_input_grad_override_ = packed_args.unpack<std::vector<bool>>();
+}
+
 void AutogradContext::save_for_backward(variable_list to_save) {
   to_save_ = std::move(to_save);
 }
@@ -527,6 +541,9 @@ void AutogradContext::save_variables() {
 
 variable_list AutogradContext::get_saved_variables() const {
   TORCH_CHECK(!has_freed_buffers_, ERR_BACKWARD_TWICE);
+  if (saved_variables_override_.has_value()) {
+    return *saved_variables_override_;
+  }
   variable_list saved;
   saved.reserve(saved_variables_.size());
   auto ptr = grad_fn_.lock();
@@ -538,6 +555,9 @@ variable_list AutogradContext::get_saved_variables() const {
 }
 
 bool AutogradContext::needs_input_grad(size_t output_edge_index) const {
+  if (needs_input_grad_override_.has_value()) {
+    return needs_input_grad_override_.value().at(output_edge_index);
+  }
   auto ptr = grad_fn_.lock();
   TORCH_INTERNAL_ASSERT(ptr);
   return ptr->task_should_compute_output(output_edge_index);
@@ -545,6 +565,15 @@ bool AutogradContext::needs_input_grad(size_t output_edge_index) const {
 
 bool AutogradContext::needs_input_grad(
     std::initializer_list<IndexRange> idxs) const {
+  if (needs_input_grad_override_.has_value()) {
+    return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
+      bool result = false;
+      for (const auto i : c10::irange(range.first, range.second)) {
+        result |= needs_input_grad_override_.value().at(i);
+      }
+      return result;
+    });
+  }
   auto ptr = grad_fn_.lock();
   TORCH_INTERNAL_ASSERT(ptr);
   return ptr->task_should_compute_output(idxs);

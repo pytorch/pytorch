@@ -2,7 +2,7 @@
 import sys
 from contextlib import nullcontext
 from enum import auto, Enum
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -319,7 +319,7 @@ class TestExplicitUnshard(FSDPTest):
                 self.mlp2 = MLP(dim)
                 self.mlp3 = MLP(dim)
 
-            def forward(self, ys: List[torch.Tensor], works: List[dist.Work]):
+            def forward(self, ys: list[torch.Tensor], works: list[dist.Work]):
                 (y1, y2, y3), (work1, work2, work3) = ys, works
                 work1.wait()
                 z1 = self.mlp1(y1)
@@ -372,7 +372,7 @@ class TestExplicitUnshard(FSDPTest):
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((batch_size, dim), device=device_type)
         for _ in range(10):
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
@@ -382,8 +382,12 @@ class TestExplicitUnshard(FSDPTest):
             model.module.mlps._wait_unshard_streams_on_current_stream()
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestCommunication, globals(), only_for=devices)
-instantiate_device_type_tests(TestExplicitUnshard, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestCommunication, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestExplicitUnshard, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

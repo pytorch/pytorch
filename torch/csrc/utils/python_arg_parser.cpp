@@ -48,6 +48,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
     {"std::string_view", ParameterType::STRING},
+    {"::std::string_view", ParameterType::STRING},
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
@@ -1012,7 +1013,15 @@ auto FunctionParameter::check(
     case ParameterType::PYOBJECT:
       return true;
     case ParameterType::SCALARTYPE:
-      return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
+      if (THPDtype_Check(obj) || THPPythonScalarType_Check(obj)) {
+        return true;
+      }
+      if (check_has_torch_function(obj, /*ignore_mode*/ true)) {
+        // tensor subclasses and unrelated objects with __torch_function__
+        append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
+        return true;
+      }
+      return false;
     case ParameterType::LAYOUT:
       return THPLayout_Check(obj);
     case ParameterType::MEMORY_FORMAT:

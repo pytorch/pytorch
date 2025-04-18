@@ -3,7 +3,6 @@
 import functools
 import operator
 import pickle
-import sys
 import types
 from itertools import permutations
 from typing import Any
@@ -325,11 +324,6 @@ class TestMisc(TestCase):
         # test for https://github.com/numpy/numpy/pull/16574#issuecomment-642660971
         assert np.dtype(dtype=np.float64) == np.dtype(np.float64)
 
-    @skipif(sys.version_info >= (3, 9), reason="Requires python 3.9")
-    def test_class_getitem_38(self) -> None:
-        with pytest.raises(TypeError):
-            np.dtype[Any]
-
 
 class TestFromDTypeAttribute(TestCase):
     def test_simple(self):
@@ -358,7 +352,6 @@ class TestFromDTypeAttribute(TestCase):
 
 
 @skip(reason="Parameteric dtypes, our stuff is simpler.")
-@skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:

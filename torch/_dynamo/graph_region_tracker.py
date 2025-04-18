@@ -1,3 +1,18 @@
+"""
+This module provides functionality for tracking and managing regions in computational graphs.
+It supports graph optimization by identifying and grouping similar regions based on their
+structure and behavior. The module implements algorithms for:
+
+1. Tracking nodes and their relationships in the computational graph
+2. Identifying identical or similar regions across the graph
+3. Managing graph regions for optimization purposes
+4. Supporting deduplication and other graph transformation passes
+
+The core functionality revolves around the GraphRegionTracker class which maintains
+mappings between nodes and their duplicates, enabling efficient graph analysis and
+optimization operations.
+"""
+
 import copyreg
 import io
 import logging
@@ -5,22 +20,14 @@ import math
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    Dict,
-    List,
-    Optional,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._pytree import tree_flatten
+
+from .graph_utils import _flatten_args_kwargs
 
 
 T = TypeVar("T")
@@ -31,8 +38,8 @@ if TYPE_CHECKING:
 
 
 Node = torch.fx.Node
-Region = List[Node]
-IdenticalNodes = List[Node]
+Region = list[Node]
+IdenticalNodes = list[Node]
 GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
 
 log = logging.getLogger(__name__)
@@ -137,7 +144,7 @@ def get_global_state_key() -> GlobalStateKey:
 class BackwardBfsArgIter:
     def __init__(self, origin: Node) -> None:
         self._cur: Optional[Node] = origin
-        self._queue: Deque[Optional[Node]] = deque()
+        self._queue: deque[Optional[Node]] = deque()
 
     @staticmethod
     def create(origin: Node) -> "BackwardBfsArgIter":
@@ -174,6 +181,9 @@ class BackwardBfsArgIter:
         else:
             self._queue.append(arg)
 
+    def __str__(self) -> str:
+        return f"BackwardBfsArgIter(cur={self._cur}, queue={self._queue})"
+
 
 class GraphRegionTracker:
     """
@@ -187,8 +197,8 @@ class GraphRegionTracker:
     """
 
     def __init__(self) -> None:
-        self.hash_to_duplicates: Dict[str, IdenticalNodes] = defaultdict(list)
-        self.node_to_duplicates: Dict[Node, IdenticalNodes] = {}
+        self.hash_to_duplicates: dict[str, IdenticalNodes] = defaultdict(list)
+        self.node_to_duplicates: dict[Node, IdenticalNodes] = {}
         self.input_pickler = InputPickler()
 
     def _hash_node(
@@ -230,7 +240,7 @@ class GraphRegionTracker:
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
-    def get_identical_regions(self, graph: torch.fx.Graph) -> List[List[Region]]:
+    def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
         This function is responsible for extracting the largest regions of identical nodes from the given graph.
         **Note**: This function assumes the nodes that have been tracked with track_node are in the provided graph argument.
@@ -245,6 +255,8 @@ class GraphRegionTracker:
         """
         topological_ranking = {node: i for i, node in enumerate(graph.nodes)}
         region_groups_with_rank = []
+        # needed to detect if replacing a region will create cycles
+        node_to_recursive_ancestors = _populate_recursive_ancestor_map(graph)
 
         # Create region groups; a region group is a group
         # of regions that are all identical. In this initial state
@@ -271,9 +283,14 @@ class GraphRegionTracker:
         # We start from regions later in the graph and expand them earlier
         # as a result, we will create the largest regions first and they won't
         # overlap.
-        seen_nodes: Set[Node] = set()
+        seen_nodes: set[Node] = set()
         for region_group in region_groups:
-            fully_expand_region_group(region_group, seen_nodes, self._is_identical)
+            fully_expand_region_group(
+                region_group,
+                seen_nodes,
+                node_to_recursive_ancestors,
+                self._is_identical,
+            )
             # sort topologically
             for region in region_group:
                 region.sort(key=lambda n: topological_ranking[n])
@@ -287,8 +304,9 @@ class GraphRegionTracker:
 
 
 def fully_expand_region_group(
-    regions: List[Region],
-    seen_nodes: Set[Node],
+    regions: list[Region],
+    seen_nodes: set[Node],
+    node_to_recursive_ancestors: dict[Node, set[Node]],
     is_identical_fn: Callable[[Node, Node], bool],
 ) -> None:
     debug_log("--------------------------------------------------")
@@ -301,7 +319,7 @@ def fully_expand_region_group(
         (origin,) = region  # Only works for 1 element sets
         region_iters.append(BackwardBfsArgIter.create(origin))
 
-    nodes_to_add: List[Node] = []
+    nodes_to_add: list[Node] = []
 
     # we already have the origin node in each region
     for region_it in region_iters:
@@ -310,22 +328,28 @@ def fully_expand_region_group(
         region_it.add_children(node)
 
     current_node = region_iters[0].next()
-    assert current_node is not None
+
+    # No children
+    if current_node is None:
+        return
+
     # Loop incrementally adding new nodes to each region
     # regions are only expanded if the node to add is valid
     # for ALL regions
     while current_node:
-        add_node = True
+        add_node = not _will_create_cycle(
+            current_node, regions[0], node_to_recursive_ancestors
+        )
         nodes_to_add.clear()
         nodes_to_add.append(current_node)
         nodes_to_add_set = set(nodes_to_add)
-        for region_it in region_iters[1:]:
+        for ind, region_it in enumerate(region_iters[1:]):
+            ind += 1  # compensate for the 0th region
             node = region_it.next()
 
             debug_log("--------------------")
             debug_log("considering adding: %s, cur_node: %s", node, current_node)
             debug_log("previously claimed nodes: %s", node in seen_nodes)
-            debug_log("%s", seen_nodes)
             if node:
                 debug_log("is_identical: %s", is_identical_fn(node, current_node))
                 add_node &= (
@@ -333,6 +357,9 @@ def fully_expand_region_group(
                     and node not in nodes_to_add_set
                     and node.op != "placeholder"
                     and is_identical_fn(node, current_node)
+                    and not _will_create_cycle(
+                        node, regions[ind], node_to_recursive_ancestors
+                    )
                 )
                 nodes_to_add.append(node)
                 nodes_to_add_set.add(node)
@@ -357,3 +384,35 @@ def fully_expand_region_group(
 
     debug_log("end expand new region group: %s", regions)
     debug_log("--------------------------------------------------")
+
+
+def _populate_recursive_ancestor_map(graph: torch.fx.Graph) -> dict[Node, set[Node]]:
+    node_to_recursive_ancestors: dict[Node, set[Node]] = {}
+    for node in graph.nodes:
+        node_to_recursive_ancestors[node] = set()
+    for node in graph.nodes:
+        all_args = _flatten_args_kwargs((node.args, node.kwargs))
+        for arg in all_args:
+            if isinstance(arg, Node):
+                node_to_recursive_ancestors[node].update(
+                    node_to_recursive_ancestors[arg]
+                )
+                node_to_recursive_ancestors[node].add(node)
+    return node_to_recursive_ancestors
+
+
+def _will_create_cycle(
+    node_to_add: Node,
+    region: Region,
+    node_to_recursive_ancestors: dict[Node, set[Node]],
+) -> bool:
+    region_set: set[Node] = set(region)
+    region_ancestors: set[Node] = set(
+        tree_flatten([list(node_to_recursive_ancestors[node]) for node in region])[0]
+    )
+    external_users = [user for user in node_to_add.users if user not in region_set]
+    for user in external_users:
+        if user in region_ancestors:
+            return True
+
+    return False

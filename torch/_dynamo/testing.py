@@ -1,3 +1,18 @@
+"""Testing utilities and infrastructure for Dynamo.
+
+This module provides a comprehensive set of testing utilities including:
+- Test result collection and validation
+- Graph manipulation and comparison tools
+- Test case management and execution helpers
+- Specialized test decorators for different Python versions and features
+- RNG state management
+- Compilation counting and monitoring
+- Debug utilities for bytecode transformation
+
+The utilities in this module are used across Dynamo's test suite to ensure
+consistent testing patterns and proper test isolation.
+"""
+
 import contextlib
 import dis
 import functools
@@ -8,17 +23,8 @@ import re
 import sys
 import types
 import unittest
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    overload,
-    Sequence,
-    TypeVar,
-    Union,
-)
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -35,7 +41,7 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
-from .types import DynamoFrameType
+from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import same
 
 
@@ -83,7 +89,7 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
 
 def collect_results(
     model: torch.nn.Module, prediction: Any, loss: Any, example_inputs: Any
-) -> List[Any]:
+) -> list[Any]:
     results = []
     results.append(prediction)
     results.append(loss)
@@ -134,15 +140,13 @@ def requires_bwd_pass(out: Any) -> bool:
 
 
 @overload
-def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
-    ...
+def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[List[Any], tuple[Any, ...], Dict[Any, Any]]
-) -> float:
-    ...
+    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]],
+) -> float: ...
 
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
@@ -183,37 +187,41 @@ def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
 
 def debug_insert_nops(
     frame: DynamoFrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
-) -> Optional[GuardedCode]:
+) -> ConvertFrameReturn:
     """used to debug jump updates"""
 
-    def insert_nops(instructions: List[Any], code_options: Any) -> None:
+    def insert_nops(instructions: list[Any], code_options: Any) -> None:
         instructions.insert(0, create_instruction("NOP"))
         instructions.insert(0, create_instruction("NOP"))
 
-    if is_generator(frame.f_code):
-        return None
+    metrics_context = torch._dynamo.utils.get_metrics_context()
+    with torch._dynamo.utils.dynamo_timed("debug_insert_nops"), metrics_context:
+        if is_generator(frame.f_code):
+            return ConvertFrameReturn()
 
-    debug_checks(frame.f_code)
-    code = transform_code_object(frame.f_code, insert_nops)
-    graph = OutputGraph(
-        code_options={},
-        compiler_fn=None,
-        root_tx=None,
-        export=False,
-        export_constraints=None,
-        frame_state={"_id": 0},
-        # TODO: shouldn't this be f_locals/f_globals from frame?
-        local_scope=locals(),
-        global_scope=globals(),
-        f_code=frame.f_code,
-        torch_function_mode_stack=[],
-    )
+        debug_checks(frame.f_code)
+        code = transform_code_object(frame.f_code, insert_nops)
+        graph = OutputGraph(
+            code_options={},
+            compiler_fn=None,
+            root_tx=None,
+            export=False,
+            export_constraints=None,
+            frame_state={"_id": 0},
+            # TODO: shouldn't this be f_locals/f_globals from frame?
+            local_scope=locals(),
+            global_scope=globals(),
+            f_code=frame.f_code,
+            torch_function_mode_stack=[],
+        )
 
-    return GuardedCode(
-        code,
-        CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
-        CompileId(frame_id=0, frame_compile_id=0),
-    )
+        return wrap_guarded_code(
+            GuardedCode(
+                code,
+                CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+                CompileId(frame_id=0, frame_compile_id=0),
+            )
+        )
 
 
 class CompileCounter:
@@ -222,7 +230,7 @@ class CompileCounter:
         self.op_count = 0
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         self.frame_count += 1
         for node in gm.graph.nodes:
@@ -240,10 +248,10 @@ class CompileCounterWithBackend:
         self.frame_count = 0
         self.op_count = 0
         self.backend = backend
-        self.graphs: List[torch.fx.GraphModule] = []
+        self.graphs: list[torch.fx.GraphModule] = []
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         from .backends.registry import lookup_backend
 
@@ -264,10 +272,10 @@ class CompileCounterWithBackend:
 # we can assert on
 class EagerAndRecordGraphs:
     def __init__(self) -> None:
-        self.graphs: List[torch.fx.GraphModule] = []
+        self.graphs: list[torch.fx.GraphModule] = []
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
@@ -275,23 +283,23 @@ class EagerAndRecordGraphs:
 
 class AotEagerAndRecordGraphs:
     def __init__(self) -> None:
-        self.graphs: List[torch.fx.GraphModule] = []
-        self.fw_graphs: List[torch.fx.GraphModule] = []
-        self.bw_graphs: List[torch.fx.GraphModule] = []
+        self.graphs: list[torch.fx.GraphModule] = []
+        self.fw_graphs: list[torch.fx.GraphModule] = []
+        self.bw_graphs: list[torch.fx.GraphModule] = []
 
     def __call__(
-        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
 
         def fw_compiler(
-            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+            gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
         ) -> Callable[..., Any]:
             self.fw_graphs.append(gm)
             return gm.forward
 
         def bw_compiler(
-            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+            gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
         ) -> Callable[..., Any]:
             self.bw_graphs.append(gm)
             return gm.forward
@@ -360,7 +368,7 @@ def standard_test(
 
 
 def dummy_fx_compile(
-    gm: fx.GraphModule, example_inputs: List[torch.Tensor]
+    gm: fx.GraphModule, example_inputs: list[torch.Tensor]
 ) -> Callable[..., Any]:
     return gm.forward
 
@@ -457,31 +465,31 @@ def make_test_cls_with_patches(
 
 
 # test Python 3.11+ specific features
-def skipIfNotPy311(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
 
 
-def skipIfNotPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
 
 
-def xfailIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
     return fn
 
 
-def skipIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
+def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
 
 
-def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
+def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 10):
         return fn
     else:
@@ -490,19 +498,19 @@ def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
-def expectedFailureDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
-def expectedFailureCodegenDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureCodegenDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_codegen_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls test generated in test/inductor/test_cpp_wrapper.py
-def expectedFailureDynamicWrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
+def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn
 
@@ -516,3 +524,9 @@ def reset_rng_state(use_xla: bool = False) -> None:
         import torch_xla.core.xla_model as xm
 
         xm.set_rng_state(1337, str(xm.xla_device()))
+
+
+def _skipped_function_for_test_reconstruct(
+    f: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> _T:
+    return f(*args, **kwargs)

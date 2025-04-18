@@ -513,8 +513,9 @@ def verify(
                 "could mean that your network is numerically unstable.  Otherwise\n"
                 "it indicates a bug in PyTorch/ONNX; please file a bug report."
             )
-            with Errors(msg, rtol=rtol, atol=atol) as errs, errs.addErrCtxt(
-                result_hint
+            with (
+                Errors(msg, rtol=rtol, atol=atol) as errs,
+                errs.addErrCtxt(result_hint),
             ):
                 for i, (x, y) in enumerate(zip(torch_out, backend_out)):
                     errs.checkAlmostEqual(x.data.cpu().numpy(), y, f"In output {i}")

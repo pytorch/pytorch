@@ -7,22 +7,22 @@
 # a type attached and restored via `restore_type_tag` below. The legacy
 # functions should stick around for backwards-compatibility.
 
-from typing import List, Union
+from typing import Union
 
 
-def build_intlist(data: List[int]) -> List[int]:
+def build_intlist(data: list[int]) -> list[int]:
     return data
 
 
-def build_tensorlist(data: List[object]) -> List[object]:
+def build_tensorlist(data: list[object]) -> list[object]:
     return data
 
 
-def build_doublelist(data: List[float]) -> List[float]:
+def build_doublelist(data: list[float]) -> list[float]:
     return data
 
 
-def build_boollist(data: List[bool]) -> List[bool]:
+def build_boollist(data: list[bool]) -> list[bool]:
     return data
 
 

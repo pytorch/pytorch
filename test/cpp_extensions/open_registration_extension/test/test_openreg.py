@@ -78,6 +78,17 @@ class TestOpenReg(TestCase):
         slice_a = pinned_a[2:5]
         self.assertTrue(slice_a.is_pinned())
 
+    def test_rewrapped_storage(self):
+        pinned_a = torch.randn(10).pin_memory()
+        rewrapped_a = torch.tensor((), dtype=torch.float32).set_(
+            pinned_a.untyped_storage()[2:],
+            size=(5,),
+            stride=(1,),
+            storage_offset=0,
+        )
+        self.assertTrue(rewrapped_a.is_pinned())
+        self.assertNotEqual(pinned_a.data_ptr(), rewrapped_a.data_ptr())
+
     def test_stream_synchronize(self):
         stream = torch.Stream(device="openreg:1")
         stream.synchronize()

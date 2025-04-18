@@ -65,20 +65,12 @@ _like_tensor_constructors = ordered_set(
     aten.ones_like.out,
     aten.rand_like.default,
     aten.rand_like.out,
-    aten.rand_like.generator,
-    aten.rand_like.generator_out,
     aten.randn_like.default,
     aten.randn_like.out,
-    aten.randn_like.generator,
-    aten.randn_like.generator_out,
     aten.randint_like.default,
     aten.randint_like.out,
     aten.randint_like.low_dtype,
     aten.randint_like.low_dtype_out,
-    aten.randint_like.generator,
-    aten.randint_like.generator_out,
-    aten.randint_like.generator_with_low_dtype,
-    aten.randint_like.generator_with_low_dtype_out,
     aten.zeros_like.default,
     aten.zeros_like.out,
     aten.new_empty.default,
@@ -230,14 +222,6 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 
 def stride_incorrect_op(op):
-    if op.namespace not in ("aten", "prims"):
-        return False
-    if op is aten._fft_c2c.default:
-        return False
-
-    op_name = op.name()
-    if "fft" in op_name:
-        return True
     return False
 
 
@@ -290,7 +274,15 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 
 
 def _unique(
-    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+    fake_mode,
+    func,
+    arg,
+    dim,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    *,
+    unique_consecutive=False,
 ):
     if (
         fake_mode.shape_env is None
@@ -299,8 +291,10 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
+    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+
     # Do not use a memo for unique_dim
-    if dim is not None or (nnz := arg.unique_memo) is None:
+    if dim is not None or nnz is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -329,7 +323,10 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            arg.unique_memo = nnz
+            if unique_consecutive:
+                arg.unique_consecutive_memo = nnz
+            else:
+                arg.unique_memo = nnz
 
     if dim is None:
         ret = [arg.new_empty((nnz,))]
@@ -372,6 +369,20 @@ def unique_dim(
         sorted,
         return_inverse,
         return_counts,
+    )
+
+
+@register_op_impl(aten.unique_consecutive.default)
+def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        dim,
+        False,
+        return_inverse,
+        return_counts,
+        unique_consecutive=True,
     )
 
 
@@ -471,7 +482,7 @@ def nonzero(fake_mode, func, arg):
 
         arg.nonzero_memo = nnz
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+    return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
@@ -546,6 +557,40 @@ def masked_select(fake_mode, func, self, mask):
     _constrain_range_for_size(nnz, max=maxval)
 
     return self.new_empty((nnz,))
+
+
+@register_op_impl(torch.ops.aten._assert_tensor_metadata.default)
+def assert_tensor_metadata(
+    fake_mode,
+    func,
+    t,
+    sizes=None,
+    strides=None,
+    dtype=None,
+    *,
+    device=None,
+    layout=None,
+) -> None:
+    if sizes is not None:
+        assert (
+            t.size() == sizes
+        ), f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+    if strides is not None:
+        assert (
+            t.stride() == strides
+        ), f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+    if dtype is not None:
+        assert (
+            t.dtype == dtype
+        ), f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+    if layout is not None:
+        assert (
+            t.layout == layout
+        ), f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
+    if device is not None:
+        assert (
+            t.device == device
+        ), f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -786,6 +831,23 @@ def conv(fake_mode, func, *args, **kwargs):
             )
 
 
+@register_op_impl(torch.ops.aten.bincount.default)
+def bincount(fake_mode, func, inputs, weights=None, minlength=0):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    new_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(new_size, min=minlength)
+    return inputs.new_empty(new_size)
+
+
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
 def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
     if (
@@ -862,7 +924,9 @@ def infer_size(a, b):
     return tuple(expandedSizes)
 
 
-def make_fast_binary_impl(slow_ref):
+def make_fast_binary_impl(
+    slow_ref, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+):
     def fast_binary_impl(mode, *args, **kwargs):
         def slow(msg):
             count_label(f"slow {msg}")
@@ -929,7 +993,7 @@ def make_fast_binary_impl(slow_ref):
             # compute promotion
             # TODO: we don't need the compute type
             _, common_dtype = elementwise_dtypes(
-                *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+                *operands, type_promotion_kind=type_promotion_kind
             )
 
         # check all tensors on same device
@@ -999,7 +1063,7 @@ def make_fast_binary_impl(slow_ref):
 def fast_detach(fake_mode, x):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    return FakeTensor(fake_mode, out, x.device)
+    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
 
 
 @functools.lru_cache(None)
@@ -1014,7 +1078,10 @@ def get_fast_op_impls():
     )
     register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
-        make_fast_binary_impl(torch._refs.div)
+        make_fast_binary_impl(
+            torch._refs.div,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
     )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
     return FAST_OP_IMPLEMENTATIONS

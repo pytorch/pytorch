@@ -1,15 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import (
-    Callable,
-    cast,
-    Collection,
-    List,
-    Mapping,
-    MutableMapping,
-    Optional,
-    TypeVar,
-    Union,
-)
+from collections.abc import Collection, Mapping, MutableMapping
+from typing import Callable, cast, Optional, TypeVar, Union
 
 import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
@@ -123,7 +114,7 @@ def set_element(
     """Set ``value`` in ``root_dict`` along the ``path`` object path."""
     cur_container = cast(CONTAINER_TYPE, root_dict)
 
-    def extend_list(lst: List[STATE_DICT_ITEM], idx: int) -> None:
+    def extend_list(lst: list[STATE_DICT_ITEM], idx: int) -> None:
         while len(lst) <= idx:
             lst.append(None)
 
@@ -144,7 +135,7 @@ def set_element(
 
     key = path[-1]
     if type(key) == int:
-        extend_list(cast(List[STATE_DICT_ITEM], cur_container), key)
+        extend_list(cast(list[STATE_DICT_ITEM], cur_container), key)
 
     cur_container[key] = value
 

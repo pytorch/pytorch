@@ -6,7 +6,7 @@ import logging
 import operator
 import struct
 import sys
-from typing import List, NamedTuple, Optional, Tuple
+from typing import NamedTuple, Optional
 
 import torch
 
@@ -210,7 +210,7 @@ class Operand(NamedTuple):
     # This is always the PyTorch shape, which is NCHW for feature maps.
     # The actual NNAPI operand might have a transposed shape.
     # we use 0 for load time dynamic shapes & -1 for runtime dynamic shapes
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
 
     # Specifies how the shape of the operand that we define in NNAPI
     # relates to the shape we track above.
@@ -943,8 +943,8 @@ class _NnapiSerializer:
         assert node.outputsSize() == 1
         output = node.outputsAt(0)
         ctype = output.type()
-        const_vals: Optional[List] = []
-        tensors: Optional[List] = []
+        const_vals: Optional[list] = []
+        tensors: Optional[list] = []
         for inp in node.inputs():
             if const_vals is not None and inp in self.constants:
                 _, val = self.get_constant_value(inp)

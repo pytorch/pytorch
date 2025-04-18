@@ -193,6 +193,8 @@ aten::div_.Scalar
 aten::div_.Scalar_mode
 aten::div_.Tensor
 aten::div_.Tensor_mode
+aten::elu
+aten::elu.out
 aten::embedding
 aten::embedding.out
 aten::empty_strided
@@ -506,6 +508,8 @@ aten::triu_indices.out
 aten::trunc
 aten::trunc.out
 aten::trunc_
+aten::unbind_copy.int
+aten::unbind_copy.int_out
 aten::unfold
 aten::uniform
 aten::uniform.out

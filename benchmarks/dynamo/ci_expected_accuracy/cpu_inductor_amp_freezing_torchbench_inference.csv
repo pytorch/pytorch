@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,24
+detectron2_fcos_r_50_fpn,fail_accuracy,22
 
 
 
@@ -138,7 +138,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,19
+hf_BigBird,pass,24
 
 
 
@@ -159,6 +159,10 @@ hf_Longformer,pass,4
 
 
 hf_Reformer,pass,5
+
+
+
+hf_Roberta_base,pass,0
 
 
 
@@ -191,6 +195,10 @@ maml,pass_due_to_skip,0
 
 
 maml_omniglot,pass,0
+
+
+
+microbench_unbacked_tolist_sum,pass,1
 
 
 

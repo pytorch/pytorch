@@ -6,7 +6,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -20,7 +20,7 @@ from ..remote_cache import (
     RemoteCacheBackend,
     RemoteCacheJsonSerde,
 )
-from .triton_compat import Config
+from .triton_compat import Config, HAS_WARP_SPEC
 
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-_InductorMetaTy = Dict[str, object]
+_InductorMetaTy = dict[str, object]
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:
@@ -88,7 +88,7 @@ class AutotuneCache:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     # Read the best config options from the most local cache and return it.
-    def _read(self) -> Optional[Dict[str, JsonDataTy]]:
+    def _read(self) -> Optional[dict[str, JsonDataTy]]:
         if local_cache := self.local_cache:
             cache, key = local_cache
             if best_config := cache.get(key):
@@ -106,7 +106,7 @@ class AutotuneCache:
     # Read the best config options from the most local cache and figure out
     # which `configs` represents that option.
     def read_best(
-        self, inductor_meta: _InductorMetaTy, configs: List[Config]
+        self, inductor_meta: _InductorMetaTy, configs: list[Config]
     ) -> Optional[Config]:
         if best := self._read():
             return _load_cached_autotuning(
@@ -121,7 +121,21 @@ class AutotuneCache:
         if not inductor_meta.get("autotune_local_cache", True):
             return
 
-        cache_filename = f"{dirname}/{cache_key}.best_config"
+        from ..codecache import torch_key
+
+        """
+        [Note: torch_key in autotune cache key]
+        Include torch_key() in the cache key so that different versions
+        of torch result in cache invalidation. This is important in case
+        of changes to the best_config format or other code changes that
+        are not backward compatible w.r.t. the cache.
+        """
+        hasher = hashlib.sha256()
+        hasher.update(cache_key.encode("utf-8"))
+        hasher.update(torch_key())
+        updated_cache_key = hasher.hexdigest()
+
+        cache_filename = f"{dirname}/{updated_cache_key}.best_config"
         local_cache = LocalAutotuneCache()
         self.local_cache = (local_cache, cache_filename)
 
@@ -139,10 +153,13 @@ class AutotuneCache:
             return
         assert isinstance(backend_hash, str)
 
+        from ..codecache import torch_key
+
         is_fbcode = bool(inductor_meta.get("is_fbcode", False))
 
         salt = "autotune-best-config-v2"
-        key = backend_hash + self.configs_hash + salt
+        # re: torch_key - see [Note: torch_key in autotune cache key]
+        key = torch_key().hex() + backend_hash + self.configs_hash + salt
         key = hashlib.sha256(key.encode("utf-8")).hexdigest()
 
         remote_cache = create_cache(
@@ -154,7 +171,46 @@ class AutotuneCache:
         if not remote_cache:
             return
 
+        # Save the args passed to create_cache
+        # in case AutotuneCache needs to be pickled
+        self.remote_cache_full_key = key
+        self.is_fbcode = is_fbcode
         self.remote_cache = (remote_cache, cache_key)
+
+    # The AutotuneCache may be serialized/deserialized if we're using
+    # AsyncCompile worker processes to run triton compilation.
+    # This is because AutotuneCache instances are created on the worker
+    # process, but we need to run AutotuneCache.save on the parent process
+    # when actually doing autotuning.
+    def __getstate__(self) -> dict[str, Any]:
+        # The remote cache handles themselves may not be serializable
+        # So clear it and reconstruct it on setstate
+        remote_cache = getattr(self, "remote_cache", None)
+        return {
+            **self.__dict__,
+            # Save the cache_key portion
+            "remote_cache": remote_cache and remote_cache[1],
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Reconstruct the remote cache on the parent class
+        self.__dict__.update(state)
+        if self.remote_cache is not None:
+            assert isinstance(self.remote_cache, str)
+            assert hasattr(self, "remote_cache_full_key")
+            assert hasattr(self, "is_fbcode")
+            cache_key = self.remote_cache
+            remote_cache = create_cache(
+                self.remote_cache_full_key,
+                self.is_fbcode,
+                "FbRemoteAutotuneCache",
+                "RemoteAutotuneCache",
+            )
+            if remote_cache is not None:
+                self.remote_cache = (remote_cache, cache_key)
+            else:
+                log.warning("Warning, failed to recreate remote cache after pickling")
+                self.remote_cache = None
 
     # Save the config in the caches
     def save(
@@ -168,6 +224,15 @@ class AutotuneCache:
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
         }
+        if HAS_WARP_SPEC:
+            data.update(
+                {
+                    "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
+                    "num_buffers_warp_spec": getattr(
+                        config, "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
 
         if local_cache := self.local_cache:
             cache, key = local_cache
@@ -196,7 +261,7 @@ class _AutotuneCacheBundlerImpl:
     _cache: RemoteCache[JsonDataTy]
 
     # All known entries from LocalAutotuneCache.put()
-    _entries: Dict[str, JsonDataTy]
+    _entries: dict[str, JsonDataTy]
 
     def end_compile(self) -> None:
         # TODO: Do we need to compute time_taken_ms and encode that somehow?
@@ -407,9 +472,9 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 
 
 def _load_cached_autotuning(
-    best_config: Dict[str, JsonDataTy],
+    best_config: dict[str, JsonDataTy],
     configs_hash: str,
-    configs: List[Config],
+    configs: list[Config],
     inductor_meta: _InductorMetaTy,
 ) -> Optional[Config]:
     if best_config is None:
@@ -425,7 +490,25 @@ def _load_cached_autotuning(
     ):
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
+
+        # Extract common arguments
+        config_args = {
+            "num_warps": num_warps,
+            "num_stages": num_stages,
+        }
+
+        if HAS_WARP_SPEC:
+            config_args.update(
+                {
+                    "num_consumer_groups": best_config.pop("num_consumer_groups", 0),
+                    "num_buffers_warp_spec": best_config.pop(
+                        "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
+
+        # Create the triton_config with the appropriate arguments
+        triton_config = Config(best_config, **config_args)
         triton_config.found_by_coordesc = True
         return triton_config
 
@@ -454,8 +537,9 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _put(self, key: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(key), exist_ok=True)
-        with open(key, "wb") as fd:
-            fd.write(data)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):

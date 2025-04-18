@@ -8,9 +8,8 @@
 import copy
 import os
 import sys
-import unittest
 from contextlib import nullcontext
-from typing import Any, cast, List
+from typing import Any, cast
 
 import numpy as np
 
@@ -37,8 +36,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
-    TEST_WITH_ASAN,
-    TEST_WITH_DEV_DBG_ASAN,
 )
 
 
@@ -64,7 +61,6 @@ def _get_backend_for_tests():
 BACKEND = _get_backend_for_tests()
 
 
-@unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -103,8 +99,6 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         )
 
 
-# TODO: skip_but_pass_in_sandcastle_if does not work here.
-@unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def test_state_dict(self):
         """Check that ZeroRedundancyOptimizer exposes the expected state dict
@@ -207,7 +201,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
                 super().step()
                 kwarg.append(5)
 
-        kwarg: List[Any] = []
+        kwarg: list[Any] = []
         x = torch.tensor([1.0], device=self.device, requires_grad=True)
         o = ZeroRedundancyOptimizer(
             [x],

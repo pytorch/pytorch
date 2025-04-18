@@ -5,7 +5,7 @@ import sys
 from collections import Counter
 from enum import auto, Enum
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -363,7 +363,7 @@ class TestFSDPHybridShard(FSDPTest):
         torch.manual_seed(global_pg.rank() + 1)
         for _ in range(5):
             inp = fsdp_model.module.get_input(torch.device("cuda"))
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for model, optim in ((fsdp_model, fsdp_optim), (hsdp_model, hsdp_optim)):
                 optim.zero_grad()
                 loss = model(*inp).sum()
@@ -396,7 +396,7 @@ class TestFSDPHybridShard(FSDPTest):
         sharding_strategy_mode: str,
         use_orig_params: bool,
         hsdp_process_groups: Optional[
-            Tuple[dist.ProcessGroup, dist.ProcessGroup]
+            tuple[dist.ProcessGroup, dist.ProcessGroup]
         ] = None,
         hsdp_device_mesh: Optional = None,
     ):

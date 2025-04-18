@@ -38,7 +38,7 @@ constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
-C10_DEFINE_TYPED_REGISTRY( // NOLINT
+C10_DEFINE_TYPED_REGISTRY(
     TimerRegistry,
     c10::DeviceType,
     Timer,
@@ -90,14 +90,14 @@ std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
 Reducer::Reducer(
     std::vector<at::Tensor> params,
     std::vector<std::vector<size_t>> bucket_indices,
-    const std::vector<size_t>& per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<bool> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
     std::unordered_map<size_t, std::string> param_names,
-    int64_t first_bucket_bytes_cap)
+    int64_t first_bucket_bytes_cap,
+    bool skip_all_reduce_unused_params)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -112,10 +112,12 @@ Reducer::Reducer(
       num_bwd_calls_(0),
       first_autograd_hook_called_(false),
       num_buckets_ready_(0),
+      num_buckets_reduced_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
+      skip_all_reduce_unused_params_(skip_all_reduce_unused_params),
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
@@ -184,21 +186,23 @@ Reducer::Reducer(
 #endif
       // Hook to execute after the gradient accumulator has executed.
       hooks_.emplace_back(
-          grad_accumulator->add_post_hook(
-              std::make_unique<torch::autograd::utils::LambdaPostHook>(
-                  [this, variable_index](
-                      const torch::autograd::variable_list& outputs,
-                      const torch::autograd::variable_list& /* unused */) {
+          grad_accumulator->add_post_hook(std::make_unique<
+                                          torch::autograd::utils::
+                                              LambdaPostHook>(
+              [this, variable_index](
+                  const torch::autograd::variable_list& outputs,
+                  const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
-                    this->rpc_context_.set(
-                        ThreadLocalDistAutogradContext::getContextPtr());
+                this->rpc_context_.set(
+                    ThreadLocalDistAutogradContext::getContextPtr());
 #endif
-                    this->autograd_hook(variable_index);
-                    return outputs;
-                  },
-                  [=](torch::autograd::CompiledNodeArgs& args) {
-                    // Make post_hook an noop if compiled_autograds is enabled.
-                  })),
+                this->autograd_hook(variable_index);
+                return outputs;
+              },
+              [=](torch::autograd::CompiledNodeArgs& args) {
+                TORCH_INTERNAL_ASSERT(
+                    "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
+              })),
           grad_accumulator);
 
       // Map raw function pointer to parameter index.
@@ -1019,6 +1023,22 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
   }
 }
 
+bool Reducer::is_unused_bucket(Bucket& bucket) {
+  for (const auto& variable_index : bucket.variable_indices) {
+    if (std::find(
+            unused_parameters_.begin(),
+            unused_parameters_.end(),
+            variable_index) == unused_parameters_.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Reducer::should_skip_all_reduce_bucket(Bucket& bucket) {
+  return is_unused_bucket(bucket) && skip_all_reduce_unused_params_;
+}
+
 // Called when the bucket at the specified index is ready to be reduced.
 void Reducer::mark_bucket_ready(size_t bucket_index) {
   TORCH_INTERNAL_ASSERT(bucket_index >= next_bucket_);
@@ -1039,7 +1059,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       record_backward_comm_start_time();
     }
     auto& bucket = buckets_[next_bucket_];
-    all_reduce_bucket(bucket);
+    if (!should_skip_all_reduce_bucket(bucket)) {
+      all_reduce_bucket(bucket);
+      num_buckets_reduced_++;
+    }
   }
 }
 
@@ -1158,14 +1181,43 @@ void Reducer::initialize_buckets(
         offset += length;
       }
 
-      // Allocate the bucket's flattened `gradients` tensor.
       // Make gradient type in the reduced precision if mixed precision is
       // enabled. This ensures that the type is correct when e.g. rebuilding
       // buckets.
       if (mixed_precision_param_dtype_.has_value()) {
         options = options.dtype(mixed_precision_param_dtype_);
       }
-      bucket.gradients = at::empty({static_cast<long>(offset)}, options);
+
+      // Allocate the bucket's flattened `gradients` tensor.
+      auto bucketSize = static_cast<long>(offset);
+      // Check if we can use comm-optimized memory pool to allocate tensor
+      c10::intrusive_ptr<Backend> backend = nullptr;
+      // An environment variable to disable comm-optimized memory pool.
+      // Default is 1 for now (disabled).
+      // TODO: turn it on by default once we have more confidence on it.
+      bool ddpDisableCommMem =
+          (getCvarString({"DDP_DISABLE_COMM_MEM"}, "1") == "1");
+      try {
+        backend = process_group_->getDefaultBackend();
+      } catch (...) {
+        // Sometimes the backend type can be `UNDEFINED` rather than `NCCL` or
+        // `GLOO`. In this case, we just fall back to the regular way of
+        // creating tensor
+        LOG(INFO)
+            << "Reducer: default comm backend not found, skipping bucket memory optimization";
+      }
+      if (ddpDisableCommMem == 0 && backend != nullptr &&
+          backend->supportsTensorAlloc(options.device().index())) {
+        // Comm-optimized memory pool is available, use it to allocate tensor
+        LOG(INFO)
+            << "Reducer: found comm-optimized memory allocator, using it to create bucket";
+        bucket.gradients = backend->allocateTensor(bucketSize, options);
+      } else {
+        // Plain creation of tensor
+        LOG(INFO)
+            << "Reducer: comm-optimized memory allocator not found, using regular one";
+        bucket.gradients = at::empty({bucketSize}, options);
+      }
 
       // Note:  "Gradient Layout Contract"
       //
@@ -1326,6 +1378,8 @@ void Reducer::reset_bucket_counting() {
   // Reset num_buckets_ready_ at the beginning of backward computation
   // in each iteration.
   num_buckets_ready_ = 0;
+
+  num_buckets_reduced_ = 0;
 
   for (auto& bucket : buckets_) {
     bucket.pending = bucket.variables.size();
@@ -1613,10 +1667,16 @@ void Reducer::finalize_backward() {
   // flattened `gradients` tensor.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
-    TORCH_INTERNAL_ASSERT(
-        bucket.future_work,
-        "Expected bucket.future_work not to be null. "
-        "This may indicate that communication hook was not properly installed.");
+    // It is possible that the bucket all_reduce is skipped if the bucket is
+    // unused bucket and skip_all_reduce_unused_params_ is true.
+    if (bucket.future_work == nullptr) {
+      TORCH_INTERNAL_ASSERT(
+          skip_all_reduce_unused_params_,
+          "currently only support to skip all reduce for unused params "
+          "when skip_all_reduce_unused_params_ is true.");
+      continue;
+    }
+
     bucket.future_work->wait();
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
@@ -2287,14 +2347,14 @@ void verify_params_across_processes(
     }
   }
 
-  auto metadata_dev = metadata.clone().to(params[0].device());
-  std::vector<at::Tensor> vec{metadata_dev};
+  metadata = metadata.to(params[0].device());
+  std::vector<at::Tensor> vec{metadata};
   process_group->broadcast(vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.
   auto control = at::empty({static_cast<long>(i)}, options);
-  control.copy_(metadata_dev, /*non_blocking=*/false);
+  control.copy_(metadata, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
   for (const auto p : c10::irange(params.size())) {

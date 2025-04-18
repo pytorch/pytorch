@@ -47,11 +47,11 @@ TEST(TestLoops, HasSameArgTypes) {
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
-  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 8);
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 1), 1);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 1), 1);
@@ -65,8 +65,8 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 4), 2);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 4), 1);
 
-  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 8), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 8), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 8), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 8), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 8), 4);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 8), 2);
   ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr + 8), 1);

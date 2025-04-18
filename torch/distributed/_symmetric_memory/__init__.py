@@ -2,11 +2,12 @@ import math
 import os
 import socket
 import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -15,7 +16,7 @@ from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 
-_group_name_to_store: Dict[str, c10d.Store] = {}
+_group_name_to_store: dict[str, c10d.Store] = {}
 
 
 def enable_symm_mem_for_group(group_name: str) -> None:
@@ -95,7 +96,7 @@ def is_symm_mem_enabled_for_group(group_name: str) -> bool:
     return _is_test_mode or group_name in _group_name_to_store
 
 
-_group_name_to_workspace_tensor: Dict[str, Optional[torch.Tensor]] = {}
+_group_name_to_workspace_tensor: dict[str, Optional[torch.Tensor]] = {}
 
 
 def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
@@ -139,7 +140,7 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
     return _SymmetricMemory.rendezvous(tensor)
 
 
-_backend_streams: Dict[int, torch.cuda.Stream] = {}
+_backend_streams: dict[int, torch.cuda.Stream] = {}
 
 
 def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
@@ -149,9 +150,9 @@ def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
 
 
 def _pipelined_multi_all_gather_and_consume(
-    shard: List[torch.Tensor],
-    shard_consumer: Callable[[List[torch.Tensor], int], None],
-    ag_out: List[torch.Tensor],
+    shard: list[torch.Tensor],
+    shard_consumer: Callable[[list[torch.Tensor], int], None],
+    ag_out: list[torch.Tensor],
     group_name: str,
     ag_out_needed: bool = True,
 ) -> None:
@@ -195,11 +196,11 @@ def _pipelined_multi_all_gather_and_consume(
         assert x.shape[0] * group_size == y.shape[0]
         assert x.shape[1:] == y.shape[1:]
 
-    def copy_shard(dst: List[torch.Tensor], src: List[torch.Tensor]) -> None:
+    def copy_shard(dst: list[torch.Tensor], src: list[torch.Tensor]) -> None:
         for d, s in zip(dst, src):
             d.copy_(s)
 
-    def get_p2p_bufs(remote_rank: int) -> List[torch.Tensor]:
+    def get_p2p_bufs(remote_rank: int) -> list[torch.Tensor]:
         offset_bytes = 0
         bufs = []
         for x in shard:
@@ -216,7 +217,7 @@ def _pipelined_multi_all_gather_and_consume(
     local_p2p_bufs = get_p2p_bufs(rank)
 
     # shards[i] => shard from rank i
-    shards: List[List[torch.Tensor]] = [[] for _ in range(group_size)]
+    shards: list[list[torch.Tensor]] = [[] for _ in range(group_size)]
     for x in ag_out:
         for i, y in enumerate(x.chunk(group_size)):
             shards[i].append(y)
@@ -276,7 +277,7 @@ def _pipelined_multi_all_gather_and_consume(
             stream = backend_stream
         remote_rank = (step + rank) % group_size
         remote_p2p_bufs = get_p2p_bufs(remote_rank)
-        with torch.cuda.stream(stream):
+        with stream:
             copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
             shard_consumer(shards[remote_rank], remote_rank)
 
@@ -287,7 +288,7 @@ def _pipelined_multi_all_gather_and_consume(
             stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
-        with torch.cuda.stream(stream):
+        with stream:
             copy_shard(dst=shards[rank], src=shard)
 
     torch.cuda.current_stream().wait_stream(backend_stream)
@@ -311,7 +312,7 @@ def _pipelined_all_gather_and_consume(
             shard_consumer(shard, src_rank)
     """
 
-    def adapter(shard: List[torch.Tensor], rank: int) -> None:
+    def adapter(shard: list[torch.Tensor], rank: int) -> None:
         shard_consumer(shard[0], rank)
 
     _pipelined_multi_all_gather_and_consume(
@@ -371,7 +372,7 @@ def _pipelined_produce_and_all2all(
             stream = backend_stream
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
-        with torch.cuda.stream(stream):
+        with stream:
             # Parallelization strategy: every rank issues independent compute
             # -> barrier -> p2p copy sequences on two streams. In addition to
             # computation/communication overlapping, the strategy allows for
@@ -428,6 +429,10 @@ def _pipelined_produce_and_all2all(
             # chunk_producer after all peers have finished reading from it.
             symm_mem.barrier(channel=step % 2)
 
+    # If the sleep wasn't issued in the above loop, do it now.
+    if group_size == 2:
+        torch.cuda._sleep(100)
+
     chunk_producer(rank, out_chunks[rank])
     torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
@@ -456,7 +461,7 @@ lib.define(
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
     "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
-    "str reduce_op, int scatter_dim, str group_name, "
+    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, int[]? output_shape, "
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
@@ -505,14 +510,14 @@ def _check_and_verify_fp8_all_gather_scale_mode(
 def _fused_all_gather_matmul_impl(
     mm_out_op: torch._ops.OpOverload,
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     A_scale: Optional[torch.Tensor],
-    kwargs_list: List[Dict[str, Any]],
-    out_dtypes: List[Optional[torch.dtype]],
+    kwargs_list: list[dict[str, Any]],
+    out_dtypes: list[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
     return_A: bool,
-) -> tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], list[torch.Tensor]]:
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     for B in Bs:
@@ -563,7 +568,7 @@ def _fused_all_gather_matmul_impl(
             A_scale_shard.shape[1],
         )
 
-        def row_wise_sharded_consumer(shard: List[torch.Tensor], rank: int) -> None:
+        def row_wise_sharded_consumer(shard: list[torch.Tensor], rank: int) -> None:
             for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
                 mm_out_op(
                     shard[0],
@@ -630,12 +635,12 @@ def _fused_all_gather_matmul_impl(
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
 def _fused_all_gather_matmul_fallback(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
     *,
     return_A: bool = True,
-) -> tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], list[torch.Tensor]]:
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
         A_shard.contiguous(), group_size, group_name
@@ -652,12 +657,12 @@ def _fused_all_gather_matmul_fallback(
 @torch.library.impl(lib, "fused_all_gather_matmul", "CUDA")
 def _fused_all_gather_matmul(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
     *,
     return_A: bool = True,
-) -> tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], list[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
     communication:
@@ -703,7 +708,7 @@ def _fused_all_gather_matmul(
 
 def _should_use_fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
 ) -> bool:
@@ -763,7 +768,7 @@ def _fused_all_gather_matmul_native(
     for step in range(1, world_size):
         src_rank = (rank + step) % world_size
         src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
-        with torch.cuda.stream(backend_stream):
+        with backend_stream:
             A_shards[src_rank].copy_(src_buf)
             if not torch.cuda.is_current_stream_capturing():
                 # cuStreamWriteValue32 issues a system level fence before the write
@@ -806,9 +811,9 @@ def _should_use_multimem_all_gather_matmul(
 
 def _multimem_all_gather_matmul(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     group_name: str,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     group = c10d._resolve_process_group(group_name)
     A_shape = torch.Size((A_shard.shape[0] * group.size(), *A_shard.shape[1:]))
     symm_mem = get_symm_mem_workspace(
@@ -822,16 +827,16 @@ def _multimem_all_gather_matmul(
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
 def _fused_all_gather_scaled_matmul_fallback(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
-    B_scales: List[torch.Tensor],
+    B_scales: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
-    biases: List[Optional[torch.Tensor]],
-    result_scales: List[Optional[torch.Tensor]],
-    out_dtypes: List[Optional[torch.dtype]],
-    use_fast_accum: List[bool],
-) -> tuple[torch.Tensor, List[torch.Tensor]]:
+    biases: list[Optional[torch.Tensor]],
+    result_scales: list[Optional[torch.Tensor]],
+    out_dtypes: list[Optional[torch.dtype]],
+    use_fast_accum: list[bool],
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
 
     group_size = c10d._get_group_size_by_name(group_name)
@@ -896,16 +901,16 @@ def _fused_all_gather_scaled_matmul_fallback(
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "CUDA")
 def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
-    B_scales: List[torch.Tensor],
+    B_scales: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
-    biases: List[Optional[torch.Tensor]],
-    result_scales: List[Optional[torch.Tensor]],
-    out_dtypes: List[Optional[torch.dtype]],
-    use_fast_accum: List[bool],
-) -> tuple[torch.Tensor, List[torch.Tensor]]:
+    biases: list[Optional[torch.Tensor]],
+    result_scales: list[Optional[torch.Tensor]],
+    out_dtypes: list[Optional[torch.dtype]],
+    use_fast_accum: list[bool],
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
     communication:
@@ -976,7 +981,7 @@ def _fused_all_gather_scaled_matmul(
 
 def make_contiguous_for_perm(
     t: torch.Tensor,
-    perm: List[int],
+    perm: list[int],
 ) -> torch.Tensor:
     """
     Restride `t` such that `t.permute(perm)` is contiguous.
@@ -998,95 +1003,6 @@ def restride_A_shard_for_fused_all_gather_matmul(
     perm = list(range(len(t.shape)))
     perm.insert(0, perm.pop(gather_dim))
     return make_contiguous_for_perm(t, perm)
-
-
-def _fused_matmul_reduce_scatter_impl(
-    mm_out_op: torch._ops.OpOverload,
-    A: torch.Tensor,
-    B: torch.Tensor,
-    A_scale: Optional[torch.Tensor],
-    kwargs: Dict[str, Any],
-    out_dtype: Optional[torch.dtype],
-    reduce_op: str,
-    scatter_dim: int,
-    group_name: str,
-) -> torch.Tensor:
-    if A.dim() < 2:
-        raise ValueError("A_shard must be a matrix")
-    if scatter_dim < 0 or scatter_dim >= A.dim():
-        raise ValueError("Invalid gather_dim")
-    if B.dim() != 2:
-        raise ValueError("B must be a matrix")
-    if reduce_op == "sum":
-        reduce_fn = partial(torch.sum, dim=0)
-    elif reduce_op == "avg":
-        reduce_fn = partial(torch.mean, dim=0)
-    else:
-        raise ValueError("reduce_op must be sum or avg")
-
-    group = c10d._resolve_process_group(group_name)
-    out_shape = [*A.shape[:-1], B.shape[1]]
-    out_shape[scatter_dim] //= group.size()
-
-    # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
-    x = A.movedim(scatter_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    leading_dims[1] //= group.size()
-    x = x.flatten(0, -2)
-    A_shards = x.chunk(group.size())
-
-    A_scale_shards = None
-    if A_scale is None:
-        pass
-    elif A_scale.numel() == 1:
-        A_scale_shards = [A_scale] * group.size()
-    else:
-        if A_scale.shape[:-1] != A.shape[:-1]:
-            raise ValueError(
-                "For row-wise scaling, the leading dims of A_scale "
-                "must match the leading dims of A "
-                f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
-            )
-        A_scale = A_scale.movedim(scatter_dim, 0).contiguous().flatten(0, -2)
-        A_scale_shards = list(A_scale.chunk(group.size()))
-
-    # Computing block-wise matmul along the first dim of A
-    def chunk_producer(rank: int, out: torch.Tensor) -> None:
-        if A_scale_shards is not None:
-            mm_out_op(
-                A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out
-            )
-        else:
-            mm_out_op(A_shards[rank], B, **kwargs, out=out)
-
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
-
-    _pipelined_produce_and_all2all(
-        chunk_producer,
-        stacked_partials,
-        group_name,
-    )
-    # Ensures that the transpose and reduction produce contiguous result
-    # in a single reduction kernel.
-    return reduce_fn(
-        stacked_partials.view(*leading_dims, -1)
-        .movedim(1, scatter_dim + 1)
-        .movedim(0, scatter_dim),
-        dim=scatter_dim,
-    )
-
-
-@torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
-def _fused_matmul_reduce_scatter_fallback(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    reduce_op: str,
-    scatter_dim: int,
-    group_name: str,
-) -> torch.Tensor:
-    res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
-    res = funcol.wait_tensor(res)
-    return res
 
 
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "CUDA")
@@ -1117,12 +1033,134 @@ def _fused_matmul_reduce_scatter(
             mm_out_op=torch.ops.aten.mm.out,
             A=A,
             B=B,
-            A_scale=None,
             kwargs={},
             out_dtype=A.dtype,
             reduce_op=reduce_op,
             scatter_dim=scatter_dim,
             group_name=group_name,
+        )
+
+
+@torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
+def _fused_matmul_reduce_scatter_fallback(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: str,
+) -> torch.Tensor:
+    res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+    res = funcol.wait_tensor(res)
+    return res
+
+
+def _fused_matmul_reduce_scatter_impl(
+    mm_out_op: torch._ops.OpOverload,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    kwargs: dict[str, Any],
+    out_dtype: Optional[torch.dtype],
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: str,
+) -> torch.Tensor:
+    if A.dim() < 2:
+        raise ValueError("A_shard must be a matrix")
+    if scatter_dim < 0 or scatter_dim >= A.dim():
+        raise ValueError("Invalid gather_dim")
+    if B.dim() != 2:
+        raise ValueError("B must be a matrix")
+    if reduce_op == "sum":
+        reduce_fn = partial(torch.sum, dim=0)
+    elif reduce_op == "avg":
+        reduce_fn = partial(torch.mean, dim=0)
+    else:
+        raise ValueError("reduce_op must be sum or avg")
+
+    group = c10d._resolve_process_group(group_name)
+    out_shape = [*A.shape[:-1], B.shape[1]]
+    out_shape[scatter_dim] //= group.size()
+
+    # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
+    x = A.movedim(scatter_dim, 0)
+    leading_dims = [group.size()] + list(x.shape[:-1])
+    leading_dims[1] //= group.size()
+    x = x.flatten(0, -2)
+    A_shards = x.chunk(group.size())
+
+    # Computing block-wise matmul along the first dim of A
+    def chunk_producer(rank: int, out: torch.Tensor) -> None:
+        mm_out_op(A_shards[rank], B, **kwargs, out=out)
+
+    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+
+    _pipelined_produce_and_all2all(
+        chunk_producer,
+        stacked_partials,
+        group_name,
+    )
+
+    # Ensures that the transpose and reduction produce contiguous result
+    # in a single reduction kernel.
+    return reduce_fn(
+        stacked_partials.view(*leading_dims, -1)
+        .movedim(1, scatter_dim + 1)
+        .movedim(0, scatter_dim),
+        dim=scatter_dim,
+    )
+
+
+@torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "CUDA")
+def _fused_scaled_matmul_reduce_scatter(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    A_scale: torch.Tensor,
+    B_scale: torch.Tensor,
+    reduce_op: str,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
+    group_name: str,
+    output_shape: list[int],
+    bias: Optional[torch.Tensor] = None,
+    result_scale: Optional[torch.Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    if _is_test_mode:
+        return _fused_scaled_matmul_reduce_scatter_fallback(
+            A,
+            B,
+            A_scale,
+            B_scale,
+            reduce_op,
+            orig_scatter_dim,
+            scatter_dim_after_maybe_reshape,
+            group_name,
+            output_shape,
+            bias,
+            result_scale,
+            out_dtype,
+            use_fast_accum,
+        )
+    with torch.profiler.record_function("fused_scaled_matmul_reduce_scatter"):
+        return _fused_scaled_matmul_reduce_scatter_impl(
+            mm_out_op=torch.ops.aten._scaled_mm.out,
+            A=A,
+            B=B,
+            A_scale=A_scale,
+            kwargs={
+                "scale_b": B_scale,
+                "bias": bias,
+                "scale_result": result_scale,
+                "out_dtype": out_dtype,
+                "use_fast_accum": use_fast_accum,
+            },
+            out_dtype=out_dtype,
+            reduce_op=reduce_op,
+            orig_scatter_dim=orig_scatter_dim,
+            scatter_dim_after_maybe_reshape=scatter_dim_after_maybe_reshape,
+            group_name=group_name,
+            output_shape=output_shape,
         )
 
 
@@ -1133,8 +1171,10 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     A_scale: torch.Tensor,
     B_scale: torch.Tensor,
     reduce_op: str,
-    scatter_dim: int,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
     group_name: str,
+    output_shape: list[int],
     bias: Optional[torch.Tensor] = None,
     result_scale: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
@@ -1164,63 +1204,137 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         out_dtype,
         use_fast_accum,
     )
-    C = C.view(*A.shape[:-1], B.shape[1])
+    C = C.view(*output_shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_tensor(
         C,
         reduce_op,
-        scatter_dim,
+        orig_scatter_dim,  # need original scatter dim for 3D+ output tensor here
         group_name,
     )
     res = funcol.wait_tensor(res)
     return res
 
 
-@torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "CUDA")
-def _fused_scaled_matmul_reduce_scatter(
+def _fused_scaled_matmul_reduce_scatter_impl(
+    mm_out_op: torch._ops.OpOverload,
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: torch.Tensor,
-    B_scale: torch.Tensor,
+    kwargs: dict[str, Any],
+    out_dtype: Optional[torch.dtype],
     reduce_op: str,
-    scatter_dim: int,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
     group_name: str,
-    bias: Optional[torch.Tensor] = None,
-    result_scale: Optional[torch.Tensor] = None,
-    out_dtype: Optional[torch.dtype] = None,
-    use_fast_accum: bool = False,
+    output_shape: list[int],
 ) -> torch.Tensor:
-    if _is_test_mode:
-        return _fused_scaled_matmul_reduce_scatter_fallback(
-            A,
-            B,
-            A_scale,
-            B_scale,
-            reduce_op,
-            scatter_dim,
-            group_name,
-            bias,
-            result_scale,
-            out_dtype,
-            use_fast_accum,
+    if A.dim() < 2:
+        raise ValueError("A_shard must be a matrix")
+    if (
+        scatter_dim_after_maybe_reshape < 0
+        or scatter_dim_after_maybe_reshape >= A.dim()
+    ):
+        raise ValueError("Invalid scatter dim for 2D tensor input to scaled_mm")
+    if orig_scatter_dim < 0 or orig_scatter_dim >= len(output_shape):
+        raise ValueError("Invalid scatter dim for 3D+ output tensor")
+    if B.dim() != 2:
+        raise ValueError("B must be a matrix")
+    if reduce_op == "sum":
+        reduce_fn = partial(torch.sum, dim=0)
+    elif reduce_op == "avg":
+        reduce_fn = partial(torch.mean, dim=0)
+    else:
+        raise ValueError("reduce_op must be sum or avg")
+
+    group = c10d._resolve_process_group(group_name)
+
+    # Move scatter to first dim, then shard the tensor along the first dim, so the chunk producer
+    # can perform matmuls along the first dim.
+    A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
+
+    # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
+    A_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
+
+    # Parition A along the first dim to prepare for sharding across TP process group.
+    A_shards = A_with_scatter_dim_0.chunk(group.size())
+
+    # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
+    # How we do this depends on if we are using tensorwise scaling, rowwise scaling, or no scaling.
+    tensorwise_scaling = A_scale is not None and A_scale.numel() == 1
+    rowwise_scaling = A_scale is not None and A_scale.numel() > 1
+
+    # For tensorwise scaling, the scale should be replicated so each shard has a copy.
+    if tensorwise_scaling:
+        A_scale_shards = [A_scale] * group.size()
+
+    # For rowwise scaling, we need to move the scatter dim to the first dim to match the
+    # dim swap of the 'A' tensor. Then we can shard the scales along the first dim, just like
+    # the 'A' tensor.
+    elif rowwise_scaling:
+        if A_scale.shape[:-1] != A.shape[:-1]:
+            raise ValueError(
+                "For row-wise scaling, the leading dims of A_scale "
+                "must match the leading dims of A "
+                f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+            )
+        A_scale = (
+            A_scale.movedim(scatter_dim_after_maybe_reshape, 0)
+            .contiguous()
+            .flatten(0, -2)
         )
-    with torch.profiler.record_function("fused_matmul_reduce_scatter"):
-        return _fused_matmul_reduce_scatter_impl(
-            mm_out_op=torch.ops.aten._scaled_mm.out,
-            A=A,
-            B=B,
-            A_scale=A_scale,
-            kwargs={
-                "scale_b": B_scale,
-                "bias": bias,
-                "scale_result": result_scale,
-                "out_dtype": out_dtype,
-                "use_fast_accum": use_fast_accum,
-            },
-            out_dtype=out_dtype,
-            reduce_op=reduce_op,
-            scatter_dim=scatter_dim,
-            group_name=group_name,
-        )
+        A_scale_shards = list(A_scale.chunk(group.size()))
+    else:
+        raise ValueError("A_scale cannot be none for scaled_mm")
+
+    # Computing block-wise matmul along the first dim of A
+    def chunk_producer(rank: int, out: torch.Tensor) -> None:
+        mm_out_op(A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out)
+
+    # Stacked partials will be the 2D outputs of the the pipelined scaled mm, and will
+    # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
+    # (a*b,c) @ (c,d) = (a*b,d)
+    stacked_partials = A_with_scatter_dim_0.new_empty(
+        A_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype
+    )
+
+    # Execute the pipelined mm/scaled_mm.
+    _pipelined_produce_and_all2all(
+        chunk_producer,
+        stacked_partials,
+        group_name,
+    )
+
+    # We now need to transform the *unreduced* stacked 2D partial mm outputs to an *unreduced* 3D+ output,
+    # then reduce-scatter. To do this, we first need to determine the shape of the unreduced 3D+ output,
+    # to reshape our stacked partials so we can apply the reduce-scatter.
+    #
+    # The *unreduced* 3D+ tensor will have dim 0 = `group_size`, as we have `group_size` instances of
+    # stacked partial outputs. The next dims will be A's leading dims (sharded along the original scatter dim),
+    # as it was the left operand of the mm op. We can use -1 as the final dim of the view to populate the rest.
+    stacked_partials_3D_leading_dims = [group.size()] + list(
+        A_with_scatter_dim_0.shape[:-1]
+    )
+
+    # A [group_size] leading dim has been prepended to `stacked_partials_3D_leading_dims`,
+    # to capture the partial output from each rank. If the original scatter dim was 0, then
+    # it is now dim 1 in this tensor, since this new `[group_size]` dim was prepended.
+    stacked_partial_scatter_dim = orig_scatter_dim if orig_scatter_dim > 0 else 1
+    stacked_partials_3D_leading_dims[stacked_partial_scatter_dim] //= group.size()
+
+    # Ensures that the transpose and reduction produce contiguous result
+    # in a single reduction kernel.
+    reduced_out = reduce_fn(
+        # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
+        stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
+        # Swap back the scatter dim (which we moved to 0, and now is `group_size`)
+        .movedim(0, orig_scatter_dim),
+        dim=orig_scatter_dim,  # Reduce along the origal scatter dim (`group_size`)
+    )
+
+    # Output shape must be scattered along original scatter dim as well.
+    output_shape[orig_scatter_dim] //= group.size()
+    out = reduced_out.view(*output_shape)
+    return out
 
 
 def restride_A_for_fused_matmul_reduce_scatter(
@@ -1237,8 +1351,8 @@ def restride_A_for_fused_matmul_reduce_scatter(
 
 
 def _maybe_convert_scalar_types_to_dtypes(
-    scalar_types: List[Any],
-) -> List[Optional[torch.dtype]]:
+    scalar_types: list[Any],
+) -> list[Optional[torch.dtype]]:
     """
     When a list of `torch.dtype`s is passed through the dispatcher as
     `ScalarType[]`, it is converted to a list of scalar type enum values. This
@@ -1270,7 +1384,7 @@ def _maybe_convert_scalar_types_to_dtypes(
     if any(not isinstance(x, (type(None), int)) for x in scalar_types):
         return scalar_types
 
-    dtypes: List[Optional[torch.dtype]] = []
+    dtypes: list[Optional[torch.dtype]] = []
     for scalar_type in scalar_types:
         if scalar_type is None:
             dtypes.append(scalar_type)
@@ -1363,7 +1477,7 @@ def _low_contention_all_gather(
     chunks = output.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         if not input_is_symm_mem:
             local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
             local_buf.copy_(tensor)
@@ -1401,7 +1515,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     chunks = a2a_res.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         # pull + offline reduction
         symm_mem.barrier()
         for step in range(0, world_size):
@@ -1438,7 +1552,7 @@ def _low_contention_reduce_scatter_with_workspace(
     chunks = tensor.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         # push + offline reduction
         workspace.barrier()
         for step in range(0, world_size):
@@ -1507,7 +1621,8 @@ def _low_contention_reduce_scatter(
 # =============================================================================
 
 
-from typing import Any, overload, Sequence, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, overload, TYPE_CHECKING, Union
 
 from torch.types import _device, _dtype, _int
 
@@ -1519,8 +1634,7 @@ if TYPE_CHECKING:
 @overload
 def empty(
     *size: _int, dtype: Optional[_dtype] = None, device: Optional[_device] = None
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 @overload
@@ -1529,8 +1643,7 @@ def empty(
     *,
     dtype: Optional[_dtype] = None,
     device: Optional[_device] = None,
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 def empty(  # type: ignore[misc]

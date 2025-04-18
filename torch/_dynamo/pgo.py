@@ -1,3 +1,14 @@
+"""
+Profile Guided Optimization (PGO) implementation for Dynamo.
+
+This module provides functionality for caching and managing code state profiles
+that guide optimization decisions in Dynamo. It implements both local and remote
+caching mechanisms for storing profile information across runs, handles profile
+merging across distributed ranks, and manages the lifecycle of profile data
+during compilation. The profiles track dynamic vs static properties of tensors
+and help Dynamo make better specialization decisions.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -7,8 +18,9 @@ import enum
 import logging
 import os
 import pickle
+import re
 from collections import defaultdict
-from typing import DefaultDict, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
 import torch._dynamo.config
@@ -105,13 +117,13 @@ class CodeId:
 
 @dataclasses.dataclass
 class CodeState:
-    automatic_dynamic: DefaultDict[str, FrameStateSizeEntry] = dataclasses.field(
+    automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 
 
-_INIT_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
-_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
+_INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,9 +179,9 @@ class FrameStateSizeEntry:
     scalar: Union[int, AutoDynamic, AutoUnset] = dataclasses.field(default=auto_unset)
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
-    size: Union[
-        AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]
-    ] = dataclasses.field(default=auto_unset)
+    size: Union[AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]] = (
+        dataclasses.field(default=auto_unset)
+    )
     stride: Union[
         AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
@@ -481,6 +493,20 @@ def get_cache_key() -> Optional[str]:
     return None
 
 
+def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+    """
+    The PGO cache artifact key for a MAST job contains the job name and the version.
+    When we want to use the cache artifact on a different MAST job, we need to
+    update the key to use the new MAST job's name and version.
+    """
+    if not original_key.startswith("mast:"):
+        # if original_key is overriden, then dont change it
+        return original_key
+    if (new_key := get_cache_key()) is not None:
+        return new_key
+    return original_key
+
+
 # This solely controls local PGO
 def code_state_path(cache_key: str) -> Optional[str]:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
@@ -489,7 +515,8 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
     from torch._inductor.runtime.runtime_utils import cache_dir
 
-    return os.path.join(cache_dir(), "dynamo", f"code_state_{cache_key}.pkl")
+    code_state_key = re.sub(r'[<>:"/\\|?*]', "_", f"code_state_{cache_key}.pkl")
+    return os.path.join(cache_dir(), "dynamo", code_state_key)
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
@@ -529,7 +556,7 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
+def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return "\n".join(
         f"{k.filename}:{k.firstlineno}:{k.name}:\n"
         + "\n".join(
@@ -539,7 +566,7 @@ def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
     )
 
 
-def get_code_state() -> DefaultDict[CodeId, CodeState]:
+def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
@@ -551,7 +578,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     if cache_key is None:
         return _CODE_STATE
 
-    def hit(ty: str) -> DefaultDict[CodeId, CodeState]:
+    def hit(ty: str) -> defaultdict[CodeId, CodeState]:
         global _INIT_CODE_STATE
         assert isinstance(_CODE_STATE, defaultdict)
         log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
@@ -592,7 +619,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     remote_cache = get_remote_cache()
     if remote_cache is not None:
         with dynamo_timed(
-            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
+            name := "pgo.get_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # TODO: I don't really understand why there's a JSON container format
@@ -672,7 +701,7 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str,
         with open(tmp_path, "wb") as f:
             f.write(pickled_code)
             size = f.tell()
-        os.rename(tmp_path, path)
+        os.replace(tmp_path, path)
     return path, size
 
 
@@ -703,7 +732,11 @@ def put_local_code_state(cache_key: str) -> None:
 
 
 def put_remote_code_state(cache_key: str) -> None:
-    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
+    with dynamo_timed(
+        name := "pgo.put_remote_code_state",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
+    ):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 

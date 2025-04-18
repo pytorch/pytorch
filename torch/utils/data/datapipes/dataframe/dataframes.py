@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
@@ -373,7 +373,7 @@ def get_val(capture):
 
 class CaptureInitial(CaptureVariable):
     def __init__(self, schema_df=None):
-        new_ctx: Dict[str, List[Any]] = {
+        new_ctx: dict[str, list[Any]] = {
             "operations": [],
             "variables": [],
             "schema_df": schema_df,

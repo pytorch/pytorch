@@ -5,7 +5,7 @@ import logging
 import math
 import operator
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import sympy
 
@@ -60,7 +60,7 @@ try:
     def z3str(e: z3.ExprRef) -> str:
         assert z3.is_expr(e), f"unsupported expression type: {e}"
 
-        def get_args_str(e: z3.ExprRef) -> List[str]:
+        def get_args_str(e: z3.ExprRef) -> list[str]:
             return [z3str(e.arg(i)) for i in range(e.num_args())]
 
         # First, we simplify the given expression.
@@ -350,13 +350,13 @@ try:
             super().__init__(module, garbage_collect_values=True)
 
         def placeholder(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             symbol = fx_traceback.get_current_meta()["symbol"]
             return self.validator.z3var(symbol)
 
         def call_function(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             if target != torch._assert:
                 # Lift and runs the node target function
@@ -481,21 +481,21 @@ try:
             log.debug("new instance")
 
             # Mapping of SymPy symbols to Z3 variables.
-            self.symbols: Dict[sympy.Symbol, z3.ExprRef] = {}
+            self.symbols: dict[sympy.Symbol, z3.ExprRef] = {}
 
             # Set of source Z3 expressions.
             # They represent the generated guards without any kind of
             # simplification or transformation.
-            self._source_exprs: Set[z3.BoolRef] = set()
+            self._source_exprs: set[z3.BoolRef] = set()
 
             # Set of target Z3 expressions.
             # They represent the actual checked guards at runtime. They might
             # be simplified or transformed versions of the source guards.
-            self._target_exprs: Set[z3.BoolRef] = set()
+            self._target_exprs: set[z3.BoolRef] = set()
 
             # Set of Z3 expressions representing assertions over both the
             # source and target expressions.
-            self._assertions: Set[z3.BoolRef] = set()
+            self._assertions: set[z3.BoolRef] = set()
 
         # Retrieves the corresponding Z3 variable.
         def z3var(self, symbol: sympy.Symbol) -> z3.ExprRef:
@@ -503,7 +503,7 @@ try:
             return self.symbols[symbol]
 
         # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exists.
-        def add_var(self, symbol: sympy.Symbol, type: Type) -> z3.ExprRef:
+        def add_var(self, symbol: sympy.Symbol, type: type) -> z3.ExprRef:
             if symbol in self.symbols:
                 return self.symbols[symbol]
 
@@ -769,7 +769,7 @@ def bisect(shape_env):
 
     # Checks whether the given shape_env fails when produce_guards is called.
     def check_shapeenv_fails(
-        shape_env: ShapeEnv, tracked_fakes: Optional[List[Any]]
+        shape_env: ShapeEnv, tracked_fakes: Optional[list[Any]]
     ) -> Optional[ValidationException]:
         assert tracked_fakes is not None
         try:
@@ -819,7 +819,13 @@ def bisect(shape_env):
     ]
 
     # Preparing the indices for binary search.
+    # The overall invariants are
+    # - for all i < left, assert_node[i] doesn't fail
+    # - for all i >= right, assert_node[i] fails
+    # - `right in exception` always holds
+    # - `left <= right` always holds
     left, mid, right = 0, 0, len(assert_nodes) - 1
+    exception[right] = check_node_fails(assert_nodes[right])
 
     while left < right:
         mid = (left + right) // 2

@@ -7,7 +7,6 @@ import unittest
 from contextlib import contextmanager
 from datetime import timedelta
 from io import StringIO
-from typing import List
 from unittest.mock import patch
 
 import numpy as np
@@ -684,7 +683,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
             self.assertEqual(len(counters["graph_break"]), 1)
             first_graph_break = list(counters["graph_break"].keys())[0]  # noqa: RUF015
-            self.assertTrue("setattr" not in first_graph_break)
+            self.assertIn("setattr() on Tensor.requires_grad", first_graph_break)
 
     @config.patch(inline_inbuilt_nn_modules=False)
     @config.patch(enable_compiler_collectives=True)
@@ -1725,13 +1724,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, _ = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
+        # Test is that this function call does not throw an exception.
         fsdp_m = torch.compile(fsdp_m)
-        self.assertRaisesRegex(
-            AssertionError,
-            "Dynamo only supports FSDP with use_orig_params=True",
-            fsdp_m,
-            inputs,
-        )
 
     def test_fsdp_skip_guards(self):
         """
@@ -1959,7 +1953,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = ModuleWithStaticMethod(False)
         x = torch.randn((2, 3), device="cuda")
         ref_out = model(x)
-        test_outs: List[torch.Tensor] = []
+        test_outs: list[torch.Tensor] = []
 
         for use_self in (False, True):
             model = ModuleWithStaticMethod(use_self)

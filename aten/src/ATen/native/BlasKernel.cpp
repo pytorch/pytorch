@@ -116,18 +116,6 @@ void fp16_gemv_trans(
   fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
-void bf16_gemv_trans(
-    const int m,
-    const int n,
-    const at::BFloat16 alpha,
-    const at::BFloat16* a,
-    const int lda,
-    const at::BFloat16* x,
-    const int incx,
-    const at::BFloat16 beta,
-    at::BFloat16* y,
-    const int incy);
-
 #endif // !defined(C10_MOBILE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
@@ -146,14 +134,14 @@ void fp16_gemv_notrans(
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
-bool scal_use_fast_path(
+static bool scal_use_fast_path(
     [[maybe_unused]] int64_t n,
     [[maybe_unused]] int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-bool gemv_use_fast_path(
+static bool gemv_use_fast_path(
     [[maybe_unused]] char trans,
     [[maybe_unused]] int64_t m,
     [[maybe_unused]] int64_t n,
@@ -166,7 +154,7 @@ bool gemv_use_fast_path(
 }
 
 template <typename scalar_t>
-void scal_fast_path(
+static void scal_fast_path(
     [[maybe_unused]] int* n,
     [[maybe_unused]] scalar_t* a,
     [[maybe_unused]] scalar_t* x,
@@ -176,7 +164,7 @@ void scal_fast_path(
 }
 
 template <typename scalar_t>
-void gemv_fast_path(
+static void gemv_fast_path(
     [[maybe_unused]] const char* trans,
     [[maybe_unused]] const int* m,
     [[maybe_unused]] const int* n,
@@ -258,10 +246,6 @@ template <>
 void gemv_fast_path<float>(const char *trans, const int *m, const int *n, const float *alpha, const float *a, const int *lda, const float *x, const int *incx, const float *beta, float *y, const int *incy) {
   sgemv_(remove_const(trans), remove_const(m), remove_const(n), remove_const(alpha), remove_const(a), remove_const(lda), remove_const(x), remove_const(incx), remove_const(beta), y, remove_const(incy));
 }
-#else
-INSTANTIATE(float)
-INSTANTIATE(double)
-#endif // AT_BUILD_WITH_BLAS
 
 INSTANTIATE(uint8_t)
 INSTANTIATE(int8_t)
@@ -283,7 +267,7 @@ bool gemv_use_fast_path<at::BFloat16>(
       beta == 0.0;
 }
 
-void bf16_gemv_trans(
+static void bf16_gemv_trans(
   const int m,
   const int n,
   const at::BFloat16 alpha,
@@ -511,6 +495,7 @@ void gemv_fast_path<at::Half>(
 INSTANTIATE(c10::Half)
 INSTANTIATE(c10::BFloat16)
 #endif // !defined(C10_MOBILE)
+#endif // AT_BUILD_WITH_BLAS
 #undef INSTANTIATE
 
 } // namespace blas_impl

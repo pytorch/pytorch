@@ -1,51 +1,18 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
-import copy
-import dataclasses
 import unittest
-from contextlib import contextmanager
 from dataclasses import dataclass
-from re import escape
 from typing import Any, List
 
 from parameterized import parameterized_class
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._export.utils import (
-    get_buffer,
-    get_param,
-    is_buffer,
-    is_param,
-    register_dataclass_as_pytree_node,
-)
-from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
+from torch._export.utils import register_dataclass_as_pytree_node
+from torch.export import export
 from torch.export._swap import _swap_modules
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-    skipIfTorchDynamo,
-    TestCase,
-)
-from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._pytree import (
-    LeafSpec,
-    tree_flatten,
-    tree_unflatten,
-    TreeSpec,
-    treespec_dumps,
-    treespec_loads,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")

@@ -1,12 +1,11 @@
 import dataclasses
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._dynamo.exc import UserError, UserErrorType
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _DerivedDim,
-    _Dim,
     _DimHint,
     _tree_map_with_path,
     Dim,
@@ -19,12 +18,12 @@ from .serialize import _dataclass_to_dict
 @dataclasses.dataclass
 class RootDim:
     """
-    This represents a _Dim object.
+    This represents a Dim object.
     """
 
     min: int
     max: Union[int, None]
-    derived: List[str]
+    derived: list[str]
 
 
 @dataclasses.dataclass
@@ -33,15 +32,15 @@ class DynamicShapesSpec:
     This stores a dynamic_shapes spec for de/serialization.
     """
 
-    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None]
-    dims: Dict[str, RootDim]
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None]
+    dims: dict[str, RootDim]
 
 
 def _postprocess_serialized_shapes(
-    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None],
-    dims: Dict[str, Dict[str, Union[int, List[str], None]]],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dims: dict[str, dict[str, Union[int, list[str], None]]],
     to_dict: Optional[bool] = False,
-) -> Union[DynamicShapesSpec, Dict[str, Any]]:
+) -> Union[DynamicShapesSpec, dict[str, Any]]:
     """
     Sorts dims and dumps to dictionary format.
     """
@@ -63,11 +62,11 @@ def _postprocess_serialized_shapes(
 
 
 def _dump_dynamic_shapes(
-    dynamic_shapes: Union[Dict[str, Any], tuple[Any], List[Any], None],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
     args: tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     to_dict: Optional[bool] = False,
-) -> Union[DynamicShapesSpec, Dict[str, Any]]:
+) -> Union[DynamicShapesSpec, dict[str, Any]]:
     """
     Utility function for dynamic shapes serialization, serializing a dynamic_shapes spec.
     Returns a DynamicShapesSpec dataclass containing 2 fields, "dynamic_shapes" and "dims".
@@ -127,7 +126,7 @@ def _dump_dynamic_shapes(
     }
     ```
     """
-    dims: Dict[str, Dict[str, Any]] = {}
+    dims: dict[str, dict[str, Any]] = {}
 
     def _standardize_shapes(path, tensor, shape):  # type: ignore[no-untyped-def]
         """
@@ -137,7 +136,7 @@ def _dump_dynamic_shapes(
         if not isinstance(tensor, torch.Tensor):
             return None
         if shape is None:
-            return [Dim.STATIC] * len(tensor.shape)  # type: ignore[attr-defined]
+            return [Dim.STATIC] * len(tensor.shape)
 
         out = []
         if isinstance(shape, dict):
@@ -150,7 +149,7 @@ def _dump_dynamic_shapes(
         return out
 
     def _track_dim_from_dims(
-        val: Union[None, int, _DimHint, _Dim]
+        val: Union[None, int, _DimHint, Dim]
     ) -> Union[None, int, str]:
         """
         Tracks dims, ranges, derived dims from the standardized dynamic_shapes spec.
@@ -158,9 +157,9 @@ def _dump_dynamic_shapes(
         if val is None or isinstance(val, int):  # non-tensor input or static
             return val
         if isinstance(val, _DimHint):  # store enum as string
-            return val.__class__.__name__ + "." + val.name
+            return val.__class__.__name__ + "." + val.type.name
 
-        assert isinstance(val, _Dim)
+        assert isinstance(val, Dim)
 
         # track root dim
         root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]
@@ -198,9 +197,9 @@ def _dump_dynamic_shapes(
 
 
 def _load_dynamic_shapes(
-    spec: Union[DynamicShapesSpec, Dict[str, Any]],
+    spec: Union[DynamicShapesSpec, dict[str, Any]],
     from_dict: Optional[bool] = False,
-) -> Union[Dict[str, Any], tuple[Any], List[Any], None]:
+) -> Union[dict[str, Any], tuple[Any], list[Any], None]:
     """
     Utility function for dynamic shapes serialization.
     Deserializes a DynamicShapesSpec or corresponding dictionary into a dynamic_shapes input to export().
@@ -290,20 +289,22 @@ def _load_dynamic_shapes(
             modulus, remainder = sympy.polys.polytools.div(expr, symbol)
             ddim = dim_cache[name]
             if modulus != 1:
-                ddim = int(modulus) * ddim
+                ddim = int(modulus) * ddim  # type: ignore[assignment, operator]
             if remainder != 0:
-                ddim = ddim + int(remainder)
+                ddim = ddim + int(remainder)  # type: ignore[assignment, operator]
             dim_cache[_expr] = ddim  # cache derived dims
 
     def deserialize_shape(
         val: Union[None, int, str]
-    ) -> Union[None, int, _Dim, _DimHint]:
+    ) -> Union[None, int, Dim, _DimHint]:
         if val is None or isinstance(val, int):
             return val
         elif val == "_DimHint.AUTO":
-            return _DimHint.AUTO
+            return _DimHint.AUTO()
+        elif val == "_DimHint.DYNAMIC":
+            return _DimHint.DYNAMIC()
         elif val == "_DimHint.STATIC":
-            return _DimHint.STATIC
+            return _DimHint.STATIC()
         if not isinstance(val, str):
             raise UserError(
                 UserErrorType.INVALID_INPUT,
@@ -316,6 +317,6 @@ def _load_dynamic_shapes(
                 "Expected dims in `spec['dynamic_shapes']` to be tracked in `spec['dims']`, "
                 f"got {val} which is not in {dims.keys()}",
             )
-        return dim_cache[val]
+        return dim_cache[val]  # type: ignore[return-value]
 
     return tree_map(deserialize_shape, dynamic_shapes)

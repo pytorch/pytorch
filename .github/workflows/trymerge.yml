@@ -7,7 +7,7 @@ on:
 jobs:
   do_merge:
     name: try_merge_pr_${{ github.event.client_payload.pr_num }}
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     environment: mergebot
     permissions:
       id-token: write
@@ -16,13 +16,13 @@ jobs:
     steps:
       - name: Checkout repo
         id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
           check-latest: false
@@ -87,7 +87,7 @@ jobs:
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
 
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         continue-on-error: true
         with:
           role-to-assume: arn:aws:iam::308535385114:role/upload_to_ossci_raw_job_status

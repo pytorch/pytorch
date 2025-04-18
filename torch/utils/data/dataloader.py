@@ -5,6 +5,7 @@ To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
+from __future__ import annotations
 
 import functools
 import itertools
@@ -14,7 +15,8 @@ import os
 import queue
 import threading
 import warnings
-from typing import Any, Callable, Generic, Iterable, List, Optional, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -36,6 +38,9 @@ from torch.utils.data.sampler import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
 __all__ = [
     "DataLoader",
     "get_worker_info",
@@ -51,7 +56,7 @@ _worker_init_fn_t = Callable[[int], None]
 # Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
 # type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
 # See https://github.com/python/mypy/issues/3737.
-_collate_fn_t = Callable[[List[_T]], Any]
+_collate_fn_t = Callable[[list[_T]], Any]
 
 
 # These functions used to be defined in this file. However, it was moved to
@@ -232,7 +237,7 @@ class DataLoader(Generic[_T_co]):
     sampler: Union[Sampler, Iterable]
     pin_memory_device: str
     prefetch_factor: Optional[int]
-    _iterator: Optional["_BaseDataLoaderIter"]
+    _iterator: Optional[_BaseDataLoaderIter]
     __initialized = False
 
     def __init__(
@@ -241,7 +246,7 @@ class DataLoader(Generic[_T_co]):
         batch_size: Optional[int] = 1,
         shuffle: Optional[bool] = None,
         sampler: Union[Sampler, Iterable, None] = None,
-        batch_sampler: Union[Sampler[List], Iterable[List], None] = None,
+        batch_sampler: Union[Sampler[list], Iterable[list], None] = None,
         num_workers: int = 0,
         collate_fn: Optional[_collate_fn_t] = None,
         pin_memory: bool = False,
@@ -255,7 +260,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
-    ):
+    ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -355,7 +360,7 @@ class DataLoader(Generic[_T_co]):
             self._dataset_kind = _DatasetKind.Map
 
         if sampler is not None and shuffle:
-            raise ValueError("sampler option is mutually exclusive with " "shuffle")
+            raise ValueError("sampler option is mutually exclusive with shuffle")
 
         if batch_sampler is not None:
             # auto_collation with custom batch_sampler
@@ -415,7 +420,7 @@ class DataLoader(Generic[_T_co]):
 
         torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
 
-    def _get_iterator(self) -> "_BaseDataLoaderIter":
+    def _get_iterator(self) -> _BaseDataLoaderIter:
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -474,9 +479,7 @@ class DataLoader(Generic[_T_co]):
 
         super().__setattr__(attr, val)
 
-    # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
-    # since '_BaseDataLoaderIter' references 'DataLoader'.
-    def __iter__(self) -> "_BaseDataLoaderIter":
+    def __iter__(self) -> _BaseDataLoaderIter:
         # When using a single worker the returned iterator should be
         # created everytime to avoid resetting its state
         # However, in the case of a multiple workers iterator
@@ -671,7 +674,8 @@ class _BaseDataLoaderIter:
             # memory allocation for MPS is fixed.
             if (
                 self._pin_memory
-                and torch.accelerator.current_accelerator().type == "mps"
+                and (acc := torch.accelerator.current_accelerator()) is not None
+                and acc.type == "mps"
             ):
                 self._pin_memory = False
                 warn_msg = (
@@ -702,7 +706,7 @@ class _BaseDataLoaderIter:
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
 
-    def __iter__(self) -> "_BaseDataLoaderIter":
+    def __iter__(self) -> Self:
         return self
 
     def _reset(self, loader, first_iter=False):

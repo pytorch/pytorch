@@ -88,6 +88,7 @@ std::vector<at::Tensor> all_reduce_coalesced(
 at::Tensor allocate_all_gather_output(
     const at::Tensor& input,
     int64_t group_size) {
+  TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   output_size[0] *= group_size;
   return at::empty(
@@ -103,6 +104,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
+    TORCH_CHECK(tensor.is_contiguous());
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
 
@@ -118,6 +120,7 @@ at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
     int64_t group_size,
     std::string group_name) {
+  TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
   return all_gather_into_tensor_coalesced(
       inputs, group_size, std::move(group_name))[0];
@@ -128,6 +131,7 @@ at::Tensor& all_gather_into_tensor_out(
     int64_t group_size,
     const std::string& group_name,
     at::Tensor& output) {
+  TORCH_CHECK(input.is_contiguous());
   c10d::AllgatherOptions opts;
 
   auto group = c10d::resolve_process_group(group_name);
@@ -139,6 +143,7 @@ at::Tensor& all_gather_into_tensor_out(
 at::Tensor allocate_reduce_scatter_output(
     const at::Tensor& input,
     const int64_t group_size) {
+  TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   if (output_size[0] % group_size != 0) {
     LOG(WARNING) << "The first dimension of the reduce_scatter input ("
@@ -163,6 +168,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
+    TORCH_CHECK(tensor.is_contiguous());
     outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
 
@@ -179,6 +185,7 @@ at::Tensor reduce_scatter_tensor(
     std::string reduce_op,
     int64_t group_size,
     std::string group_name) {
+  TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
@@ -190,6 +197,7 @@ at::Tensor all_to_all_single(
     std::vector<int64_t> input_split_sizes,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
+  TORCH_CHECK(input.is_contiguous());
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] = std::accumulate(
       output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
@@ -529,33 +537,41 @@ at::Tensor shard_dim_alltoall(
     const std::string& group_name) {
   auto group = c10d::resolve_process_group(group_name);
   auto group_size = group->getSize();
+  std::vector<int64_t> input_sizes = input.sizes().vec();
   std::vector<int64_t> output_sizes = input.sizes().vec();
-  if (output_sizes[shard_dim] % group_size != 0) {
-    LOG(WARNING) << "The first dimension of the shard_dim_alltoall input ("
-                 << output_sizes[shard_dim]
+  if (input_sizes[shard_dim] % group_size != 0) {
+    LOG(WARNING) << "The shard dimension of the shard_dim_alltoall input ("
+                 << input_sizes[shard_dim]
                  << ") is not divisible by the group size (" << group_size
                  << ").";
   }
-  output_sizes[shard_dim] = output_sizes[shard_dim] / group_size;
-  std::vector<at::Tensor> inputs;
-  inputs.reserve(group_size);
-  auto length = output_sizes[shard_dim];
-  for (int i = 0; i < group_size; i++) {
-    inputs.push_back(input.narrow(shard_dim, i * length, length).contiguous());
-  }
-  // allocate outputs
-  std::vector<at::Tensor> outputs;
-  outputs.reserve(group_size);
-  for (int i = 0; i < group_size; i++) {
-    outputs.push_back(input.new_empty(output_sizes).contiguous());
-  }
-  auto work = group->alltoall(outputs, inputs);
+  input_sizes[shard_dim] /= group_size;
+  input_sizes.insert(input_sizes.begin() + shard_dim, group_size);
 
+  auto tensor_reshaped = input.view(input_sizes);
+  auto tensor_for_comm = tensor_reshaped.movedim(shard_dim, 0).contiguous();
+
+  auto recv_tensor = at::empty_like(tensor_for_comm);
+  std::vector<int64_t> out_split_sizes;
+  std::vector<int64_t> in_split_sizes;
+  c10d::AllToAllOptions opts;
+
+  auto work = group->alltoall_base(
+      recv_tensor, tensor_for_comm, out_split_sizes, in_split_sizes, opts);
+
+  // TODO: it's tricky to get the current async behavior work for shard dim
+  // alltoall so for now we just keep this comm op to be synchronous. We might
+  // need to have sth similar to future callback to do the permute, contiguous
+  // and view calls. We can revisit later how to support the async case with the
+  // Work registry.
   work->wait();
-  // TODO: it's very tricky to get the current async behavior work for shard dim
-  // alltoall so for now we just keep this comm op to be synchronous. We can
-  // revisit later how to support the async case with the Work registry.
-  return at::cat(outputs, gather_dim);
+
+  auto output = recv_tensor.movedim(0, gather_dim).contiguous();
+
+  // view/reshape it back to the expected output shape
+  output_sizes[shard_dim] /= group_size;
+  output_sizes[gather_dim] *= group_size;
+  return output.view(output_sizes);
 }
 } // namespace
 

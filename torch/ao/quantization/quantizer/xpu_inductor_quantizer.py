@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch.ao.quantization.observer import HistogramObserver, PerChannelMinMaxObserver
@@ -26,7 +26,7 @@ __all__ = [
 
 @functools.lru_cache
 def get_default_xpu_inductor_quantization_config():
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    extra_args: dict[str, Any] = {"eps": 2**-12}
     act_observer_or_fake_quant_ctr = HistogramObserver
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
@@ -89,38 +89,6 @@ class XPUInductorQuantizer(X86InductorQuantizer):
     """
 
     def _annotate_qat_conv2d_fusion_pattern(
-        self,
-        model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ):
-        pass
-
-    def _annotate_conv2d_binary(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ) -> None:
-        pass
-
-    def _annotate_conv2d_binary_unary(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ) -> None:
-        pass
-
-    def _annotate_linear_fusion_pattern(
-        self,
-        model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ):
-        pass
-
-    def _annotate_matmul(
         self,
         model: torch.fx.GraphModule,
         quantization_config: Optional[QuantizationConfig],

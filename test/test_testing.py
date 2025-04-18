@@ -440,6 +440,40 @@ if __name__ == '__main__':
             op.supported_dtypes(torch.device("cuda", index=1)),
         )
 
+    def test_setup_and_teardown_run_for_device_specific_tests(self, device):
+        # TODO: Move this (and other similar text blocks) to some fixtures/ subdir
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
+
+class TestFoo(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # store something on the test class to query during teardown
+        cls.stored_thing = "called with " + cls.__name__
+
+    @classmethod
+    def tearDownClass(cls):
+        # throw here so we know teardown was run
+        raise RuntimeError(cls.stored_thing)
+
+    def test_bar(self, device):
+        # make sure the test can access the stored thing
+        print(self.stored_thing)
+
+instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}')
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        expected_device_class_name = f"TestFoo{self.device_type.upper()}"
+        expected_error_text = f"RuntimeError: called with {expected_device_class_name}"
+        self.assertIn(expected_error_text, stderr)
+
+
 instantiate_device_type_tests(TestTesting, globals())
 
 
@@ -2297,9 +2331,6 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
-        # See https://github.com/pytorch/pytorch/issues/77801
-        if not sys.version_info >= (3, 9):
-            ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
             if IS_MACOS or IS_JETSON:
@@ -2332,12 +2363,10 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
-    @unittest.skipIf(IS_WINDOWS, "TODO enable on Windows")
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
 
-    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
@@ -2353,7 +2382,6 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
-    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global

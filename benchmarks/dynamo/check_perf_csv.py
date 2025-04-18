@@ -26,7 +26,7 @@ def check_perf_csv(filename, threshold, threshold_scale):
             textwrap.dedent(
                 f"""
                 Error {len(failed)} models performance regressed
-                    {' '.join(failed)}
+                    {" ".join(failed)}
                 """
             )
         )

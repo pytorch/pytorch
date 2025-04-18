@@ -3,7 +3,7 @@
 import contextlib
 import importlib
 import unittest
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    requires_gpu,
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
@@ -53,6 +54,8 @@ def run_and_compare(
     expected_num_programs: int = 1,
     expected_num_triton_kernels: int = 1,
     config_patches: Optional[dict] = None,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ):
     """
     Runs the module through Inductor, comparing to eager reference.
@@ -74,7 +77,9 @@ def run_and_compare(
     ref_tensors = flatten_tensors(func(*args))
     actual_tensors = flatten_tensors(result)
     for ref, actual in zip(ref_tensors, actual_tensors):
-        self.assertTrue(torch.allclose(ref, actual))
+        # Don't clobber the default tolerance values
+        tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
+        self.assertTrue(torch.allclose(ref, actual, **tol))
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)
@@ -91,7 +96,7 @@ def run_and_compare(
 
 class BlockPointerTestBase(InductorTestCase):
     def _discontiguous_tensor(
-        self, view_size: Tuple[int, ...], device: Union[torch.device, str]
+        self, view_size: tuple[int, ...], device: Union[torch.device, str]
     ) -> torch.Tensor:
         """
         Create a padded tensor of the given size.
@@ -104,12 +109,22 @@ class BlockPointerTestBase(InductorTestCase):
         view = torch.as_strided(full, view_size, full.stride())
         return view
 
+    def _assert_pointwise_ndims(self, code, num_dims: int) -> None:
+        pointwise_blocks = ["XBLOCK", "YBLOCK", "ZBLOCK"]
+        return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
+
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
         reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
-        for expected_block in reduction_blocks[:num_dims]:
+        return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
+
+    def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
+        for expected_block in blocks[:num_dims]:
             self.assertIn(expected_block, code)
-        for unexpected_block in reduction_blocks[num_dims:]:
+        for unexpected_block in blocks[num_dims:]:
             self.assertNotIn(unexpected_block, code)
+
+    def _get_lines_containing_substr(self, code: str, substr: str) -> str:
+        return "\n".join(line for line in code.split("\n") if substr in line)
 
 
 @instantiate_parametrized_tests
@@ -185,9 +200,9 @@ class CommonTemplate:
     )
     def test_pointwise(
         self,
-        full_size: Tuple[int],
-        view_size: Tuple[int],
-        stride: Optional[Tuple[int]],
+        full_size: tuple[int],
+        view_size: tuple[int],
+        stride: Optional[tuple[int]],
         offset: Optional[int],
         require_block_ptr: bool,
         prefer_nd_tiling: bool,
@@ -238,7 +253,7 @@ class CommonTemplate:
         ],
     )
     def test_broadcast(
-        self, x_size: Tuple[int], y_size: Tuple[int], prefer_nd_tiling: bool
+        self, x_size: tuple[int], y_size: tuple[int], prefer_nd_tiling: bool
     ):
         """
         Test that we can generate strided block pointers when inputs have different
@@ -287,7 +302,7 @@ class CommonTemplate:
             ((5, 6, 1, 1), (5, 6, 4, 3)),
         ],
     )
-    def test_expand_broadcast(self, x_size: Tuple[int], y_size: Tuple[int]):
+    def test_expand_broadcast(self, x_size: tuple[int], y_size: tuple[int]):
         """
         When the load and store have different shapes, we should use broadcast.
         """
@@ -295,7 +310,7 @@ class CommonTemplate:
         def foo(x, y_size):
             return x.expand(y_size).clone()
 
-        def get_input(size: Tuple[int]) -> torch.Tensor:
+        def get_input(size: tuple[int]) -> torch.Tensor:
             device = torch.device(self.device)
             full = torch.randn(size).to(device)
             view = torch.as_strided(full, size, full.stride())
@@ -343,29 +358,29 @@ class CommonTemplate:
         # Check the code for broadcasts.
         # We shouldn't see any strides of 0.
         load_lines, store_lines = tuple(
-            [line for line in triton_code.split("\n") if substr in line]
+            self._get_lines_containing_substr(triton_code, substr)
             for substr in ("tl.load", "tl.store")
         )
         if prefer_nd_tiling:
             self.assertExpectedInline(
-                "\n".join(load_lines),
+                load_lines,
                 """\
-    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), boundary_check=[0, 1])
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[YBLOCK], order=[0], offsets=[yoffset]), boundary_check=[0], eviction_policy='evict_last')[None, :]""",  # noqa: B950
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[1, 0], offsets=[yoffset, xoffset]), boundary_check=[0, 1])
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[YBLOCK], order=[0], offsets=[yoffset]), boundary_check=[0], eviction_policy='evict_last')[:, None]""",  # noqa: B950
             )
             self.assertExpectedInline(
-                "\n".join(store_lines),
-                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), tl.broadcast_to(tmp2, [XBLOCK, YBLOCK]).to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
+                store_lines,
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[8, 1], block_shape=[YBLOCK, XBLOCK], order=[1, 0], offsets=[yoffset, xoffset]), tl.broadcast_to(tmp2, [YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
-                "\n".join(load_lines),
+                load_lines,
                 """\
     tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), boundary_check=[0])
     tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[(7 + XBLOCK) // 8], order=[0], offsets=[xoffset // 8]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [(7 + XBLOCK) // 8, ((1) * ((1) <= ((7 + XBLOCK) // 8)) + ((7 + XBLOCK) // 8) * (((7 + XBLOCK) // 8) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",  # noqa: B950
             )
             self.assertExpectedInline(
-                "\n".join(store_lines),
+                store_lines,
                 """    tl.store(tl.make_block_ptr(out_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), tl.broadcast_to(tmp2, [XBLOCK]).to(tl.float32), boundary_check=[0])""",  # noqa: B950
             )
 
@@ -394,7 +409,7 @@ class CommonTemplate:
     )
     def test_reduction(
         self,
-        view_size: Tuple[int],
+        view_size: tuple[int],
         num_block_pointers: int,
         num_triton_kernels: int,
         prefer_nd_tiling: bool,
@@ -447,7 +462,7 @@ class CommonTemplate:
         ],
     )
     def test_mixed_pointwise_reduction(
-        self, view_size: Tuple[int], num_block_pointers: int, num_triton_kernels: int
+        self, view_size: tuple[int], num_block_pointers: int, num_triton_kernels: int
     ):
         """
         Tests mixing pointwise with reduction ops.
@@ -571,8 +586,8 @@ class CommonTemplate:
     )
     def test_nd_tiling_odd_shapes_pointwise(
         self,
-        full_size: Tuple[int],
-        view_size: Tuple[int],
+        full_size: tuple[int],
+        view_size: tuple[int],
         num_block_pointers: int,
         num_tiles: int,
     ):
@@ -621,7 +636,7 @@ class CommonTemplate:
     )
     def test_2d_reduction_odd_shapes(
         self,
-        view_size: Tuple[int],
+        view_size: tuple[int],
         num_block_pointers: int,
         num_triton_kernels: int,
         reduction_op: Callable,
@@ -681,7 +696,7 @@ class CommonTemplate:
     )
     def test_2d_welford_reduction(
         self,
-        size: Tuple[int],
+        size: tuple[int],
         expected_num_block_pointers: int,
         expected_num_triton_kernels: int,
         expect_fallback: bool,
@@ -895,6 +910,197 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
+    @requires_gpu()  # FIXME this test failed on Triton-CPU
+    def test_3d_permute_tiling(self):
+        """
+        Test 3D tiling with permute.
+        """
+
+        def foo(x, y, z):
+            dims = [0, 2, 1]
+            a = x.permute(dims=dims) + y
+            b = (z + y).permute(dims=dims)
+            return a + b
+
+        inps = (torch.rand((51, 51, 51), device=self.device, dtype=torch.float32),) * 3
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check for 3D tiling
+        self._assert_pointwise_ndims(code, 3)
+
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    @parametrize("num_tile_candidates", (1, 2))
+    def test_unbacked_size_on_non_contig_dim(self, num_tile_candidates: int):
+        # NUM_REPEAT should determine # of candidate_tilings.
+        NUM_REPEAT = 2 if num_tile_candidates == 2 else 8
+
+        def foo(x, length):
+            unbacked = length.item()
+            torch._check_is_size(unbacked)
+
+            repeated = x.repeat(1, unbacked, NUM_REPEAT)
+            # permute creates split in middle with unbacked symint is the first range
+            # ranges: [33*unbacked, NUM_REPEAT, 64]
+            permute120 = repeated.permute([1, 2, 0])
+            return permute120.cos()
+
+        inps = (
+            torch.rand((64, 33, 1), device=self.device, dtype=torch.float32),
+            torch.scalar_tensor(16, device=self.device, dtype=torch.int32),
+        )
+
+        with torch._dynamo.config.patch({"capture_scalar_outputs": True}):
+            run_and_compare(
+                self,
+                foo,
+                *inps,
+                expected_num_triton_kernels=1,
+                expected_num_block_pointers=0,
+                config_patches={
+                    "triton.max_tiles": 3,
+                    "triton.prefer_nd_tiling": True,
+                },
+            )
+
+    # block_ptr advancements should also be deferrered conditional
+    # on the associated buffer not being removed
+    # in this case the bernoulli operation is fused with the following sum
+    # so an output buffer is not needed to store the immediate result of the
+    # bernoulli operation
+    # TODO: fails for triton CPU "Failed to convert to LLVM IR"
+    @test_torchinductor.xfail_if_triton_cpu
+    def test_removed_buffers(self):
+        from torch.ops import aten
+
+        def fn(a):
+            return aten.bernoulli(a).sum() / torch.prod(torch.tensor(a.size()))
+
+        p = 0.3
+        result, code = run_and_compare(
+            self,
+            fn,
+            *[torch.ones(200, 200, device=self.device) * p],
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=3,
+            atol=p * 0.06,
+            rtol=0.06,
+        )
+
+    def test_pointwise_index_order(self):
+        """
+        Test the order of indices in pointwise kernels. Expect Z to be the leading dim,
+        then Y, then X.
+        """
+
+        inps = [
+            self._discontiguous_tensor((5, 5, 5), device=self.device) for _ in range(2)
+        ]
+
+        result, (triton_code,) = run_and_compare(
+            self,
+            torch.add,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check the load and store for block pointer strides.
+        load_lines, store_lines, index_lines = tuple(
+            self._get_lines_containing_substr(triton_code, substr)
+            for substr in ("tl.load", "tl.store", "index =")
+        )
+        self.assertExpectedInline(
+            load_lines,
+            """\
+    tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            store_lines,
+            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",  # noqa: B950
+        )
+
+        # Check the indices. These are used for non-block pointers.
+        self.assertExpectedInline(
+            index_lines,
+            """\
+    zindex = zoffset + tl.arange(0, ZBLOCK)[:, None, None]
+    yindex = yoffset + tl.arange(0, YBLOCK)[None, :, None]
+    xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",  # noqa: B950
+        )
+
+    def test_expand_clone_broadcast(self):
+        """
+        Test expand followed by clone. This uses an explicit Triton broadcast.
+        """
+        base_size = (1, 32)
+        expanded_size = (32, 32)
+
+        def foo(x):
+            return x.expand(*expanded_size).clone()
+
+        inps = [torch.randn(base_size, device=self.device)]
+        result, (triton_code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=2,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # We should only need one broadcast.
+        num_broadcasts = triton_code.count("tl.broadcast_to")
+        self.assertEqual(num_broadcasts, 1)
+
+    def test_mul_broadcast_multi_output(self):
+        def foo(x, y, z):
+            a = x * y
+            b = 128.0
+            c = a * b
+            d = a * z
+            e = x * z
+            return a, c, d, e
+
+        inps = [
+            torch.randn((8, 11, 128), device=self.device),
+            torch.randn((128,), device=self.device),
+            torch.randn((8, 11, 128), device=self.device),
+        ]
+        result, (triton_code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=7,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check that the tiling is 2D, even though we allow up to 3D.
+        # Singleton splits should be discarded.
+        self._assert_pointwise_ndims(triton_code, 2)
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
@@ -903,7 +1109,12 @@ class TritonBlockPointerTestCPU(BlockPointerTestBase):
     device = "cpu"
 
 
-test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestCPU, "cpu")
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonBlockPointerTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_triton_cpu",
+)
 
 
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")

@@ -17,7 +17,7 @@ jobs:
     environment: update-commit-hash
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: update-xla-commit-hash
@@ -30,16 +30,6 @@ jobs:
           test-infra-ref: main
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-      - name: update-triton-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        with:
-          repo-owner: openai
-          repo-name: triton
-          branch: main
-          pin-folder: .ci/docker/ci_commit_pins
-          test-infra-ref: main
-          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-slow-tests:
     if: github.repository_owner == 'pytorch'
@@ -47,18 +37,18 @@ jobs:
     environment: update-commit-hash
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.UPDATEBOT_TOKEN }}
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
       - name: Install requirements
         shell: bash
         run: |
-          pip install requests==2.32.2 clickhouse-connect==0.7.16
+          pip install requests==2.32.2 clickhouse-connect==0.8.14
       - name: Update slow test file
         shell: bash
         env:

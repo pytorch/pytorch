@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 
 import itertools
-from typing import List
 
 import torch
 from torch.autograd.profiler_legacy import profile
@@ -13,7 +12,7 @@ from . import (
 )
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 class _server_process_global_profile(profile):
@@ -48,11 +47,11 @@ class _server_process_global_profile(profile):
 
         profile_memory (bool, optional): Whether to report memory usage, default: ``False``
 
-    .. warning:
+    .. warning::
         Enabling memory profiling incurs additional profiler overhead
 
-    .. warning:
-        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+    .. warning::
+        Due to some CUDA multiprocessing limitations (see :ref:`multiprocessing-cuda-note`),
         one cannot use the profiler with ``use_cuda = True`` to benchmark
         DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
         please use ``use_cuda = False`` or ``num_workers = 0``.
@@ -64,10 +63,14 @@ class _server_process_global_profile(profile):
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> x, y = torch.tensor(1), torch.tensor(2)
-        >>> outer_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        >>> outer_profile_rref = rpc.remote(
+        ...     dst_worker_name, rpc._server_process_global_profile
+        ... )
         >>> outer_profile_rref.rpc_sync().__enter__()
         >>> rpc.rpc_sync(dst_worker_name, torch.add, (x, y))
-        >>> inner_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        >>> inner_profile_rref = rpc.remote(
+        ...     dst_worker_name, rpc._server_process_global_profile
+        ... )
         >>> inner_profile_rref.rpc_sync().__enter__()
         >>> rpc.rpc_sync(dst_worker_name, torch.sub, (x, y))
         >>> inner_profile_rref.rpc_sync().__exit__(None, None, None)

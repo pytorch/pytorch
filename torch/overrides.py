@@ -27,8 +27,10 @@ import contextlib
 import functools
 import types
 import warnings
+from collections.abc import Iterable
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C import (
@@ -57,12 +59,15 @@ __all__ = [
     "enable_reentrant_dispatch",
 ]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 def _disable_user_warnings(
-    func: Callable,
+    func: Callable[_P, _R],
     regex: str = ".*is deprecated, please use.*",
     module: str = "torch",
-) -> Callable:
+) -> Callable[_P, _R]:
     """
     Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
     given ``regex`` pattern.
@@ -83,7 +88,7 @@ def _disable_user_warnings(
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message=regex, module=module
@@ -95,13 +100,13 @@ def _disable_user_warnings(
 
 @functools.lru_cache(None)
 @_disable_user_warnings
-def get_ignored_functions() -> Set[Callable]:
+def get_ignored_functions() -> set[Callable]:
     """
     Return public functions that cannot be overridden by ``__torch_function__``.
 
     Returns
     -------
-    Set[Callable]
+    set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.
@@ -374,7 +379,7 @@ def get_ignored_functions() -> Set[Callable]:
 
 
 @functools.lru_cache(None)
-def get_default_nowrap_functions() -> Set[Callable]:
+def get_default_nowrap_functions() -> set[Callable]:
     """
     Return public functions that do not wrap in a subclass when invoked by
     the default ``Tensor.__torch_function__`` that preserves subclasses.  Typically,
@@ -401,7 +406,7 @@ def get_default_nowrap_functions() -> Set[Callable]:
 
 @functools.lru_cache(None)
 @_disable_user_warnings
-def get_testing_overrides() -> Dict[Callable, Callable]:
+def get_testing_overrides() -> dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
     Returns
@@ -427,7 +432,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     # function signatures for native kernels that can be consumed by inspect.
     # See Issue #28233.
     Tensor = torch.Tensor
-    ret: Dict[Callable, Callable] = {
+    ret: dict[Callable, Callable] = {
         torch.abs: lambda input, out=None: -1,
         torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
@@ -1065,11 +1070,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1  # noqa: B950
         ),
         torch.rad2deg: lambda input, out=None: -1,
-        torch.rand_like: lambda input, dtype=None, layout=None, device=None, generator=None, requires_grad=False: -1,
-        torch.randint_like: (
-            lambda input, high, dtype=None, layout=torch.strided, device=None, generator=None, requires_grad=False: -1
-        ),
-        torch.randn_like: lambda input, dtype=None, layout=None, device=None, generator=None, requires_grad=False: -1,
+        torch.rand_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
+        torch.randint_like: lambda input, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
+        torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
@@ -1131,7 +1134,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.std: lambda input, dim=None: -1,
         torch.std_mean: lambda input, dim=None: -1,
         torch.stft: (
-            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None: -1  # noqa: B950
+            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None, align_to_window=None: -1  # noqa: B950
         ),
         torch.sub: lambda input, other, out=None: -1,
         torch.subtract: lambda input, other, out=None: -1,
@@ -1592,8 +1595,8 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Optional[Callable[[Any], Type]] = None,
-) -> List[Any]:
+    get_type_fn: Optional[Callable[[Any], type]] = None,
+) -> list[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -1634,8 +1637,8 @@ def _get_overloaded_args(
     if not torch._C._is_torch_function_enabled():
         return []
     # Runtime is O(num_arguments * num_unique_types)
-    overloaded_types: Set[Type] = set()
-    overloaded_args: List[Any] = []
+    overloaded_types: set[type] = set()
+    overloaded_args: list[Any] = []
     for arg in relevant_args:
         arg_type = get_type_fn(arg)
         # We only collect arguments if they have a unique type, which ensures
@@ -1806,9 +1809,9 @@ has_torch_function_variadic = _add_docstr(
 
 
 @functools.lru_cache(None)
-def _get_overridable_functions() -> (
-    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
-):
+def _get_overridable_functions() -> tuple[
+    dict[Any, list[Callable]], dict[Callable, str]
+]:
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [
@@ -1893,7 +1896,7 @@ def _get_overridable_functions() -> (
 
 
 @_disable_user_warnings
-def get_overridable_functions() -> Dict[Any, List[Callable]]:
+def get_overridable_functions() -> dict[Any, list[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns
@@ -1927,7 +1930,7 @@ def resolve_name(f):
 
 
 @functools.lru_cache(None)
-def _get_tensor_methods() -> Set[Callable]:
+def _get_tensor_methods() -> set[Callable]:
     """Returns a set of the overridable methods on ``torch.Tensor``"""
     overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])

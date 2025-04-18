@@ -6,7 +6,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import requests
 from gitutils import retries_decorator
@@ -76,7 +76,7 @@ DISABLED_TESTS_JSON = (
 
 
 @retries_decorator()
-def query_db(query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+def query_db(query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     return query_clickhouse(query, params)
 
 
@@ -97,7 +97,7 @@ def download_log_worker(temp_dir: str, id: int, name: str) -> None:
         f.write(data)
 
 
-def printer(item: Tuple[str, Tuple[int, str, List[Any]]], extra: str) -> None:
+def printer(item: tuple[str, tuple[int, str, list[Any]]], extra: str) -> None:
     test, (_, link, _) = item
     print(f"{link:<55} {test:<120} {extra}")
 
@@ -107,21 +107,25 @@ def close_issue(num: int) -> None:
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {os.environ['GITHUB_TOKEN']}",
     }
-    requests.post(
+    response = requests.post(
         f"https://api.github.com/repos/pytorch/pytorch/issues/{num}/comments",
         data=json.dumps({"body": CLOSING_COMMENT}),
         headers=headers,
     )
-    requests.patch(
+    if response.status_code != 201:
+        raise RuntimeError(f"Failed to comment on issue {num}: {response.text}")
+    response = requests.patch(
         f"https://api.github.com/repos/pytorch/pytorch/issues/{num}",
         data=json.dumps({"state": "closed"}),
         headers=headers,
     )
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to close issue {num}: {response.text}")
 
 
 def check_if_exists(
-    item: Tuple[str, Tuple[int, str, List[str]]], all_logs: List[str]
-) -> Tuple[bool, str]:
+    item: tuple[str, tuple[int, str, list[str]]], all_logs: list[str]
+) -> tuple[bool, str]:
     test, (_, link, _) = item
     # Test names should look like `test_a (module.path.classname)`
     reg = re.match(r"(\S+) \((\S*)\)", test)
@@ -190,6 +194,13 @@ if __name__ == "__main__":
     if args.dry_run:
         print("dry run, not actually closing")
     else:
+        failed = False
         for item in to_be_closed:
             _, (num, _, _) = item
-            close_issue(num)
+            try:
+                close_issue(num)
+            except RuntimeError as e:
+                print(e)
+                failed = True
+        if failed:
+            sys.exit(1)

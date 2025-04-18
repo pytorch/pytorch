@@ -4,7 +4,7 @@ import os
 import tempfile
 import textwrap
 from functools import lru_cache
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from torch._dynamo.exc import BackendCompilerFailed, ShortenTraceback
 
@@ -29,7 +29,7 @@ else:
 
 class OperatorIssue(RuntimeError):
     @staticmethod
-    def operator_str(target: Any, args: List[Any], kwargs: dict[str, Any]) -> str:
+    def operator_str(target: Any, args: list[Any], kwargs: dict[str, Any]) -> str:
         lines = [f"target: {target}"] + [
             f"args[{i}]: {arg}" for i, arg in enumerate(args)
         ]
@@ -39,13 +39,13 @@ class OperatorIssue(RuntimeError):
 
 
 class MissingOperatorWithoutDecomp(OperatorIssue):
-    def __init__(self, target: Any, args: List[Any], kwargs: dict[str, Any]) -> None:
+    def __init__(self, target: Any, args: list[Any], kwargs: dict[str, Any]) -> None:
         _record_missing_op(target)
         super().__init__(f"missing lowering\n{self.operator_str(target, args, kwargs)}")
 
 
 class MissingOperatorWithDecomp(OperatorIssue):
-    def __init__(self, target: Any, args: List[Any], kwargs: dict[str, Any]) -> None:
+    def __init__(self, target: Any, args: list[Any], kwargs: dict[str, Any]) -> None:
         _record_missing_op(target)
         super().__init__(
             f"missing decomposition\n{self.operator_str(target, args, kwargs)}"
@@ -62,7 +62,7 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
 class LoweringException(OperatorIssue):
     def __init__(
-        self, exc: Exception, target: Any, args: List[Any], kwargs: dict[str, Any]
+        self, exc: Exception, target: Any, args: list[Any], kwargs: dict[str, Any]
     ) -> None:
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"

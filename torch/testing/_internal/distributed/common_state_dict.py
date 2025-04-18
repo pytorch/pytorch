@@ -4,7 +4,7 @@
 
 import copy
 from itertools import chain
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -32,8 +32,8 @@ class VerifyStateDictMixin:
 
     def _verify_msd(
         self,
-        msd: Dict[str, Any],
-        dist_msd: Dict[str, Any],
+        msd: dict[str, Any],
+        dist_msd: dict[str, Any],
         options: StateDictOptions = StateDictOptions(),
         offload_to_cpu=False,
     ) -> None:
@@ -56,8 +56,8 @@ class VerifyStateDictMixin:
         self,
         model: nn.Module,
         optim: torch.optim.Optimizer,
-        osd: Dict[str, Any],
-        dist_osd: Dict[str, Any],
+        osd: dict[str, Any],
+        dist_osd: dict[str, Any],
     ) -> None:
         params = list(chain.from_iterable(g["params"] for g in optim.param_groups))
         param_pid_mapping = dict(zip(params, range(len(params))))
@@ -110,7 +110,7 @@ class VerifyStateDictMixin:
         model: nn.Module,
         optim: torch.optim.Optimizer,
         new_optim: torch.optim.Optimizer,
-        dist_osd: Dict[str, Any],
+        dist_osd: dict[str, Any],
     ) -> None:
         new_dist_osd = _gather_state_dict(dist_osd)
         set_state_dict(
@@ -120,3 +120,51 @@ class VerifyStateDictMixin:
             optim_state_dict=new_dist_osd,
         )
         self.assertEqual(optim.state_dict(), new_optim.state_dict())
+
+
+class FusionEmbedding(nn.Module):
+    def __init__(self, vocab_size: int, fusion_vocab_size: int, embed_dim: int) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.fusion_embedding = nn.Embedding(fusion_vocab_size, embed_dim)
+
+
+class FusionEmbeddingWithHook(nn.Module):
+    def __init__(self, vocab_size: int, fusion_vocab_size: int, embed_dim: int) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.fusion_embedding = nn.Embedding(fusion_vocab_size, embed_dim)
+        self._register_state_dict_hook(FusionEmbeddingWithHook._state_dict_hook)
+        self._register_load_state_dict_pre_hook(
+            FusionEmbeddingWithHook._load_state_dict_hook, with_module=True
+        )
+
+    def _state_dict_hook(self, destination, prefix, keep_vars):
+        """Remove "embedding" from the original embedding in the state_dict
+        name. This keeps the orginal state dict name for the embedding
+        from before fusing with the FusionEmbedding.
+        """
+        key = prefix + "embedding.weight"
+        new_key = prefix + "weight"
+        destination[new_key] = destination[key]
+        del destination[key]
+
+    def _load_state_dict_hook(self, state_dict, prefix, *args, **kwargs):
+        """Apply extra "embedding" prefix to the state_dict key to
+        account for the FusionEmbedding wrapping.
+        """
+        if state_dict:
+            key = prefix + "weight"
+            new_key = prefix + "embedding.weight"
+            state_dict[new_key] = state_dict[key]
+            del state_dict[key]
+
+
+class FusionEmbeddingWithModifier(FusionEmbeddingWithHook):
+    # _fqn_modifiers is a private function as a contract between DSD. When users change the state_dict
+    # keys, they need to provide a mapping from the new key to the original key. This is used to ensure
+    # consistency between the state_dict keys and fqn.
+    def _fqn_modifiers(self) -> dict[str, str]:
+        return {
+            "weight": "embedding",
+        }

@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 import copy
 import unittest
-from typing import Tuple
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -40,7 +39,7 @@ class TestSACILP(TestCase):
 
     def _init_model_input_optimizer(
         self,
-    ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
+    ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
         bsz = 8
         model_args = ModelArgs(
             n_layers=4,

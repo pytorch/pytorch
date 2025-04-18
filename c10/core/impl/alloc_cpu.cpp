@@ -7,6 +7,7 @@
 #include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
+#include <cstring>
 
 #ifdef USE_MIMALLOC
 #include <mimalloc.h>
@@ -18,15 +19,17 @@
 #endif
 
 // TODO: rename flags to C10
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     false,
-    "If set, do memory zerofilling when allocating on CPU");
+    "If set, do memory zerofilling when allocating on CPU")
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_junk_fill,
     false,
-    "If set, fill memory with deterministic junk when allocating on CPU");
+    "If set, fill memory with deterministic junk when allocating on CPU")
 
 namespace c10 {
 

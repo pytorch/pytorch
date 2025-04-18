@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from itertools import chain
 from operator import getitem
-from typing import Callable, Dict, Optional, Set, Type, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -91,16 +91,16 @@ def _get_supported_activation_modules():
 
 
 def _get_default_structured_pruning_patterns() -> (
-    Dict[
-        tuple[Union[Type[nn.Module], Callable, MatchAllNode, str], ...],
+    dict[
+        tuple[Union[type[nn.Module], Callable, MatchAllNode, str], ...],
         Callable[..., None],
     ]
 ):
     """
     Returns the patterns for conv2d / linear conversion for each element in the activation functions/modules defined above.
     """
-    patterns: Dict[
-        tuple[Union[Type[nn.Module], Callable, MatchAllNode, str], ...],
+    patterns: dict[
+        tuple[Union[type[nn.Module], Callable, MatchAllNode, str], ...],
         Callable[..., None],
     ] = {
         # linear -> linear
@@ -229,7 +229,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
     def make_config_from_model(
         self,
         model: nn.Module,
-        SUPPORTED_MODULES: Optional[Set[Type]] = None,
+        SUPPORTED_MODULES: Optional[set[type]] = None,
     ) -> None:
         if SUPPORTED_MODULES is None:
             SUPPORTED_MODULES = _get_supported_structured_pruning_modules()
@@ -265,7 +265,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     module.prune_bias = prune_bias
 
                 module.register_forward_hook(
-                    BiasHook(module.parametrizations.weight[0], prune_bias)
+                    BiasHook(module.parametrizations.weight[0], prune_bias)  # type: ignore[union-attr, index]
                 )
 
     def prune(self) -> None:

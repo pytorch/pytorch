@@ -6,7 +6,6 @@
 #include <c10/util/Half.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/complex.h>
-#include <c10/util/string_view.h>
 
 #ifdef __CUDACC__
 #include <cuda.h> // For CUDA_VERSION

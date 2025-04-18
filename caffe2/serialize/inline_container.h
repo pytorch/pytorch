@@ -172,8 +172,13 @@ class TORCH_API PyTorchStreamReader final {
       size_t n);
 
   size_t getRecordSize(const std::string& name);
-
+  size_t getRecordHeaderOffset(const std::string& name);
   size_t getRecordOffset(const std::string& name);
+  size_t getRecordOffsetNoRead(
+      size_t cursor,
+      std::string filename,
+      size_t size,
+      uint64_t alignment);
   bool hasRecord(const std::string& name);
   std::vector<std::string> getAllRecords();
 
@@ -220,10 +225,12 @@ class TORCH_API PyTorchStreamWriter final {
  public:
   explicit PyTorchStreamWriter(
       const std::string& archive_name,
-      bool compute_crc32 = true);
+      bool compute_crc32 = true,
+      uint64_t alignment = 64);
   explicit PyTorchStreamWriter(
       const std::function<size_t(const void*, size_t)> writer_func,
-      bool compute_crc32 = true);
+      bool compute_crc32 = true,
+      uint64_t alignment = 64);
 
   void setMinVersion(const uint64_t version);
 
@@ -265,6 +272,7 @@ class TORCH_API PyTorchStreamWriter final {
   uint64_t combined_uncomp_crc32_ = 0;
   std::string serialization_id_;
   bool compute_crc32_;
+  uint64_t alignment_;
 
   // This number will be updated when the model has operators
   // that have valid upgraders.
@@ -279,8 +287,6 @@ class TORCH_API PyTorchStreamWriter final {
 };
 
 namespace detail {
-// Writer-specific constants
-constexpr uint64_t kFieldAlignment = 64;
 
 // Returns a record to be appended to the local user extra data entry in order
 // to make data beginning aligned at kFieldAlignment bytes boundary.
@@ -288,7 +294,12 @@ size_t getPadding(
     size_t cursor,
     size_t filename_size,
     size_t size,
-    std::string& padding_buf);
+    std::string& padding_buf,
+    uint64_t alignment);
+
+std::tuple<size_t, size_t>
+getOffset(size_t cursor, size_t filename_size, size_t size, uint64_t alignment);
+
 } // namespace detail
 
 } // namespace serialize

@@ -161,7 +161,6 @@ Tensor _nested_select_backward_symint(
   const Tensor& grad,
   const Tensor& nested_self,
   int64_t dim,
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();

@@ -285,7 +285,7 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
+static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -1639,7 +1639,7 @@ TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tens
 }
 
 template <typename scalar_t, bool is_bmm>
-inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
+static inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
   int64_t bs = result.size(0);
   int64_t is = result.size(1);
   int64_t js = result.size(2);
@@ -3485,6 +3485,8 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
       __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+  TORCH_CHECK(K % qGroupSize == 0,
+      __func__, ": expect K to be divisible by qGroupSize, got K:", K, ", qGroupSize:", qGroupSize);
 
   TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
       && qScaleAndZeros.size(2) == 2,
@@ -3570,11 +3572,10 @@ Tensor _weight_int8pack_mm_cpu(
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(),
-      __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
-
+  TORCH_CHECK(A.stride(1) == 1,
+      __func__, " : A must be contiguous on the last dimension.");
   TORCH_CHECK(B.dtype() == kChar,
       __func__, " : expect B to be int8 tensor.");
   TORCH_CHECK(B.is_contiguous(),

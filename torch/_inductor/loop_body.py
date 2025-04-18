@@ -6,7 +6,7 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, TypeVar
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -17,8 +17,18 @@ from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
+from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
+from .utils import (
+    cache_on_self,
+    reduction_num_outputs,
+    sympy_index_symbol_with_prefix,
+    sympy_subs,
+)
 from .virtualized import ops, V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 T = TypeVar("T")
@@ -83,14 +93,14 @@ class LoopBody:
     indexing simplifications and makes it easier to analyze loop bodies.
     """
 
-    indexing_exprs: Dict[str, sympy.Expr]
-    indexing_exprs_name: Dict[sympy.Expr, str]
-    submodules: Dict[str, Any]
-    subblocks: Dict[str, LoopBodyBlock]
-    indirect_vars: List[sympy.Symbol]
-    indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
+    indexing_exprs: dict[str, sympy.Expr]
+    indexing_exprs_name: dict[sympy.Expr, str]
+    submodules: dict[str, Any]
+    subblocks: dict[str, LoopBodyBlock]
+    indirect_vars: list[sympy.Symbol]
+    indirect_var_ranges: dict[sympy.Symbol, sympy.Expr]
     root_block: LoopBodyBlock
-    memory_usage: Dict[MemoryUsageType, List[MemoryEntry]]
+    memory_usage: dict[MemoryUsageType, list[MemoryEntry]]
     op_counts: collections.Counter[str]
 
     def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
@@ -120,7 +130,7 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
-        self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.indirect_var_ranges: dict[sympy.Symbol, sympy.Expr] = {}
         self.memory_usage = {t: [] for t in MemoryUsageType}
         self.op_counts = collections.Counter()
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
@@ -189,11 +199,12 @@ class LoopBody:
         # There is indeed an issue due to symbol name conflicting.
         # y0 maybe reused for the y dimension later.
         (
-            iter_vars,
-            reduce_vars,
-        ), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_sizes, reduce_sizes, prefix="t"
-        )
+            (
+                iter_vars,
+                reduce_vars,
+            ),
+            var_ranges,
+        ) = dependencies.index_vars_no_squeeze(iter_sizes, reduce_sizes, prefix="t")
         new_body = LoopBody(
             old_body,
             [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
@@ -229,14 +240,15 @@ class LoopBody:
         new_sizes = (new_iter_size, reduce_size)
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="t"  # type: ignore[arg-type]
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}
         inverse_order = [inverse_order[i] for i in range(len(new_order))]
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
-            index = list(itertools.chain(*indices))
+            index = [*itertools.chain.from_iterable(indices)]
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
@@ -249,7 +261,8 @@ class LoopBody:
 
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="p"  # type: ignore[arg-type]
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
         )
         new_body = LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -380,9 +393,9 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(
-            v not in self.var_ranges for v in index
-        ), f"{self.var_ranges=}, {indices=}"
+        assert all(v not in self.var_ranges for v in index), (
+            f"{self.var_ranges=}, {indices=}"
+        )
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
@@ -433,181 +446,16 @@ class LoopBodyBlock:
     operations will manifest as an extra LoopBodyBlock.
     """
 
-    def __init__(self, body: LoopBody, fn: Callable[..., Any], args: List[Any]):
+    def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
         self.body = body
-
-        def add_index(expr: sympy.Expr, mtype: MemoryUsageType, **kwargs):
-            return tracer.create_proxy(
-                "call_module",
-                "get_index",
-                (body.add_index_expr(expr, mtype, **kwargs),),
-                {},
-            )
-
-        class CaptureIndexing(V.WrapperHandler):  # type: ignore[name-defined]
-            self.name = "CaptureIndexing"
-
-            def load(self, name: str, index: sympy.Expr):
-                index = add_index(index, MemoryUsageType.LOAD, buffer_name=name)
-                return self._inner.load(name, index)
-
-            def load_seed(self, name: str, index: int):
-                assert isinstance(index, int)
-                body.add_index_expr(
-                    sympy.Integer(index), MemoryUsageType.LOAD_SEED, buffer_name=name
-                )
-                return self._inner.load_seed(name, index)
-
-            def store(self, name, index, value, mode=None):
-                index = add_index(
-                    index, MemoryUsageType.STORE, buffer_name=name, mode=mode
-                )
-                return self._inner.store(name, index, value, mode)
-
-            def store_reduction(self, name, index, value):
-                index = add_index(
-                    index, MemoryUsageType.STORE_REDUCTION, buffer_name=name
-                )
-                return self._inner.store_reduction(name, index, value)
-
-            def reduction(self, dtype, src_dtype, reduction_type, value):
-                result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
-                if "welford" in reduction_type:
-                    return tuple(result[i] for i in range(3))
-                return result
-
-            def index_expr(self, index, dtype):
-                if isinstance(index, (int, sympy.Integer)):
-                    return self._inner.constant(int(index), dtype)
-                index = add_index(index, MemoryUsageType.INDEX_EXPR)
-                return self._inner.index_expr(index, dtype)
-
-            def check_bounds(self, index, size, lower, upper):
-                index = add_index(index, MemoryUsageType.CHECK_BOUNDS)
-                size = add_index(size, MemoryUsageType.CHECK_BOUNDS)
-                return self._inner.check_bounds(index, size, lower, upper)
-
-            def bucketize(
-                self,
-                values: T,
-                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
-                boundary_indices: T,
-                indexing_dtype: torch.dtype,
-                right: bool,
-                sorter: Optional[tuple[str, sympy.Expr]] = None,
-                sorter_indices: Optional[T] = None,
-            ) -> T:
-                """
-                See [Note: Inductor bucketize op]
-                """
-                boundaries = (
-                    boundaries[0],
-                    add_index(
-                        boundaries[1],
-                        MemoryUsageType.BUCKETIZE,
-                        buffer_name=boundaries[0],
-                    ),
-                    add_index(
-                        boundaries[2],
-                        MemoryUsageType.BUCKETIZE,
-                        buffer_name=boundaries[0],
-                    ),
-                    add_index(
-                        boundaries[3],
-                        MemoryUsageType.BUCKETIZE,
-                        buffer_name=boundaries[0],
-                    ),
-                )
-                if sorter is not None:
-                    sorter = (
-                        sorter[0],
-                        add_index(
-                            sorter[1], MemoryUsageType.BUCKETIZE, buffer_name=sorter[0]
-                        ),
-                    )
-
-                return self._inner.bucketize(
-                    values,
-                    boundaries,
-                    boundary_indices,
-                    indexing_dtype,
-                    right,
-                    sorter,
-                    sorter_indices,
-                )
-
-            @staticmethod
-            def masked(mask_proxy, masked_body: Callable[..., Any], other_proxy):
-                """
-                Recursively capture the masked out body in another LoopBodyBlock
-                """
-                name = self.body.add_submodule(None, "masked_subblock")
-                self.body.submodules[name] = self.body.bind_masked_shim(name)
-                self.body.subblocks[name] = LoopBodyBlock(self.body, masked_body, [])
-                return tracer.create_proxy(
-                    "call_module", name, (mask_proxy, other_proxy), {}
-                )
-
-            @staticmethod
-            def scan(
-                dtype_proxy,
-                combine_fn: Callable[
-                    [tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]
-                ],
-                value_proxy,
-            ):
-                shim = self.body.bind_scan_shim(combine_fn)
-                name = self.body.add_submodule(shim, "scan")
-                result = tracer.create_proxy(
-                    "call_module",
-                    name,
-                    (dtype_proxy, value_proxy),
-                    {},
-                )
-                # Proxies are iterable, but some methods expect tuples/lists
-                return tuple(result[i] for i in range(len(value_proxy)))
-
-            def sort(self, dtypes, values, stable, descending):
-                result = self._inner.sort(dtypes, values, stable, descending)
-                # Proxies are iterable, but some methods expect tuples/lists
-                return tuple(result[i] for i in range(len(values)))
-
-            def frexp(self, value_proxy):
-                result = self._inner.frexp(value_proxy)
-                # Proxies are iterable, but some methods expect tuples/lists
-                return (result[0], result[1])
-
-            @staticmethod
-            def indirect_indexing(index_proxy, size, check=True, wrap_neg=True):
-                """
-                Flow data from tensors into indexing formulas.
-                Introduce a call_module to update the indexing.
-                """
-
-                var = self.body.add_indirect(size)
-                set_indirect = self.body.bind_set_indirect_shim(
-                    var, size, check, wrap_neg
-                )
-                tracer.create_proxy(
-                    "call_module",
-                    self.body.add_submodule(set_indirect, f"set_{var}"),
-                    (index_proxy,),
-                    {},
-                )
-                return var
-
-            @staticmethod
-            def output(result):
-                tracer.create_proxy("output", "output", (result,), {})
 
         tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
 
         from .index_propagation import IndexPropagation
-        from .sizevars import SimplifyIndexing
 
         handler: Any = CountOps(
-            SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges),
+            CaptureIndexing(proxy_ops, body, tracer),
             body.op_counts,
         )
         if config.constant_and_index_propagation:
@@ -649,11 +497,188 @@ class LoopBodyBlock:
         return copy
 
 
-class CountOps:
-    def __init__(self, inner: Any, counts: collections.Counter[str]):
+class CountOps(DefaultHandler):
+    def __init__(self, inner: OpsHandler[Any], counts: collections.Counter[str]):
         self._inner = inner
         self._counts = counts
 
-    def __getattr__(self, name):
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         self._counts[name] += 1
-        return getattr(self._inner, name)
+        return getattr(self._inner, name)(*args, **kwargs)
+
+
+class CaptureIndexing(WrapperHandler):
+    name = "CaptureIndexing"
+
+    def __init__(
+        self,
+        inner: OpsHandler[Any],
+        body: LoopBody,
+        tracer: LightTracer,
+    ):
+        super().__init__(inner)
+        self.body = body
+        self.tracer = tracer
+
+    def _add_index(self, expr: sympy.Expr, mtype: MemoryUsageType, **kwargs: Any):
+        return self.tracer.create_proxy(
+            "call_module",
+            "get_index",
+            (self.body.add_index_expr(expr, mtype, **kwargs),),
+            {},
+        )
+
+    def _simplify(self, expr: sympy.Expr) -> sympy.Expr:
+        return V.graph.sizevars.simplify_with_ranges(expr, self.body.var_ranges)
+
+    def load(self, name: str, index: sympy.Expr):
+        index = self._simplify(index)
+        index = self._add_index(index, MemoryUsageType.LOAD, buffer_name=name)
+        return self._inner.load(name, index)
+
+    def load_seed(self, name: str, index: int):
+        assert isinstance(index, int)
+        self.body.add_index_expr(
+            sympy.Integer(index), MemoryUsageType.LOAD_SEED, buffer_name=name
+        )
+        return self._inner.load_seed(name, index)
+
+    def store(self, name, index, value, mode=None):
+        index = self._simplify(index)
+        index = self._add_index(
+            index, MemoryUsageType.STORE, buffer_name=name, mode=mode
+        )
+        return self._inner.store(name, index, value, mode)
+
+    def store_reduction(self, name, index, value):
+        index = self._simplify(index)
+        index = self._add_index(
+            index, MemoryUsageType.STORE_REDUCTION, buffer_name=name
+        )
+        return self._inner.store_reduction(name, index, value)
+
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
+        num_outputs = reduction_num_outputs(reduction_type)
+        if num_outputs > 1:
+            return tuple(result[i] for i in range(num_outputs))
+        return result
+
+    def index_expr(self, index, dtype):
+        index = self._simplify(index)
+        if isinstance(index, (int, sympy.Integer)):
+            return self._inner.constant(int(index), dtype)
+        index = self._add_index(index, MemoryUsageType.INDEX_EXPR)
+        return self._inner.index_expr(index, dtype)
+
+    def check_bounds(self, index, size, lower, upper):
+        index = self._simplify(index)
+        index = self._add_index(index, MemoryUsageType.CHECK_BOUNDS)
+        size = self._add_index(size, MemoryUsageType.CHECK_BOUNDS)
+        return self._inner.check_bounds(index, size, lower, upper)
+
+    def bucketize(
+        self,
+        values: T,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
+    ) -> T:
+        """
+        See [Note: Inductor bucketize op]
+        """
+        boundaries = (
+            boundaries[0],
+            self._add_index(
+                boundaries[1],
+                MemoryUsageType.BUCKETIZE,
+                buffer_name=boundaries[0],
+            ),
+            self._add_index(
+                boundaries[2],
+                MemoryUsageType.BUCKETIZE,
+                buffer_name=boundaries[0],
+            ),
+            self._add_index(
+                boundaries[3],
+                MemoryUsageType.BUCKETIZE,
+                buffer_name=boundaries[0],
+            ),
+        )
+        if sorter is not None:
+            sorter = (
+                sorter[0],
+                self._add_index(
+                    sorter[1], MemoryUsageType.BUCKETIZE, buffer_name=sorter[0]
+                ),
+            )
+
+        return self._inner.bucketize(
+            values,
+            boundaries,
+            boundary_indices,
+            indexing_dtype,
+            right,
+            sorter,
+            sorter_indices,
+        )
+
+    def masked(self, mask_proxy, masked_body: Callable[..., Any], other_proxy):
+        """
+        Recursively capture the masked out body in another LoopBodyBlock
+        """
+        name = self.body.add_submodule(None, "masked_subblock")
+        self.body.submodules[name] = self.body.bind_masked_shim(name)
+        self.body.subblocks[name] = LoopBodyBlock(self.body, masked_body, [])
+        return self.tracer.create_proxy(
+            "call_module", name, (mask_proxy, other_proxy), {}
+        )
+
+    def scan(
+        self,
+        dtype_proxy,
+        combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
+        value_proxy,
+    ):
+        shim = self.body.bind_scan_shim(combine_fn)
+        name = self.body.add_submodule(shim, "scan")
+        result = self.tracer.create_proxy(
+            "call_module",
+            name,
+            (dtype_proxy, value_proxy),
+            {},
+        )
+        # Proxies are iterable, but some methods expect tuples/lists
+        return tuple(result[i] for i in range(len(value_proxy)))
+
+    def sort(self, dtypes, values, stable, descending):
+        result = self._inner.sort(dtypes, values, stable, descending)
+        # Proxies are iterable, but some methods expect tuples/lists
+        return tuple(result[i] for i in range(len(values)))
+
+    def frexp(self, value_proxy):
+        result = self._inner.frexp(value_proxy)
+        # Proxies are iterable, but some methods expect tuples/lists
+        return (result[0], result[1])
+
+    def indirect_indexing(self, index_proxy, size, check=True, wrap_neg=True):
+        """
+        Flow data from tensors into indexing formulas.
+        Introduce a call_module to update the indexing.
+        """
+
+        var = self.body.add_indirect(size)
+        set_indirect = self.body.bind_set_indirect_shim(var, size, check, wrap_neg)
+        self.tracer.create_proxy(
+            "call_module",
+            self.body.add_submodule(set_indirect, f"set_{var}"),
+            (index_proxy,),
+            {},
+        )
+        return var
+
+    def output(self, *result):
+        self.tracer.create_proxy("output", "output", result, {})

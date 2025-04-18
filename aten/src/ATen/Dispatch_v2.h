@@ -87,7 +87,7 @@
 
 #define AT_FLOAT8_TYPES                                          \
   c10::kFloat8_e5m2, c10::kFloat8_e5m2fnuz, c10::kFloat8_e4m3fn, \
-      c10::kFloat8_e4m3fnuz
+      c10::kFloat8_e4m3fnuz, c10::kFloat8_e8m0fnu
 
 #define AT_INTEGRAL_TYPES \
   c10::kByte, c10::kChar, c10::kInt, c10::kLong, c10::kShort

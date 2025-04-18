@@ -1,6 +1,5 @@
 import argparse
 import subprocess
-from typing import Dict
 
 import generate_binary_build_matrix
 
@@ -10,7 +9,7 @@ def tag_image(
     default_tag: str,
     release_version: str,
     dry_run: str,
-    tagged_images: Dict[str, bool],
+    tagged_images: dict[str, bool],
 ) -> None:
     if image in tagged_images:
         return
@@ -41,7 +40,7 @@ def main() -> None:
     )
 
     options = parser.parse_args()
-    tagged_images: Dict[str, bool] = {}
+    tagged_images: dict[str, bool] = {}
     platform_images = [
         generate_binary_build_matrix.WHEEL_CONTAINER_IMAGES,
         generate_binary_build_matrix.LIBTORCH_CONTAINER_IMAGES,

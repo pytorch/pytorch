@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from numbers import Number, Real
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -7,7 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Beta"]
@@ -30,6 +30,7 @@ class Beta(ExponentialFamily):
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
+
     arg_constraints = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
@@ -37,8 +38,13 @@ class Beta(ExponentialFamily):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
-        if isinstance(concentration1, Real) and isinstance(concentration0, Real):
+    def __init__(
+        self,
+        concentration1: Union[Tensor, float],
+        concentration0: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
+        if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
             )
@@ -90,7 +96,7 @@ class Beta(ExponentialFamily):
     @property
     def concentration1(self) -> Tensor:
         result = self._dirichlet.concentration[..., 0]
-        if isinstance(result, Number):
+        if isinstance(result, _Number):
             return torch.tensor([result])
         else:
             return result
@@ -98,7 +104,7 @@ class Beta(ExponentialFamily):
     @property
     def concentration0(self) -> Tensor:
         result = self._dirichlet.concentration[..., 1]
-        if isinstance(result, Number):
+        if isinstance(result, _Number):
             return torch.tensor([result])
         else:
             return result

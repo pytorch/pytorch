@@ -7,7 +7,8 @@ import inspect
 import logging
 import types
 import typing
-from typing import Any, Iterator, Mapping, Optional, Sequence, TypeVar, Union
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Optional, TypeVar, Union
 
 import onnx
 
@@ -224,9 +225,9 @@ def _get_attr_type(type_: type) -> ir.AttributeType:
         if origin_type in (
             collections.abc.Sequence,
             Sequence,
-            typing.List,
             list,
-            typing.Tuple,
+            list,
+            tuple,
             tuple,
         ):
             inner_type = typing.get_args(type_)[0]
@@ -306,9 +307,9 @@ def _get_allowed_types_from_type_annotation(
         allowed_types = set()
         subtypes = typing.get_args(type_)
         for subtype in subtypes:
-            assert (
-                subtype is not type(None)
-            ), "Union should not contain None type because it is handled by _is_optional."
+            assert subtype is not type(None), (
+                "Union should not contain None type because it is handled by _is_optional."
+            )
             allowed_types.update(_get_allowed_types_from_type_annotation(subtype))
         return allowed_types
 

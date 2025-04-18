@@ -3,7 +3,8 @@ Python polyfills for functools
 """
 
 import functools
-from typing import Callable, Iterable, TypeVar
+from collections.abc import Iterable
+from typing import Callable, TypeVar
 
 from ..decorators import substitute_in_graph
 

@@ -12,18 +12,15 @@ import traceback
 import unittest.mock
 import weakref
 from abc import abstractmethod
+from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
-    List,
     NamedTuple,
     Optional,
-    Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -234,6 +231,7 @@ class SLoc:
 class ShapeGuard(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
+    size_oblivious: bool
 
 
 @dataclass_slots
@@ -260,8 +258,8 @@ class Guard:
     create_fn: Callable[[GuardBuilderBase, Guard], None]
 
     # Export only. These values are written to at time of guard check_fn creation.
-    guard_types: Optional[List[str]] = None
-    code_list: Optional[List[str]] = None
+    guard_types: Optional[list[str]] = None
+    code_list: Optional[list[str]] = None
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
 
@@ -448,8 +446,8 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 
 @dataclasses.dataclass
 class StorageOverlap(GuardEnvExpr):
-    overlapping_sources: List[Source]
-    non_overlapping_sources: List[Source]
+    overlapping_sources: list[Source]
+    non_overlapping_sources: list[Source]
 
 
 """
@@ -478,7 +476,7 @@ class GuardsCheckpointState:
     The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
     """
 
-    dynamo_guards: Set[Guard] = set()
+    dynamo_guards: set[Guard] = set()
 
     def __init__(self, dynamo_guards):
         self.dynamo_guards = dynamo_guards
@@ -500,7 +498,7 @@ class GuardsCheckpointState:
 
 
 class ModuleContextCheckpointState:
-    nn_modules: Dict[str, torch.nn.Module] = {}
+    nn_modules: dict[str, torch.nn.Module] = {}
 
     def __init__(self, nn_modules):
         self.nn_modules = nn_modules
@@ -523,7 +521,7 @@ class ModuleContextCheckpointState:
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
     def __init__(self) -> None:
-        self.nn_modules: Dict[str, Any] = {}
+        self.nn_modules: dict[str, Any] = {}
 
     def copy_graphstate(self):
         return ModuleContextCheckpointState(dict(self.nn_modules))
@@ -534,7 +532,7 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
 
 
 class GlobalContextCheckpointState:
-    global_state: Dict[str, Tuple[Callable, ...]] = {}
+    global_state: dict[str, tuple[Callable, ...]] = {}
 
     def __init__(self, global_states):
         self.global_state = global_states
@@ -572,7 +570,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
     }
 
     def __init__(self) -> None:
-        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
+        self.global_state: dict[str, tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
         return GlobalContextCheckpointState(dict(self.global_state))
@@ -586,14 +584,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         ), "Global state mismatch"
         for func, args in self.global_state.values():
             func(args)
-
-
-"""
-A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
-directly outside of it. For passing around internal state representations of this object,
-prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
-"""
 
 
 # Like a Set[Guard] but will record the user stack on all guards at the
@@ -628,20 +618,32 @@ class GuardsSet:
                 guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
-    def update(self, *others: Set[Guard]):
+    def update(self, *others: set[Guard]):
         for o in others:
             for g in o:
                 self.add(g, skip=1)
 
     def remove_guards_with_source(self, source):
-        """Delete all guards with a given source"""
-        self.inner = {g for g in self.inner if g.originating_source != source}
+        """Delete all guards that contains a given source"""
+        from ._dynamo.source import is_from_source
+
+        self.inner = {
+            g for g in self.inner if not is_from_source(g.originating_source, source)
+        }
+
+
+"""
+A GuardsContext is a checkpointable representation of all the guards in the current tracing
+context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+directly outside of it. For passing around internal state representations of this object,
+prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
+"""
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
-        self.aotautograd_guards: List[GuardEnvExpr] = []
+        self.aotautograd_guards: list[GuardEnvExpr] = []
 
     def copy_graphstate(self):
         return GuardsCheckpointState(set(self.dynamo_guards.inner))
@@ -654,10 +656,10 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
-    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str): ...
 
     @abstractmethod
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]: ...
 
     @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable): ...
@@ -671,18 +673,25 @@ class HopSubgraphCache:
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str): ...
 
+    @abstractmethod
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule): ...
+
+    @abstractmethod
+    def get_lazy_bwd_entry(self, identifier: str): ...
+
 
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
-        self.autograd_cache: Dict[str, Callable] = {}
-        self.proxy_dispatch_cache: Dict[str, Callable] = {}
-        self.dynamo_identifiers: Dict[str, str] = {}
+        self.autograd_cache: dict[str, Callable] = {}
+        self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
+        self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
 
-    def add_dynamo_identifier(self, cache_key: str, identifier: str):
-        self.dynamo_identifiers[cache_key] = identifier
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str):
+        self.dynamo_installed_submodules[fn_id].append(identifier)
 
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
-        return self.dynamo_identifiers.get(cache_key, None)
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]:
+        return self.dynamo_installed_submodules.get(fn_id, [])
 
     def add_autograd_key_entry(self, identifier: str, key: Callable):
         self.autograd_cache[identifier] = key
@@ -695,6 +704,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule):
+        self.lazy_bwd_cache[identifier] = gmod
+
+    def get_lazy_bwd_entry(self, identifier: str):
+        return self.lazy_bwd_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:
@@ -748,7 +763,7 @@ class CompileContext:
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
-        self.shape_env_guards: List[str] = []
+        self.shape_env_guards: list[str] = []
 
     @staticmethod
     def current_compile_id():
@@ -816,7 +831,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
+        self.output_strides: Optional[list[Optional[tuple[int, ...]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -870,9 +885,10 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        with unittest.mock.patch.object(
-            tc, "frame_summary_stack", []
-        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+        with (
+            unittest.mock.patch.object(tc, "frame_summary_stack", []),
+            unittest.mock.patch.object(tc, "loc_in_frame", None),
+        ):
             try:
                 yield
             except Exception as e:
@@ -1019,6 +1035,12 @@ class ChainedSource(Source):
 
     def is_ephemeral(self):
         return self.base.is_ephemeral()
+
+    def get_base(self) -> Source:
+        current: Source = self
+        while isinstance(current, ChainedSource):
+            current = current.base
+        return current
 
 
 def detect_fake_mode(inputs: Any = None):

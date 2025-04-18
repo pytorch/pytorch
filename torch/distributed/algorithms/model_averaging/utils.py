@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # flake8: noqa C101
 import itertools
-from typing import Dict, Iterable, Iterator, Union
+from collections.abc import Iterable, Iterator
+from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -51,7 +52,10 @@ def average_parameters(
 
 
 def get_params_to_average(
-    params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]
+    params: Union[
+        Iterable[torch.nn.Parameter],
+        Iterable[dict[str, torch.nn.Parameter]],
+    ],
 ):
     """
     Return a list of parameters that need to average.
@@ -81,7 +85,7 @@ def get_params_to_average(
 
 def average_parameters_or_parameter_groups(
     params: Union[
-        Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]
+        Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
     ],
     process_group: ProcessGroup,
 ):

@@ -16,10 +16,10 @@ void build_feature_required_feature_not_available(const char* feature) {
 }
 } // namespace impl
 
-static_assert(std::is_nothrow_move_constructible<
-              std::optional<RegistrationHandleRAII>>::value);
-static_assert(std::is_nothrow_move_assignable<
-              std::optional<RegistrationHandleRAII>>::value);
+static_assert(std::is_nothrow_move_constructible_v<
+              std::optional<RegistrationHandleRAII>>);
+static_assert(std::is_nothrow_move_assignable_v<
+              std::optional<RegistrationHandleRAII>>);
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(

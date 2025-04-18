@@ -30,6 +30,10 @@
 #include <ATen/native/mkldnn/Utils.h>
 #endif
 
+#ifdef USE_MPS
+#include <ATen/mps/MPSDevice.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -93,7 +97,7 @@ static bool conv_benchmark_empty_cache = true;
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
-bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
+static bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
   auto w = at::symint::size<T>(input, 3);  // same as h
   auto ch = at::symint::size<T>(input, 1);
   auto bs = at::symint::size<T>(input, 0);
@@ -216,7 +220,7 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
 
 // simplified version for cudnn 8.2 and above
 template <typename T>
-bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
+static bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
   // 1D conv
   if(at::symint::size<T>(input, 2) == 1 && stride == 1){
     return true;
@@ -603,7 +607,7 @@ struct ConvParams {
   // nInputPlane and nInputPlane == nOutputPlane (the latter due to the lack of
   // a depthwise multiplier)
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const  {
-    return input.is_cuda() &&
+    return (input.is_cuda() || input.is_xpu()) &&
            !transposed &&
            (input.ndimension() == 4 || input.ndimension() == 5) &&
            at::symint::size<T>(input, 1) == groups &&
@@ -636,7 +640,7 @@ REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub)
 REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub)
 
 template <typename T>
-std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
+static std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
   out << "ConvParams {"
       << "  stride = " << IntArrayRef{params.stride}
       << "  padding = " << ArrayRef<T>{params.padding}
@@ -1199,7 +1203,7 @@ at::Tensor convolution_overrideable(
 // a bool indicating whether the bias is defined. This is done to save memory by
 // avoiding saving the full bias tensor for backward.
 template <typename T>
-ConvBackend _select_conv_backend(
+static ConvBackend _select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
     const std::optional<Tensor>& bias,
@@ -1219,6 +1223,12 @@ ConvBackend _select_conv_backend(
       return ConvBackend::Cudnn;
     } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value())) {
       return ConvBackend::MiopenDepthwise;
+    } else if (params.use_mkldnn(input, weight)) {
+      if (params.transposed) {
+        return ConvBackend::MkldnnTranspose;
+      } else {
+        return ConvBackend::Mkldnn;
+      }
     } else {
       if (input.ndimension() == 4) {
         return ConvBackend::CudaDepthwise2d;
@@ -1413,7 +1423,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& input,
     const Tensor& weight,
     const ConvBackend backend) {
-  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
+  auto backend_memory_format = at::MemoryFormat::Contiguous;
 #if !defined(C10_MOBILE)
   auto k = weight.ndimension();
   // See Note [Mobile check segfaults]
@@ -1449,6 +1459,17 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::Overrideable:
       if (xpu_conv_use_channels_last(input, weight)) {
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+      }
+      break;
+    case ConvBackend::Mps:
+    case ConvBackend::MpsTranspose:
+      if (mps_conv_use_channels_last(input, weight)) {
+#ifdef USE_MPS
+        if (!mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS)) {
+          break;
+        }
+#endif
+        backend_memory_format = (k == 5) ? MemoryFormat::ChannelsLast3d : MemoryFormat::ChannelsLast;
       }
       break;
     default:

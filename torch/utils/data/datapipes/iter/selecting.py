@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Iterator, TypeVar
+from collections.abc import Iterator
+from typing import Callable, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper

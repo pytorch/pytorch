@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import itertools
 import sys
-from typing import Callable, Iterable, Iterator, overload, TypeVar
+from typing import Callable, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeAlias
 
 from ..decorators import substitute_in_graph
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 
 __all__ = [
@@ -137,8 +141,7 @@ def zip_longest(
     /,
     *,
     fillvalue: _U = ...,
-) -> Iterator[tuple[_T1]]:
-    ...
+) -> Iterator[tuple[_T1]]: ...
 
 
 @overload
@@ -146,8 +149,7 @@ def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
     /,
-) -> Iterator[tuple[_T1 | None, _T2 | None]]:
-    ...
+) -> Iterator[tuple[_T1 | None, _T2 | None]]: ...
 
 
 @overload
@@ -157,8 +159,7 @@ def zip_longest(
     /,
     *,
     fillvalue: _U = ...,
-) -> Iterator[tuple[_T1 | _U, _T2 | _U]]:
-    ...
+) -> Iterator[tuple[_T1 | _U, _T2 | _U]]: ...
 
 
 @overload
@@ -168,8 +169,7 @@ def zip_longest(
     iter3: Iterable[_T],
     /,
     *iterables: Iterable[_T],
-) -> Iterator[tuple[_T | None, ...]]:
-    ...
+) -> Iterator[tuple[_T | None, ...]]: ...
 
 
 @overload
@@ -180,8 +180,7 @@ def zip_longest(
     /,
     *iterables: Iterable[_T],
     fillvalue: _U = ...,
-) -> Iterator[tuple[_T | _U, ...]]:
-    ...
+) -> Iterator[tuple[_T | _U, ...]]: ...
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.zip_longest

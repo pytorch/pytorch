@@ -2,7 +2,6 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
-from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -51,6 +50,11 @@ reduceops_common_args = merge_dicts(
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
 """
     ),
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+"""
+    },
 )
 
 multi_dim_common = merge_dicts(
@@ -71,6 +75,11 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
     {
         "opt_dim": """
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+"""
+    },
+    {
+        "opt_dim_all_reduce": """
+    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
         If ``None``, all dimensions are reduced.
 """
     },
@@ -83,6 +92,17 @@ single_dim_common = merge_dicts(
     dim (int): the dimension to reduce.
 """
     ),
+    {
+        "opt_dim": """
+    dim (int, optional): the dimension to reduce.
+"""
+    },
+    {
+        "opt_dim_all_reduce": """
+    dim (int, optional): the dimension to reduce.
+        If ``None``, all dimensions are reduced.
+"""
+    },
     {
         "keepdim_details": """If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -129,7 +149,6 @@ factory_common_args = merge_dicts(
 factory_like_common_args = parse_kwargs(
     """
     input (Tensor): the size of :attr:`input` will determine size of the output tensor.
-    generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
         Default: if ``None``, defaults to the layout of :attr:`input`.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
@@ -171,7 +190,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes: Dict[str, str] = {
+reproducibility_notes: dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -397,7 +416,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 .. math::
     out = \beta\ \text{input} + \alpha\ (\sum_{i=0}^{b-1} \text{batch1}_i \mathbin{@} \text{batch2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -409,12 +428,12 @@ must be real numbers, otherwise they should be integers.
 {rocm_fp16_note}
 
 Args:
+    input (Tensor): matrix to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
-    input (Tensor): matrix to be added
     alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
     {out}
 
@@ -538,7 +557,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat1}_i \mathbin{@} \text{mat2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -659,7 +678,7 @@ size `m`, then :attr:`input` must be
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat} \mathbin{@} \text{vec})
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -701,7 +720,7 @@ outer product between :attr:`vec1` and :attr:`vec2` and the added matrix
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{vec1} \otimes \text{vec2})
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -801,8 +820,8 @@ returns `True` if all elements in the row evaluate to `True` and `False` otherwi
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -856,8 +875,8 @@ returns `True` if any element in the row evaluate to `True` and `False` otherwis
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -915,13 +934,15 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
 
 .. warning::
-    Prefer using other view functions, like :meth:`torch.Tensor.expand`,
-    to setting a view's strides manually with `as_strided`, as this
-    function's behavior depends on the implementation of a tensor's storage.
-    The constructed view of the storage must only refer to elements within
-    the storage or a runtime error will be thrown, and if the view is
-    "overlapped" (with multiple indices referring to the same element in
-    memory) its behavior is undefined.
+    Prefer using other view functions, like :meth:`torch.Tensor.view` or
+    :meth:`torch.Tensor.expand`, to setting a view's strides manually with
+    `as_strided`, as this function will throw an error on non-standard Pytorch
+    backends (that do not have a concept of stride) and the result will depend
+    on the current layout in memory. The constructed view must only refer to
+    elements within the Tensor's storage or a runtime error will be thrown.
+    If the generated view is "overlapped" (with multiple indices referring to
+    the same element in memory), the behavior of inplace operations on this view
+    is undefined (and might not throw runtime errors).
 
 Args:
     {input}
@@ -1322,7 +1343,7 @@ same as the scaling factors used in :meth:`torch.addbmm`.
 .. math::
     \text{out}_i = \beta\ \text{input}_i + \alpha\ (\text{batch1}_i \mathbin{@} \text{batch2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -3613,13 +3634,20 @@ Examples::
             [ 0.6927, -0.3735, -0.4945]])
 
 
-    >>> torch.diagonal(a, 0)
+    >>> torch.diagonal(a)
     tensor([-1.0854, -0.0905, -0.4945])
 
 
     >>> torch.diagonal(a, 1)
     tensor([ 1.1431,  0.0360])
 
+    >>> b = torch.randn(2, 5)
+    >>> b
+    tensor([[-1.7948, -1.2731, -0.3181,  2.0200, -1.6745],
+            [ 1.8262, -1.5049,  0.4114,  1.0704, -1.2607]])
+
+    >>> torch.diagonal(b, 1, 1, 0)
+    tensor([1.8262])
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
@@ -4002,7 +4030,11 @@ equal(input, other) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
-Note that tensors containing NaNs are never equal to each other.
+.. note::
+
+    Tensors containing NaNs are never equal to each other. Additionally, this function does not
+    differentiate between the data types of the tensors during comparison. For more thorough tensor checks,
+    use :meth:`torch.testing.assert_close`.
 
 Example::
 
@@ -4010,6 +4042,8 @@ Example::
     True
     >>> torch.equal(torch.tensor([3, torch.nan]), torch.tensor([3, torch.nan]))
     False
+    >>> torch.equal(torch.tensor([1, 2, 3], dtype=torch.int32), torch.tensor([1, 2, 3], dtype=torch.float32))
+    True
 """,
 )
 
@@ -5618,7 +5652,7 @@ Args:
     {input}
     k (int): k for the k-th smallest element
     dim (int, optional): the dimension to find the kth value along
-    {keepdim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor)
@@ -6237,8 +6271,8 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {dim}
+    {opt_keepdim}
 
 Keyword args:
     {out}
@@ -6449,9 +6483,6 @@ max(input) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
-
 Args:
     {input}
 
@@ -6481,8 +6512,8 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {dim}
-    {keepdim} Default: ``False``.
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
@@ -6497,13 +6528,22 @@ Example::
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
+    >>> a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    >>> a.max(dim=1, keepdim=True)
+    torch.return_types.max(
+    values=tensor([[2.], [4.]]),
+    indices=tensor([[1], [1]]))
+    >>> a.max(dim=1, keepdim=False)
+    torch.return_types.max(
+    values=tensor([2., 4.]),
+    indices=tensor([1, 1]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
    :noindex:
 
 See :func:`torch.maximum`.
 
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -6585,8 +6625,8 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -6640,8 +6680,8 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmax of the flattened input is returned.
-    {keepdim}
+    {opt_dim} If ``None``, the argmax of the flattened input is returned.
+    {opt_keepdim}
 
 Example::
 
@@ -6732,8 +6772,8 @@ reduce over all of them.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6778,8 +6818,8 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 
 Args:
     input (Tensor): the input tensor, either of floating point or complex dtype
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -6861,8 +6901,8 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6918,8 +6958,8 @@ median of the non-``NaN`` elements. If all the elements in a reduced row are ``N
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
@@ -6966,8 +7006,8 @@ equal to the size of :attr:`q`, the remaining dimensions are what remains from t
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of values in the range [0, 1].
-    {dim}
-    {keepdim}
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7024,8 +7064,8 @@ that reduction will be ``NaN``. See the documentation for :func:`torch.quantile`
 Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword arguments:
     interpolation (str): interpolation method to use when the desired quantile lies between two data points.
@@ -7058,9 +7098,6 @@ min(input) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``min(dim=0)``
-
 Args:
     {input}
 
@@ -7090,8 +7127,8 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the tuple of two output tensors (min, min_indices)
@@ -7193,8 +7230,8 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
   {out}
@@ -7290,8 +7327,8 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-    {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim}
+    {opt_dim} If ``None``, the argmin of the flattened input is returned.
+    {opt_keepdim}
 
 Example::
 
@@ -7480,8 +7517,8 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
@@ -8567,8 +8604,8 @@ dimension :attr:`dim`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -8817,9 +8854,8 @@ Example::
 
 add_docstr(
     torch.rand_like,
-    """
-rand_like(input, *, generator=None, dtype=None, layout=None, device=None, requires_grad=False, \
-memory_format=torch.preserve_format) -> Tensor
+    r"""
+rand_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
@@ -8830,7 +8866,6 @@ Args:
     {input}
 
 Keyword args:
-    {generator}
     {dtype}
     {layout}
     {device}
@@ -8891,7 +8926,7 @@ Example::
 add_docstr(
     torch.randint_like,
     """
-randint_like(input, low=0, high, \\*, generator=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+randint_like(input, low=0, high, \\*, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
@@ -8908,7 +8943,6 @@ Args:
     high (int): One above the highest integer to be drawn from the distribution.
 
 Keyword args:
-    {generator}
     {dtype}
     {layout}
     {device}
@@ -8976,9 +9010,8 @@ Example::
 
 add_docstr(
     torch.randn_like,
-    """
-randn_like(input, *, generator=None, dtype=None, layout=None, device=None, requires_grad=False, \
-memory_format=torch.preserve_format) -> Tensor
+    r"""
+randn_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1. Please refer to :func:`torch.randn` for the
@@ -8989,7 +9022,6 @@ Args:
     {input}
 
 Keyword args:
-    {generator}
     {dtype}
     {layout}
     {device}
@@ -10469,7 +10501,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10479,7 +10511,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -10524,7 +10556,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -10534,7 +10566,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
@@ -10632,8 +10664,8 @@ reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -10684,8 +10716,8 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 Args:
     {input}
-    {opt_dim}
-    {keepdim}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
 
 Keyword args:
     {dtype}
@@ -11106,8 +11138,8 @@ are designed to work with this function. See the examples below.
 
 Args:
     {input}
-    indices (tensor): the indices into :attr:`input`. Must have long dtype.
-    dim (int, optional): dimension to select along.
+    indices (LongTensor): the indices into :attr:`input`. Must have long dtype.
+    dim (int, optional): dimension to select along. Default: 0
 
 Keyword args:
     {out}
@@ -11472,8 +11504,8 @@ Args:
         Default: if not provided, 0.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if ``None``, ``torch.long``.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor,
+        only support ``torch.int``, ``torch.long``. Default: if ``None``, ``torch.long``.
     {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 
@@ -11597,8 +11629,8 @@ Args:
         Default: if not provided, 0.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if ``None``, ``torch.long``.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor,
+        only support ``torch.int``, ``torch.long``. Default: if ``None``, ``torch.long``.
     {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 
@@ -11815,7 +11847,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -11825,7 +11857,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Example:
@@ -11869,7 +11901,7 @@ the :attr:`correction`.
 
 Args:
     {input}
-    {opt_dim}
+    {opt_dim_all_reduce}
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
@@ -11879,7 +11911,7 @@ Keyword args:
             Previously this argument was called ``unbiased`` and was a boolean
             with ``True`` corresponding to ``correction=1`` and ``False`` being
             ``correction=0``.
-    {keepdim}
+    {opt_keepdim}
     {out}
 
 Returns:
@@ -12687,7 +12719,7 @@ trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_ along
 :attr:`dim`. By default the spacing between elements is assumed to be 1, but
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
-used to specify arbitrary spacing along :attr:`dim`.
+used to specify arbitrary spacing along :attr:`dim`. Only one of :attr:`x` or :attr:`dx` should be specified.
 
 
 Assuming :attr:`y` is a one-dimensional tensor with elements :math:`{y_0, y_1, ..., y_n}`,
@@ -13796,12 +13828,7 @@ Args:
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the
-                            last such index. If no suitable index found, return 0 for non-numerical value
-                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index).
-                            In other words, if False, gets the lower bound index for each value in :attr:`input`
-                            from :attr:`boundaries`. If True, gets the upper bound index instead.
-                            Default value is False.
+    right (bool, optional): determines the behavior for values in :attr:`boundaries`. See the table above.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
 
 

@@ -4,8 +4,9 @@ import functools
 import inspect
 import os
 import warnings
+from collections.abc import Iterable
 from io import IOBase
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from torch.utils._import_utils import dill_available
 
@@ -161,7 +162,7 @@ def _check_unpickable_fn(fn: Callable):
         return
 
 
-def match_masks(name: str, masks: Union[str, List[str]]) -> bool:
+def match_masks(name: str, masks: Union[str, list[str]]) -> bool:
     # empty mask matches any input name
     if not masks:
         return True
@@ -177,7 +178,7 @@ def match_masks(name: str, masks: Union[str, List[str]]) -> bool:
 
 def get_file_pathnames_from_root(
     root: str,
-    masks: Union[str, List[str]],
+    masks: Union[str, list[str]],
     recursive: bool = False,
     abspath: bool = False,
     non_deterministic: bool = False,
@@ -252,8 +253,8 @@ def validate_pathname_binary_tuple(data: tuple[str, IOBase]):
 
 
 # Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
-_iter_deprecated_functional_names: Dict[str, Dict] = {}
-_map_deprecated_functional_names: Dict[str, Dict] = {}
+_iter_deprecated_functional_names: dict[str, dict] = {}
+_map_deprecated_functional_names: dict[str, dict] = {}
 
 
 def _deprecation_warning(
@@ -319,7 +320,7 @@ class StreamWrapper:
     StreamWrapper would guarantee the wrapped file handler is closed when it's out of scope.
     """
 
-    session_streams: Dict[Any, int] = {}
+    session_streams: dict[Any, int] = {}
     debug_unclosed_streams: bool = False
 
     def __init__(self, file_obj, parent_stream=None, name=None):

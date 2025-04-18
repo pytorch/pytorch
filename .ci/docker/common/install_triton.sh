@@ -2,6 +2,12 @@
 
 set -ex
 
+mkdir -p /opt/triton
+if [ -z "${TRITON}" ] && [ -z "${TRITON_CPU}" ]; then
+  echo "TRITON and TRITON_CPU are not set. Exiting..."
+  exit 0
+fi
+
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 get_conda_version() {
@@ -52,6 +58,7 @@ cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
 cd python
+pip_install pybind11==2.13.6
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
@@ -60,16 +67,21 @@ if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" 
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
 
-  CXX=g++-9 pip_install -e .
+  CXX=g++-9 conda_run python setup.py bdist_wheel
 elif [ -n "${UBUNTU_VERSION}" ] && [ -n "${CLANG_VERSION}" ]; then
   # Triton needs <filesystem> which surprisingly is not available with clang-9 toolchain
   add-apt-repository -y ppa:ubuntu-toolchain-r/test
   apt-get install -y g++-9
 
-  CXX=g++-9 pip_install -e .
+  CXX=g++-9 conda_run python setup.py bdist_wheel
 else
-  pip_install -e .
+  conda_run python setup.py bdist_wheel
 fi
+
+# Copy the wheel to /opt for multi stage docker builds
+cp dist/*.whl /opt/triton
+# Install the wheel for docker builds that don't use multi stage
+pip_install dist/*.whl
 
 if [ -n "${CONDA_CMAKE}" ]; then
   # TODO: This is to make sure that the same cmake and numpy version from install conda

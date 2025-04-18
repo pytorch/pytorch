@@ -6,7 +6,11 @@ import sys
 import torch
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
@@ -40,20 +44,21 @@ def check_codegen(
     example_inputs,
     kwargs=None,
     *,
+    device: torch.types.Device,
     is_cpp_code: bool,
 ):
     kwargs = kwargs or {}
 
     if is_cpp_code is False:
         if hasattr(model, "to"):
-            model = model.to(device=GPU_TYPE)
+            model = model.to(device=device)
 
         def copy_fn(x):
             # preserve strides of the input on the device
             if not isinstance(x, torch.Tensor):
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device=GPU_TYPE, dtype=x.dtype
+                x.size(), x.stride(), device=device, dtype=x.dtype
             ).copy_(x)
 
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
@@ -109,8 +114,9 @@ test_failures = {
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
-    "test_mutable_custom_op_fixed_layout2_dynamic_shapes": TestFailure(("cpu",)),
+    "test_conv3d_channels_last_use_block_ptr_False_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
@@ -130,13 +136,14 @@ test_failures = {
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
+    "test_pad_single_dynamic_shapes": TestFailure(("cpu",)),
+    "test_embedding_sparse_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     #
     # Failed to find for loop/triton kernel:
     #
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_adaptive_max_pool2d3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_fractional_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -168,10 +175,9 @@ test_failures = {
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
     "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
-    "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
@@ -256,9 +262,6 @@ test_failures = {
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_custom_op_3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu")
-    ),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
@@ -378,13 +381,12 @@ test_failures = {
     **dynamic_shapes_test_failures,
 }
 
-if TEST_WITH_ROCM:
+if not TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
+                ("cuda", "xpu") if IS_LINUX else ("cpu", "cuda", "xpu")
+            ),
         }
     )
 
@@ -404,8 +406,9 @@ if HAS_CPU:
                 self=self,
                 model=model,
                 example_inputs=example_inputs,
+                device=self.device,
                 kwargs=kwargs,
-                is_cpp_code=True,
+                is_cpp_code=torch._inductor.config.cpu_backend == "cpp",
             )
 
     copy_tests(
@@ -427,6 +430,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self=self,
                 model=model,
                 example_inputs=example_inputs,
+                device=self.device,
                 kwargs=kwargs,
                 is_cpp_code=False,
             )

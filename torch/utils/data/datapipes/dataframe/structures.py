@@ -1,4 +1,5 @@
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import DataChunk

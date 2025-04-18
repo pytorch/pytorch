@@ -8,12 +8,13 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils.dlpack
@@ -30,6 +31,7 @@ from torch._guards import (
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
+from torch.monitor import _WaitCounter
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -45,6 +47,7 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 from .schemas import (
     AOTConfig,
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputType,
     PlainTensorMeta,
@@ -62,10 +65,13 @@ from .traced_function_transforms import aot_dispatch_subclass
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
-    normalize_as_list,
     partial_flatten_asdict,
     strict_zip,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 zip = strict_zip
@@ -86,11 +92,11 @@ class CompilerWrapper:
     def pre_compile(
         self,
         flat_fn,
-        flat_args: List[Tensor],
+        flat_args: list[Tensor],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -129,7 +135,7 @@ class CompilerWrapper:
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
 @dataclass
 class RuntimeWrapper(CompilerWrapper):
-    indices_of_inps_to_detach: List[int]
+    indices_of_inps_to_detach: list[int]
     trace_joint: bool
     disable_amp: bool
 
@@ -198,6 +204,7 @@ class IsInputHandler:
 
 class AliasOfIntermediateHandler:
     def __init__(self, info, runtime_metadata, trace_joint):
+        self._unwrap_aliased_base_tensor = _identity
         if info.output_type in (
             OutputType.alias_of_intermediate,
             OutputType.alias_of_intermediate_save_as_output,
@@ -206,6 +213,8 @@ class AliasOfIntermediateHandler:
             self.base_idx = info.base_idx + num_user_outputs
         else:
             self.base_idx = info.base_idx
+            if self.base_idx in runtime_metadata.aliased_out_indices:
+                self._unwrap_aliased_base_tensor = _unwrap_tensoralias
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
@@ -215,7 +224,7 @@ class AliasOfIntermediateHandler:
     def __call__(self, orig_inputs, fw_outs, out):
         aliased_base_tensor = fw_outs[self.base_idx]
         return gen_alias_from_base(
-            aliased_base_tensor,
+            self._unwrap_aliased_base_tensor(aliased_base_tensor),
             self.unwrap_out(out),
             self.requires_grad,
             self.functional_tensor,
@@ -244,12 +253,12 @@ def _create_runtime_wrapper(
     compiled_fn,
     *,
     runtime_metadata: ViewAndMutationMeta,
-    indices_of_inps_to_detach: List[int],
+    indices_of_inps_to_detach: list[int],
     trace_joint: bool,
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
-    if not hasattr(compiled_fn, "_boxed_call"):
+    if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
 
     # Note [Inputs needed in runtime epilogue after list clearing]
@@ -282,7 +291,7 @@ def _create_runtime_wrapper(
             for info in runtime_metadata.output_info
         )
 
-    def runtime_wrapper(args: List[Any]):
+    def runtime_wrapper(args: list[Any]):
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -454,7 +463,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
@@ -473,7 +482,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
         runtime_metadata: ViewAndMutationMeta,
     ):
         @wraps(compiled_fn)
-        def wrapper(runtime_args: List[Any]):
+        def wrapper(runtime_args: list[Any]):
             if runtime_metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
@@ -513,10 +522,11 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
 
 @dataclass
 class FakifiedOutWrapper(CompilerWrapper):
-    out_metas: List[torch.Tensor] = field(default_factory=list)
+    out_metas: list[torch.Tensor] = field(default_factory=list)
     # TracingContext.fwd_output_strides
     # Generated from actually doing compile
-    fwd_output_strides: Optional[List[List[int]]] = None
+    # NB: an entry is None if it's not a Tensor
+    fwd_output_strides: Optional[list[Optional[list[int]]]] = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -526,7 +536,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
         tracing_context = torch._guards.TracingContext.try_get()
         if tracing_context and tracing_context.fakify_first_call:
             self.out_metas = [
@@ -547,12 +557,23 @@ class FakifiedOutWrapper(CompilerWrapper):
         for i in range(len(out)):
             if not isinstance(out[i], Tensor):
                 continue
+            strides = fwd_output_strides[i]
+            # fwd_output_strides is best effort by Inductor.  When an output
+            # Tensor has unbacked SymInts, Inductor may sometimes be unable
+            # to compute what the output stride would be.  If Inductor doesn't
+            # have any clear direction on the layout, we don't have to run
+            # as_strided.  To repro without this, run:
+            #
+            # python test/distributed/test_dynamo_distributed.py
+            # TestFakeDistributedSingleProc.test_unbacked_symbol_splitting_no_binding
+            if strides is None:
+                continue
             if all(
                 statically_known_true(s1 == s2)
-                for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
+                for s1, s2 in zip(out[i].stride(), strides)
             ):
                 continue
-            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+            out[i] = out[i].as_strided(out[i].shape, strides)
         return out
 
     # To be called post compile
@@ -598,7 +619,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
     def pre_compile(
         self,
         flat_fn,
-        flat_args: List[Tensor],
+        flat_args: list[Tensor],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
@@ -626,7 +647,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         subclass_metas = runtime_metadata.subclass_fw_graph_out_meta
 
         @wraps(compiled_fn)
-        def inner_fn(args: List[Any]):
+        def inner_fn(args: list[Any]):
             unwrapped_args = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
@@ -661,7 +682,7 @@ class EffectTokensWrapper(CompilerWrapper):
         num_tokens = len(runtime_metadata.tokens)
 
         @wraps(compiled_fn)
-        def inner_fn(args: List[Any]):
+        def inner_fn(args: list[Any]):
             if num_tokens > 0:
                 # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
@@ -764,9 +785,9 @@ class EffectTokensWrapper(CompilerWrapper):
 #
 @dataclass
 class AOTDedupeWrapper(CompilerWrapper):
-    keep_arg_mask: List[bool] = field(default_factory=list)
-    add_dupe_map: List[int] = field(default_factory=list)
-    old_input_metadata: List[InputAliasInfo] = field(default_factory=list)
+    keep_arg_mask: list[bool] = field(default_factory=list)
+    add_dupe_map: list[int] = field(default_factory=list)
+    old_input_metadata: list[InputAliasInfo] = field(default_factory=list)
     needs_post_compile: bool = True
 
     # NB: Hot path, avoid set lookups here
@@ -780,11 +801,11 @@ class AOTDedupeWrapper(CompilerWrapper):
     def pre_compile(
         self,
         flat_fn,
-        flat_args: List[Tensor],
+        flat_args: list[Tensor],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
 
@@ -869,10 +890,10 @@ class AOTDedupeWrapper(CompilerWrapper):
         #   ]
         #   keep_arg_mask = [True, True, False, True]
 
-        seen_args: Dict[Tensor, int] = {}
+        seen_args: dict[Tensor, int] = {}
         # Implicitly map duped arg position (list index) to de-duped arg position
-        keep_arg_mask: List[bool] = []
-        add_dupe_map: List[int] = []
+        keep_arg_mask: list[bool] = []
+        add_dupe_map: list[int] = []
         duped_arg_len = len(flat_args)
 
         j = 0  # index into deduped_flat_args
@@ -950,7 +971,7 @@ class AOTDedupeWrapper(CompilerWrapper):
             return compiled_fn
 
         @wraps(compiled_fn)
-        def wrapped_compiled_fn(args: List[Any]):
+        def wrapped_compiled_fn(args: list[Any]):
             deduped_args = self.remove_dupe_args(args)
             args.clear()
             return compiled_fn(deduped_args)
@@ -966,7 +987,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         def debugged_compiled_fn(args):
             # Test that the computed remove/add arg functions are an inverse
             new_args = self.add_dupe_args(self.remove_dupe_args(args))
-            seen: Dict[Any, None] = {}
+            seen: dict[Any, None] = {}
             for i, (x, y) in enumerate(zip(new_args, args)):
                 seen[y] = None
                 assert x is y, format_guard_bug_msg(
@@ -1008,16 +1029,16 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     # the synthetic base code prohibits more cases in the autograd case than the inference case.
     trace_joint: bool  # TODO: refactor trace_joint
     needs_post_compile: bool = True
-    aliased_arg_idx_with_metadata_mutations: List[int] = field(default_factory=list)
+    aliased_arg_idx_with_metadata_mutations: list[int] = field(default_factory=list)
 
     def pre_compile(
         self,
         flat_fn,
-        flat_args: List[Any],
+        flat_args: list[Any],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
             aot_config,
@@ -1069,7 +1090,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         )
         replay_views = config.view_replay_for_aliased_outputs
 
-        def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
+        def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:
             f_args_inner = []
             for inner_idx_or_tuple in synthetic_base_info:
                 if isinstance(inner_idx_or_tuple, int):
@@ -1249,12 +1270,12 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 #   f(c_base, b_base, a, d)
 def merge_view_inputs(
     aot_config: AOTConfig,
-    fwd_inputs: List[Any],
-    mutated_input_info: List[InputAliasInfo],
+    fwd_inputs: list[Any],
+    mutated_input_info: list[InputAliasInfo],
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
-) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, torch.Tensor]]]]]:
+) -> tuple[list[Any], Optional[list[Union[int, tuple[int, torch.Tensor]]]]]:
     def _are_differentiable_views(view1, view2):
         if view1 is view2:
             return True
@@ -1278,7 +1299,7 @@ def merge_view_inputs(
         # Return early when there are no mutations.
         return fwd_inputs, None
 
-    storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
+    storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     base_args = []
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
@@ -1293,7 +1314,7 @@ def merge_view_inputs(
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
     # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
     #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: Dict[int, Union[int, Tuple[int, torch.Tensor]]] = {}
+    inner_calling_convention_meta: dict[int, Union[int, tuple[int, torch.Tensor]]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
@@ -1429,8 +1450,8 @@ def merge_view_inputs(
             old_idx = arg_to_old_idx_map[make_hashable(other_arg)]
             inner_calling_convention_meta[old_idx] = new_idx
         # post process into a list
-        post_processed_calling_convention_meta: List[
-            Union[int, Tuple[int, torch.Tensor]]
+        post_processed_calling_convention_meta: list[
+            Union[int, tuple[int, torch.Tensor]]
         ] = [-1 for _ in range(len(inner_calling_convention_meta))]
         for k, v in inner_calling_convention_meta.items():
             post_processed_calling_convention_meta[k] = v
@@ -1440,10 +1461,17 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+# Note: [Backward graph lazy lowering]
+# After AOTDispatch traces the backward for graphs requiring autograd, we will lower the graph lazily,
+# unless we suspect that inductor might specialize and insert additional guards. When we do lazy
+# lowering, we stash the AOT backward graph (bw_module) in this class.
+#
+# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
-    placeholder_list: List[Any]
+    placeholder_list: list[Any]
     saved_context: Optional[TracingContext]
     saved_compile_context: Optional[CompileContext]
 
@@ -1666,8 +1694,49 @@ def _backward_prologue_functional(
     return all_args
 
 
+def initialize_rng_states(
+    num_rng: int,
+    graphsafe_idx: int,
+    fwd_rng_states: list[torch.Generator],
+    bwd_rng_states: list[torch.Generator],
+):
+    """
+    Initialize the cudagraph safe rng states.
+
+    Initialization of rng states should have a few properties:
+    - the initialization for each rng state should be independent
+    - the initialization should be deterministic
+    - the initialization should be based off current rng state, so that independent graphs do not
+    have equal rng behavior
+
+    We defer initialization of rng states until runtime because compilation is wrapped
+    with preserve_rng_states. Seed initialization should advance the rng states so consecutive compilations
+    do not give equal randomness.
+    """
+    with torch.utils._python_dispatch._disable_current_modes():
+        seeds = torch.randint(0, torch.iinfo(torch.int64).max, (num_rng,), device="cpu")
+        fwd_rng_states.extend(
+            [
+                torch.cuda.default_generators[graphsafe_idx]
+                .clone_state()
+                .manual_seed(int(seeds[i]))
+                for i in range(num_rng)
+            ]
+        )
+        bwd_rng_states.extend(
+            [
+                torch.cuda.default_generators[graphsafe_idx]
+                .clone_state()
+                .manual_seed(int(seeds[i]))
+                for i in range(num_rng)
+            ]
+        )
+
+
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
-def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
+def _backward_epilogue_functional(
+    metadata, maybe_subclass_metadata, out, *, make_subclass_override=None
+):
     # Toss out the backward output tokens
     num_bw_tokens = metadata.num_backward_tokens
     if num_bw_tokens > 0:
@@ -1687,9 +1756,43 @@ def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
             subclass_metas=maybe_subclass_metadata.grad_input_metas,
             included_subclass_symints=True,
             is_runtime=True,
+            make_subclass_override=make_subclass_override,
         )
         return outs_wrapped
     return out
+
+
+def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryFormatMeta):
+    if memory_format.memory_format is not None:
+        # Coerce to torch.memory_format
+        if not x.is_contiguous(memory_format=memory_format.memory_format):
+            x = x.contiguous(memory_format=memory_format.memory_format)
+        return x
+
+    expected_size = memory_format.size
+    assert expected_size is not None
+    expected_stride = memory_format.stride
+    assert expected_stride is not None
+    # Expected size and stride are static ints
+    # ok to use == to compare runtime tensor strides and shapes
+
+    if x.shape == expected_size and x.stride() == expected_stride:
+        # Runtime tangent size and stride are the same as expected, no need to coerce
+        return x
+
+    # Empty_strided creates a raw Tensor.
+    # We are guranteed that only raw Tensors has expected size and stride.
+    # Subclasses have only expected memory_format.
+    restrided = torch.empty_strided(
+        size=expected_size,
+        stride=expected_stride,
+        dtype=x.dtype,
+        device=x.device,
+        layout=x.layout,
+        requires_grad=x.requires_grad,
+    )
+    restrided.copy_(x)
+    return restrided
 
 
 # This is wrapped in a class just for namespacing purposes
@@ -1701,8 +1804,8 @@ class AOTDispatchAutograd:
             return x, [x]
 
         if isinstance(x, FakeTensor):
-            if not x.is_contiguous(memory_format=meta.memory_format):
-                x = x.contiguous(memory_format=meta.memory_format)
+            assert meta.memory_format
+            x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
         expected_type: Optional[type] = torch.Tensor
@@ -1712,6 +1815,13 @@ class AOTDispatchAutograd:
             expected_meta = meta.meta
 
         runtime_type = type(x)
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            # When we're inside compiled autograd's AOTDispatcher step,
+            # regular Tensors look like FunctionalTensors.
+            # Tensor subclasses still look like Tensor subclasses though.
+            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
+                runtime_type = torch.Tensor
+
         runtime_meta = None
         runtime_subclass_keys: Sequence[str] = []
 
@@ -1753,8 +1863,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             )
 
         # Coerce to expected memory format
-        if not x.is_contiguous(memory_format=meta.memory_format):
-            x = x.contiguous(memory_format=meta.memory_format)
+        assert meta.memory_format
+        x = coerce_to_expected_memory_format(x, meta.memory_format)
 
         if not is_traceable_wrapper_subclass(x):
             return x, [x]
@@ -1782,22 +1892,49 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         compiled_bw_func,  # bw_module after compilation + wrappers
         maybe_subclass_meta: Optional[SubclassMeta],
         num_symints_saved_for_bw_: int,
-        backward_state_indices: List[int],
+        backward_state_indices: list[int],
         disable_amp: bool,
-        indices_of_inps_to_detach: List[int],
+        indices_of_inps_to_detach: list[int],
         lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
+        # For additional context see Note [CUDA Graph Safe RNG Functionalization]
+        # Each pair forward, backward rng states must be equal prior to its invocation on any
+        # iteration of forward, backward. Because they are initialized equal, and are computing the same rng op,
+        # running forward then backward advances them the same amount and keeps them equal.
+        # However, a user may invoke multiple forwards, then backwards, such that they are not in sync.
+        # Initially we have:
+        # fwd_state0 == bwd_state0.
+        # Lets say we run:
+        # fwd0: fwd_state0 -> fwd_state1
+        # fwd1: fwd_state1 -> fwd_state2
+        # fwd2: fwd_state2 -> fwd_state3
+        # If we now invoke bwd2,
+        # we need to update bwd_state equal to the rng that was observed in fwd2.
+        # we save the rng_state fwd_state2 in forward because we detect that it is not the
+        # current backward state and therefore would not be accessible if we do not save it.
+        # Similarly, if we are going to update the backward state to a new value, and there is a pending
+        # forwards which needs its current state, we will save it.
+        # Within the autograd context, we keep track of the curr iteration so that on backward
+        # we know what the generator state must be before the backward is run.
+        num_rng = fw_metadata.num_graphsafe_rng_states
+        graphsafe_idx = fw_metadata.graphsafe_rng_state_index
+        fwd_rng_states: list[torch.Generator] = []
+        bwd_rng_states: list[torch.Generator] = []
+        curr_fwd_iter = itertools.count(0)
+        backward_state_position = 0
+        pending_forwards: set[int] = set()
+        saved_backward_tensor_states: dict[int, list[torch.Tensor]] = {}
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
-            _compiled_autograd_should_lift = False
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
@@ -1812,6 +1949,26 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     bw_state = args[backward_state_indices[0]]
                     assert isinstance(bw_state, BackwardState)
                     ctx._compiled_autograd_backward_state = bw_state
+
+                if num_rng:
+                    if len(fwd_rng_states) == 0:
+                        assert graphsafe_idx is not None
+                        initialize_rng_states(
+                            num_rng, graphsafe_idx, fwd_rng_states, bwd_rng_states
+                        )
+
+                    _curr_iter = next(curr_fwd_iter)
+                    ctx._curr_iter = _curr_iter
+
+                    # if this state is not contained in the backward,
+                    # we need to save it for when its backward pass happens
+                    if _curr_iter != backward_state_position:
+                        saved_backward_tensor_states[_curr_iter] = [
+                            rng_state.get_state() for rng_state in fwd_rng_states
+                        ]
+
+                    pending_forwards.add(_curr_iter)
+                    args = (*args, *fwd_rng_states)
 
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:
@@ -1940,6 +2097,45 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     *flat_args,
                 )
 
+                if num_rng:
+                    nonlocal backward_state_position, bwd_rng_states
+                    curr_backward_iter = ctx._curr_iter
+                    retain_graph = (
+                        torch._C._autograd._get_current_graph_task_keep_graph()
+                    )
+
+                    # Save current state if we have a pending forward that needs this state
+                    # or this state may be needed again because of retain graph
+                    if (
+                        backward_state_position in pending_forwards
+                        and backward_state_position not in saved_backward_tensor_states
+                        and (
+                            backward_state_position != curr_backward_iter
+                            or retain_graph
+                        )
+                    ):
+                        saved_backward_tensor_states[backward_state_position] = [
+                            rng_state.get_state() for rng_state in bwd_rng_states
+                        ]
+
+                    # Restore saved states if needed
+                    if curr_backward_iter in saved_backward_tensor_states:
+                        if backward_state_position != curr_backward_iter:
+                            for bwd_state, saved_state in zip(
+                                bwd_rng_states,
+                                saved_backward_tensor_states[curr_backward_iter],
+                            ):
+                                bwd_state.set_state(saved_state)
+                        if not retain_graph:
+                            del saved_backward_tensor_states[curr_backward_iter]
+                    else:
+                        assert backward_state_position == curr_backward_iter
+
+                    backward_state_position = curr_backward_iter + 1
+                    if not retain_graph:
+                        pending_forwards.remove(curr_backward_iter)
+                    all_args.extend(bwd_rng_states)
+
                 def impl_fn(double_ctx=None):
                     out = CompiledFunction._backward_impl(ctx, all_args)
                     return _backward_epilogue_functional(
@@ -1964,7 +2160,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
                     # CompiledFunctionBackward is not yet supported in dynamo skipfiles
-                    _compiled_autograd_should_lift = False
                     _aot_id = aot_config.aot_id
 
                     @staticmethod
@@ -1985,24 +2180,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
-                if ctx._is_compiled_autograd_tracing():
-                    if lazy_backward_info is None:
-                        raise RuntimeError(
-                            """This compiled backward function was saved by AOTAutogradCache, which does not support
-                        compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
-                        )
-                    bw_module = lazy_backward_info.bw_module
-                    # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
-                    symints = ctx._get_compiled_autograd_symints()
-                    assert len(symints) == len(ctx.symints)
-                    all_args[: len(symints)] = symints
-                    if backward_state_indices:
-                        assert ctx._compiled_autograd_backward_state.proxy is not None
-                        all_args.append(ctx._compiled_autograd_backward_state)
-                    context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with context():
-                        return normalize_as_list(bw_module(*all_args))
-
+                # compiled autograd reimplements this function at proxy_call_aot_backward
                 assert (
                     not backward_state_indices
                 ), "BackwardState requires CompiledAutograd"
@@ -2046,10 +2224,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         phase_name="entire_backward_compile",
                         log_pt2_compile_event=True,
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
-                    ):
+                        log_waitcounter=True,
+                        waitcounter_name_override="entire_backward_compile",
+                    ), _WaitCounter(
+                        "pytorch.wait_counter.dynamo_compile"
+                    ).guard():
                         CompileEventLogger.compilation_metric(is_forward=False)
+                        # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
+                            copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:
@@ -2099,7 +2282,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
 @dataclass
 class DebugAssertWrapper(CompilerWrapper):
-    flat_requires_grad: List[Optional[bool]] = field(default_factory=list)
+    flat_requires_grad: list[Optional[bool]] = field(default_factory=list)
 
     def post_compile(
         self,
@@ -2109,7 +2292,7 @@ class DebugAssertWrapper(CompilerWrapper):
         runtime_metadata: ViewAndMutationMeta,
     ):
         @wraps(compiled_fn)
-        def debug_compiled_function(args: List[Any]):
+        def debug_compiled_function(args: list[Any]):
             # TODO: Check aliasing relationships
             # TODO: Check strides for metadata mutation
             # (NB: ideally, this logic is factored out of this function and
@@ -2135,13 +2318,13 @@ class DebugAssertWrapper(CompilerWrapper):
 
 
 def pre_compile(
-    wrappers: List[CompilerWrapper],
+    wrappers: list[CompilerWrapper],
     flat_fn: Callable,
-    flat_args: List[Any],
+    flat_args: list[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
     """
     Runs a sequence of wrappers on the given function and arguments.
     Mutates wrappers in place.
@@ -2154,12 +2337,12 @@ def pre_compile(
 
 
 def post_compile(
-    wrappers: List[CompilerWrapper],
+    wrappers: list[CompilerWrapper],
     compiled_fn: Callable,
     aot_config: AOTConfig,
     *,
     runtime_metadata: ViewAndMutationMeta,
-) -> Tuple[Callable, ViewAndMutationMeta]:
+) -> tuple[Callable, ViewAndMutationMeta]:
     """
     Runs a sequence of wrappers on the given function. Should be called after pre_compile()
     """

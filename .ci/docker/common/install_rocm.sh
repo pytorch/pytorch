@@ -8,10 +8,6 @@ ver() {
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 18.04 ]]; then
-      # gpg-agent is not available by default on 18.04
-      apt-get install -y --no-install-recommends gpg-agent
-    fi
     if [[ $UBUNTU_VERSION == 20.04 ]]; then
       # gpg-agent is not available by default on 20.04
       apt-get install -y --no-install-recommends gpg-agent
@@ -22,6 +18,13 @@ install_ubuntu() {
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
     apt-get install -y libc++1
     apt-get install -y libc++abi1
+
+    # Make sure rocm packages from repo.radeon.com have highest priority
+    cat << EOF > /etc/apt/preferences.d/rocm-pin-600
+Package: *
+Pin: release o=repo.radeon.com
+Pin-Priority: 600
+EOF
 
     # Add amdgpu repository
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`

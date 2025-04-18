@@ -170,6 +170,10 @@ class File {
     }
     SYSASSERT(fd_, "open(" + path + ")");
   }
+  File(const File&) = delete;
+  File& operator=(const File&) = delete;
+  File(File&&) noexcept = delete;
+  File& operator=(File&&) noexcept = delete;
 
   ~File() {
     ::close(fd_);
@@ -291,6 +295,10 @@ FileStore::FileStore(std::string path, int numWorkers)
       regularPrefix_("/"),
       deletePrefix_("-") {
   addHelper(refCountKey_, 1);
+}
+
+c10::intrusive_ptr<Store> FileStore::clone() {
+  return c10::make_intrusive<FileStore>(path_, numWorkers_);
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
