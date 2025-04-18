@@ -1582,20 +1582,25 @@ Arguments:
 )")
           .def(
               "queue_pop",
-              [](::c10d::Store& store, const std::string& key) {
+              [](::c10d::Store& store, const std::string& key, bool block) {
                 auto out = [&]() {
                   py::gil_scoped_release guard;
-                  return store.queuePop(key);
+                  return store.queuePop(key, block);
                 }();
                 return toPyBytes(out);
               },
+              py::arg("key"),
+              py::arg("block") = true,
               R"(
 Pops a value from the specified queue or waits until timeout if the queue is empty.
 
 See queue_push for more details.
 
+If block is False, a dist.QueueEmptyError will be raised if the queue is empty.
+
 Arguments:
     key (str): The key of the queue to pop from.
+    block (bool): Whether to block waiting for the key or immediately return.
 )")
           .def(
               "queue_len",
