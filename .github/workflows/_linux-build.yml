@@ -35,7 +35,7 @@ on:
         description: |
           List of CUDA architectures CI build should target.
       runner_prefix:
-        required: false
+        required: true
         default: ""
         type: string
         description: Prefix for runner label
