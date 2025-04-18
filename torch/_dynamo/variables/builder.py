@@ -552,6 +552,7 @@ class VariableBuilder:
         def build_key_value(k, v):
             key = ConstantVariable.create(k)
             source_key = k
+
             source_value = GetItemSource(self.get_source(), source_key)
             res_value = LazyVariableTracker.create(v, source_value)
 
@@ -784,10 +785,7 @@ class VariableBuilder:
             args_source = AttrSource(self.get_source(), "args")
             for i, arg in enumerate(value.args):
                 args.append(
-                    VariableBuilder(
-                        self.tx,
-                        GetItemSource(args_source, i),
-                    )(arg)
+                    VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
                 )
 
             keywords = {}
@@ -801,8 +799,7 @@ class VariableBuilder:
                         hints=[*graph_break_hints.USER_ERROR],
                     )
                 keywords[k] = VariableBuilder(
-                    self.tx,
-                    DictGetItemSource(keywords_source, k),
+                    self.tx, DictGetItemSource(keywords_source, k)
                 )(v)
 
             install_guard(
@@ -871,8 +868,7 @@ class VariableBuilder:
                 for i, v in enumerate(actual_saved_tensors):
                     saved_tensors.append(
                         VariableBuilder(
-                            self.tx,
-                            GetItemSource(saved_tensors_source, i),
+                            self.tx, GetItemSource(saved_tensors_source, i)
                         )(v)
                     )
             install_guard(*guards)
@@ -1378,6 +1374,7 @@ class VariableBuilder:
         elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
             # NB - Be careful in not triggering user code. Guards also work on
             # the underlying tuple data structure.
             output = [
@@ -1545,10 +1542,9 @@ class VariableBuilder:
     def wrap_tuple_iterator(self, value: tuple_iterator):
         self.install_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
         output = [
-            VariableBuilder(
-                self.tx,
-                TupleIteratorGetItemSource(self.get_source(), i),
-            )(tuple_iterator_getitem(value, i))
+            VariableBuilder(self.tx, TupleIteratorGetItemSource(self.get_source(), i))(
+                tuple_iterator_getitem(value, i)
+            )
             for i in range(tuple_iterator_len(value))
         ]
         result = TupleIteratorVariable(output, source=self.source)
