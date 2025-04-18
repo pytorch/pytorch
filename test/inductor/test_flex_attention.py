@@ -2973,6 +2973,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_ref,
             implicit_bias_sdpa_gold,
             bias_sdpa_gold,
+            device=device,
         )
 
     @supported_platform
@@ -3008,6 +3009,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_ref,
             implicit_bias_sdpa_gold,
             bias_sdpa_gold,
+            device=device,
         )
 
         # 2-dimensional bias:
@@ -3037,6 +3039,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_ref,
             implicit_bias_sdpa_gold,
             bias_sdpa_gold,
+            device=device,
         )
 
         # 2-dimensional bias + index multiple
@@ -3066,6 +3069,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_ref,
             implicit_bias_sdpa_gold,
             bias_sdpa_gold,
+            device=device,
         )
 
         # 2-dimensional bias + transposed:
@@ -3095,6 +3099,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_ref,
             implicit_bias_sdpa_gold,
             bias_sdpa_gold,
+            device=device,
         )
 
         # 3-dimensional bias + transposed
@@ -3126,11 +3131,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_ref,
             implicit_bias_sdpa_gold,
             bias_sdpa_gold,
+            device=device,
         )
 
     def _test_learnable_bias_inner(
         self,
-        device,
         B,
         H,
         S,
@@ -3141,6 +3146,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         bias_sdpa_ref,
         implicit_bias_sdpa_gold,
         bias_sdpa_gold,
+        device: str = "cuda",
     ):
         make_tensor = functools.partial(
             torch.ones,
@@ -3850,7 +3856,7 @@ class GraphModule(torch.nn.Module):
             full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full
 """.replace(  # noqa: B950
-            "GPU_TYPE", device
+            "GPU_TYPE", torch.device(device).type
         )
 
         self.assertExpectedInline(
