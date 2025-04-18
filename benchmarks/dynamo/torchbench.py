@@ -424,8 +424,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.float16 or self.args.amp:
             if self.args.freezing and (freezing := self._tolerance["freezing"]):
                 higher_fp16 = freezing.get("higher_fp16", None)
+                higher_bf16 = freezing.get("higher_bf16", None)
                 even_higher = freezing.get("even_higher", None)
-                if higher_fp16 and name in higher_fp16:
+                if (higher_fp16 or higher_bf16) and (name in higher_fp16):
                     return 1e-2, cosine
                 elif even_higher and name in even_higher:
                     return 8 * 1e-2, cosine
