@@ -1104,14 +1104,14 @@ class _DispatchCacheEntry:
     is_output_tuple: bool = False
 
 
-@dataclass_slots
-@dataclass(frozen=True)
 class _BypassDispatchCache(Exception):
     """
     Signals cases that should skip FakeTensor caching.
     """
 
-    reason: str
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+        self.reason = msg
 
 
 @dataclass_slots
@@ -1254,6 +1254,27 @@ class FakeTensorMode(TorchDispatchMode):
             torch.nested._internal.nested_tensor._tensor_id_counter
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
+        # Flag that raises _BypassDispatchCache assertion instead of suppressing
+        # it in case of cache failure.
+        self._raise_on_failure_to_cache = False
+
+        # Save hops with unique identifiers that fail to cache. This helps us to
+        # avoid rechecking if the hop fails to cache. Note that if hop caching
+        # succeeds, we don't have to do anything as the cache infra already
+        # accounts for it.
+        self._failed_to_cache_hops: dict[
+            torch._ops.HigherOrderOperator, dict[tuple[int, str], str]
+        ] = defaultdict(lambda: dict())
+
+    @contextlib.contextmanager
+    def raise_on_failure_to_cache(self) -> Generator[None, None, None]:
+        old = self._raise_on_failure_to_cache
+        try:
+            self._raise_on_failure_to_cache = True
+            yield
+        finally:
+            self._raise_on_failure_to_cache = old
 
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
@@ -1418,6 +1439,8 @@ class FakeTensorMode(TorchDispatchMode):
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
+            if self._raise_on_failure_to_cache:
+                raise
 
         if output is _UNASSIGNED:
             output = self._dispatch_impl(func, types, args, kwargs)
@@ -1512,24 +1535,26 @@ class FakeTensorMode(TorchDispatchMode):
                         f"{func.name()} hop with a non GraphModule input"
                     )
 
-                for node in subgraph_mod.graph.nodes:
-                    if node.op == "call_function":
-                        op = node.target
+                identifier = func.identifier_fn(*args)  # type: ignore[attr-defined]
+                key = (id(subgraph_mod), identifier)
+                if identifier and key in self._failed_to_cache_hops[func]:
+                    raise _BypassDispatchCache(self._failed_to_cache_hops[func][key])
 
-                        # AOTDispatcher first pass does not run make_fx on
-                        # dynamo graphs. As a result, it can have non OpOverload
-                        # ops.
-                        if not isinstance(op, torch._ops.OpOverload):
-                            raise _BypassDispatchCache(
-                                f"{func.name()} hop with a non OpOverload input"
-                            )
+                # Run the subgraphs under the fake tensor mode and check if all
+                # the ops are fake tensor cacheable. If any of the subgraph op
+                # fails, we skip caching subgraph outputs
+                with self, self.raise_on_failure_to_cache():
+                    try:
+                        func.call_subgraph_fn(*args, **kwargs)  # type: ignore[attr-defined]
+                    except _BypassDispatchCache as e:
+                        # Save this information so that we can early exit next
+                        # time if the same hop with same key is seen
+                        # again
+                        msg = f"hop {func.name()} failed because of {str(e)}"
+                        if identifier:
+                            self._failed_to_cache_hops[func][key] = msg
 
-                        try:
-                            self._validate_cache_key(op, [], {})
-                        except _BypassDispatchCache as e:
-                            raise _BypassDispatchCache(
-                                f"hop {func.name()} failed because of {str(e)}"
-                            ) from None
+                        raise _BypassDispatchCache(msg) from None
 
             # All nodes in the subgraph are cache-able.
             return
