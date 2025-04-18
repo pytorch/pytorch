@@ -12,14 +12,14 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
-from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
+from torch._prims_common import DeviceLikeType
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
 )
-from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
+from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
@@ -205,8 +205,8 @@ class BlockMask:
     BlockMask is our format for representing a block-sparse attention mask.
     It is somewhat of a cross in-between BCSR and a non-sparse format.
 
-    Basics
-    ------
+    **Basics**
+
     A block-sparse mask means that instead of representing the sparsity of
     individual elements in the mask, a KV_BLOCK_SIZE x Q_BLOCK_SIZE block is
     considered sparse only if every element within that block is sparse.
@@ -239,8 +239,8 @@ class BlockMask:
     Notably, this format makes it easier to implement a reduction along the
     *rows* of the mask.
 
-    Details
-    -------
+    **Details**
+
     The basics of our format require only kv_num_blocks and kv_indices. But, we
     have up to 8 tensors on this object. This represents 4 pairs:
 
@@ -560,7 +560,7 @@ class BlockMask:
     def to_string(self, grid_size=(20, 20), limit=4):
         """Returns a string representation of the block mask. Quite nifty.
 
-        If grid_size is None, prints out an uncompressed version. Warning, it can be quite big!
+        If grid_size is -1, prints out an uncompressed version. Warning, it can be quite big!
         """
         dense_mask = self.to_dense()
         *batch_dims, num_rows, num_cols = dense_mask.shape
@@ -780,7 +780,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: str = "cuda",
+    device: DeviceLikeType = "cuda",
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -805,6 +805,8 @@ def create_mask(
     n = torch.arange(0, KV_LEN, device=device)
     mod_type = _get_mod_type(mod_fn)
 
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     with TransformGetItemToIndex():
         if mod_type == _ModificationType.SCORE_MOD:
             score_mod = mod_fn
@@ -827,7 +829,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: str = "cuda",
+    device: DeviceLikeType = "cuda",
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -954,9 +956,15 @@ def _nested_mod_func_adapter(
     q_offsets = q_nt._offsets  # type: ignore[attr-defined]
     kv_offsets = kv_nt._offsets  # type: ignore[attr-defined]
     q_lengths = q_nt._lengths if q_nt._lengths is not None else q_offsets.diff()  # type: ignore[attr-defined]
-    q_lengths = torch.cat([q_lengths, torch.zeros((1,), device=q_lengths.device, dtype=torch.int32)], dim=0)
+    q_lengths = torch.cat(
+        [q_lengths, torch.zeros((1,), device=q_lengths.device, dtype=torch.int32)],
+        dim=0,
+    )
     kv_lengths = kv_nt._lengths if kv_nt._lengths is not None else kv_offsets.diff()  # type: ignore[attr-defined]
-    kv_lengths = torch.cat([kv_lengths, torch.zeros((1,), device=kv_lengths.device, dtype=torch.int32)], dim=0)
+    kv_lengths = torch.cat(
+        [kv_lengths, torch.zeros((1,), device=kv_lengths.device, dtype=torch.int32)],
+        dim=0,
+    )
     q_seq_idx = _build_seq_idx(q_offsets, q_nt._values.shape[q_nt._ragged_idx - 1])  # type: ignore[attr-defined]
     if q_nt is kv_nt:
         kv_seq_idx = q_seq_idx
@@ -988,7 +996,7 @@ def _nested_mod_func_adapter(
 
         return nt_score_mod
     else:
-
+        # print(q_seq_idx, kv_seq_idx, q_offsets, kv_offsets, q_lengths, kv_lengths)
         def nt_mask_mod(b, h, q_idx, kv_idx):
             b_nested = q_seq_idx[q_idx]
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
@@ -1072,6 +1080,8 @@ def create_nested_block_mask(
         raise ValueError(
             "create_nested_block_mask(): Expected q_nt and kv_nt to be on the same device"
         )
+    # print(B, H, q_nt._values.shape[q_nt._ragged_idx - 1], kv_nt._values.shape[kv_nt._ragged_idx - 1], BLOCK_SIZE)
+    # print(q_nt._values, q_nt._offsets, q_nt._lengths, kv_nt._values, kv_nt._offsets, kv_nt._lengths)
     return create_block_mask(
         _nested_mod_func_adapter(mask_mod, q_nt, kv_nt, is_score_mod=False),  # type: ignore[arg-type]
         B,
@@ -1124,25 +1134,19 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
             f"Expect query and key/value to have the same embedding dimension "
             f"but got E={query.size(-1)} and E={key.size(-1)}."
         )
-    return
-    # TODO this config segfaults with Triton without:
-    # https://github.com/triton-lang/triton/pull/4540
-    if not (
-        _supported_head_dim(query.size(-1)) and _supported_head_dim(value.size(-1))
-    ):
-        raise ValueError(
-            f"NYI: Currently non power of 2 embedding dimension are not supported. "
-            f"Got E={query.size(-1)} and Ev={value.size(-1)}."
-        )
 
 
 def _validate_device(query: Tensor, key: Tensor, value: Tensor):
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
-    if query.device.type != "cuda" and query.device.type != "cpu":
+    if (
+        query.device.type != "cuda"
+        and query.device.type != "cpu"
+        and query.device.type != "hpu"
+    ):
         raise ValueError(
-            "FlexAttention is only supported on CUDA or CPU devices. "
+            "FlexAttention is only supported on CUDA, CPU or HPU devices. "
             f"Found input tensors on {query.device.type} device."
         )
 

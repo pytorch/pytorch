@@ -94,7 +94,7 @@ def get_freeable_input_buf(
     for node in nodes:
         for dep in node.read_writes.reads:
             if dep.name in graph_inputs and not dep.name.startswith(
-                ("primals_", "arg")
+                ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
             ):
                 dep_name_to_succ_nodes[dep.name].add(node)
                 dep_name_to_size[dep.name] = _dep_size_hint(dep)

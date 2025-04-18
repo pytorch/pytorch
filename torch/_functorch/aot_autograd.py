@@ -671,7 +671,17 @@ def _create_aot_dispatcher_function(
                     ctx = _detect_attribute_assignment(mod)
                 else:
                     ctx = nullcontext()
-                with ctx:
+
+                if torch._functorch.config.fake_tensor_propagate_real_tensors:
+                    # Running dynamo_timed causes fake tensor issues when
+                    # propagate real tensor is switched on.
+                    dynamo_timed_ctx = nullcontext()
+                else:
+                    dynamo_timed_ctx = dynamo_timed(
+                        "aot_collect_metadata", log_pt2_compile_event=True
+                    )
+
+                with dynamo_timed_ctx, ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
                         static_input_indices=aot_config.static_input_indices,
@@ -1659,8 +1669,29 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                 # TODO(avik): Assigning all other types are allowed right now.
                 # Maybe in the future we want to limit this to primitive types?
 
+        new_attrs = _get_attributes(mod)
+        if len(new_attrs) != len(snapshot):
+            added_attrs = new_attrs.keys() - snapshot.keys()
+            deleted_attrs = snapshot.keys() - new_attrs.keys()
+
+            if len(added_attrs) > 0:
+                raise ValueError(
+                    f"During torch.export, following attrs were created in the model.forward: {added_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
+
+            if len(deleted_attrs) > 0:
+                raise ValueError(
+                    f"During torch.export, following attrs were deleted in the model.forward: {deleted_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
+
         pytree.tree_map_with_path(
-            _collect_assigned_tensor_attributes, snapshot, _get_attributes(mod)
+            _collect_assigned_tensor_attributes, snapshot, new_attrs
         )
         # restore state of all attributes (including, e.g., of primitive types)
         mod.__dict__.update(snapshot)
