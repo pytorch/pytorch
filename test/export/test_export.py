@@ -4117,7 +4117,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         inputs = (torch.randn(4), torch.randn(6), torch.randn(6))
         dynamic_shapes = {"x": (Dim.AUTO,)}
-        if not is_retracebility_test(self._testMethodName):  # retraceability test forces dict -> tuple conversion
+        if not is_retracebility_test(
+            self._testMethodName
+        ):  # retraceability test forces dict -> tuple conversion
             export(P(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_unbacked_bindings_for_divisible_u_symint(self):
