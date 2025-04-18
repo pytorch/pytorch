@@ -9,6 +9,7 @@ from torch._inductor.codegen.cuda.cutlass_utils import (
 )
 from torch._inductor.ir import ComputedBuffer, Pointwise
 from torch._inductor.virtualized import ops
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -106,6 +107,7 @@ class MockIRNode(ComputedBuffer):
 
 
 class TestCutlassEVT(TestCase):
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_cutlass_py_codegen(self):
         from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
@@ -145,6 +147,7 @@ def fn(accum, buf1, buf2):
 """,
         )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
@@ -172,6 +175,7 @@ def fn(accum, buf1, buf2):
             result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
         )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
         epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS)
@@ -202,6 +206,7 @@ def fn(accum, buf1, buf2):
 """,
         )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
         _, _, code = trace(
