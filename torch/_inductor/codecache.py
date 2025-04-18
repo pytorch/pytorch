@@ -1187,6 +1187,18 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         output_code_log.debug("Output code written to: %s", artifact_path)
         # On cache hit, use artifact path as filename
         trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_runnable",
+                "encoding": "string",
+            },
+            payload_fn=lambda: graph.runnable_graph_str,
+        )
+        trace_structured(
+            "inductor_post_grad_graph",
+            payload_fn=lambda: graph.inductor_post_grad_graph_str,
+        )
+        trace_structured(
             "inductor_output_code",
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,

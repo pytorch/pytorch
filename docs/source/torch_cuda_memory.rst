@@ -8,6 +8,15 @@ at any point in time, and optionally record the history of allocation events tha
 The generated snapshots can then be drag and dropped onto the interactiver viewer hosted at `pytorch.org/memory_viz <https://pytorch.org/memory_viz>`_ which
 can be used to explore the snapshot.
 
+.. note::
+
+   The memory profiler and visualizer described in this document only have visibility into the CUDA memory that is
+   allocated and managed through the PyTorch allocator.  Any memory allocated directly from CUDA APIs will not be
+   visible in the PyTorch memory profiler.
+
+   NCCL (used for distributed communication on CUDA devices) is a common example of a library that allocates some
+   GPU memory that is invisible to the PyTorch memory profiler.  See :ref:`non_pytorch_alloc` for more info.
+
 Generating a Snapshot
 =====================
 The common pattern for recording a snapshot is to enable memory history, run the code to be observed, and then save a file with a pickled snapshot:
@@ -53,6 +62,24 @@ The stack trace information also reports the address at which an allocation occu
 The address b7f064c000000_0 refers to the (b)lock at address 7f064c000000 which is the "_0"th time this address was allocated.
 This unique string can be looked up in the Active Memory Timeline and searched
 in the Active State History to examine the memory state when a tensor was allocated or freed.
+
+.. _non_pytorch_alloc:
+
+Identifying Non-PyTorch allocations
+-----------------------------------
+
+If you suspect CUDA memory is being allocated outside of PyTorch, you can collect the raw CUDA allocation info using
+the pynvml package, and compare that to the allocation reported by pytorch.
+
+
+To collect raw memory usage outside pytorch, use :func:`device_memory_used`:
+
+.. code::
+
+    import torch
+    device_idx = ...
+    print(torch.cuda.device_memory_used(device_idx))
+
 
 Snapshot API Reference
 ======================
