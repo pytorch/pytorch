@@ -132,13 +132,11 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
-
         if self.device != "cuda":
             raise unittest.SkipTest("CUDA only")
 

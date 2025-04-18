@@ -509,13 +509,12 @@ class AOTInductorTestsTemplate:
                 model = LinearModel(device=self.device)
                 self.check_model(model, example_inputs)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_linear_dynamic_maxautotune(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -631,14 +630,13 @@ class AOTInductorTestsTemplate:
             actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
             self.assertTrue(same(model(*example_inputs), actual))
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @skip("Test was marked as expected failure, but does not fail always anymore.")
     def test_dynamic_smem_above_default_limit(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -959,13 +957,12 @@ class AOTInductorTestsTemplate:
             Model(), list_example_inputs, dynamic_shapes=dynamic_shapes
         )
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_addmm_multiple_dynamic(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
 
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -1003,13 +1000,12 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_bmm_multiple_dynamic(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3132,13 +3128,12 @@ class AOTInductorTestsTemplate:
         inputs = (torch.randn(4, 4, device=self.device),)
         self.check_model(Model(), inputs)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_convolution(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
-        if not IS_BIG_GPU:
-            raise unittest.SkipTest(
-                "skipping triton backend only since not big GPU (not enough SM)"
-            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
