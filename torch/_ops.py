@@ -6,7 +6,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, final, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
@@ -329,8 +329,19 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def namespace(self):
         return self._ns
 
-    def cacheable(self):
-        return self._cacheable
+    @final
+    def cacheable(self) -> bool:
+        from torch._functorch.autograd_function import AutogradFunctionApply
+
+        return (
+            self._cacheable
+            or f"{self.__module__}.{self.__name__}"
+            in torch._inductor.config.unsafe_marked_cacheable_functions
+            or (
+                isinstance(self, AutogradFunctionApply)
+                and torch._functorch.config.autograd_cache_allow_custom_autograd_functions
+            )
+        )
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
