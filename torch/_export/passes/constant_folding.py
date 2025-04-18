@@ -243,7 +243,7 @@ def constant_fold(
 
         gm.graph.eliminate_dead_code()
         gm.graph.lint()
-        gm.recompile()
+        #gm.recompile()
 
 
 def constant_graph_tag(gm: torch.fx.GraphModule) -> None:
