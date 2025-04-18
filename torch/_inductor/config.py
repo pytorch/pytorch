@@ -942,9 +942,9 @@ class cpp:
     vec_isa_ok: Optional[bool] = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Union[
-        Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Union[Literal["torch", "original_aten", "inductor_node"]] = (
+        "original_aten"
+    )
 
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = int(
@@ -1117,9 +1117,9 @@ class triton:
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Union[
-        Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Union[Literal["torch", "original_aten", "inductor_node"]] = (
+        "original_aten"
+    )
 
     # use alternate codegen for smaller reductions
     persistent_reductions = (
