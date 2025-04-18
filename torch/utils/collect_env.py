@@ -445,6 +445,8 @@ def get_pip_packages(run_lambda, patterns=None):
     # People generally have pip as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     out = run_and_read_all(run_lambda, [sys.executable, '-mpip', 'list', '--format=freeze'])
+    if out is None:
+        raise RuntimeError("`pip list` returned an error code. Run `pip list` at the command line to diagnose the error.")
     filtered_out = '\n'.join(
         line
         for line in out.splitlines()
