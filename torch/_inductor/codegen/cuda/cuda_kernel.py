@@ -221,6 +221,8 @@ class CUDATemplateKernel(CUDAKernel):
         self,
         inputs: list[IRNode],
         outputs: list[IRNode],
+        epilogue_inputs: list[IRNode],
+        epilogue_outputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -255,10 +257,20 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
+        for epilogue_input in epilogue_inputs:
+            if epilogue_input is not None:
+                self.named_nodes[epilogue_input.get_name()] = epilogue_input
+                self.args.input_buffers[epilogue_input.get_name()] = epilogue_input.get_name()
+
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
+
+        for epilogue_output in epilogue_outputs:
+            if epilogue_output is not None:
+                self.named_nodes[epilogue_output.get_name()] = epilogue_output
+                self.args.output_buffers[epilogue_output.get_name()] = epilogue_output.get_name()
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
