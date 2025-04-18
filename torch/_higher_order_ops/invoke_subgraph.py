@@ -401,6 +401,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx,
         *grad_outs,
     ):
+        from torch._dynamo.utils import dynamo_timed
+
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
@@ -432,13 +434,16 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             bw_graph = invoke_subgraph_cache.get_lazy_bwd_entry(identifier)
 
         if bw_graph is None:
-            bw_graph = trace_joint_graph_as_bwd(
-                subgraph,
-                len(primals),
-                primals_and_tangents,
-                ctx._fw_include_key_set,
-                ctx._fw_exclude_key_set,
-            )
+            with dynamo_timed(
+                "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
+            ):
+                bw_graph = trace_joint_graph_as_bwd(
+                    subgraph,
+                    len(primals),
+                    primals_and_tangents,
+                    ctx._fw_include_key_set,
+                    ctx._fw_exclude_key_set,
+                )
 
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_lazy_bwd_entry(identifier, bw_graph)
@@ -497,7 +502,10 @@ def _(ctx, subgraph, identifier, operands):
 # Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
 @register_fake(invoke_subgraph)
 def _(subgraph, identifier, operands):
-    return subgraph(*operands)
+    from torch._dynamo.utils import dynamo_timed
+
+    with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
@@ -509,7 +517,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
         graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
 
     if graph is None:
-        graph = reenter_make_fx(subgraph)(*operands)
+        from torch._dynamo.utils import dynamo_timed
+
+        with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
+            graph = reenter_make_fx(subgraph)(*operands)
 
         from torch._guards import detect_fake_mode
 
