@@ -12,6 +12,7 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    make_dynamo_test,
     parametrize,
 )
 
@@ -861,6 +862,30 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t + sum(range(6)))
 
+    def test_list_extend(self):
+        def f(x):
+            y = [1]
+            y.extend(y[-1] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
+    def test_deque_extendleft(self):
+        import collections
+
+        def f(x):
+            y = collections.deque([1])
+            y.extendleft(y[0] + z for z in range(3))
+            return x + 1, y
+
+        self.assertEqual(
+            f(torch.ones(3)),
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+        )
+
 
 class TestGeneratorSend(GeneratorTestsBase):
     def test_send(self):
@@ -1069,6 +1094,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         self.assertEqual(L, [1, -123, -1, 456])
 
     @parametrize("exc", [RuntimeError, AttributeError])
+    @make_dynamo_test
     def test_close_capture_and_reraise_exc(self, exc):
         def whoo(t):
             try:
@@ -1079,7 +1105,6 @@ class TestGeneratorClose(GeneratorTestsBase):
             finally:
                 pass
 
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
             i = next(gen)
@@ -1087,8 +1112,14 @@ class TestGeneratorClose(GeneratorTestsBase):
             return i
 
         t = torch.randn(2)
-        with self.assertRaises(exc):
+
+        z = 0
+        try:
             fn(t)
+        except exc:
+            z = 1
+        finally:
+            assert z == 1
 
     def test_close_with_subgen(self):
         L = []

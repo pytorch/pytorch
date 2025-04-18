@@ -493,6 +493,20 @@ def get_cache_key() -> Optional[str]:
     return None
 
 
+def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+    """
+    The PGO cache artifact key for a MAST job contains the job name and the version.
+    When we want to use the cache artifact on a different MAST job, we need to
+    update the key to use the new MAST job's name and version.
+    """
+    if not original_key.startswith("mast:"):
+        # if original_key is overriden, then dont change it
+        return original_key
+    if (new_key := get_cache_key()) is not None:
+        return new_key
+    return original_key
+
+
 # This solely controls local PGO
 def code_state_path(cache_key: str) -> Optional[str]:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
@@ -605,7 +619,9 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
     remote_cache = get_remote_cache()
     if remote_cache is not None:
         with dynamo_timed(
-            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
+            name := "pgo.get_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # TODO: I don't really understand why there's a JSON container format
@@ -716,7 +732,11 @@ def put_local_code_state(cache_key: str) -> None:
 
 
 def put_remote_code_state(cache_key: str) -> None:
-    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
+    with dynamo_timed(
+        name := "pgo.put_remote_code_state",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
+    ):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 

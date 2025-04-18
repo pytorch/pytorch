@@ -183,6 +183,8 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
+    operator.and_,
+    operator.or_,
     math.trunc,
     torch.sym_not,
     operator.mul,
@@ -1243,7 +1245,7 @@ class GraphModuleSerializer(metaclass=Final):
         def store_namedtuple_fields(ts):
             if ts.type is None:
                 return
-            if ts.type == namedtuple:
+            if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
                 serialized_type_name = pytree.SUPPORTED_SERIALIZED_TYPES[ts.context].serialized_type_name
                 if serialized_type_name in self.treespec_namedtuple_fields:
                     field_names = self.treespec_namedtuple_fields[serialized_type_name].field_names
@@ -1861,7 +1863,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 "as_none",
                 "as_string",
             ):
-                node_name = self.signature.input_specs[i].arg.name
+                node_name = self.signature.input_specs[i].arg.name or f"arg{i}"
                 placeholder_node = self.graph.placeholder(node_name)
                 placeholder_node.meta["val"] = self.deserialize_input(input_)
             else:

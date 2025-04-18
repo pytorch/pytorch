@@ -54,6 +54,7 @@ from torch._utils import (
 from torch._utils_internal import (
     get_file_path,
     prepare_multiprocessing_environment,
+    profiler_allow_cudagraph_cupti_lazy_reinit_cuda12,
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
@@ -279,6 +280,16 @@ if sys.platform == "win32":
     del _load_dll_libraries
 
 
+def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
+    # Libraries can either be in path/nvidia/lib_folder/lib or path/lib_folder/lib
+    nvidia_lib_paths = glob.glob(
+        os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
+    )
+    lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
+
+    return nvidia_lib_paths + lib_paths
+
+
 def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
@@ -286,21 +297,9 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
 
     lib_path = None
     for path in sys.path:
-        nvidia_path = os.path.join(path, "nvidia")
-        if not os.path.exists(nvidia_path):
-            continue
-        candidate_lib_paths = glob.glob(
-            os.path.join(nvidia_path, lib_folder, "lib", lib_name)
-        )
-        # if path/nvidia/lib_folder/ is not found look in path/lib_folder/
-        if not candidate_lib_paths:
-            candidate_lib_paths = glob.glob(
-                os.path.join(path, lib_folder, "lib", lib_name)
-            )
-
-        if candidate_lib_paths and not lib_path:
+        candidate_lib_paths = _get_cuda_dep_paths(path, lib_folder, lib_name)
+        if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
-        if lib_path:
             break
     if not lib_path:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
@@ -618,7 +617,7 @@ class SymInt:
 
 class SymFloat:
     """
-    Like an float (including magic methods), but redirects all operations on the
+    Like a float (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
     """
@@ -737,7 +736,7 @@ class SymFloat:
 
 class SymBool:
     """
-    Like an bool (including magic methods), but redirects all operations on the
+    Like a bool (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
 
@@ -1330,7 +1329,9 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
+        * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -1372,8 +1373,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
@@ -2101,7 +2100,7 @@ for __name in dir(_C._VariableFunctions):
     __obj.__module__ = __name__  # "torch"
     # Hide some APIs that should not be public
     if __name == "segment_reduce":
-        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        # TODO: Once the undocumented FC window is passed, remove the line below
         globals()[__name] = __obj
         __name = "_" + __name
     globals()[__name] = __obj
@@ -2232,7 +2231,7 @@ del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 def compiled_with_cxx11_abi() -> builtins.bool:
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
-    return _C._GLIBCXX_USE_CXX11_ABI
+    return True
 
 
 from torch import _library as _library, _ops as _ops
@@ -2303,7 +2302,16 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
-        if self.config.get("triton.cudagraphs", False):
+        cuda_version = None
+        if hasattr(torch, "version"):
+            from torch.torch_version import TorchVersion
+
+            cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
+
+        if self.config.get("triton.cudagraphs", False) and (
+            (cuda_version and cuda_version < "12.6")
+            or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
+        ):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
             #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
@@ -2418,7 +2426,9 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2431,7 +2441,9 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
@@ -2443,7 +2455,9 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
@@ -2579,6 +2593,10 @@ def compile(
     if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
+    guard_filter_fn = None
+    if options and isinstance(options, dict):
+        guard_filter_fn = options.pop("guard_filter_fn", None)
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2589,6 +2607,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
+        guard_filter_fn=guard_filter_fn,
     )(model)  # type: ignore[return-value]
 
 
