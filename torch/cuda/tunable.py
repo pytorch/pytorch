@@ -516,6 +516,19 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         return
 
     if op_sig == "GemmTunableOp":
+        # Warnings for unsupported cases:
+        if m == 1 or n == 1 or k == 1:
+            if (not transA) and (not transB):
+                pass  # case is supported
+            elif transB and n == 1:
+                pass  # case is supported
+            else:
+                warnings.warn(
+                    "Offline tuning is not supported for this GEMM. Use online tuning instead. "
+                    + f"Skipped tuning for: {untuned_gemm[1]}"
+                )
+                return
+
         matA = (
             torch.rand(k, m, dtype=dtype, device=deviceid).t()
             if transB
@@ -528,6 +541,14 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         )
         torch.mm(matA, matB)
     elif op_sig == "GemmStridedBatchedTunableOp":
+        # Warnings for unsupported cases:
+        if m == 1 or n == 1 or k == 1:
+            warnings.warn(
+                "Offline tuning is not support for this GEMM. Use online tuning instead. "
+                + f"Skipped tuning for: {untuned_gemm[1]}"
+            )
+            return
+
         [b] = [int(g) for g in untuned_gemm_temp[5:6]]
         matA = (
             torch.rand(b, k, m, dtype=dtype, device=deviceid)

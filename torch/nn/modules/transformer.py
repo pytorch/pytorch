@@ -84,7 +84,7 @@ class Transformer(Module):
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
 
-    Examples::
+    Examples:
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
         >>> src = torch.rand((10, 32, 512))
         >>> tgt = torch.rand((20, 32, 512))
@@ -314,6 +314,10 @@ class TransformerEncoder(Module):
 
     Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
+    .. warning::
+        All layers in the TransformerEncoder are initialized with the same parameters.
+        It is recommended to manually initialize the layers after creating the TransformerEncoder instance.
+
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
@@ -322,7 +326,7 @@ class TransformerEncoder(Module):
             (and convert back on output). This will improve the overall performance of
             TransformerEncoder when padding rate is high. Default: ``True`` (enabled).
 
-    Examples::
+    Examples:
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
         >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
         >>> src = torch.rand(10, 32, 512)
@@ -535,12 +539,16 @@ class TransformerDecoder(Module):
         for an in depth discussion of the performant building blocks PyTorch offers for building your own
         transformer layers.
 
+    .. warning::
+        All layers in the TransformerDecoder are initialized with the same parameters.
+        It is recommended to manually initialize the layers after creating the TransformerDecoder instance.
+
     Args:
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
         num_layers: the number of sub-decoder-layers in the decoder (required).
         norm: the layer normalization component (optional).
 
-    Examples::
+    Examples:
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
         >>> transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6)
         >>> memory = torch.rand(10, 32, 512)
@@ -663,7 +671,7 @@ class TransformerEncoderLayer(Module):
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
 
-    Examples::
+    Examples:
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
         >>> src = torch.rand(10, 32, 512)
         >>> out = encoder_layer(src)
@@ -969,7 +977,7 @@ class TransformerDecoderLayer(Module):
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
 
-    Examples::
+    Examples:
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
         >>> memory = torch.rand(10, 32, 512)
         >>> tgt = torch.rand(20, 32, 512)

@@ -217,6 +217,14 @@ at::Tensor one_shot_all_reduce_meta(
   return at::empty_like(input);
 }
 
+at::Tensor one_shot_all_reduce_copy_meta(
+    const at::Tensor& symm_buffer,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name) {
+  return at::empty_like(local_input);
+}
+
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
@@ -231,7 +239,20 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
+      "one_shot_all_reduce_copy(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name) -> Tensor");
+  m.def(
+      "one_shot_all_reduce_copy_out(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+
+  m.def(
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");
+
+  // note this implementation also modified the input tensor
+  m.def(
+      "two_shot_all_reduce_out(Tensor(a!) input, str reduce_op, str group_name, Tensor(b!) output) -> Tensor(b!)");
+
+  // note this implementation also modified the input tensor
+  m.def(
+      "reduce_scatter_out(Tensor(a!) input, str group_name, bool split_last_dim, Tensor(b!) output) -> Tensor(b!)");
 
   // An mm that supports consuming asynchronous input. It guarantees the
   // following rasterization order, and that the corresponding signal arrives
@@ -252,6 +273,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {
   m.impl("one_shot_all_reduce", one_shot_all_reduce_meta);
+  m.impl("one_shot_all_reduce_copy", one_shot_all_reduce_copy_meta);
 }
 
 } // namespace

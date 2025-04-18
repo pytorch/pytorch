@@ -486,6 +486,9 @@ def try_ann_to_type(ann, loc, rcb=None):
         return StreamObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
+    if ann is torch.qscheme:
+        return IntType.get()  # qscheme not yet bound in as its own type
+
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if _get_script_class(ann) is None:
             scripted_class = torch.jit._script._recursive_compile_class(ann, loc)

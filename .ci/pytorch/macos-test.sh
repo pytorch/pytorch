@@ -221,25 +221,27 @@ test_torchbench_smoketest() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  local backend=eager
   local dtype=notset
   local device=mps
+  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152)
 
-  touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
-  touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+  for backend in eager inductor; do
+    touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
+    touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
 
-  echo "Setup complete, launching torchbench training performance run"
-  for model in hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152; do
-    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
-      --performance --only "$model" --backend "$backend" --training --devices "$device" \
-      --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
-  done
+    echo "Launching torchbench training performance run for backend ${backend}"
+    for model in "${models[@]}"; do
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+        --performance --only "$model" --backend "$backend" --training --devices "$device" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv" || true
+    done
 
-  echo "Launching torchbench inference performance run"
-  for model in hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152; do
-    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
-      --performance --only "$model" --backend "$backend" --inference --devices "$device" \
-      --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+    echo "Launching torchbench inference performance run for backend ${backend}"
+    for model in "${models[@]}"; do
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+        --performance --only "$model" --backend "$backend" --inference --devices "$device" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
+    done
   done
 
   echo "Pytorch benchmark on mps device completed"

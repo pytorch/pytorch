@@ -40,9 +40,9 @@ enum TORCH_CUDA_CPP_API TuningStatus {
 class TORCH_CUDA_CPP_API ResultEntry {
   public:
     explicit ResultEntry(std::string  key, double time) : key_(std::move(key)), time_(time) {}
-    explicit ResultEntry(std::string  key, double time, const std::string& blas_sig ) : key_(std::move(key)), time_(time), blas_sig_(blas_sig) {}
-    bool operator==(const ResultEntry& other) { return key_ == other.key_; }
-    bool operator!=(const ResultEntry& other) { return key_ != other.key_; }
+    explicit ResultEntry(std::string  key, double time, std::string blas_sig ) : key_(std::move(key)), time_(time), blas_sig_(std::move(blas_sig)) {}
+    bool operator==(const ResultEntry& other) const { return key_ == other.key_; }
+    bool operator!=(const ResultEntry& other) const { return key_ != other.key_; }
     operator std::string () { return key_; }
     std::string GetKey() const { return key_; }
     double GetTime() const { return time_; }

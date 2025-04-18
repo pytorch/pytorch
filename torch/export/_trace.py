@@ -90,6 +90,7 @@ from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
+from ._wrapper_utils import _WrapperModule
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -500,11 +501,12 @@ def _produce_aten_artifact(
 
     It does:
     1. Applies runtime assertion pass
-    2. Populate meta val when missing
-    3. Lift constants as placeholders
-    4. Replace raw autograd and autocast ops with HOPs
-    5. Prettify names for placeholders
-    6. Preserve requires_grad value on node meta val
+    2. Recompute unbacked_bindings pass
+    3. Populate meta val when missing
+    4. Lift constants as placeholders
+    5. Replace raw autograd and autocast ops with HOPs
+    6. Prettify names for placeholders
+    7. Preserve requires_grad value on node meta val
     """
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
@@ -1155,10 +1157,15 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     kwargs = kwargs if kwargs is not None else {}
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
-    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+    if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
+        verify_additional_inputs = dynamic_shapes.verify
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+    else:
+        verify_additional_inputs = lambda ep: None  # noqa: E731
+        if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+            dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    return args, kwargs, original_in_spec, dynamic_shapes
+    return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
 
 
 def _get_module_call_graph(
@@ -1291,15 +1298,6 @@ def _temp_disable_texpr_fuser():
         yield
     finally:
         torch._C._jit_set_texpr_fuser_enabled(original_state)
-
-
-class _WrapperModule(torch.nn.Module):
-    def __init__(self, f):
-        super().__init__()
-        self.f = f
-
-    def forward(self, *args, **kwargs):
-        return self.f(*args, **kwargs)
 
 
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
@@ -1971,6 +1969,7 @@ def _export_for_training(
         kwargs,
         orig_in_spec,
         dynamic_shapes,
+        verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
     original_state_dict = _get_original_state_dict(mod)
@@ -2033,6 +2032,7 @@ def _export_for_training(
         verifiers=[TrainingIRVerifier],
     )
 
+    verify_additional_inputs(exported_program)
     return exported_program
 
 
@@ -2132,6 +2132,7 @@ def _export(
         kwargs,
         original_in_spec,
         dynamic_shapes,
+        verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
     original_state_dict = _get_original_state_dict(mod)
@@ -2205,4 +2206,5 @@ def _export(
 
     dtrace_structured("exported_program", payload_fn=lambda: str(exported_program))
 
+    verify_additional_inputs(exported_program)
     return exported_program
