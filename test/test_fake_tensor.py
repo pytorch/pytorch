@@ -2183,6 +2183,26 @@ class FakeTensorDispatchCache(TestCase):
             idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
             self.assertRaises(DynamicOutputShapeException, lambda: torch.ops.aten.index(x, [None, idx_tensor1]))
 
+    def test_aten_split_with_sizes(self):
+        with FakeTensorMode():
+            x = torch.randn(4, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = torch.ops.aten.split_with_sizes.default(x, [1, 3], 1)
+            self.assertHitsMisses(0, 1)
+
+            res = torch.ops.aten.split_with_sizes.default(x, [1, 3], 1)
+            self.assertHitsMisses(1, 1)
+
+            self.assertEqual(len(ref), len(res))
+            for a, b in zip(ref, res):
+                self.assertEqual(
+                    extract_tensor_metadata(a),
+                    extract_tensor_metadata(b),
+                )
+
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph(self):
         """
