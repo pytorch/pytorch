@@ -249,48 +249,13 @@ struct CUDACachingHostAllocatorImpl
   }
 };
 
-void raw_local_deleter(void* ptr);
+DECLARE_HOST_ALLOCATOR(
+    CUDACachingHostAllocator,
+    CUDACachingHostAllocatorImpl,
+    raw_local_deleter,
+    caching_host_allocator);
 
-DECLARE_HOST_ALLOCATOR(CUDACachingHostAllocator, CUDACachingHostAllocatorImpl, raw_local_deleter);
-
-CUDACachingHostAllocator caching_host_allocator;
-
-static inline CUDACachingHostAllocator& getCUDACachingHostAllocator() {
-  return caching_host_allocator;
-}
-
-void raw_local_deleter(void* ptr) {
-  getCUDACachingHostAllocator().free(ptr);
-}
+REGISTER_HOST_ALLOCATOR(at::kCUDA, &caching_host_allocator)
 
 } // anonymous namespace
-
-bool CachingHostAllocator_recordEvent(
-    void* ptr,
-    void* ctx,
-    at::cuda::CUDAStream stream) {
-  return getCUDACachingHostAllocator().record_event(ptr, ctx, stream);
-}
-
-// Releases cached pinned memory allocations via cudaHostFree
-void CachingHostAllocator_emptyCache() {
-  getCUDACachingHostAllocator().empty_cache();
-}
-
-at::Allocator* getCachingHostAllocator() {
-  return &getCUDACachingHostAllocator();
-}
-
-at::HostStats CachingHostAllocator_getStats() {
-  return getCUDACachingHostAllocator().getStats();
-}
-
-void CachingHostAllocator_resetAccumulatedStats() {
-  return getCUDACachingHostAllocator().resetAccumulatedStats();
-}
-
-void CachingHostAllocator_resetPeakStats() {
-  return getCUDACachingHostAllocator().resetPeakStats();
-}
-
 } // namespace at::cuda
