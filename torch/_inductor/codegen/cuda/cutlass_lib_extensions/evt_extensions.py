@@ -121,8 +121,9 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
         output_type: DataType,
         tile_description: TileDescription,
         epilogue_schedule: EpilogueScheduleType,
+        name_to_buffer: dict[str, Buffer],
         **kwargs: dict[str, Any],
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
         assert cuda_arch >= 90, "Only SM90+ is supported for EVT"
         epilogue_functor = _trace(fn_src, example_tensors, **kwargs)
@@ -135,8 +136,9 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
             output_type,
             fusion_callbacks,
         )
-
-        return collective_epilogue.emit()
+        evt_name, evt_code = collective_epilogue.emit()
+        evt_args = _render_argument_type(epilogue_functor, name_to_buffer)
+        return evt_name, evt_args, evt_code
 
     # Based off of
     # https://github.com/NVIDIA/cutlass/blob/df18f5e4f5de76bed8be1de8e4c245f2f5ec3020/python/cutlass/epilogue/epilogue.py#L117
@@ -173,6 +175,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
             )
 
         buffer = IndentedBuffer()
+        buffer.tabwidth = 2 # Ew, but matches the rest of the codegen
 
         def render_argument_type(name: str, t: CutlassArgType) -> None:
             if issubclass(t, ctypes.c_byte):
@@ -195,12 +198,19 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
             else:
                 render_argument_type(name, t)
 
-        buffer.writeline("{{")
-        with buffer.indent():
-            render_thread_type("thread", epilogue_thread_type)
+        # unroll the recursion once to address special case formatting
+        # namely, no ending comma and no indentation for the outermost thread type
+        buffer.writeline("{ /* thread */")
+        with buffer.indent(3):
+            if is_nested_visitor_type(epilogue_thread_type):
+                with buffer.indent():
+                    for name, inner_t in epilogue_thread_type._fields_:
+                        render_thread_type(name, inner_t)
+            else:
+                render_argument_type("thread", epilogue_thread_type)
+            buffer.writeline("}")
 
-        buffer.writeline("}};")
-
+        buffer.tabwidth = 4
         return buffer.getvalue()
 
     def _get_arg_from_node(arg_ty: type, node: Buffer) -> str:
@@ -231,11 +241,11 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
             return f"{{{', '.join([render_stride(x) for x in stride])}}}"
 
         elif issubclass(arg_ty, ctypes.c_void_p):
-            return f"{node.get_name()}.get()"
+            return f"({CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}*) {node.get_name()}"
         elif (
             arg_ty in _CUTLASS_C_DTYPES
         ):  # Assumption: this is the element dtype, this holds for all cutlass ir nodes currently
-            return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+            return f"{CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}(0)"
         elif issubclass(arg_ty, EmptyByte):
             return "{}"
 

@@ -181,38 +181,37 @@ def fn(accum, buf1, buf2):
                 epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
             ),
             """\
-{{
-    { /* thread */
+{ /* thread */
         { /* F */
-            { /* compute_1 */
-                { /* compute_0 */
-                    {}, /* accum */
-                    {}, /* C */
-                    {}, /* compute_0 */
-                },
-                {/* ptr_aux */ aux.get(), /* null_default */ float, /* dAux */ {2048, _1{}, _0{}}}, /* aux */
-                {}, /* compute_1 */
+          { /* compute_1 */
+            { /* compute_0 */
+              {}, /* accum */
+              {}, /* C */
+              {}, /* compute_0 */
             },
-            {/* ptr_aux */ F.get(), /* dAux */ {2048, _1{}, _0{}}}, /* F */
+            {/* ptr_aux */ (float*) aux, /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* aux */
+            {}, /* compute_1 */
+          },
+          {/* ptr_aux */ (float*) F, /* dAux */ {2048, _1{}, _0{}}}, /* F */
         },
-        {/* ptr_col */ bias.get(), /* null_default */ float, /* dCol */ {}}, /* bias */
+        {/* ptr_col */ (float*) bias, /* null_default */ float(0), /* dCol */ {}}, /* bias */
         {}, /* compute_2 */
         {}, /* compute_3 */
         {}, /* compute_4 */
-    },
-}};
+      }
 """,
         )
 
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
-        _, code = trace(
+        _, _, code = trace(
             BIAS_CODE,
             EXAMPLE_TENSORS,
             DataType.f32,
             DataType.f32,
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
+            _create_mock_buffer_name_map(EXAMPLE_TENSORS),
         )
         self.assertExpectedInline(
             code,
