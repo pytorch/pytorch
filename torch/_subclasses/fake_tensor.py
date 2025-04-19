@@ -876,8 +876,15 @@ class FakeTensor(Tensor):
             aten.div.Tensor,
             aten.add.Tensor,
             aten.sub.Tensor,
-            # a iteration version of mul
+            aten.mul_.Tensor,
+            aten.div_.Tensor,
+            aten.add_.Tensor,
+            aten.sub_.Tensor,
+            aten.pow.Tensor_Tensor,
+            # a iteration version of arithmetic operation
             aten._foreach_mul.List,
+            aten._foreach_div.List,
+            aten._foreach_pow.List,
             # scalar tensor could be used as inputs
             aten.fmax.default,
             aten.fmin.default,
