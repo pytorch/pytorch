@@ -13,7 +13,7 @@
 namespace c10d::cuda {
 
 bool deviceSupportsMulticast(int device_idx) {
-#if defined(CUDART_SUPPORTS_MULTICAST)
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && defined(CUDART_SUPPORTS_MULTICAST)
   // Multicast support requirements:
   // - CUDA Runtime version >= 12030: Checked at compile time using
   // CUDART_VERSION.
