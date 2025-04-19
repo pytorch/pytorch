@@ -160,11 +160,11 @@ SymInt computeStorageNbytes(
   // of the last element according to stride
   SymInt size = 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_eq(0))) {
+    if (TORCH_GUARD_OR_FALSE(sizes[i].sym_eq(0))) {
       return 0;
     }
 
-    size += strides[i] * (sizes[i] - 1);
+    size += strides[i] * (sizes[i] - 1).max(0);
   }
   return itemsize_bytes * (storage_offset + size);
 }

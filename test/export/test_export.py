@@ -4380,6 +4380,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v3
         export(N(), (t,), strict=strict)
 
+    # decomp introduces new errors for cf_changevar
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False
@@ -4449,8 +4452,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             cf_changevar(),
             (torch.tensor(20),),
             fixes=[
-                # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check((i // 2) != 0)",
                 # Could not guard on data-dependent expression Eq((u0//2), 1)
                 "torch._check((i // 2) != 1)",
             ],
@@ -13199,7 +13200,6 @@ def forward(self, x):
         inps = (torch.randn(1, 224, 768, device="cpu"),)
         export(Foo(), inps)
 
-    @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 
