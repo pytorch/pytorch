@@ -125,7 +125,7 @@ def early_config_prune(configs, named_args):
             and BLOCK_M > (M_PER_GROUP * 2)
         ):
             continue
-        # 3. make sure we don't load N tiles that are too small
+        # 3. make sure we don't load M tiles that are too small
         if BLOCK_M < 128 and BLOCK_M < (M_PER_GROUP // 2):
             continue
 
@@ -446,6 +446,8 @@ def tuned_scaled_grouped_mm(
     use_fast_accum: bool = False,
     layout: Optional[Layout] = None,
 ) -> TensorBox:
+    """Auto-tuning for _scaled_grouped_mm() operator."""
+
     m1_size, m2_size, layout, mat_a, mat_b, offs = grouped_mm_args(
         mat_a, mat_b, offs, layout=layout, out_dtype=out_dtype
     )
