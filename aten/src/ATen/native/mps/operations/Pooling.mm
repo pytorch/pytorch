@@ -644,11 +644,13 @@ static void avg_pool3d_template(const Tensor& input,
   id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
 
   // Get compute pipeline state
-  NSString* kernelName = [NSString stringWithFormat:@"avg_pool3d_%s",
-                                                   mps::getMPSTypeString(input.scalar_type()).c_str()];
-  if (is_backward_pass) {
-    kernelName = [NSString stringWithFormat:@"avg_pool3d_backward_%s",
-                                           mps::getMPSTypeString(input.scalar_type()).c_str()];
+  NSString* kernelName = nil;
+  if (input.scalar_type() == at::ScalarType::Float) {
+    kernelName = is_backward_pass ? @"avg_pool3d_backward_float" : @"avg_pool3d_float";
+  } else if (input.scalar_type() == at::ScalarType::Half) {
+    kernelName = is_backward_pass ? @"avg_pool3d_backward_half" : @"avg_pool3d_half";
+  } else {
+    TORCH_CHECK(false, "Unsupported data type for avg_pool3d on MPS: ", input.scalar_type());
   }
 
   // Get compute pipeline state from bundled library
