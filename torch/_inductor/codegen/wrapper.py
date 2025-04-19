@@ -80,12 +80,13 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = tuple[torch.device, torch.dtype, str]
+ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
+    alignment = node.get_name() not in V.graph.unaligned_buffers
     return (
         node.get_device_or_error(),
         node.get_dtype(),
@@ -93,6 +94,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # for s0 for s1, just because they happen to share the same
         # size hint
         sympy_str(V.graph.sizevars.simplify(storage_size)),
+        alignment,
     )
 
 
@@ -910,6 +912,7 @@ class PythonWrapperCodegen(CodeGen):
                 inductor_ops = torch.ops.inductor
                 _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                assert_alignment = torch._C._dynamo.guards.assert_alignment
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
@@ -1847,8 +1850,6 @@ class PythonWrapperCodegen(CodeGen):
         reset_to_zero_args,
         grids: list[list[Union[int, sympy.Expr]]],
     ):
-        from torch.utils._triton import patch_triton_dtype_repr
-
         from ..runtime.triton_heuristics import (
             config_to_dict,
             FixedGrid,
@@ -1863,7 +1864,6 @@ class PythonWrapperCodegen(CodeGen):
         )
         from .triton import gen_common_triton_imports, TritonKernel
 
-        patch_triton_dtype_repr()
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
@@ -2495,7 +2495,7 @@ class PythonWrapperCodegen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_arg_str(self, s, type_=None):
-        from torch.utils._triton import dtype_to_string, has_triton_package
+        from torch.utils._triton import has_triton_package
 
         if has_triton_package():
             import triton
@@ -2522,7 +2522,7 @@ class PythonWrapperCodegen(CodeGen):
         elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
-            return dtype_to_string(s)
+            return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
         else:

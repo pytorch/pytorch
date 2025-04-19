@@ -282,18 +282,16 @@ class BlockPtrOptions:
         # We need an explicit broadcast for stores, or if the final reshape does more
         # than add singletons.
         sizevars = V.graph.sizevars
-        require_broadcast = any(self.broadcasting_dims) and (
-            len(pre_broadcast_shape) != len(final_shape)
-            or any(
-                not (
-                    sizevars.statically_known_equals(pre_dim, 1)
-                    or sizevars.statically_known_equals(pre_dim, post_dim)
-                )
+        supports_implicit_broadcast = allow_implicit and (
+            len(pre_broadcast_shape) == len(final_shape)
+            and all(
+                sizevars.statically_known_equals(pre_dim, 1)
+                or sizevars.statically_known_equals(pre_dim, post_dim)
                 for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
             )
         )
 
-        if not allow_implicit or require_broadcast:
+        if any(self.broadcasting_dims) and not supports_implicit_broadcast:
             value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
 
         # Reshape to the final shape.
@@ -933,7 +931,11 @@ class TritonOverrides(OpOverrides):
 
         # NOTE: We use a tensor here in order to get the expected type.
         # Otherwise, e.g. float64 constants would be trunctated to float32.
-        return f"tl.full({shape}, {triton_val}, {triton_type})"
+        if value < 0 and not dtype.is_signed:
+            triton_signed_type = f"tl.{triton_type[4:]}"
+            return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
+        else:
+            return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @classmethod
     def constant(cls, value, dtype):
@@ -2099,7 +2101,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # Stores require an explicit broadcast.
+        # Stores require an explicit broadcast. We do this in two phases:
+        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
+        #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
+        #  2. In case the block pointer has different dimensionality, broadcast/reshape the
+        #     result to the shape of the pointer.
+        value = f"tl.broadcast_to({value}, {indexing.final_shape})"
+
+        # These dims no longer need broadcasting.
+        for idx, (dim, broadcast_dim) in enumerate(
+            zip(indexing.final_shape, indexing.broadcast_shape)
+        ):
+            if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
+                indexing.broadcasting_dims[idx] = False
+
         value = indexing.codegen_broadcast_and_reshape(
             value, indexing.final_shape, indexing.block_shape, False
         )

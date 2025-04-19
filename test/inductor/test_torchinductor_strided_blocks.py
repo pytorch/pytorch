@@ -1031,6 +1031,33 @@ class CommonTemplate:
     xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",  # noqa: B950
         )
 
+    def test_expand_clone_broadcast(self):
+        """
+        Test expand followed by clone. This uses an explicit Triton broadcast.
+        """
+        base_size = (1, 32)
+        expanded_size = (32, 32)
+
+        def foo(x):
+            return x.expand(*expanded_size).clone()
+
+        inps = [torch.randn(base_size, device=self.device)]
+        result, (triton_code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=2,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # We should only need one broadcast.
+        num_broadcasts = triton_code.count("tl.broadcast_to")
+        self.assertEqual(num_broadcasts, 1)
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
