@@ -644,10 +644,10 @@ static void avg_pool3d_template(const Tensor& input,
   id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
 
   // Get compute pipeline state
-  NSString* kernelName = [NSString stringWithFormat:@"avg_pool3d_%@",
+  NSString* kernelName = [NSString stringWithFormat:@"avg_pool3d_%s",
                                                    mps::getMPSTypeString(input.scalar_type()).c_str()];
   if (is_backward_pass) {
-    kernelName = [NSString stringWithFormat:@"avg_pool3d_backward_%@",
+    kernelName = [NSString stringWithFormat:@"avg_pool3d_backward_%s",
                                            mps::getMPSTypeString(input.scalar_type()).c_str()];
   }
 
@@ -766,7 +766,7 @@ struct structured_avg_pool3d_out_mps : public at::meta::structured_avg_pool3d {
 };
 
 // Register the structured kernel for avg_pool3d_out_mps
-REGISTER_DISPATCH(avg_pool3d_stub, &structured_avg_pool3d_out_mps::impl);
+REGISTER_DISPATCH(avg_pool3d_kernel, &structured_avg_pool3d_out_mps::impl);
 
 
 // Define structured kernels for avg_pool3d_backward_out_mps
@@ -795,7 +795,7 @@ struct structured_avg_pool3d_backward_out_mps : public at::meta::structured_avg_
 };
 
 // Register the structured kernel for avg_pool3d_backward_out_mps
-REGISTER_DISPATCH(avg_pool3d_backward_stub, &structured_avg_pool3d_backward_out_mps::impl);
+REGISTER_DISPATCH(avg_pool3d_backward_kernel, &structured_avg_pool3d_backward_out_mps::impl);
 } // anonymous namespace
 
 } // namespace at::native
