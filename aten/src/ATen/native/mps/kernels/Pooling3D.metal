@@ -63,7 +63,7 @@ kernel void avg_pool3d(
     if (count_include_pad) {
         pool_size = kernel_depth * kernel_height * kernel_width;
     } else {
-        pool_size = (id_end - id_start) * (ih_end - ih_start) * (iw_end - iw_start);
+        pool_size = (valid_id_end - valid_id_start) * (valid_ih_end - valid_ih_start) * (valid_iw_end - valid_iw_start);
     }
 
     // Use custom divisor if provided
