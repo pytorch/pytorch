@@ -1043,6 +1043,8 @@ class CachingAutotuner(KernelInterface):
                 "num_warps": launcher.config.num_warps,
                 "num_stages": launcher.config.num_stages,
                 "kernel_kwargs": kernel_kwargs_str,
+                "kernel_num_gb": self.inductor_meta.get("kernel_num_gb", None),
+                "kernel_flop": self.inductor_meta.get("kernel_flop", None),
             }
 
             with torch._C._profiler._RecordFunctionFast(
