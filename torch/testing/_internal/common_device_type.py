@@ -1956,14 +1956,18 @@ IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
     and torch.cpu._is_avx2_supported()
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )
+IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
+    torch.xpu.is_available() and torch.utils._triton.has_triton()
+)
 flex_attention_supported_platform = unittest.skipUnless(
-    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
+    or IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
     or (
         torch.cuda.is_available()
         and torch.utils._triton.has_triton()
         and torch.cuda.get_device_capability() >= (8, 0)
     ),
-    "Requires CUDA and Triton, or CPU with avx2 and later",
+    "Requires CUDA and Triton, XPU and triton, or CPU with avx2 and later",
 )
 if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
     e4m3_type = torch.float8_e4m3fnuz
