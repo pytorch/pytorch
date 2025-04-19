@@ -33,11 +33,13 @@ T* remove_const(const T* x) {
 } // namespace
 
 #if AT_BUILD_WITH_BLAS()
+#ifndef _ARMPL_H
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
 extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
+#endif
 
 #if AT_BLAS_F2C()
 # define ffloat double
@@ -52,10 +54,12 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
   extern "C" void cblas_cdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
   extern "C" void cblas_zdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
 
+#ifndef _ARMPL_H
   static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
   {
     return cblas_sdot(*n, x, *incx, y, *incy);
   }
+#endif
   static inline void cdotu_(std::complex<float> *res, const int *n, const std::complex<float> *x, const int *incx,
   const std::complex<float> *y, const int *incy) {
     cblas_cdotu_sub(*n, x, *incx, y, *incy, res);
