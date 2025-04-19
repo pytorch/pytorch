@@ -96,7 +96,7 @@ class WrapperGraphModule:
     gm: GraphModule
     compiled_fn: Callable[..., Any]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Write the code to a file for debugging.
         self.tempfile = tempfile.NamedTemporaryFile(mode="w+", delete=False)
         with self.tempfile as f:

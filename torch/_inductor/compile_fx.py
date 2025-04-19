@@ -709,8 +709,12 @@ def _compile_fx_inner(
     # Check if the registered backend(s) support caching.
     init_backend_registration()
     backends_support_caching = all(
-        get_wrapper_codegen_for_device(device.type, config.cpp_wrapper).supports_caching
-        for device in get_all_devices(gm)
+        backend.supports_caching
+        for backend in (
+            get_wrapper_codegen_for_device(device.type, config.cpp_wrapper)
+            for device in get_all_devices(gm)
+        )
+        if backend is not None
     )
 
     with (
