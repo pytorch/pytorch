@@ -15,6 +15,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
 )
 from torch.distributed.tensor._ops.utils import (
+    generate_redistribute_costs,
     normalize_dim,
     normalize_dims,
     prod,
@@ -505,20 +506,14 @@ def propagate_shape_and_sharding(
     for dim in range(len(global_input_shape)):
         shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
 
-    def is_sharded(input_dim: InputDim) -> bool:
-        for placement in input_src_placements:
-            if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
-                return True
-        return False
-
-    def get_shard_mesh_dim_and_placement(
+    def maybe_get_shard_mesh_dim_and_placement(
         input_dim: InputDim,
-    ) -> tuple[int, Shard]:
+    ) -> tuple[Optional[int], Optional[Shard]]:
         # if input_dim is sharded, return the mesh_dim and shard placement
         for i, placement in enumerate(input_src_placements):
             if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
                 return i, placement
-        raise RuntimeError("input_dim is not sharded")
+        return None, None
 
     def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
         # TODO(whc) this helper is pretty hard to understand, at least it should be better documented if not refactored
@@ -528,7 +523,10 @@ def propagate_shape_and_sharding(
             for i, dim in enumerate(cmd.input_dims):
                 if isinstance(dim, InputDim):
                     can_shard_dim = True
-                    input_sharded = is_sharded(dim)
+                    shard_mesh_dim, shard_placement = (
+                        maybe_get_shard_mesh_dim_and_placement(dim)
+                    )
+                    input_sharded = shard_mesh_dim is not None
                     if i > 0:
                         can_shard_dim = False
                         if strict_view and input_sharded:
@@ -537,8 +535,8 @@ def propagate_shape_and_sharding(
                                 "but only the leftmost dim of a Flatten can be sharded.",
                             )
                     elif input_sharded:
-                        shard_mesh_dim, shard_placement = (
-                            get_shard_mesh_dim_and_placement(dim)
+                        assert shard_placement is not None, (
+                            "Shard placement cannot be None if input_sharded=True"
                         )
                         tensor_dim_size = global_input_shape[shard_placement.dim]
                         mesh_dim_size = mesh_sizes[shard_mesh_dim]
@@ -661,11 +659,11 @@ def register_op_strategy_map(
                 mesh=mesh,
                 tensor_meta=input_src_spec.tensor_meta,
             )
-            redistribute_costs: list[list[float]] = []
+            redistribute_costs: list[list[float]] = [
+                generate_redistribute_costs(input_strategy, input_tgt_spec)
+            ]
 
             # TODO(whc) should attach propagated tensor_meta.
-            # we now compute the new shape,
-            # so maybe its as simple as copying the rest of tensor_meta from old tensor and changing the shape?
             output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
                 PlacementStrategy(
