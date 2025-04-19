@@ -769,16 +769,16 @@ REGISTER_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl);
 
 // Implementation for avg_pool3d_backward_kernel
 void avg_pool3d_backward_kernel_impl(
-    const at::Tensor& grad_input,
-    const at::Tensor& grad_output,
+    const at::Tensor& output,
+    const at::Tensor& input,
     int kW, int kH, int kD,
     int dW, int dH, int dD,
     int padW, int padH, int padD,
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
-  avg_pool3d_template(grad_output, // Note: input is grad_output for backward
-                     grad_input,
-                     grad_output,
+  avg_pool3d_template(input, // Note: input is grad_output for backward
+                     output, // output is grad_input
+                     input,  // grad_output
                      {kD, kH, kW},
                      {dD, dH, dW},
                      {padD, padH, padW},
