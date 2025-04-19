@@ -1117,7 +1117,7 @@ class triton:
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Union[Literal["torch", "original_aten", "inductor_node"]] = (
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
         "original_aten"
     )
 
