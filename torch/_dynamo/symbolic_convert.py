@@ -590,15 +590,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 hints=_hints,
             ),
         )
-        if not self.should_compile_partial_graph():
-            unimplemented_v2(
-                gb_type="Should not compile partial graph (data-dependent branching)",
-                context="",
-                explanation="Dynamo has determined when encountering data-dependent "
-                "branching (e.g. `if my_tensor.item() > 0:`) that it should not "
-                "compile the partial graph.",
-                hints=[],
-            )
+        assert self.should_compile_partial_graph()
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
             msg = (
@@ -642,8 +634,24 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if value.is_python_constant():
                 if bool(value.as_python_constant()):
                     return self.jump(inst)
-                else:
+                elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
+                else:
+                    unimplemented_v2(
+                        gb_type="Data-dependent assertion failed (cannot compile partial graph)",
+                        context=f"value: {value}",
+                        explanation="Dynamo has determined when encountering a data-dependent assert failure "
+                        "that it should not compile the partial graph.",
+                        hints=[
+                            *graph_break_hints.FUNDAMENTAL,
+                            "Use `torch._assert()` to raise a hard AssertionError when the check fails. "
+                            "This error will propagate back the user code "
+                            "that called the compiled function (i.e. Dynamo wil not trace any exception handling).",
+                            "Remove the assert statement.",
+                            "Move the assert statement outside of any context managers in order to graph break with "
+                            "partial graph compilation (if fullgraph=False).",
+                        ],
+                    )
 
             # TODO maybe should respect DtoH sync intention of users later??
             # Manually insert torch._assert_async instead of python assert and jump over
@@ -1342,15 +1350,13 @@ class InstructionTranslatorBase(
                 raise
             except RuntimeError as e:
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
-                    print(
-                        "\n"
-                        + torch.fx.GraphModule(
-                            self.output.nn_modules, self.output.graph
-                        ).print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                        file=sys.stderr,
+                    readable_graph = torch.fx.GraphModule(
+                        self.output.nn_modules, self.output.graph
+                    ).print_readable(
+                        print_output=False, include_stride=True, include_device=True
                     )
+                    e.partial_fx_graph = readable_graph  # type: ignore[attr-defined]
+                    raise
 
                 raise
             except Exception as e:
@@ -1367,6 +1373,11 @@ class InstructionTranslatorBase(
                 # there was an exception.
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
+
+                    # Note that this call maybe redundant if compile_subgraph is
+                    # called. This is ok, because calling exit stack close()
+                    # twice is not an issue (second stop is a no op).
+                    self.output.mark_bytecode_tracing_stop()
 
     def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(val, VariableTracker), (
@@ -1634,6 +1645,9 @@ class InstructionTranslatorBase(
                 hints=[],
             )
 
+    # fb internal 3.12 opcode
+    EAGER_IMPORT_NAME = IMPORT_NAME
+
     def IMPORT_FROM(self, inst):
         self.DUP_TOP(inst)
         self._load_attr(inst)
@@ -1703,34 +1717,6 @@ class InstructionTranslatorBase(
         self.popn(2)
         self.push(None)
 
-    def CALL_FINALLY(self, inst):
-        """
-        pushes the address of the next instruction onto the stack and increments
-        bytecode counter by delta
-        """
-        # Python 3.8 only
-        addr = self.indexof[self.next_instruction]
-        self.push(ConstantVariable.create(addr))
-        self.jump(inst)
-
-    def END_FINALLY(self, inst):
-        # Python 3.8 only
-        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
-        tos = self.pop()
-        if isinstance(tos, ConstantVariable):
-            self.instruction_pointer = tos.as_python_constant()
-        else:
-            pass
-
-    def POP_FINALLY(self, inst):
-        # Python 3.8 only
-        preserve_tos = inst.argval
-        if preserve_tos:
-            tos = self.pop()
-        _ = self.pop()
-        if preserve_tos:
-            self.push(tos)  # type: ignore[possibly-undefined]
-
     def FOR_ITER(self, inst):
         it = self.pop().realize()
         try:
@@ -1751,18 +1737,22 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
-    def _raise_exception_variable(self, val) -> NoReturn:
-        # User can raise exception in 2 ways
-        #   1) raise exception type - raise NotImplementedError
-        #   2) raise execption instance - raise NotImplemetedError("foo")
-
-        # 1) when user raises exception type
+    def _create_exception_type(self, val):
         if isinstance(
             val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
         ):
             # Create the instance of the exception type
             # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
+        return val
+
+    def _raise_exception_variable(self, val) -> NoReturn:
+        # User can raise exception in 2 ways
+        #   1) raise exception type - raise NotImplementedError
+        #   2) raise execption instance - raise NotImplemetedError("foo")
+
+        # 1) when user raises exception type
+        val = self._create_exception_type(val)
 
         # Handle https://peps.python.org/pep-0479/
         # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
@@ -1789,6 +1779,10 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
+            if not len(self.exn_vt_stack):
+                msg = ConstantVariable("No active exception to reraise")
+                exc.raise_observed_exception(RuntimeError, self, args=[msg])
+
             # re-raise the previous exception. Here CPython refers to the exception
             # on top of the exception stack
             assert len(self.exn_vt_stack)
@@ -1800,24 +1794,16 @@ class InstructionTranslatorBase(
             val = self.stack[-1]
             self._raise_exception_variable(val)
         else:
-            # raise .. from None
+            # raise .. from ...
             from_vt = self.pop()
-            if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
-                val = self.pop()
-                try:
-                    self._raise_exception_variable(val)
-                finally:
-                    # Update __cause__/__supppress_context__ in the raised exception
-                    curr_exc = self.exn_vt_stack.get_current_exception()
-                    curr_exc.call_setattr(
-                        self, ConstantVariable("__cause__"), ConstantVariable(None)
-                    )
-            unimplemented_v2(
-                gb_type="Re-raise with 2 arguments",
-                context=str(from_vt),
-                explanation="Dynamo does not support `raise ... from [not-None]`",
-                hints=[],
-            )
+            val = self.pop()
+            try:
+                self._raise_exception_variable(val)
+            finally:
+                # Update __cause__/__supppress_context__ in the raised exception
+                curr_exc = self.exn_vt_stack.get_current_exception()
+                cause = self._create_exception_type(from_vt)
+                curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)
 
     def CLEANUP_THROW(self, inst):
         # https://github.com/python/cpython/pull/96010
@@ -2826,6 +2812,17 @@ class InstructionTranslatorBase(
     def LOAD_ASSERTION_ERROR(self, inst):
         self.load_builtin_from_argval("AssertionError")
 
+    def LOAD_BUILD_CLASS(self, inst):
+        unimplemented_v2(
+            gb_type="LOAD_BUILD_CLASS bytecode not supported",
+            context="",
+            explanation="Dynamo does not support tracing classes that are defined in the compiled region.",
+            hints=[
+                "Move the class definition out of the compiled region.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)
@@ -3775,10 +3772,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
+            msg = inspect.getattr_static(
+                func.get_function(), "_torchdynamo_disable_msg", None
+            )
             unimplemented_v2(
                 gb_type="Skip inlining `torch.compiler.disable()`d function",
                 context=str(func.get_function()),
-                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
                 hints=[
                     "Remove the `torch.compiler.disable` call",
                 ],

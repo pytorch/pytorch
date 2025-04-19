@@ -104,7 +104,8 @@ float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
 // Rather than unrolling to process multiple rows (transposed columns)
 // of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
 // along an individual dot product.
-static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, const float beta, Half* y, int incy) {
+// NB: lda must be long, otherwise it can cause int32 overflow
+static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int64_t lda, const Half *x, const float beta, Half* y, int incy) {
   if (beta == 0.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
       for (int i = begin; i < end; ++i) {
@@ -236,7 +237,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
 
 // Return a + b_low * c_low + b_high * c_high
 vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
-#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML)
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
   // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
@@ -394,7 +395,8 @@ float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) 
   return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
 }
 
-void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, const float beta, Half* y, int incy) {
+// NB: lda must be long, otherwise it can cause int32 overflow
+void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int64_t lda, const Half *x, const float beta, Half* y, int incy) {
   if (beta == 0.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
       for (int i = begin; i < end; ++i) {
@@ -448,7 +450,8 @@ float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec
   }
 }
 
-void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
+// NB: lda must be long, otherwise it can cause int32 overflow
+void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int64_t lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
     for (int i = begin; i < end; ++i) {
       y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);

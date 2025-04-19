@@ -123,7 +123,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertEqual(all_gathers[2].gather_dim, 0)
         self.assertEqual(
             all_gathers[2].res_node.target,
-            torch.ops.aten.view.dtype,
+            torch.ops._c10d_functional.wait_tensor.default,
         )
 
         self.assertEqual(all_gathers[3].gather_dim, 1)
@@ -156,11 +156,11 @@ class MicroPipelineTPTest(TestCase):
                 "placeholder",
             )
             self.assertEqual(
-                reduce_scatter.rs_node.target,
+                reduce_scatter.reduce_scatter_node.target,
                 torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
             self.assertEqual(
-                reduce_scatter.res_node.target,
+                reduce_scatter.wait_tensor_node.target,
                 torch.ops._c10d_functional.wait_tensor.default,
             )
             self.assertEqual(reduce_scatter.group_name, group.group_name)
@@ -401,7 +401,7 @@ class MicroPipelineTPTest(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @parametrize("scatter_dim", [2])
+    @parametrize("scatter_dim", [0, 1, 2])
     @fresh_inductor_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
@@ -432,11 +432,11 @@ class MicroPipelineTPTest(TestCase):
             C = C.view(*orig_shape[:-1], C.shape[-1])
             return reduce_scatter_tensor(C, "sum", scatter_dim, group)
 
-        A = torch.rand(1, 16, 32, device="cuda").to(torch.float8_e4m3fn)
+        A = torch.rand(2, 16, 32, device="cuda").to(torch.float8_e4m3fn)
         B = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn).T
 
         # A_scale = rowwise scales
-        A_scale = torch.full((1, 16, 1), 0.1, device="cuda")
+        A_scale = torch.full((2, 16, 1), 0.1, device="cuda")
 
         # B_scale = rowwise scales transposed for A @ B^T
         B_scale = torch.full((1, 64), 0.1, device="cuda")
