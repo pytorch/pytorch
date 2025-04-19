@@ -13382,20 +13382,14 @@ Example::
 add_docstr(
     torch.Event,
     r"""
-Event(device=None, *, enable_timing=False, blocking=False, interprocess=False)
+Event(device, *, enable_timing) -> Event
 
 Query and record Stream status to identify or control dependencies across Stream and measure timing.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Event.
         If not given, the current :ref:`accelerator<accelerators>` type will be used.
-    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``)
-    blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
-    interprocess (bool): if ``True``, the event can be shared between processes (default: ``False``)
-
-.. warning::
-
-    Both blocking and interprocess are not supported right now and are noops.
+    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``).
 
 Returns:
     Event: An torch.Event object.
@@ -13403,7 +13397,6 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> event = torch.Event()
     >>> e_cuda = torch.Event(device='cuda')
 """,
 )
@@ -13459,14 +13452,14 @@ Example::
 add_docstr(
     torch.Event.record,
     r"""
-Event.record(stream=None) -> None
+Event.record(stream) -> None
 
 Record the event in a given stream. The stream's device must match the event's device.
 This function is equivalent to ``stream.record_event(self)``.
 
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to be recorded.
-        If not given, the current stream will be used.
+    If not given, the current stream will be used.
 
 Example::
 
@@ -13497,13 +13490,13 @@ Example::
 add_docstr(
     torch.Event.wait,
     r"""
-Event.wait(stream=None) -> None
+Event.wait(stream) -> None
 
 Make all future work submitted to the given stream wait for this event.
 
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to synchronize.
-        If not given, the current stream will be used.
+    If not given, the current stream will be used.
 
 Example::
 
