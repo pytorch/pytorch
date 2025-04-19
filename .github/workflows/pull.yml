@@ -49,6 +49,9 @@ jobs:
     name: linux-jammy-py3.9-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
@@ -94,6 +97,9 @@ jobs:
     name: linux-jammy-py3.9-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-no-ops
@@ -108,6 +114,9 @@ jobs:
     name: linux-jammy-py3.9-gcc11-pch
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-pch
@@ -122,6 +131,9 @@ jobs:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang15-asan
@@ -156,6 +168,9 @@ jobs:
     name: linux-focal-py3.9-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang10-onnx
@@ -183,6 +198,9 @@ jobs:
     name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-focal-py3.9-clang10
@@ -218,6 +236,9 @@ jobs:
     name: linux-focal-py3.13-clang10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.13-clang10
@@ -252,6 +273,9 @@ jobs:
     name: linux-focal-cuda11.8-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
@@ -282,6 +306,9 @@ jobs:
     name: linux-focal-cuda12.6-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11
@@ -313,6 +340,9 @@ jobs:
     name: linux-jammy-py3-clang12-mobile-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang12-mobile-build
@@ -328,6 +358,9 @@ jobs:
     name: linux-jammy-cuda11.8-cudnn9-py3.9-clang12
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda11.8-cudnn9-py3.9-clang12
@@ -342,6 +375,9 @@ jobs:
     name: linux-focal-py3_9-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang9-xla
@@ -400,6 +436,9 @@ jobs:
     name: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
@@ -417,6 +456,9 @@ jobs:
     name: linux-focal-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm-py3.10
@@ -434,6 +476,9 @@ jobs:
     name: linux-focal-cuda12.6-py3.10-gcc11-sm89
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
@@ -455,6 +500,9 @@ jobs:
     name: unstable-linux-focal-cuda12.6-py3.10-gcc11-sm89-xfail
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
@@ -485,6 +533,9 @@ jobs:
     name: linux-jammy-py3-clang12-executorch
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang12-executorch
@@ -509,6 +560,9 @@ jobs:
     name: cuda12.4-py3.10-gcc9-sm75
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm75
@@ -534,6 +588,9 @@ jobs:
     name: linux-jammy-xpu-2025.0-py3.9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       sync-tag: linux-xpu-2025-0-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}

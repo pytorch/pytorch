@@ -33,6 +33,9 @@ jobs:
     name: linux-jammy-cpu-py3.9-gcc11-nightly-dynamo-benchmarks
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks

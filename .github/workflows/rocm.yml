@@ -30,6 +30,9 @@ jobs:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     name: linux-focal-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-rocm-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3

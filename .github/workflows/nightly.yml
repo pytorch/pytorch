@@ -31,6 +31,9 @@ jobs:
     name: docs build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-jammy-py3.9-gcc11

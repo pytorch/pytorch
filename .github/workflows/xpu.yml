@@ -26,6 +26,9 @@ jobs:
     name: linux-jammy-xpu-2025.0-py3.9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       sync-tag: linux-xpu-2025-0-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}

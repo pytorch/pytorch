@@ -49,6 +49,9 @@ jobs:
     name: libtorch-linux-focal-cuda12.6-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: libtorch-linux-focal-cuda12.6-py3.10-gcc11
       docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
@@ -66,6 +69,9 @@ jobs:
     name: linux-focal-cuda12.6-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-no-ops
@@ -170,6 +176,9 @@ jobs:
     name: linux-focal-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm-py3.10
@@ -205,6 +214,9 @@ jobs:
     name: cuda12.4-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
@@ -215,6 +227,9 @@ jobs:
     name: verify-cachebench-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
