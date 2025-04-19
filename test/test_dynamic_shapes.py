@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
+    has_free_symbols,
     hint_int,
     is_symbolic,
     ShapeEnv,
@@ -393,7 +394,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(res_and, 0b1000)
         self.assertIsInstance(res_and, torch.SymInt, msg=type(res_and))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_and(s0, s1), 8)"""
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_and(s97, s26), 8)"""
         )
 
         a1 = create_symint(shape_env, 3)
@@ -415,7 +416,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(res_or, 0b1110)
         self.assertIsInstance(res_or, torch.SymInt, msg=type(res_or))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s0, s1), 14)"""
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s97, s26), 14)"""
         )
 
     def test_stride(self):
@@ -497,7 +498,7 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertEqual(guard_int(a0), 2)
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s97, 2)""")
 
     def test_sym_sum(self):
         shape_env = ShapeEnv()
@@ -512,7 +513,7 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
         s0 = create_symint(shape_env, 2)
         self.assertEqual(guard_int(s0), 2)
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s97, 2)""")
 
         shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
         s0 = create_symint(shape_env, 2)
@@ -520,7 +521,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(len(shape_env.guards), 0)
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[None]]),
-            """[Eq(s0, 2)]""",
+            """[Eq(s97, 2)]""",
         )
 
     def test_sym_int(self):
@@ -529,14 +530,14 @@ class TestPySymInt(TestCase):
         r = sym_int(a0)
         self.assertEqual(r, 5)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 5)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s97, 5)""")
 
         a1 = create_symint(shape_env, 7)
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[1][0]), """Eq(TruncToInt(IntTrueDiv(s1, 2)), 3)"""
+            str(shape_env.guards[1][0]), """Eq(TruncToInt(IntTrueDiv(s26, 2)), 3)"""
         )
 
         a3 = create_symint(shape_env, 3)
@@ -544,7 +545,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[2][0]), """Eq(TruncToInt(2.0*ToFloat(s2)), 6)"""
+            str(shape_env.guards[2][0]), """Eq(TruncToInt(2.0*ToFloat(s57)), 6)"""
         )
 
     def test_sym_log2(self):
@@ -554,7 +555,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2.0)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_log2(ToFloat(s0)), 2.0)"""
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_log2(ToFloat(s97)), 2.0)"""
         )
 
     def test_sym_sqrt(self):
@@ -564,7 +565,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s0)), 2.0)"""
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s97)), 2.0)"""
         )
 
     def test_sym_floor(self):
@@ -575,14 +576,14 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(FloorToInt(IntTrueDiv(s0, 2)), 2)""",
+            """Eq(FloorToInt(IntTrueDiv(s97, 2)), 2)""",
         )
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s97)), 15)""",
         )
 
     def test_sym_trunc(self):
@@ -592,14 +593,14 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(TruncToInt(IntTrueDiv(s0, 2)), 2)"""
+            str(shape_env.guards[0][0]), """Eq(TruncToInt(IntTrueDiv(s97, 2)), 2)"""
         )
         r = torch.sym_int(torch.sym_sqrt(a0))
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s0))), 2)""",
+            """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s97))), 2)""",
         )
 
     def test_sym_ceil(self):
@@ -610,7 +611,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(CeilToInt(IntTrueDiv(s0, 2)), 3)""",
+            """Eq(CeilToInt(IntTrueDiv(s97, 2)), 3)""",
         )
         r1 = 3.0 * a0
         r = math.floor(r1)
@@ -618,7 +619,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s97)), 15)""",
         )
 
     def test_sym_ite(self):
@@ -638,7 +639,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(type(t), type(r3))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(Piecewise((s0, Eq(s0, 5)), (s1, True)), 5)""",
+            """Eq(Piecewise((s97, Eq(s97, 5)), (s26, True)), 5)""",
         )
         b4 = f == 5
         r4 = torch.sym_ite(b4, t, f)
@@ -647,7 +648,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(type(f), type(r4))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(Piecewise((s0, Eq(s1, 5)), (s1, True)), 4)""",
+            """Eq(Piecewise((s97, Eq(s26, 5)), (s26, True)), 4)""",
         )
 
     def test_tracing_sym_ite(self):
@@ -679,7 +680,7 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         int(a0)
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s97, 2)""")
 
     def test_data_dependent_guard(self):
         shape_env = ShapeEnv()
@@ -710,7 +711,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[u0 < s0]""",
+            """[u0 < s97]""",
         )
         self.assertTrue(i0 < s0)
         self.assertTrue(i0 != s0)
@@ -1004,17 +1005,9 @@ def forward(self, x_1):
         b = s3 + s4 + s5
         assert_optimized(a)
         assert_optimized(b)
-        assert_optimized(a + b)
-        assert_optimized(b + a)
-
-        # same as above but b does not have ordered_summation_of_unique_symbols.
-        s6 = create_symint(shape_env, 11)
-        s7 = create_symint(shape_env, 21)
-        s8 = create_symint(shape_env, 31)
-        b = torch.sym_sum([s6, s7, s8])
-        assert_optimized(a)
-        assert_not_optimized(b)
         assert_not_optimized(a + b)
+        assert_not_optimized(b + a)
+        assert_not_optimized(b + a + b)
 
     def test_max_of_unique_summation_opt(self):
         shape_env = ShapeEnv()
@@ -1173,18 +1166,18 @@ def forward(self, x_1):
             out.strip(),
             """\
 class f(torch.nn.Module):
-    def forward(self, a_1: "f32[s0, s1]", b_1: "f32[s2, s1]"):
+    def forward(self, a_1: "f32[s75, s96]", b_1: "f32[s57, s96]"):
         # No stacktrace found for following nodes
-        sym_size_int: "Sym(s0)" = torch.ops.aten.sym_size.int(a_1, 0)
-        sym_size_int_1: "Sym(s2)" = torch.ops.aten.sym_size.int(b_1, 0)
-        add: "Sym(s0 + s2)" = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
-        sym_size_int_2: "Sym(s1)" = torch.ops.aten.sym_size.int(a_1, 1)
-        sym_size_int_3: "Sym(s1)" = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
-        add_1: "Sym(2*s1)" = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
-        new_empty: "f32[s0 + s2, 2*s1]" = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
+        sym_size_int: "Sym(s75)" = torch.ops.aten.sym_size.int(a_1, 0)
+        sym_size_int_1: "Sym(s57)" = torch.ops.aten.sym_size.int(b_1, 0)
+        add: "Sym(s57 + s75)" = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+        sym_size_int_2: "Sym(s96)" = torch.ops.aten.sym_size.int(a_1, 1)
+        sym_size_int_3: "Sym(s96)" = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
+        add_1: "Sym(2*s96)" = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
+        new_empty: "f32[s57 + s75, 2*s96]" = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: "f32[s0 + s2, 2*s1]" = native_dropout[0]
-        getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
+        getitem: "f32[s57 + s75, 2*s96]" = native_dropout[0]
+        getitem_1: "b8[s57 + s75, 2*s96]" = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""",  # noqa: B950
         )
 
@@ -1329,6 +1322,22 @@ class f(torch.nn.Module):
             res = Tensor(sym_args)
             self.assertEqual(res, expected, exact_dtype=False)
 
+    def test_backed_size_oblivious_01_spec(self):
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+        @torch.compile(dynamic=True, fullgraph=True)
+        def f(a, b):
+            if guard_size_oblivious(a.size(0) == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            # always go to the >= 2 branch.
+            self.assertEqual(
+                f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+            )
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
@@ -1426,8 +1435,7 @@ class TestSymNumberMagicMethods(TestCase):
                 out = lambda_apply(sym_inp1)
             else:
                 out = lambda_apply(sym_inp1, inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -1438,16 +1446,14 @@ class TestSymNumberMagicMethods(TestCase):
         sym_inp2 = get_sym_inp(inp2)
         with maybe_xfail(inp1, sym_inp2):
             out = lambda_apply(inp1, sym_inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
         # Symified both args
         with maybe_xfail(sym_inp1, sym_inp2):
             out = lambda_apply(sym_inp1, sym_inp2)
-            if fn not in sym_node.alternate_impl_if_hinted_methods:
-                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
+            self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -2815,6 +2821,136 @@ class TestGuardsExpressions(TestCase):
         guards = shape_env.produce_guards_expression([s0])
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_guard_or_true(self):
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        def func(a, b):
+            x = a.item()
+            if guard_or_true(x == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        # call with guarding.
+        self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
+        self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
+
+        unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func(a, b)
+
+        # always return b*10
+        self.assertEqual(
+            unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
+        )
+        self.assertEqual(
+            unbacked_func(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
+        )
+
+        # Test that statically known true works.
+        def func2(a, b):
+            x = a.item()
+            if guard_or_true(x != x):
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func2 = torch.compile(func2, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func2(a, b)
+        # always return b*20
+        self.assertEqual(
+            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+        )
+        self.assertEqual(
+            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
+        )
+
+        # Test backed_size_oblivious
+        with torch.fx.experimental._config.patch("backed_size_oblivious", True):
+
+            def func3(a, b):
+                if guard_or_true(a.size()[0] != 9):
+                    return b * 10
+                else:
+                    return b * 20
+
+            compiled = torch.compile(func3, dynamic=True, fullgraph=True)
+            a = torch.rand(9, 2)
+            b = torch.rand(3, 4)
+
+            self.assertEqual(func3(a, b), b * 20)
+            self.assertEqual(compiled(a, b), b * 10)
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_guard_or_false(self):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        def func(a, b):
+            x = a.item()
+            if guard_or_false(x == 1):
+                return b * 10
+            else:
+                return b * 20
+
+        # call with guarding.
+        self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
+        self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
+
+        unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func(a, b)
+
+        # always return b*20
+        self.assertEqual(
+            unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+        )
+        self.assertEqual(
+            unbacked_func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
+        )
+
+        # Test that statically known true works.
+        def func2(a, b):
+            x = a.item()
+            if guard_or_false(x == x):
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func2 = torch.compile(func2, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func2(a, b)
+        # always return b*10
+        self.assertEqual(
+            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
+        )
+        self.assertEqual(
+            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
+        )
+
+        # Test backed_size_oblivious
+        with torch.fx.experimental._config.patch("backed_size_oblivious", True):
+
+            def func3(a, b):
+                if guard_or_false(a.size()[0] == 9):
+                    return b * 10
+                else:
+                    return b * 20
+
+            compiled = torch.compile(func3, dynamic=True, fullgraph=True)
+            a = torch.rand(9, 2)
+            b = torch.rand(3, 4)
+
+            self.assertEqual(func3(a, b), b * 10)
+            self.assertEqual(compiled(a, b), b * 20)
+
     def test_guards_float_div(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 8)
@@ -2846,13 +2982,45 @@ class TestGuardsExpressions(TestCase):
             ],
         )
 
-        self.assertEqual(f"{x.stride()}", "(s1, 1)")
-        self.assertEqual(f"{x.shape}", "torch.Size([s0, s1])")
+        self.assertEqual(f"{x.stride()}", "(s49, 1)")
+        self.assertEqual(f"{x.shape}", "torch.Size([s26, s49])")
 
         x_clean = _remove_symbols_without_guarding(x, 4096)
 
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_neq_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a):
+            torch._check(a.item() != 5)
+            return a.item() * 10
+
+        func(torch.tensor([100]))
+
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([5]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_sym_or_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(operator.or_(a.item() == 5, b.item() == 5))
+            return a.item() * 10
+
+        func(torch.tensor([5]), torch.tensor([100]))
+        func(torch.tensor([100]), torch.tensor([5]))
+
+    def test_has_free_symbols(self):
+        self.assertFalse(has_free_symbols(sympy.S.true))
+        self.assertFalse(has_free_symbols(sympy.Max(1, 10, evaluate=False)))
+
+        self.assertFalse(has_free_symbols(sympy.sympify("1")))
+        self.assertFalse(has_free_symbols(sympy.sympify("1.1")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
+        self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
 
 if __name__ == "__main__":

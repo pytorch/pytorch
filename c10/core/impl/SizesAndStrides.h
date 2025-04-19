@@ -50,6 +50,20 @@ class C10_API SizesAndStrides {
     }
   }
 
+  bool operator==(const SizesAndStrides& other) const {
+    if (size_ != other.size_) {
+      return false;
+    }
+    return !(
+        isInline()
+            ? std::memcmp(
+                  inlineStorage_, other.inlineStorage_, sizeof(inlineStorage_))
+            : std::memcmp(
+                  outOfLineStorage_,
+                  other.outOfLineStorage_,
+                  storageBytes(size_)));
+  }
+
   SizesAndStrides& operator=(const SizesAndStrides& rhs) {
     if (this == &rhs) {
       return *this;

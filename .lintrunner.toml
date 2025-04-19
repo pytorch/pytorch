@@ -55,6 +55,7 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
+    'aten/src/ATen/cpu/vec/*.h',
     'aten/src/ATen/mps/**/*.mm',
     'aten/src/ATen/mps/**/*.h',
     'aten/src/ATen/xpu/**/*.h',
@@ -271,6 +272,7 @@ exclude_patterns = [
     'torch/csrc/utils/generated_serialization_types.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
+    'aten/src/ATen/ExpandBase.h',
 ]
 init_command = [
     'python3',
@@ -398,6 +400,7 @@ exclude_patterns=[
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '**/*.png',
     '**/*.gz',
+    '**/*.patch',
 ]
 command = [
     'python3',
@@ -452,7 +455,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
-    '.ci/magma/package_files/*.patch',
+    '**/*.patch',
 ]
 command = [
     'python3',
@@ -1162,14 +1165,6 @@ exclude_patterns = [
     'test/quantization/core/test_utils.py',
     'test/quantization/core/test_workflow_module.py',
     'test/quantization/core/test_workflow_ops.py',
-    'test/quantization/eager/__init__.py',
-    'test/quantization/eager/test_bias_correction_eager.py',
-    'test/quantization/eager/test_equalize_eager.py',
-    'test/quantization/eager/test_fuse_eager.py',
-    'test/quantization/eager/test_model_numerics.py',
-    'test/quantization/eager/test_numeric_suite_eager.py',
-    'test/quantization/eager/test_quantize_eager_ptq.py',
-    'test/quantization/eager/test_quantize_eager_qat.py',
     'test/quantization/fx/__init__.py',
     'test/quantization/fx/test_equalize_fx.py',
     'test/quantization/fx/test_model_report_fx.py',
@@ -1720,7 +1715,7 @@ command = [
     '@{{PATHSFILE}}'
 ]
 include_patterns = [
-   'torch/**/not-exist.py'
+   'torch/_inductor/**/*.py'
 ]
 is_formatter = false
 

@@ -88,7 +88,9 @@ class IpcChannel {
     }
 
     TORCH_CHECK(
-        sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", c10::utils::str_error(errno));
+        sendmsg(socket_, &msg, 0) > 0,
+        "Failed to send fd: ",
+        c10::utils::str_error(errno));
   }
 
   int recv_fd() {
@@ -256,8 +258,15 @@ void map_block(
 namespace c10d {
 namespace symmetric_memory {
 
-AllocationRef::AllocationRef(void* ptr, HandleType handle, size_t block_size, int device_idx)
-    : ptr(ptr), handle(handle), block_size(block_size), device_idx(device_idx) {}
+AllocationRef::AllocationRef(
+    void* ptr,
+    HandleType handle,
+    size_t block_size,
+    int device_idx)
+    : ptr(ptr),
+      handle(handle),
+      block_size(block_size),
+      device_idx(device_idx) {}
 
 AllocationRef::~AllocationRef() {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -572,12 +581,12 @@ int CUDASymmetricMemory::get_world_size() {
 }
 
 Block::Block(
-  c10::intrusive_ptr<AllocationRef> alloc_ref,
-  int device_idx,
-  size_t block_size,
-  size_t buffer_size,
-  size_t signal_pad_offset,
-  const std::optional<std::string>& group_name)
+    c10::intrusive_ptr<AllocationRef> alloc_ref,
+    int device_idx,
+    size_t block_size,
+    size_t buffer_size,
+    size_t signal_pad_offset,
+    const std::optional<std::string>& group_name)
     : alloc_ref(std::move(alloc_ref)),
       device_idx(device_idx),
       block_size(block_size),
@@ -618,7 +627,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
   AT_CUDA_CHECK(cudaMemset(ptr, 0, block_size));
 
-  auto alloc_ref = c10::make_intrusive<AllocationRef>(ptr, handle, block_size, device_idx);
+  auto alloc_ref =
+      c10::make_intrusive<AllocationRef>(ptr, handle, block_size, device_idx);
   auto block = c10::make_intrusive<Block>(
       std::move(alloc_ref),
       device_idx,
@@ -784,7 +794,9 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   // The group_name passed to rendezvous() takes precedence over
   // the default group_name specified during allocation.
   std::string group_name_;
-  if (group_name.has_value()) {
+  // Treat empty string and std::nullopt the same as empty string seems to be
+  // implicitly used that way
+  if (group_name.has_value() && group_name != "") {
     group_name_ = *group_name;
   } else {
     if (!block->default_group_name.has_value()) {

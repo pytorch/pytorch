@@ -38,7 +38,8 @@ package.
    the following code will compile the model into a shared library for CUDA execution.
    Otherwise, the compiled artifact will run on CPU. For better performance during CPU inference,
    it is suggested to enable freezing by setting ``export TORCHINDUCTOR_FREEZING=1``
-   before running the Python script below.
+   before running the Python script below. The same behavior works in an environment with Intel®
+   GPU as well.
 
 .. code-block:: python
 
