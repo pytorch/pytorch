@@ -40,60 +40,6 @@ constexpr auto exclude_keys_for_meta_dispatch =
 
     });
 
-// Helper around at::has_internal_overlap.
-// The ATen util is used in hot-path eager mode: it's always fast,
-// but might return TOO_HARD sometimes.
-// During functionalization, we're ok taking a bit longer
-// to detect memory overlap.
-inline bool has_internal_overlap_helper(const at::Tensor t) {
-  auto has_overlap = at::has_internal_overlap(t);
-  if (has_overlap == at::MemOverlap::Yes) return true;
-  if (has_overlap == at::MemOverlap::No) return false;
-  return false;
-}
-
-
-inline Tensor to_meta(const Tensor& t) {
-    if (!t.defined()) return t;
-    return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
-/*dtype=*/t.scalar_type(), /*layout=*/t.layout(),
-/*device=*/c10::Device(kMeta), /*pin_memory=*/std::nullopt);
-}
-
-inline std::optional<Tensor> to_meta(const std::optional<Tensor>& t) {
-  if (t.has_value()) {
-    return to_meta(*t);
-  }
-  return std::nullopt;
-}
-
-inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
-  std::vector<Tensor> outputs;
-  outputs.reserve(t_list.size());
-  for (const auto& tensor : t_list) {
-    outputs.push_back(to_meta(tensor));
-  }
-  return outputs;
-}
-
-inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
-  c10::List<Tensor> outputs;
-  outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_meta(t_list[i]));
-  }
-  return outputs;
-}
-
-inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optional<Tensor>>& t_list) {
-  c10::List<::std::optional<Tensor>> outputs;
-  outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_meta(t_list[i]));
-  }
-  return outputs;
-}
-
 static bool disable_meta_reference() {
   static auto env = std::getenv("TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE");
   return env != nullptr && std::strcmp(env, "1") == 0;
