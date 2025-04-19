@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -8,6 +9,7 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
 import tempfile
 import typing
@@ -97,8 +99,10 @@ class WrapperGraphModule:
     compiled_fn: Callable[..., Any]
 
     def __post_init__(self) -> None:
-        # Write the code to a file for debugging.
+        # Write the code to a file for compatibility with debugging utilities.
+        # The file is deleted upon program termination.
         self.tempfile = tempfile.NamedTemporaryFile(mode="w+", delete=False)
+        atexit.register(os.remove, self.tempfile.name)
         with self.tempfile as f:
             f.write(self.value)
 
