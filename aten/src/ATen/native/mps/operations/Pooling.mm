@@ -633,6 +633,9 @@ static void avg_pool3d_template(const Tensor& input,
   // Get MPS stream
   MPSStream* mpsStream = getCurrentMPSStream();
 
+  // Synchronize the MPS stream to ensure any previous operations are completed
+  mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
+
   // Get MPS data types
   MPSDataType inputDataType = mps::getMPSDataType(input.scalar_type());
   MPSDataType outputDataType = mps::getMPSDataType(output.scalar_type());
@@ -739,8 +742,15 @@ static void avg_pool3d_template(const Tensor& input,
 
   // End encoding and commit
   [computeEncoder endEncoding];
+
+  // Commit the command buffer
+  [commandBuffer commit];
+
+  // Wait for the command buffer to complete
+  [commandBuffer waitUntilCompleted];
+
   // Synchronize the MPS stream
-  mpsStream->synchronize(SyncType::COMMIT);
+  mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_out_mps)
