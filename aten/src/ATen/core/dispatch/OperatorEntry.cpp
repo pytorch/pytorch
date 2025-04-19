@@ -4,9 +4,9 @@
 #include <ATen/core/dispatch/ObservedOperators.h>
 #include <c10/util/irange.h>
 
-#include <algorithm>
 #include <array>
 #include <utility>
+#include <vector>
 
 namespace c10::impl {
 
@@ -22,63 +22,15 @@ namespace {
 #endif
 }
 
-// TODO: replace DispatchKeyRange with std::views::iota |
-// std::views::transform (with a cast back to DispatchKey) once we
-// move to C++20.
-class DispatchKeyRangeIterator {
-  using iterator_type = c10::detail::integer_iterator<uint16_t>;
- public:
-  using iterator_category = iterator_type::iterator_category;
-  using value_type = DispatchKey;
-  using difference_type = iterator_type::difference_type;
-  using reference = value_type;
-  using pointer = void; // omit operator->
-
-  explicit constexpr DispatchKeyRangeIterator(DispatchKey value) : it_(static_cast<uint16_t>(value)) {}
-
-  constexpr reference operator*() const {
-    return static_cast<reference>(*it_);
-  }
-
-  constexpr DispatchKeyRangeIterator& operator++() {
-    ++it_;
-    return *this;
-  };
-
-  constexpr DispatchKeyRangeIterator operator++(int) {
-    const auto copy = *this;
-    ++(*this);
-    return copy;
-  }
-
-  constexpr bool operator==(const DispatchKeyRangeIterator& rhs) const {
-    return it_ == rhs.it_;
-  }
-
-  constexpr bool operator!=(const DispatchKeyRangeIterator& rhs) const {
-    return it_ != rhs.it_;
-  }
-
-  iterator_type it_;
-};
-
-class DispatchKeyRange {
- public:
-  constexpr DispatchKeyRange(DispatchKey begin, DispatchKey end) : begin_(begin), end_(end) {}
-  constexpr DispatchKeyRangeIterator begin() const {
-    return begin_;
-  }
-
-  constexpr DispatchKeyRangeIterator end() const {
-    return end_;
-  }
- private:
-  DispatchKeyRangeIterator begin_;
-  DispatchKeyRangeIterator end_;
-};
-
-static constexpr auto allDispatchKeysInFullSet() {
-  return DispatchKeyRange(static_cast<DispatchKey>(1), DispatchKey::EndOfFunctionalityKeys);
+static const std::vector<DispatchKey>& allDispatchKeysInFullSet() {
+  static const auto result = ([]() {
+    std::vector<DispatchKey> vec;
+    for (const auto dispatch_key: DispatchKeySet(DispatchKeySet::FULL)) {
+      vec.push_back(dispatch_key);
+    }
+    return vec;
+  })();
+  return result;
 }
 
 // Returns an array of the same size as the dispatch table, where each
@@ -91,17 +43,11 @@ static const auto& getDispatchTableIndexToKey() {
     arr.fill(DispatchKey::Undefined);
     const auto update_array_entry = [](result_type& arr_, DispatchKey dk) {
       const auto index = getDispatchTableIndexForDispatchKey(dk);
-      TORCH_INTERNAL_ASSERT(arr_.at(index) == DispatchKey::Undefined || arr_.at(index) == dk);
+      TORCH_INTERNAL_ASSERT(arr_.at(index) == DispatchKey::Undefined);
       arr_.at(index) = dk;
     };
-    for (const auto dk_outer: DispatchKeyRange(static_cast<DispatchKey>(1), static_cast<DispatchKey>(static_cast<uint16_t>(DispatchKey::EndOfAliasKeys) + 1))) {
-      for (const auto dk: c10::getRuntimeDispatchKeySet(dk_outer)) {
-        update_array_entry(arr, dk);
-      }
-      if (c10::isBackendDispatchKey(dk_outer)) {
-        DispatchKey autograd_key = getAutogradKeyFromBackend(toBackendComponent(dk_outer));
-        update_array_entry(arr, autograd_key);
-      }
+    for (const auto dk_outer: allDispatchKeysInFullSet()) {
+      update_array_entry(arr, dk_outer);
     }
     // Self-test. Should be plenty cheap enough to just run in prod
     // builds. We just need to make sure that we have the dispatch key
@@ -149,6 +95,8 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dispatch_ix < dispatch_table_index_to_key.size());
         dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_table_index_to_key[dispatch_ix], true);
       }
+    } else {
+      dispatchTable_[dispatch_ix] = missingKernel().kernel;
     }
   }
 }
