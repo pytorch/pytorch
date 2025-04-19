@@ -631,8 +631,8 @@ static void avg_pool3d_template(const Tensor& input,
   MPSStream* mpsStream = getCurrentMPSStream();
 
   // Get MPS data types
-  MPSDataType inputDataType = getMPSDataType(input.scalar_type());
-  MPSDataType outputDataType = getMPSDataType(output.scalar_type());
+  MPSDataType inputDataType = mps::getMPSDataType(input.scalar_type());
+  MPSDataType outputDataType = mps::getMPSDataType(output.scalar_type());
 
   // Create command buffer
   id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
@@ -642,27 +642,29 @@ static void avg_pool3d_template(const Tensor& input,
 
   // Get compute pipeline state
   NSString* kernelName = [NSString stringWithFormat:@"avg_pool3d_%@",
-                                                   getMPSTypeString(input.scalar_type())];
+                                                   mps::getMPSTypeString(input.scalar_type()).c_str()];
   if (is_backward_pass) {
     kernelName = [NSString stringWithFormat:@"avg_pool3d_backward_%@",
-                                           getMPSTypeString(input.scalar_type())];
+                                           mps::getMPSTypeString(input.scalar_type()).c_str()];
   }
 
-  id<MTLComputePipelineState> pipelineState = [[MetalContext sharedInstance] pipelineState:[kernelName UTF8String]];
+  // Get compute pipeline state from bundled library
+  static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+  id<MTLComputePipelineState> pipelineState = lib.getPipelineStateForFunc([kernelName UTF8String]);
   [computeEncoder setComputePipelineState:pipelineState];
 
   // Set buffers
   if (!is_backward_pass) {
     // Forward pass
-    id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
-    id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
+    id<MTLBuffer> inputBuffer = mps::getMTLBufferStorage(input);
+    id<MTLBuffer> outputBuffer = mps::getMTLBufferStorage(output);
 
     [computeEncoder setBuffer:outputBuffer offset:0 atIndex:0];
     [computeEncoder setBuffer:inputBuffer offset:0 atIndex:1];
   } else {
     // Backward pass
-    id<MTLBuffer> gradInputBuffer = getMTLBufferStorage(output); // grad_input
-    id<MTLBuffer> gradOutputBuffer = getMTLBufferStorage(grad_output);
+    id<MTLBuffer> gradInputBuffer = mps::getMTLBufferStorage(output); // grad_input
+    id<MTLBuffer> gradOutputBuffer = mps::getMTLBufferStorage(grad_output);
 
     [computeEncoder setBuffer:gradInputBuffer offset:0 atIndex:0];
     [computeEncoder setBuffer:gradOutputBuffer offset:0 atIndex:1];
@@ -731,7 +733,8 @@ static void avg_pool3d_template(const Tensor& input,
 
   // End encoding and commit
   [computeEncoder endEncoding];
-  mpsStream->commit(true);
+  // Synchronize the MPS stream
+  mpsStream->synchronize();
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_out_mps)
@@ -743,7 +746,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& output) {
-  mps::avg_pool3d_template(input,
+  avg_pool3d_template(input,
                            output,
                            std::nullopt,
                            kernel_size,
@@ -766,7 +769,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& gradInput) {
-  mps::avg_pool3d_template(input,
+  avg_pool3d_template(input,
                            gradInput,
                            gradOutput,
                            kernel_size,
