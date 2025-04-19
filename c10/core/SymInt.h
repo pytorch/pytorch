@@ -224,6 +224,11 @@ class C10_API SymInt {
 
   operator SymFloat() const;
 
+  void unsafe_set_data(size_t nbytes) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_heap_allocated());
+    data_ = static_cast<int64_t>(nbytes);
+  }
+
   // Don't use this.  Prefer maybe_as_int instead
   int64_t as_int_unchecked() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_heap_allocated());

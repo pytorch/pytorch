@@ -64,17 +64,11 @@ static inline bool is_thp_alloc_enabled() {
   return value;
 }
 
-inline size_t c10_compute_alignment(size_t nbytes) {
-  static const auto pagesize = sysconf(_SC_PAGESIZE);
-  // for kernels that don't provide page size, default it to 4K
-  const size_t thp_alignment = (pagesize < 0 ? gPagesize : pagesize);
-  return (is_thp_alloc_enabled() ? thp_alignment : gAlignment);
-}
-
 inline bool is_thp_alloc(size_t nbytes) {
   // enable thp (transparent huge pages) for larger buffers
   return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
 }
+
 #elif !defined(__ANDROID__) && !defined(_MSC_VER)
 constexpr size_t c10_compute_alignment([[maybe_unused]] size_t nbytes) {
   return gAlignment;
@@ -85,6 +79,15 @@ constexpr bool is_thp_alloc([[maybe_unused]] size_t nbytes) {
 }
 #endif
 } // namespace
+
+#if defined(__linux__) && !defined(__ANDROID__)
+size_t c10_compute_alignment(size_t nbytes) {
+  static const auto pagesize = sysconf(_SC_PAGESIZE);
+  // for kernels that don't provide page size, default it to 4K
+  const size_t thp_alignment = (pagesize < 0 ? gPagesize : pagesize);
+  return (is_thp_alloc_enabled() ? thp_alignment : gAlignment);
+}
+#endif
 
 void* alloc_cpu(size_t nbytes) {
   if (nbytes == 0) {

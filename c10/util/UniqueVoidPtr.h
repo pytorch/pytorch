@@ -43,13 +43,16 @@ class UniqueVoidPtr {
   // Lifetime tied to ctx_
   void* data_;
   std::unique_ptr<void, DeleterFnPtr> ctx_;
+  bool has_deleter_{false};
 
  public:
   UniqueVoidPtr() : data_(nullptr), ctx_(nullptr, &deleteNothing) {}
   explicit UniqueVoidPtr(void* data)
       : data_(data), ctx_(nullptr, &deleteNothing) {}
   UniqueVoidPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter)
-      : data_(data), ctx_(ctx, ctx_deleter ? ctx_deleter : &deleteNothing) {}
+      : data_(data),
+        ctx_(ctx, ctx_deleter ? ctx_deleter : &deleteNothing),
+        has_deleter_(ctx_deleter) {}
   void* operator->() const {
     return data_;
   }
@@ -60,6 +63,19 @@ class UniqueVoidPtr {
   void* get() const {
     return data_;
   }
+
+  bool /* success */ unsafe_reset_data_and_ctx(void* new_data_and_ctx) {
+    if (C10_UNLIKELY(has_deleter_)) {
+      return false;
+    }
+    // seems quicker than calling the no-op deleter when we reset
+    // NOLINTNEXTLINE(bugprone-unused-return-value)
+    ctx_.release();
+    ctx_.reset(new_data_and_ctx);
+    data_ = new_data_and_ctx;
+    return true;
+  }
+
   void* get_context() const {
     return ctx_.get();
   }
@@ -74,6 +90,7 @@ class UniqueVoidPtr {
       DeleterFnPtr new_deleter) {
     if (get_deleter() != expected_deleter)
       return false;
+    has_deleter_ = new_deleter;
     ctx_ = std::unique_ptr<void, DeleterFnPtr>(ctx_.release(), new_deleter);
     return true;
   }

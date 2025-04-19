@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/macros/Macros.h>
 #include <c10/util/Synchronized.h>
 #include <array>

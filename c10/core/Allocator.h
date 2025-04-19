@@ -40,6 +40,10 @@ class C10_API DataPtr {
   void* operator->() const {
     return ptr_.get();
   }
+  C10_ALWAYS_INLINE bool /* success */ unsafe_reset_data_and_ctx(
+      void* new_data_and_ctx) {
+    return ptr_.unsafe_reset_data_and_ctx(new_data_and_ctx);
+  }
   void clear() {
     ptr_.clear();
   }
