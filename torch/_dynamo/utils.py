@@ -608,6 +608,9 @@ class CompileEventLogger:
         method_fn(*args, **kwargs)
 
 
+_dynamo_timed_tls = threading.local()
+
+
 @contextmanager
 def dynamo_timed(
     key: str,
@@ -616,7 +619,6 @@ def dynamo_timed(
     log_pt2_compile_event: bool = False,
     metadata: Optional[dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
-    dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
@@ -655,9 +657,6 @@ def dynamo_timed(
     - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
       field to be logged to dyname_compile column. We expect all columns to be _us;
       therefore, the field name must end with "_us".
-    - dynamo_compile_runtime_column_us: Like 'dynamo_compile_column_us', but should
-      be used for those columns captured outside of a compile context, e.g.,
-      runtime autotuning.
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
@@ -666,13 +665,6 @@ def dynamo_timed(
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
-    # We're standardizing on microseconds for dynamo_compile timings.
-    if dynamo_compile_column_us is not None:
-        assert dynamo_compile_column_us.endswith("_us")
-
-    # Only one of these should be set.
-    assert dynamo_compile_column_us is None or dynamo_compile_runtime_column_us is None
-
     if phase_name:
         event_name = phase_name
         fn_name = key
@@ -709,6 +701,15 @@ def dynamo_timed(
             _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
         )
 
+    if dynamo_compile_column_us:
+        # We're standardizing on microseconds for dynamo_compile timings.
+        assert dynamo_compile_column_us.endswith("_us")
+        # Track nested dynamo_timed calls that update CompilationMetrics so we can
+        # bump a total duration only for the outermost metric.
+        if not hasattr(_dynamo_timed_tls, "depth"):
+            _dynamo_timed_tls.depth = 0
+        _dynamo_timed_tls.depth += 1
+
     try:
         with contextlib.ExitStack() as stack:
             for cx in cx_managers:
@@ -722,11 +723,6 @@ def dynamo_timed(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
         if dynamo_compile_column_us:
-            metrics_context = get_metrics_context()
-            if metrics_context.in_progress():
-                metrics_context.increment(
-                    dynamo_compile_column_us, time_spent_ns // 1000
-                )
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
             # CompilationMetrics (but note that we accumulate by the associated event
@@ -734,17 +730,31 @@ def dynamo_timed(
             # this way?
             cumulative_time_spent_ns[event_name] += time_spent_ns
 
-        if dynamo_compile_runtime_column_us:
-            get_runtime_metrics_context().increment(
-                dynamo_compile_runtime_column_us,
-                time_spent_ns // 1000,
-                extra={
-                    "compile_id": compile_id,
-                    "is_runtime": True,
-                    "is_forward": not is_backward,
-                },
+            duration_us = time_spent_ns // 1000
+            is_compile_time_event = (
+                torch._guards.CompileContext.current_compile_id() is not None
             )
-            cumulative_time_spent_ns[event_name] += time_spent_ns
+
+            # Bump the total duration for every outer event.
+            _dynamo_timed_tls.depth -= 1
+            is_outer_event = _dynamo_timed_tls.depth == 0
+
+            if is_compile_time_event:
+                metrics_context = get_metrics_context()
+                if metrics_context.in_progress():
+                    metrics_context.increment(dynamo_compile_column_us, duration_us)
+                    if is_outer_event:
+                        metrics_context.increment("duration_us", duration_us)
+            else:
+                runtime_context = get_runtime_metrics_context()
+                runtime_context.increment(dynamo_compile_column_us, duration_us)
+                if is_outer_event:
+                    extra = {
+                        "compile_id": compile_id,
+                        "is_runtime": True,
+                        "is_forward": not is_backward,
+                    }
+                    runtime_context.increment("duration_us", duration_us, extra)
 
 
 @overload
@@ -1528,7 +1538,6 @@ def record_compilation_metrics(
         "compile_id": compile_id,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
-        "duration_us": (end_time_ns - start_time_ns) // 1000,
         "fail_type": exc_type.__qualname__ if exc_type else None,
         "fail_reason": str(exc_value) if exc_value else None,
         "structured_logging_overhead_us": to_int_us(
