@@ -2,7 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Optional
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -16,7 +16,11 @@ __all__ = [
     "current_device_index",
     "current_stream",
     "device_count",
+    "empty_cache",
     "is_available",
+    "memory_allocated",
+    "memory_reserved",
+    "memory_stats",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
@@ -41,6 +45,15 @@ def device_count() -> int:
 
     mod = torch.get_device_module(acc)
     return mod.device_count()
+
+
+# TODO: replace with C code once generic CachingAllocator is upstreamed
+def empty_cache() -> None:
+    acc = current_accelerator()
+    if acc is None:
+        return
+    mod = torch.get_device_module(acc)
+    mod.empty_cache()
 
 
 def is_available() -> bool:
@@ -189,3 +202,49 @@ def synchronize(device: _device_t = None, /) -> None:
     """
     device_index = _get_device_index(device, True)
     torch._C._accelerator_synchronizeDevice(device_index)
+
+
+def memory_stats(device: _device_t = None) -> dict[str, Any]:
+    r"""Return the current memory stats for a given device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): a given device that must match the current
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        dict[str, int]: the current memory stats for a given device.
+    """
+    acc = current_accelerator()
+    if acc is None:
+        return {}
+    mod = torch.get_device_module(acc)
+    return mod.memory_stats(device)
+
+
+def memory_allocated(device: _device_t = None) -> int:
+    r"""Return the current memory occupied by tensors in bytes for a given device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): a given device that must match the current
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        int: the current memory allocated for a given device.
+    """
+    return memory_stats(device=device).get("allocated_bytes.all.current", 0)
+
+
+def memory_reserved(device: _device_t = None) -> int:
+    r"""Return the current memory reserved by the caching allocator in bytes for a given device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): a given device that must match the current
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        int: the current memory reserved for a given device.
+    """
+    return memory_stats(device=device).get("reserved_bytes.all.current", 0)
