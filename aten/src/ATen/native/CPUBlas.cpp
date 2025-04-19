@@ -27,6 +27,9 @@ extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 const at::BFloat16 *b, int *ldb,
                 float *beta,
                 float *c, int *ldc);
+
+extern "C" void sbgemv_(const char* trans, const int* m, const int* n, const float* alpha, const at::BFloat16 * a, const int* lda, const at::BFloat16 * x, const int* incx, const float* beta, float* y, const int* incy);
+
 #endif  // BLAS_HAS_SBGEMM
 extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy);
 extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
@@ -413,15 +416,24 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      sbgemm_(&transa_, &transb_,
-              &m_, &n_, &k_,
-              &alpha_,
-              a, &lda_,
-              b, &ldb_,
-              &beta_,
-              c, &ldc_);
+      if (m != 1 && n == 1 && k != 1 && transb == TransposeType::NoTranspose) { // dispatch to sbgemv kernel
+        int incr_x = 1, incr_y = 1;
+        if(transa == TransposeType::NoTranspose) {
+          sbgemv_(&transa_, &m_, &k_, &alpha_, a, &lda_, b, &incr_x, &beta_, c, &incr_y);
+        } else {
+          sbgemv_(&transa_, &k_, &m_, &alpha_, a, &lda_, b, &incr_x, &beta_, c, &incr_y);
+        }
+      } else {
+        sbgemm_(&transa_, &transb_,
+                &m_, &n_, &k_,
+                &alpha_,
+                a, &lda_,
+                b, &ldb_,
+                &beta_,
+                c, &ldc_);
+      }
       return;
-   }
+    }
 #endif
 #ifdef MKL_HAS_SBGEMM
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
