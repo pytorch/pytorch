@@ -145,7 +145,7 @@ class SymbolicOpsTest(common_utils.TestCase):
             def forward(self, x: torch.Tensor):
                 return torch.onnx.ops.symbolic(
                     "custom_domain::CustomOp",
-                    (x,),
+                    (x, None),
                     dict(
                         int_key=1,
                         float_key=1.0,
@@ -289,7 +289,7 @@ class SymbolicOpsTest(common_utils.TestCase):
             def forward(self, x: torch.Tensor):
                 return torch.onnx.ops.symbolic_multi_out(
                     "custom_domain::CustomOp",
-                    (x,),
+                    (x, None),
                     dict(
                         int_key=1,
                         float_key=1.0,

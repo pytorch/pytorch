@@ -4452,7 +4452,7 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -4471,7 +4471,7 @@ def forward(self, arg0_1):
     cos_1 = torch.ops.aten.cos.default(add);  add = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [cos_1]);  gt = true_graph_0 = false_graph_0 = cos_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (cos_1,));  gt = true_graph_0 = false_graph_0 = cos_1 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -4528,7 +4528,7 @@ def forward(self, arg0_1, arg1_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1, arg1_1));  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -4647,7 +4647,7 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -5082,7 +5082,7 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1,));  gt = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -6078,8 +6078,8 @@ class TestAOTModuleSimplified(AOTTestCase):
         self.assertExpectedInline(
             shape_env.format_guards(),
             """\
- - Eq(s1, 20)
- - Eq(s2, 30)""",
+ - Eq(s49, 20)
+ - Eq(s70, 30)""",
         )
 
         assert torch.allclose(ref[0], res[0])
@@ -6632,6 +6632,7 @@ metadata incorrectly.
     @parametrize("dynamic_shapes", [True, False])
     @parametrize("test_subclasses", [True, False])
     @parametrize("device", ["cuda", "cpu"])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_noncontig_nonmemformat_tangents(
         self, dynamic_shapes, test_subclasses, device
     ):
@@ -6697,6 +6698,7 @@ metadata incorrectly.
 
             self.assertEqual(ref_x.grad, x.grad)
 
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
@@ -7148,7 +7150,8 @@ class MockFXGraphCache:
         if gm is not None:
             gm = make_boxed_func(gm)
             gm = MockFXGraphCacheOutput(gm)
-            gm._fx_graph_cache_key = key
+            gm._fx_graph_cache_key = key  # (cache_key, debug lines)
+            gm._fx_graph_cache_debug_lines = []
             gm._time_taken_ns = 0
         return gm, {}
 

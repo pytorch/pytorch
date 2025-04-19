@@ -61,9 +61,16 @@ class BinaryBuildWorkflow:
     cross_compile_arm64: bool = False
     macos_runner: str = "macos-14-xlarge"
     use_split_build: bool = False
+    # Mainly used for libtorch builds
+    build_variant: str = ""
 
     def __post_init__(self) -> None:
-        self.build_environment = f"{self.os}-binary-{self.package_type}"
+        if self.build_environment == "":
+            self.build_environment = "-".join(
+                item
+                for item in [self.os, "binary", self.package_type, self.build_variant]
+                if item != ""
+            )
         if self.use_split_build:
             # added to distinguish concurrency groups
             self.build_environment += "-split"
@@ -169,6 +176,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
         package_type="libtorch",
+        build_variant=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.LINUX,
             generate_binary_build_matrix.RELEASE,
@@ -194,6 +202,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
+        build_variant=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.WINDOWS,
             generate_binary_build_matrix.RELEASE,
@@ -207,6 +216,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
+        build_variant=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.WINDOWS,
             generate_binary_build_matrix.DEBUG,
@@ -217,40 +227,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
             isolated_workflow=True,
         ),
     ),
-]
-
-WINDOWS_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.RELEASE,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-        ciflow_config=CIFlowConfig(
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.DEBUG,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-        ciflow_config=CIFlowConfig(
-            isolated_workflow=True,
-        ),
-    ),
-]
-
-WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="wheel",
@@ -267,6 +243,7 @@ WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="libtorch",
+        build_variant=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.WINDOWS_ARM64,
             generate_binary_build_matrix.RELEASE,
@@ -281,6 +258,7 @@ WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="libtorch",
+        build_variant=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.WINDOWS_ARM64,
             generate_binary_build_matrix.DEBUG,
@@ -294,10 +272,44 @@ WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
+WINDOWS_BINARY_SMOKE_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        build_variant=generate_binary_build_matrix.RELEASE,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS,
+            generate_binary_build_matrix.RELEASE,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="main",
+        ciflow_config=CIFlowConfig(
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        build_variant=generate_binary_build_matrix.DEBUG,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS,
+            generate_binary_build_matrix.DEBUG,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="main",
+        ciflow_config=CIFlowConfig(
+            isolated_workflow=True,
+        ),
+    ),
+]
+
 MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS_ARM64,
         package_type="libtorch",
+        build_variant=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.MACOS,
             generate_binary_build_matrix.RELEASE,
@@ -386,10 +398,6 @@ def main() -> None:
         (
             jinja_env.get_template("windows_binary_build_workflow.yml.j2"),
             WINDOWS_BINARY_SMOKE_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("windows_arm64_binary_build_workflow.yml.j2"),
-            WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS,
         ),
         (
             jinja_env.get_template("macos_binary_build_workflow.yml.j2"),

@@ -36,7 +36,9 @@ FROM base as cuda
 ARG BASE_CUDA_VERSION=11.8
 # Install CUDA
 ADD ./common/install_cuda.sh install_cuda.sh
-RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh ci_commit_pins/nccl-cu*
 
 FROM base as intel
 # MKL
@@ -59,11 +61,6 @@ FROM base as libpng
 # Install libpng
 ADD ./common/install_libpng.sh install_libpng.sh
 RUN bash ./install_libpng.sh && rm install_libpng.sh
-
-FROM base as cache
-# Install sccache
-ADD ./common/install_cache.sh install_cache.sh
-RUN bash ./install_cache.sh && rm install_cache.sh
 
 FROM ${GPU_IMAGE} as common
 ARG DEVTOOLSET_VERSION=11
@@ -117,10 +114,6 @@ COPY --from=libpng             /usr/local/include/libpng*            /usr/local/
 COPY --from=libpng             /usr/local/lib/libpng*                /usr/local/lib/
 COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/lib/pkgconfig
 COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
-COPY --from=cache              /opt/cache                            /opt/cache
-
-# Ensure sccache is included in the path
-ENV PATH /opt/cache/bin:$PATH
 
 FROM common as cpu_final
 ARG BASE_CUDA_VERSION=11.8
@@ -167,7 +160,7 @@ ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
 ENV MKLROOT /opt/intel
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
+RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 

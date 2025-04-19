@@ -95,7 +95,7 @@ Releasing a new version of PyTorch generally entails 3 major steps:
   * A: When bulk of the tracked features merged into the main branch, the primary release engineer starts the release process of cutting the release branch by creating a new git branch based off of the current `main` development branch of PyTorch. This allows PyTorch development flow on `main` to continue uninterrupted, while the release engineering team focuses on stabilizing the release branch in order to release a series of release candidates (RC). The activities in the release branch include both regression and performance testing as well as polishing new features and fixing release-specific bugs. In general, new features *are not* added to the release branch after it was created.
 
 * Q: What is a cherry-pick ?
-  * A: A cherry pick is a process of propagating commits from the main into the release branch, utilizing git's built in [cherry-pick feature](https://git-scm.com/docs/git-cherry-pick). These commits are typically limited to small fixes or documentation updates to ensure that the release engineering team has sufficient time to complete a thorough round of testing on the release branch. To nominate a fix for cherry-picking, a separate pull request must be created against the respective release branch and then mentioned in the Release Tracker issue (example: https://github.com/pytorch/pytorch/issues/94937) following the template from the issue description. The comment nominating a particular cherry-pick for inclusion in the release should include the committed PR against main branch, the newly created cherry-pick PR, as well as the acceptance criteria for why the cherry-pick is needed in the first place.
+  * A: A cherry pick is a process of propagating commits from the main into the release branch, utilizing git's built in [cherry-pick feature](https://git-scm.com/docs/git-cherry-pick). These commits are typically limited to small fixes or documentation updates to ensure that the release engineering team has sufficient time to complete a thorough round of testing on the release branch. To nominate a fix for cherry-picking, a separate pull request must be created against the respective release branch and then mentioned in the Release Tracker issue (example: https://github.com/pytorch/pytorch/issues/94937) following the template from the issue description. The comment nominating a particular cherry-pick for inclusion in the release should include the committed PR against main branch, the newly created cherry-pick PR, as well as the acceptance criteria for why the cherry-pick is needed in the first place.  This process can be automated by using entering a comment `@pytorchbot cherry-pick -c [reason]` on the PR you wish to cherry-pick.
 
 ## Cutting a release branch preparations
 
@@ -132,7 +132,7 @@ This script should create 2 branches:
 ### PyTorch ecosystem libraries
 
 *Note*:  Release branches for individual ecosystem libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Ecosystem Library POC.
-Test-Infra branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used domains.
+Test-Infra branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used for domains.
 
 > NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
 
@@ -141,8 +141,11 @@ DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/releas
 ```
 
 ### Making release branch specific changes for PyTorch
+First you should cut a release branch for pytorch/test-infra:
+* Create a new branch using the naming convention `release/[major].[minor]`, e.g. `release/2.7`
+* On that release branch, update branch pointers for any pytorch-managed reusable actions or workflows to point to the new release's branch ([example](https://github.com/pytorch/test-infra/commit/749b9e36afa23298ad5498c9f5bcd96f5467baff#diff-d41015f3ac6cfa64b00e366bec416bb9487ac27493de7ebe7778fdfc7518b003R39)).
 
-These are examples of changes that should be made to release branches so that CI / tooling can function normally on
+Here are examples of changes that should be made to the pytorch/pytorch release branches so that CI / tooling can function normally on
 them:
 
 * Update backwards compatibility tests to use RC binaries instead of nightlies
@@ -163,8 +166,10 @@ Ecosystem libraries branch cut is done a few days after branch cut for the `pyto
 After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
-* torchvision : https://github.com/pytorch/vision/pull/5400
-* torchaudio: https://github.com/pytorch/audio/pull/2210
+* torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change workflow branch references](https://github.com/pytorch/vision/pull/8969)
+* torchaudio: [Update version.txt](https://github.com/pytorch/audio/commit/654fee8fd17784271be1637eac1293fd834b4e9a) and [change workflow branch references](https://github.com/pytorch/audio/pull/3890)
+
+The CI workflow updating part of the above PRs can be automated by running: `python release/apply-release-changes.py [version]` (where version is something like '2.7').  That script lives in both pytorch/audio and pytorch/vision.
 
 ## Running Launch Execution team Core XFN sync
 
@@ -207,9 +212,7 @@ git tag -f  v1.12.0-rc2
 git push origin  v1.12.0-rc2
 ```
 
-Pushing a release candidate should trigger the `binary_builds` workflow within CircleCI using [`pytorch/pytorch-probot`](https://github.com/pytorch/pytorch-probot)'s [`trigger-circleci-workflows`](trigger-circleci-workflows) functionality.
-
-This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
+Pushing a release candidate tag should trigger the `binary_build` workflows. This trigger functionality is configured in [`linux_binary_build_workflow.yml.j2]`][(https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml](https://github.com/pytorch/pytorch/blob/main/.github/templates/linux_binary_build_workflow.yml.j2#L19-L22)) and in the matching templates for the other OSes.
 
 To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). And make sure all binary builds are successful.
 ### Release Candidate Storage

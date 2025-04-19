@@ -256,6 +256,9 @@ class TestSavePlan(TestCase):
             self.assertIsNone(plan.storage_data)
 
         self.assertEqual(first_metadata, second_metadata)
+        self.assertEqual(
+            second_metadata, planner._cached_metadata[planner._cached_plans_key]
+        )
 
         # Validate that all_plans are cached and remain unchanged.
         cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
@@ -296,6 +299,10 @@ class TestSavePlan(TestCase):
 
         # Global metadata should be different as one plan has changed
         self.assertNotEqual(second_metadata, third_metadata)
+        # Validate that the metadata is cached
+        self.assertEqual(
+            third_metadata, planner._cached_metadata[planner._cached_plans_key]
+        )
 
         # Validate that the new plan has been cached
         cached_global_plan = SavePlanner._cached_global_plan[planner._cached_plans_key][

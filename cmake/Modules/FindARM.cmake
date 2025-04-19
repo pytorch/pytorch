@@ -106,18 +106,8 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       }
     ")
 
-    SET(SVE_BF16_CODE "
-      #include <arm_sve.h>
-      int main()
-      {
-        svfloat32_t a = svdup_n_f32(0);
-        svbfloat16_t b = svreinterpret_bf16_f32(a);
-        return 0;
-      }
-    ")
-
     # Macro to check for SVE instruction support
-    MACRO(CHECK_COMPILES lang type flags code)
+    MACRO(CHECK_SVE lang type flags)
       # Save the current state of required flags
       SET(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
 
@@ -152,8 +142,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     ENDMACRO()
 
     # Check for SVE256 vector length
-    CHECK_COMPILES(CXX "SVE256" "-march=armv8.2-a+sve -msve-vector-bits=256" SVE_CODE)
-    CHECK_COMPILES(CXX "SVE256_BF16" "-march=armv8.2-a+sve+bf16 -msve-vector-bits=256" SVE_BF16_CODE)
+    CHECK_SVE(CXX "SVE256" "-march=armv8-a+sve -msve-vector-bits=256")
 
     # If SVE256 support is not found, set CXX_SVE_FOUND to FALSE and notify the user
     if(NOT CXX_SVE256_FOUND)

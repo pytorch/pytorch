@@ -322,7 +322,7 @@ def _load_state_dict_from_keys(
         storage_reader=storage_reader,
         process_group=process_group,
         no_dist=no_dist,
-        planner=_EmptyStateDictLoadPlanner(keys=keys or set()),
+        planner=_EmptyStateDictLoadPlanner(keys=keys),
     )
 
     return sd

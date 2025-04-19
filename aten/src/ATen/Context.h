@@ -446,17 +446,15 @@ class TORCH_API Context {
   bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
-      c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
+      (c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true ||
+       c10::utils::check_env("TORCH_LINALG_PREFER_HIPSOLVER") == true) // alias
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
   at::BlasBackend blas_preferred_backend =
-#ifdef USE_ROCM
-      (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
-#else
-      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
-#endif
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
+       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true) // alias
       ? at::BlasBackend::Cublaslt
-      : at::BlasBackend::Cublas;
+      : at::BlasBackend::Default;
   at::ROCmFABackend rocm_fa_preferred_backend =
       c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
       ? at::ROCmFABackend::Ck
