@@ -114,6 +114,8 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
+    case at::kUInt64:
+      return ncclDataType_t::ncclUint64;
 #if defined(USE_ROCM)
     case at::kFloat8_e4m3fnuz:
       return ncclDataType_t::ncclUint8;
