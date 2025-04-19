@@ -38,6 +38,7 @@ from torch.onnx._internal.exporter import (
     _registration,
     _reporting,
     _tensors,
+    _type_casting,
     _verification,
 )
 
@@ -61,6 +62,7 @@ _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
     torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
     torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
+    torch.float4_e2m1fn_x2: ir.DataType.FLOAT4E2M1,
     torch.int16: ir.DataType.INT16,
     torch.int32: ir.DataType.INT32,
     torch.int64: ir.DataType.INT64,
@@ -109,8 +111,17 @@ def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
 class TorchTensor(ir.Tensor):
     def __init__(self, tensor: torch.Tensor, name: str | None = None):
         # Pass the tensor as the raw data to ir.Tensor's constructor
+        if tensor.dtype == torch.float4_e2m1fn_x2:
+            # Change the shape to the unpacked shape
+            shape = ir.Shape(_type_casting.get_float4_shape(tensor), frozen=True)
+        else:
+            # The base class will set the shape to the tensor's shape
+            shape = None
         super().__init__(
-            tensor, dtype=torch_dtype_to_onnx_dtype(tensor.dtype), name=name
+            tensor,
+            dtype=torch_dtype_to_onnx_dtype(tensor.dtype),
+            shape=shape,
+            name=name,
         )
 
     def numpy(self) -> npt.NDArray:
@@ -132,6 +143,10 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
+        if self.dtype == ir.DataType.FLOAT4E2M1:
+            return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
+                self.dtype.numpy()
+            )
 
         return self.raw.numpy(force=True)
 
@@ -213,7 +228,13 @@ def _set_shape_type(
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
         dims = []
-        for dim in meta_val.shape:
+        shape: tuple[int, ...]
+        if meta_val.dtype == torch.float4_e2m1fn_x2:
+            # Change the shape to the unpacked shape
+            shape = _type_casting.get_float4_shape(meta_val)
+        else:
+            shape = meta_val.shape
+        for dim in shape:
             if isinstance(dim, int):
                 dims.append(dim)
             else:
