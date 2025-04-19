@@ -274,6 +274,10 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
   }
 
+  c10::intrusive_ptr<Store> clone() override {
+    PYBIND11_OVERLOAD_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
+  }
+
   // Note: this function manually calls the Python-side overload
   // for this function instead of using the PYBIND11_OVERLOAD_XYZ
   // macros. This is done so that we can call the Python-side
@@ -555,7 +559,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool find_unused_parameters,
                  bool gradient_as_bucket_view,
                  std::unordered_map<size_t, std::string> param_to_name_mapping,
-                 int64_t first_bucket_bytes_cap) {
+                 int64_t first_bucket_bytes_cap,
+                 bool skip_all_reduce_unused_params) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -569,7 +574,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     find_unused_parameters,
                     gradient_as_bucket_view,
                     std::move(param_to_name_mapping),
-                    first_bucket_bytes_cap);
+                    first_bucket_bytes_cap,
+                    skip_all_reduce_unused_params);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -581,7 +587,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("gradient_as_bucket_view") = false,
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
-          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes)
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
+          py::arg("skip_all_reduce_unused_params") = false)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -1208,6 +1215,16 @@ and :class:`~torch.distributed.HashStore`).
 )")
           // Default constructor.
           .def(py::init<>())
+          .def(
+              "clone",
+              &::c10d::Store::clone,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Clones the store and returns a new object that points to the same underlying
+store. The returned store can be used concurrently with the original object.
+This is intended to provide a safe way to use a store from multiple threads by
+cloning one store per thread.
+)")
           // Convert from std::string to std::vector<uint8>.
           .def(
               "set",
@@ -1333,7 +1350,7 @@ Calling :meth:`~torch.distributed.store.check` with a list of keys that
 one wants to check whether stored in the store or not.
 
 Arguments:
-    keys (lisr[str]): The keys to query whether stored in the store.
+    keys (list[str]): The keys to query whether stored in the store.
 
 Example::
     >>> import torch.distributed as dist
@@ -1542,6 +1559,63 @@ Example::
     >>> store.get("first_key")
 )")
           .def(
+              "queue_push",
+              [](::c10d::Store& store,
+                 const std::string& key,
+                 const std::string& value) {
+                store.queuePush(key, toVec8(value));
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Pushes a value into the specified queue.
+
+Using the same key for queues and set/get operations may result in unexpected
+behavior.
+
+wait/check operations are supported for queues.
+
+wait with queues will only wake one waiting worker rather than all.
+
+Arguments:
+    key (str): The key of the queue to push to.
+    value (str): The value to push into the queue.
+)")
+          .def(
+              "queue_pop",
+              [](::c10d::Store& store, const std::string& key, bool block) {
+                auto out = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.queuePop(key, block);
+                }();
+                return toPyBytes(out);
+              },
+              py::arg("key"),
+              py::arg("block") = true,
+              R"(
+Pops a value from the specified queue or waits until timeout if the queue is empty.
+
+See queue_push for more details.
+
+If block is False, a dist.QueueEmptyError will be raised if the queue is empty.
+
+Arguments:
+    key (str): The key of the queue to pop from.
+    block (bool): Whether to block waiting for the key or immediately return.
+)")
+          .def(
+              "queue_len",
+              &::c10d::Store::queueLen,
+              R"(
+Returns the length of the specified queue.
+
+If the queue doesn't exist it returns 0.
+
+See queue_push for more details.
+
+Arguments:
+    key (str): The key of the queue to get the length.
+)")
+          .def(
               "has_extended_api",
               &::c10d::Store::hasExtendedApi,
               R"(Returns true if the store supports extended operations.)");
@@ -1615,7 +1689,7 @@ Arguments:
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
-    master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
+    master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
 Example::
     >>> import torch.distributed as dist
@@ -2512,6 +2586,10 @@ Arguments:
               "supports_coalescing",
               &::c10d::Backend::supportsCoalescing,
               "(test whether the backend supports coalescing)")
+          .def_property_readonly(
+              "supports_time_estimate",
+              &::c10d::Backend::supportsTimeEstimation,
+              "(test whether the backend supports collective time estimation)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -2845,24 +2923,36 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
   processGroupGloo
       .def_static(
           "create_device",
-          [](const std::string& hostname, const std::string& interface)
+          [](const std::string& hostname,
+             const std::string& interface,
+             std::optional<bool> lazyInit_)
               -> std::shared_ptr<::gloo::transport::Device> {
+            bool lazyInit =
+                lazyInit_.value_or(::c10d::getDefaultGlooLazyInit());
+
             if (!hostname.empty()) {
               return ::c10d::ProcessGroupGloo::createDeviceForHostname(
-                  hostname);
+                  hostname, lazyInit);
             }
             if (!interface.empty()) {
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
-                  interface);
+                  interface, lazyInit);
             }
             throw std::invalid_argument(
                 "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
-          py::arg("interface") = "")
+          py::arg("interface") = "",
+          py::arg("lazy_init") = std::nullopt)
       .def_static(
           "create_default_device",
-          &::c10d::ProcessGroupGloo::createDefaultDevice);
+          [](std::optional<bool> lazyInit_) {
+            bool lazyInit =
+                lazyInit_.value_or(::c10d::getDefaultGlooLazyInit());
+
+            return ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit);
+          },
+          py::arg("lazy_init") = std::nullopt);
 
   processGroupGloo
       .def(
@@ -2894,20 +2984,22 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             py::gil_scoped_release nogil{};
 
             auto options = ::c10d::ProcessGroupGloo::Options::create();
+            bool lazyInit = ::c10d::getDefaultGlooLazyInit();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
             if (ifnameEnv && strlen(ifnameEnv) > 1) {
               for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options->devices.push_back(
-                    ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
+                    ::c10d::ProcessGroupGloo::createDeviceForInterface(
+                        iface, lazyInit));
               }
             } else {
               // If no hostname is specified, this function looks up
               // the machine's hostname and returns a device instance
               // associated with the address that the hostname resolves to.
               options->devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDefaultDevice());
+                  ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
             }
 
             options->timeout = timeout;
@@ -3000,6 +3092,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               R"(Create a new ProcessGroupNCCL instance.)")
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
+          .def(
+              "_start_time_estimate",
+              &::c10d::ProcessGroupNCCL::startTimeEstimate)
+          .def("_end_time_estimate", &::c10d::ProcessGroupNCCL::endTimeEstimate)
           .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
@@ -3550,6 +3646,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         if (get("key3") != "15") {
           TORCH_CHECK(false, "assertion failed");
         }
+
+        auto cloned = store->clone();
+        store->set("foo", "bar");
+
+        auto ret = cloned->get("foo");
+        TORCH_CHECK(
+            std::string(ret.begin(), ret.end()) == "bar",
+            "checked clone behavior");
       },
       py::call_guard<py::gil_scoped_release>());
 

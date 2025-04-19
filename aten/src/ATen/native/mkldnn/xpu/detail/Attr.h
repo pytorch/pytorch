@@ -131,7 +131,7 @@ struct PostOpParam {
 
 class Attr {
  public:
-  Attr() : q_scale_(1.f), q_zero_point_(0) {}
+  Attr() : q_scale_(1.f) {}
   Attr(float q_scale, int64_t zp = 0) : q_scale_(q_scale), q_zero_point_(zp) {}
 
   /***** eltwise *****/
@@ -338,8 +338,7 @@ class Attr {
     // [1, C, 1, 1], channel broadcast
     // [dst.shape], no broadcast and eltwise-wise binary operations on dst
 
-    auto engine = GpuEngineManager::Instance().get_engine(
-        {c10::kXPU, c10::xpu::current_device()});
+    auto& engine = GpuEngineManager::Instance().get_engine();
     for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       if (kind == kind_t::binary) {

@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import copy
 import sys
 
 import torch
@@ -201,6 +200,26 @@ class TestSavePlan(TestCase):
                         item_md.chunks[new_item.index.index], old_item.tensor_data.chunk
                     )
 
+    def test_dedup_plans(self):
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=4):
+                tensor = torch.rand(10)
+                val = [1, 2, 3]
+                st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
+                state_dict = {"tensor": tensor, "value": val, "st": st}
+                return create_default_local_save_plan(state_dict, rank == 0)
+
+        all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        deduped_plans = dedup_save_plans(all_plans)
+
+        # Number of plans should remain unchanged
+        self.assertEqual(len(all_plans), len(deduped_plans))
+
+        # Numer of items in the deduped plans should be less than the original plans
+        for new_plan, old_plan in zip(deduped_plans, all_plans):
+            self.assertFalse(_compare_save_plans(new_plan, old_plan))
+            self.assertTrue(len(new_plan.items) < len(old_plan.items))
+
     def test_global_plan_with_caching(self):
         def create_data(rank):
             with with_dist(rank=rank, world_size=4):
@@ -213,7 +232,6 @@ class TestSavePlan(TestCase):
                 return planner.create_local_plan()
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
-        expected_all_plans = copy.deepcopy(all_plans)
         planner = DefaultSavePlanner(enable_plan_caching=True)
         # First iteration, should create a new plan
         first_global_plan, first_metadata = planner.create_global_plan(all_plans)
@@ -224,12 +242,11 @@ class TestSavePlan(TestCase):
 
         # Validate that all_plans are cached
         cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
-        self.assertEqual(cached_all_plans, expected_all_plans)
+        self.assertEqual(cached_all_plans, all_plans)
 
         # Second iteration, should return empty plans
         # Recreate the plans as the previous ones are deduped.
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
-        expected_all_plans = copy.deepcopy(all_plans)
         second_global_plan, second_metadata = planner.create_global_plan(all_plans)
         # All the plans should be empty and usable
         for plan in second_global_plan:
@@ -239,10 +256,13 @@ class TestSavePlan(TestCase):
             self.assertIsNone(plan.storage_data)
 
         self.assertEqual(first_metadata, second_metadata)
+        self.assertEqual(
+            second_metadata, planner._cached_metadata[planner._cached_plans_key]
+        )
 
         # Validate that all_plans are cached and remain unchanged.
         cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
-        self.assertEqual(cached_all_plans, expected_all_plans)
+        self.assertEqual(cached_all_plans, all_plans)
 
         # Third iteration with changed plans
         def create_data_v2(rank):
@@ -261,7 +281,6 @@ class TestSavePlan(TestCase):
             create_data_v2(2),
             create_data_v2(3),
         ]
-        expected_all_plans = copy.deepcopy(all_plans)
         third_global_plan, third_metadata = planner.create_global_plan(all_plans)
         # Only the rank 0 plan should be non-empty. The rest should be empty
         tensor_plan = third_global_plan[0]
@@ -270,7 +289,7 @@ class TestSavePlan(TestCase):
 
         # Validate that all_plans are updated and cached
         cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
-        self.assertEqual(cached_all_plans, expected_all_plans)
+        self.assertEqual(cached_all_plans, all_plans)
 
         for plan in third_global_plan[1:]:
             self.assertFalse(plan.usable)
@@ -280,6 +299,10 @@ class TestSavePlan(TestCase):
 
         # Global metadata should be different as one plan has changed
         self.assertNotEqual(second_metadata, third_metadata)
+        # Validate that the metadata is cached
+        self.assertEqual(
+            third_metadata, planner._cached_metadata[planner._cached_plans_key]
+        )
 
         # Validate that the new plan has been cached
         cached_global_plan = SavePlanner._cached_global_plan[planner._cached_plans_key][

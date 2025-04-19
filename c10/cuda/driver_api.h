@@ -3,6 +3,8 @@
 #define NVML_NO_UNVERSIONED_FUNC_DEFS
 #include <nvml.h>
 
+#include <c10/util/Exception.h>
+
 #define C10_CUDA_DRIVER_CHECK(EXPR)                                        \
   do {                                                                     \
     CUresult __err = EXPR;                                                 \

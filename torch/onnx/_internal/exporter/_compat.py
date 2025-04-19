@@ -50,7 +50,7 @@ def export_compat(
     verbose: bool | None = None,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
-    opset_version: int | None = None,
+    opset_version: int | None = _constants.TORCHLIB_OPSET,
     custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
     | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
@@ -105,8 +105,7 @@ def export_compat(
     dynamic_shapes_with_export_dim, need_axis_mapping = (
         _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
     )
-
-    registry = _registration.ONNXRegistry.from_torchlib()
+    registry = _registration.ONNXRegistry().from_torchlib(opset_version=opset_version)
     if custom_translation_table is not None:
         for torch_op, onnx_ops in custom_translation_table.items():
             # TODO(justinchuby): Support complex inputs with annotations

@@ -210,6 +210,12 @@ def maybe_skip_size_asserts(op):
     else:
         return contextlib.nullcontext()
 
+def get_func_call() -> str:
+    return "void inductor_entry_impl(" if torch._inductor.config.cpp_wrapper else "def call("
+
+def get_kernel_launch() -> str:
+    return "call_triton_" if torch._inductor.config.cpp_wrapper else ".run("
+
 def clone_preserve_strides_offset(x, device=None):
     if not isinstance(x, torch.Tensor):
         return x
