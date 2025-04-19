@@ -121,6 +121,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     size_bytes_is_heap_allocated_ = false;
   }
 
+  void unsafe_set_nbytes(size_t size_bytes) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!size_bytes_is_heap_allocated_);
+    size_bytes_.unsafe_set_data(size_bytes);
+  }
+
   void set_nbytes(c10::SymInt size_bytes) {
     size_bytes_ = std::move(size_bytes);
   }
