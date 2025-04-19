@@ -1236,6 +1236,8 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
+    if grad_output.is_xpu:
+        return NotImplemented
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -1474,7 +1476,7 @@ def _addmm_activation(
 ):
     out = addmm(self, mat1, mat2, beta, alpha)
     if use_gelu:
-        if self.is_cuda:
+        if self.is_cuda or self.is_xpu:
             return aten.gelu(out, approximate="tanh")
         else:
             return aten.gelu(out)
