@@ -751,17 +751,17 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& output) {
-  // Fallback to CPU implementation
-  auto input_cpu = input.to(at::kCPU);
-  auto output_cpu = at::avg_pool3d(
-      input_cpu,
-      kernel_size,
-      stride,
-      padding,
-      ceil_mode,
-      count_include_pad,
-      divisor_override);
-  output.copy_(output_cpu.to(at::kMPS));
+  avg_pool3d_template(input,
+                     output,
+                     std::nullopt,
+                     kernel_size,
+                     stride,
+                     padding,
+                     {1, 1, 1},
+                     ceil_mode,
+                     count_include_pad,
+                     divisor_override,
+                     "avg_pool3d");
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
@@ -774,19 +774,17 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& grad_input) {
-  // Fallback to CPU implementation
-  auto input_cpu = input.to(at::kCPU);
-  auto grad_output_cpu = grad_output.to(at::kCPU);
-  auto grad_input_cpu = at::avg_pool3d_backward(
-      grad_output_cpu,
-      input_cpu,
-      kernel_size,
-      stride,
-      padding,
-      ceil_mode,
-      count_include_pad,
-      divisor_override);
-  grad_input.copy_(grad_input_cpu.to(at::kMPS));
+  avg_pool3d_template(input,
+                     grad_input,
+                     grad_output,
+                     kernel_size,
+                     stride,
+                     padding,
+                     {1, 1, 1},
+                     ceil_mode,
+                     count_include_pad,
+                     divisor_override,
+                     "avg_pool3d_backward");
 }
 
 } // namespace at::native

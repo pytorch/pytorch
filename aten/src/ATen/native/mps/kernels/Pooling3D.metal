@@ -254,7 +254,6 @@ REGISTER_AVG_POOL3D_KERNELS(float);
 // Register for half (float16)
 REGISTER_AVG_POOL3D_KERNELS(half);
 // Register for bfloat16 if Metal version supports it
-// Disabled for now due to compatibility issues
-// #if __METAL_VERSION__ >= 310
-// REGISTER_AVG_POOL3D_KERNELS(bfloat);
-// #endif
+#if __METAL_VERSION__ >= 310
+REGISTER_AVG_POOL3D_KERNELS(bfloat);
+#endif
