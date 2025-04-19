@@ -642,6 +642,7 @@ static void avg_pool3d_template(const Tensor& input,
 
   // Create compute command encoder
   id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+  TORCH_CHECK(computeEncoder != nil, "Failed to create compute command encoder");
 
   // Get compute pipeline state
   NSString* kernelName = nil;
@@ -751,19 +752,37 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& output) {
-  // Ensure input is contiguous for consistent results
-  Tensor contiguous_input = input.is_contiguous() ? input : input.contiguous();
-  avg_pool3d_template(contiguous_input,
-                     output,
-                     std::nullopt,
-                     kernel_size,
-                     stride,
-                     padding,
-                     {1, 1, 1},
-                     ceil_mode,
-                     count_include_pad,
-                     divisor_override,
-                     "avg_pool3d");
+  // Create a new stream for non-contiguous tensors to avoid command buffer conflicts
+  if (!input.is_contiguous()) {
+    // Create a contiguous copy of the input tensor
+    Tensor contiguous_input = input.contiguous();
+
+    // Use the contiguous input tensor
+    avg_pool3d_template(contiguous_input,
+                       output,
+                       std::nullopt,
+                       kernel_size,
+                       stride,
+                       padding,
+                       {1, 1, 1},
+                       ceil_mode,
+                       count_include_pad,
+                       divisor_override,
+                       "avg_pool3d");
+  } else {
+    // Use the original input tensor directly
+    avg_pool3d_template(input,
+                       output,
+                       std::nullopt,
+                       kernel_size,
+                       stride,
+                       padding,
+                       {1, 1, 1},
+                       ceil_mode,
+                       count_include_pad,
+                       divisor_override,
+                       "avg_pool3d");
+  }
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
@@ -776,20 +795,38 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& grad_input) {
-  // Ensure input and grad_output are contiguous for consistent results
-  Tensor contiguous_input = input.is_contiguous() ? input : input.contiguous();
-  Tensor contiguous_grad_output = grad_output.is_contiguous() ? grad_output : grad_output.contiguous();
-  avg_pool3d_template(contiguous_input,
-                     grad_input,
-                     contiguous_grad_output,
-                     kernel_size,
-                     stride,
-                     padding,
-                     {1, 1, 1},
-                     ceil_mode,
-                     count_include_pad,
-                     divisor_override,
-                     "avg_pool3d_backward");
+  // Handle non-contiguous tensors
+  if (!input.is_contiguous() || !grad_output.is_contiguous()) {
+    // Create contiguous copies of the input and grad_output tensors
+    Tensor contiguous_input = input.is_contiguous() ? input : input.contiguous();
+    Tensor contiguous_grad_output = grad_output.is_contiguous() ? grad_output : grad_output.contiguous();
+
+    // Use the contiguous tensors
+    avg_pool3d_template(contiguous_input,
+                       grad_input,
+                       contiguous_grad_output,
+                       kernel_size,
+                       stride,
+                       padding,
+                       {1, 1, 1},
+                       ceil_mode,
+                       count_include_pad,
+                       divisor_override,
+                       "avg_pool3d_backward");
+  } else {
+    // Use the original tensors directly
+    avg_pool3d_template(input,
+                       grad_input,
+                       grad_output,
+                       kernel_size,
+                       stride,
+                       padding,
+                       {1, 1, 1},
+                       ceil_mode,
+                       count_include_pad,
+                       divisor_override,
+                       "avg_pool3d_backward");
+  }
 }
 
 } // namespace at::native
