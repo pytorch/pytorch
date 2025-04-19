@@ -4,7 +4,6 @@ Test the FX IR backend.
 """
 
 import operator
-import tempfile
 import unittest
 from typing import Callable, Optional
 
@@ -29,7 +28,11 @@ from torch.testing._internal.inductor_utils import (
 
 @requires_gpu()
 @config.patch(
-    compile_threads=1, size_asserts=False, scalar_asserts=False, nan_asserts=False
+    compile_threads=1,
+    alignment_asserts=False,
+    size_asserts=False,
+    scalar_asserts=False,
+    nan_asserts=False,
 )
 class FxirTestCase(InductorTestCase):
     device = GPU_TYPE
@@ -340,7 +343,6 @@ class FxirTestCase(InductorTestCase):
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
     def test_debug(self, mock_output_code):
         # Dump debug output to a predetermined directory, so we can find it.
-        debug_dir = tempfile.TemporaryDirectory()
         args = [torch.randn(11, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.sub, args)
 
