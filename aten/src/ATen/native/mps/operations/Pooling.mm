@@ -11,6 +11,10 @@
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/avg_pool3d.h>
+#include <ATen/ops/avg_pool3d_backward.h>
+#include <ATen/ops/avg_pool3d_backward_native.h>
+#include <ATen/ops/avg_pool3d_native.h>
 #include <ATen/ops/max_pool2d_backward_native.h>
 #include <ATen/ops/max_pool2d_native.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
@@ -539,6 +543,240 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps)
                            count_include_pad,
                            divisor_override,
                            "avg_pool2d_backward");
+}
+
+// 3D Average Pooling implementation using custom Metal shader
+static void avg_pool3d_template(const Tensor& input,
+                                const Tensor& output,
+                                const std::optional<Tensor>& grad_output_opt,
+                                IntArrayRef kernel_size,
+                                IntArrayRef stride,
+                                IntArrayRef padding,
+                                IntArrayRef dilation,
+                                bool ceil_mode,
+                                bool count_include_pad,
+                                const std::optional<int64_t> divisor_override,
+                                const c10::string& op_name) {
+  const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
+  const bool is_backward_pass = grad_output.defined();
+  const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
+
+  // Check macOS version compatibility
+  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS),
+              "avg_pool3d is only supported on MPS for MacOS_13_2 or newer");
+
+  // Handle special cases
+  if (use_divisor && input.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: passing divisor to Average Pooling op with int64 input is ",
+                    "not supported on MPS backend. ",
+                    "Falling back on CPU. This may have performance implications.");
+    if (!is_backward_pass) {
+      output.copy_(at::avg_pool3d(
+          input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override));
+    } else {
+      output.copy_(at::avg_pool3d_backward(grad_output.to("cpu"),
+                                           input.to("cpu"),
+                                           kernel_size,
+                                           stride,
+                                           padding,
+                                           ceil_mode,
+                                           count_include_pad,
+                                           divisor_override));
+    }
+    return;
+  }
+
+  // Check input dimensions
+  TORCH_CHECK(input.dim() == 5, "avg_pool3d: Expected 5D tensor as input, got ", input.dim(), "D tensor");
+
+  // Extract dimensions
+  const int64_t nbatch = input.size(0);
+  const int64_t channels = input.size(1);
+  const int64_t input_depth = input.size(2);
+  const int64_t input_height = input.size(3);
+  const int64_t input_width = input.size(4);
+
+  // Extract pooling parameters
+  const int64_t kD = kernel_size[0];
+  const int64_t kH = kernel_size.size() > 1 ? kernel_size[1] : kD;
+  const int64_t kW = kernel_size.size() > 2 ? kernel_size[2] : kH;
+
+  const int64_t dD = stride.empty() ? kD : stride[0];
+  const int64_t dH = stride.empty() ? kH : (stride.size() > 1 ? stride[1] : dD);
+  const int64_t dW = stride.empty() ? kW : (stride.size() > 2 ? stride[2] : dH);
+
+  const int64_t pD = padding.empty() ? 0 : padding[0];
+  const int64_t pH = padding.empty() ? 0 : (padding.size() > 1 ? padding[1] : pD);
+  const int64_t pW = padding.empty() ? 0 : (padding.size() > 2 ? padding[2] : pH);
+
+  const int64_t dilationD = dilation.empty() ? 1 : dilation[0];
+  const int64_t dilationH = dilation.empty() ? 1 : (dilation.size() > 1 ? dilation[1] : dilationD);
+  const int64_t dilationW = dilation.empty() ? 1 : (dilation.size() > 2 ? dilation[2] : dilationH);
+
+  // Check dilation
+  TORCH_CHECK(dilationD == 1 && dilationH == 1 && dilationW == 1,
+              "avg_pool3d: Dilation > 1 not supported in MPS backend");
+
+  // Calculate output dimensions
+  const int64_t output_depth = pooling_output_shape<int64_t>(input_depth, kD, pD, dD, dilationD, ceil_mode);
+  const int64_t output_height = pooling_output_shape<int64_t>(input_height, kH, pH, dH, dilationH, ceil_mode);
+  const int64_t output_width = pooling_output_shape<int64_t>(input_width, kW, pW, dW, dilationW, ceil_mode);
+
+  // Early return for empty tensors
+  if (input.numel() == 0 || output.numel() == 0 || (is_backward_pass && grad_output.numel() == 0)) {
+    return;
+  }
+
+  // Get MPS stream
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  // Get MPS data types
+  MPSDataType inputDataType = getMPSDataType(input.scalar_type());
+  MPSDataType outputDataType = getMPSDataType(output.scalar_type());
+
+  // Create command buffer
+  id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+  // Create compute command encoder
+  id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+
+  // Get compute pipeline state
+  NSString* kernelName = [NSString stringWithFormat:@"avg_pool3d_%@",
+                                                   getMPSTypeString(input.scalar_type())];
+  if (is_backward_pass) {
+    kernelName = [NSString stringWithFormat:@"avg_pool3d_backward_%@",
+                                           getMPSTypeString(input.scalar_type())];
+  }
+
+  id<MTLComputePipelineState> pipelineState = [[MetalContext sharedInstance] pipelineState:[kernelName UTF8String]];
+  [computeEncoder setComputePipelineState:pipelineState];
+
+  // Set buffers
+  if (!is_backward_pass) {
+    // Forward pass
+    id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
+    id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
+
+    [computeEncoder setBuffer:outputBuffer offset:0 atIndex:0];
+    [computeEncoder setBuffer:inputBuffer offset:0 atIndex:1];
+  } else {
+    // Backward pass
+    id<MTLBuffer> gradInputBuffer = getMTLBufferStorage(output); // grad_input
+    id<MTLBuffer> gradOutputBuffer = getMTLBufferStorage(grad_output);
+
+    [computeEncoder setBuffer:gradInputBuffer offset:0 atIndex:0];
+    [computeEncoder setBuffer:gradOutputBuffer offset:0 atIndex:1];
+  }
+
+  // Set parameters
+  int batch_size = static_cast<int>(nbatch);
+  int channels_val = static_cast<int>(channels);
+  int input_depth_val = static_cast<int>(input_depth);
+  int input_height_val = static_cast<int>(input_height);
+  int input_width_val = static_cast<int>(input_width);
+  int output_depth_val = static_cast<int>(output_depth);
+  int output_height_val = static_cast<int>(output_height);
+  int output_width_val = static_cast<int>(output_width);
+  int kernel_depth_val = static_cast<int>(kD);
+  int kernel_height_val = static_cast<int>(kH);
+  int kernel_width_val = static_cast<int>(kW);
+  int stride_depth_val = static_cast<int>(dD);
+  int stride_height_val = static_cast<int>(dH);
+  int stride_width_val = static_cast<int>(dW);
+  int padding_depth_val = static_cast<int>(pD);
+  int padding_height_val = static_cast<int>(pH);
+  int padding_width_val = static_cast<int>(pW);
+  int count_include_pad_val = count_include_pad ? 1 : 0;
+  int divisor_override_val = divisor_override.has_value() ? static_cast<int>(divisor_override.value()) : 0;
+
+  [computeEncoder setBytes:&batch_size length:sizeof(int) atIndex:2];
+  [computeEncoder setBytes:&channels_val length:sizeof(int) atIndex:3];
+  [computeEncoder setBytes:&input_depth_val length:sizeof(int) atIndex:4];
+  [computeEncoder setBytes:&input_height_val length:sizeof(int) atIndex:5];
+  [computeEncoder setBytes:&input_width_val length:sizeof(int) atIndex:6];
+  [computeEncoder setBytes:&output_depth_val length:sizeof(int) atIndex:7];
+  [computeEncoder setBytes:&output_height_val length:sizeof(int) atIndex:8];
+  [computeEncoder setBytes:&output_width_val length:sizeof(int) atIndex:9];
+  [computeEncoder setBytes:&kernel_depth_val length:sizeof(int) atIndex:10];
+  [computeEncoder setBytes:&kernel_height_val length:sizeof(int) atIndex:11];
+  [computeEncoder setBytes:&kernel_width_val length:sizeof(int) atIndex:12];
+  [computeEncoder setBytes:&stride_depth_val length:sizeof(int) atIndex:13];
+  [computeEncoder setBytes:&stride_height_val length:sizeof(int) atIndex:14];
+  [computeEncoder setBytes:&stride_width_val length:sizeof(int) atIndex:15];
+  [computeEncoder setBytes:&padding_depth_val length:sizeof(int) atIndex:16];
+  [computeEncoder setBytes:&padding_height_val length:sizeof(int) atIndex:17];
+  [computeEncoder setBytes:&padding_width_val length:sizeof(int) atIndex:18];
+  [computeEncoder setBytes:&count_include_pad_val length:sizeof(int) atIndex:19];
+  [computeEncoder setBytes:&divisor_override_val length:sizeof(int) atIndex:20];
+
+  // Calculate grid and threadgroup sizes
+  MTLSize gridSize, threadgroupSize;
+  if (!is_backward_pass) {
+    // Forward pass
+    int total_output_size = nbatch * channels * output_depth * output_height * output_width;
+    gridSize = MTLSizeMake(total_output_size, 1, 1);
+  } else {
+    // Backward pass
+    int total_input_size = nbatch * channels * input_depth * input_height * input_width;
+    gridSize = MTLSizeMake(total_input_size, 1, 1);
+  }
+
+  // Calculate optimal threadgroup size
+  threadgroupSize = MTLSizeMake(
+      std::min(static_cast<NSUInteger>(pipelineState.maxTotalThreadsPerThreadgroup), static_cast<NSUInteger>(256)),
+      1, 1);
+
+  // Dispatch threads
+  [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+
+  // End encoding and commit
+  [computeEncoder endEncoding];
+  mpsStream->commit(true);
+}
+
+TORCH_IMPL_FUNC(avg_pool3d_out_mps)
+(const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ std::optional<int64_t> divisor_override,
+ const Tensor& output) {
+  mps::avg_pool3d_template(input,
+                           output,
+                           std::nullopt,
+                           kernel_size,
+                           stride,
+                           padding,
+                           {1, 1, 1},
+                           ceil_mode,
+                           count_include_pad,
+                           divisor_override,
+                           "avg_pool3d");
+}
+
+TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
+(const Tensor& gradOutput,
+ const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ std::optional<int64_t> divisor_override,
+ const Tensor& gradInput) {
+  mps::avg_pool3d_template(input,
+                           gradInput,
+                           gradOutput,
+                           kernel_size,
+                           stride,
+                           padding,
+                           {1, 1, 1},
+                           ceil_mode,
+                           count_include_pad,
+                           divisor_override,
+                           "avg_pool3d_backward");
 }
 
 } // namespace at::native

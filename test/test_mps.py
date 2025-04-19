@@ -625,7 +625,7 @@ def mps_ops_modifier(ops):
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
-        'nn.functional.avg_pool3d': None,
+        # 'nn.functional.avg_pool3d': None,  # Now implemented
         'nn.functional.ctc_loss': None,
         'nn.functional.embedding_bag': None,
         'nn.functional.hardshrink': None,
@@ -1996,6 +1996,53 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
+
+    def test_avg_pool3d(self):
+        # Test case for avg_pool3d
+        def helper(input_shape, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+            if stride is None:
+                stride = kernel_size
+
+            # Create input tensor
+            x_cpu = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x_mps = x_cpu.detach().clone().to('mps').requires_grad_()
+
+            # Apply avg_pool3d
+            y_cpu = F.avg_pool3d(x_cpu, kernel_size=kernel_size, stride=stride, padding=padding,
+                                 ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+            y_mps = F.avg_pool3d(x_mps, kernel_size=kernel_size, stride=stride, padding=padding,
+                                 ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
+
+            # Check forward pass
+            self.assertEqual(y_cpu, y_mps.cpu())
+
+            # Check backward pass
+            grad_output = torch.randn_like(y_cpu)
+            grad_output_mps = grad_output.to('mps')
+            y_cpu.backward(grad_output)
+            y_mps.backward(grad_output_mps)
+            self.assertEqual(x_cpu.grad, x_mps.grad.cpu())
+
+        # Test with different input shapes and parameters
+        helper((2, 3, 4, 5, 6), kernel_size=2)
+        helper((1, 3, 5, 6, 7), kernel_size=3, stride=2)
+        helper((1, 1, 4, 5, 6), kernel_size=(2, 2, 2), padding=1)
+        helper((2, 3, 5, 5, 5), kernel_size=(3, 2, 2), stride=(2, 1, 1))
+        helper((1, 3, 4, 4, 4), kernel_size=2, padding=1, ceil_mode=True)
+        helper((1, 3, 4, 4, 4), kernel_size=2, padding=1, count_include_pad=False)
+        helper((1, 3, 4, 4, 4), kernel_size=2, divisor_override=1)
+
+        # Test with non-contiguous input
+        x = torch.randn(2, 3, 4, 5, 6, device='cpu')
+        x_mps = x.to('mps')
+        x_non_contiguous = x.permute(0, 2, 3, 4, 1).contiguous().permute(0, 4, 1, 2, 3)
+        x_non_contiguous_mps = x_non_contiguous.to('mps')
+        self.assertFalse(x_non_contiguous.is_contiguous())
+        self.assertFalse(x_non_contiguous_mps.is_contiguous())
+
+        y_cpu = F.avg_pool3d(x_non_contiguous, kernel_size=2)
+        y_mps = F.avg_pool3d(x_non_contiguous_mps, kernel_size=2)
+        self.assertEqual(y_cpu, y_mps.cpu())
 
     def test_baddbmm(self):
         def helper(input_shape, batch1_shape, batch2_shape):
