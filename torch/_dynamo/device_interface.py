@@ -150,6 +150,10 @@ class DeviceInterface:
     def memory_allocated(device: _device_t = None) -> int:
         raise NotImplementedError
 
+    @staticmethod
+    def inductor_backend() -> Union[str, None]:
+        return None
+
 
 class DeviceGuard:
     """
@@ -245,6 +249,10 @@ class CudaInterface(DeviceInterface):
         else:
             return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
+    @staticmethod
+    def inductor_backend() -> Union[str, None]:
+        return torch._inductor.config.cuda_backend
+
 
 get_xpu_stream: Optional[Callable[[int], int]]
 if torch.xpu._is_compiled():
@@ -317,6 +325,10 @@ class XpuInterface(DeviceInterface):
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return torch.xpu.is_bf16_supported()
 
+    @staticmethod
+    def inductor_backend() -> Union[str, None]:
+        return "triton"
+
 
 @dataclass
 class CpuDeviceProperties:
@@ -366,6 +378,10 @@ class CpuInterface(DeviceInterface):
             cpu_count = multiprocessing.cpu_count()
             return CpuDeviceProperties(cpu_count)
 
+    @staticmethod
+    def inductor_backend() -> Union[str, None]:
+        return torch._inductor.config.cpu_backend
+
 
 class MpsInterface(DeviceInterface):
     @staticmethod
@@ -404,6 +420,10 @@ class MpsInterface(DeviceInterface):
         @staticmethod
         def current_device():
             return 0
+
+    @staticmethod
+    def inductor_backend() -> Union[str, None]:
+        return "metal"
 
 
 device_interfaces: dict[str, type[DeviceInterface]] = {}
