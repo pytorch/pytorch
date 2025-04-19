@@ -95,6 +95,7 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, metrics
+from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
@@ -705,6 +706,13 @@ def _compile_fx_inner(
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
 
+    # Check if the registered backend(s) support caching.
+    init_backend_registration()
+    backends_support_caching = all(
+        get_wrapper_codegen_for_device(device.type, config.cpp_wrapper).supports_caching
+        for device in get_all_devices(gm)
+    )
+
     with (
         _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
     ):
@@ -712,6 +720,7 @@ def _compile_fx_inner(
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
+            and backends_support_caching
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
@@ -1762,13 +1771,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
-    """
-    Returns a cuda device context manager if there is a single device in the graph
-    """
-    if not torch.cuda.is_available():
-        return contextlib.nullcontext()
-
+def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     input_devices: OrderedSet[torch.device] = OrderedSet(
         node.meta["val"].device
@@ -1781,8 +1784,18 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
         for arg in output_node(gm).args[0]  # type: ignore[union-attr]
         if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
     )
+    return input_devices | out_devices
+
+
+def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
+    """
+    Returns a cuda device context manager if there is a single device in the graph
+    """
+    if not torch.cuda.is_available():
+        return contextlib.nullcontext()
+
     cuda_devices: OrderedSet[torch.device] = OrderedSet(
-        device for device in (input_devices | out_devices) if device.type == "cuda"
+        device for device in get_all_devices(gm) if device.type == "cuda"
     )
 
     return (

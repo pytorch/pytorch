@@ -766,6 +766,8 @@ class PythonWrapperCodegen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
+    supports_caching = True  # Whether the output code is cacheable.
+
     def __init__(self):
         super().__init__()
         self._names_iter: Iterator[int] = count()

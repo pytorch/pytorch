@@ -84,6 +84,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     Generate Wrapper FX IR, for use in other backends.
     """
 
+    supports_caching = False
+
     def __init__(self) -> None:
         super().__init__()
         graph = torch.fx.Graph()
