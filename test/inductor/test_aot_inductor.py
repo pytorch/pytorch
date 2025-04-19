@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
+    IS_S390X,
     IS_WINDOWS,
     parametrize,
     skipIfRocm,
@@ -3701,23 +3702,23 @@ class AOTInductorTestsTemplate:
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched dim value at",
-                21
-                if SM80OrLater
-                else 19,  # we have 9 dynamic dims for which we generate different checks
+                (
+                    21 if SM80OrLater else 19
+                ),  # we have 9 dynamic dims for which we generate different checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "dim value is too",
-                18
-                if SM80OrLater
-                else 16,  # we have 9 dynamic dims for which we generate two checks
+                (
+                    18 if SM80OrLater else 16
+                ),  # we have 9 dynamic dims for which we generate two checks
                 exactly=True,
             ).run(src_code)
             FileCheck().check_count(
                 "unmatched stride value at",
-                21
-                if SM80OrLater
-                else 19,  # we have 9 symbolic strides for which we don't generate checks
+                (
+                    21 if SM80OrLater else 19
+                ),  # we have 9 symbolic strides for which we don't generate checks
                 exactly=True,
             ).run(src_code)
 
@@ -5504,6 +5505,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleGpu(TestCase):
     device = GPU_TYPE

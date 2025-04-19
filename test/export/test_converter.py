@@ -1448,7 +1448,11 @@ class TestConverter(TestCase):
             ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
             self._check_tensor_list_equal(orig_out, ep_out)
 
-    # qnnpack not supported on s390x
+    # qnnpack/xnnpack not supported on s390x.
+    # it is required by
+    # torch.ops.prepacked.linear_clamp_prepack
+    # and
+    # torch.ops.prepacked.linear_clamp_run
     @xfailIfS390X
     def test_ts2ep_convert_quantized_model_with_opcontext(self):
         class M(torch.nn.Module):
@@ -1467,6 +1471,12 @@ class TestConverter(TestCase):
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
 
+    # qnnpack/xnnpack not supported on s390x.
+    # it is required by
+    # torch.ops.prepacked.linear_clamp_prepack
+    # and
+    # torch.ops.prepacked.linear_clamp_run
+    @xfailIfS390X
     def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):

@@ -11,6 +11,7 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
 from torch.testing._internal.common_device_type import expectedFailureXPU
+from torch.testing._internal.common_utils import IS_S390X
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -84,6 +85,7 @@ class TestCase(InductorTestCase):
 class UnsupportedTests(TestCase):
     device = DEVICE
 
+    @skipIf(IS_S390X, "No CUDA on S390X")
     def test_no_op(self):
         def f(a):
             return a
@@ -99,6 +101,7 @@ class UnsupportedTests(TestCase):
         self.assertZero(calculate_runtime(f, *inp))
 
 
+@skipIf(IS_S390X, "No CUDA on S390X")
 class ComputeBoundedTests(TestCase):
     device = DEVICE
 
@@ -176,6 +179,7 @@ class ComputeBoundedTests(TestCase):
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@skipIf(IS_S390X, "No CUDA on S390X")
 class MemoryBoundedTests(TestCase):
     device = DEVICE
 
@@ -219,6 +223,7 @@ class MemoryBoundedTests(TestCase):
         self.assertNotZero(calculate_runtime(f, *inp))
 
 
+@skipIf(IS_S390X, "No CUDA on S390X")
 @skipIf(not dist.is_available(), "requires distributed")
 class TestCommAnalysis(TestCase):
     device = DEVICE
