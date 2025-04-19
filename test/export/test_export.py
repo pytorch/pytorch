@@ -4576,6 +4576,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
+    @testing.expectedFailureCppSerDes  # cpp ser/der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -4600,7 +4601,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch.rand((1, 1, 32, 32)),
         )
 
-        dim = torch.export.Dim("Dim", min=16, max=64)
+        dim = torch.export.Dim.AUTO
         dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
 
         exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
