@@ -740,15 +740,14 @@ static void avg_pool3d_template(const Tensor& input,
   mpsStream->synchronize(SyncType::COMMIT);
 }
 
-TORCH_IMPL_FUNC(avg_pool3d_out_mps)
-(const Tensor& input,
- IntArrayRef kernel_size,
- IntArrayRef stride,
- IntArrayRef padding,
- bool ceil_mode,
- bool count_include_pad,
- std::optional<int64_t> divisor_override,
- const Tensor& output) {
+Tensor mps_avg_pool3d(const Tensor& input,
+                    IntArrayRef kernel_size,
+                    IntArrayRef stride,
+                    IntArrayRef padding,
+                    bool ceil_mode,
+                    bool count_include_pad,
+                    std::optional<int64_t> divisor_override) {
+  Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   avg_pool3d_template(input,
                      output,
                      std::nullopt,
@@ -760,21 +759,21 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
                      count_include_pad,
                      divisor_override,
                      "avg_pool3d");
+  return output;
 }
 
-TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
-(const Tensor& gradOutput,
- const Tensor& input,
- IntArrayRef kernel_size,
- IntArrayRef stride,
- IntArrayRef padding,
- bool ceil_mode,
- bool count_include_pad,
- std::optional<int64_t> divisor_override,
- const Tensor& gradInput) {
+Tensor mps_avg_pool3d_backward(const Tensor& grad_output,
+                             const Tensor& input,
+                             IntArrayRef kernel_size,
+                             IntArrayRef stride,
+                             IntArrayRef padding,
+                             bool ceil_mode,
+                             bool count_include_pad,
+                             std::optional<int64_t> divisor_override) {
+  Tensor grad_input = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
   avg_pool3d_template(input,
-                     gradInput,
-                     gradOutput,
+                     grad_input,
+                     grad_output,
                      kernel_size,
                      stride,
                      padding,
@@ -783,6 +782,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
                      count_include_pad,
                      divisor_override,
                      "avg_pool3d_backward");
+  return grad_input;
 }
 
 } // namespace at::native
