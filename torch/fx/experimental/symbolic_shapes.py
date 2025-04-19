@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sympy
 from sympy import Add, S
+from torch._prims_common import IntLike
 
 
 """
@@ -66,6 +67,7 @@ from torch.fx.experimental.recording import (
     ShapeEnvEvent,
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.types import BoolLikeType, FloatLikeType, IntLikeType, py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
@@ -129,6 +131,8 @@ __all__ = [
     "ShapeEnv",
     "is_concrete_int",
     "is_concrete_float",
+    "is_concrete_bool",
+    "has_static_value",
     "guard_int",
     "guard_float",
     "guard_scalar",
@@ -137,7 +141,6 @@ __all__ = [
     "SYMPY_INTERP",
     "free_symbols",
     "is_symbol_binding_fx_node",
-    "is_concrete_bool",
     "is_nested_int",
     "SHAPEENV_EVENT_KEY",
     "CURRENT_NODE_KEY",
@@ -399,6 +402,51 @@ def is_concrete_float(a: Union[float, SymFloat]) -> bool:
         return True
 
     return False
+
+
+def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
+    """
+    Utility to check if underlying object
+    in SymBool is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymBool or bool): Object to test if it bool
+    """
+    assert isinstance(a, (SymBool, bool))
+
+    if isinstance(a, bool):
+        return True
+
+    if isinstance(
+        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
+    ):
+        return True
+
+    return False
+
+
+def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> bool:
+    """
+    User-code friendly utility to check if a value is static or dynamic.
+    Returns true if given a constant, or a symbolic expression with a fixed value.
+
+    Args:
+        a (Union[SymBool, SymFloat, SymInt, bool, float, int]): Object to test
+    """
+    assert isinstance(a, py_sym_types + (bool, float, int))
+    if (
+        isinstance(a, BoolLikeType)
+        and is_concrete_bool(a)  # type: ignore[arg-type]
+        or isinstance(a, FloatLikeType)
+        and is_concrete_float(a)  # type: ignore[arg-type]
+        or isinstance(a, IntLikeType)
+        and is_concrete_int(a)  # type: ignore[arg-type]
+    ):
+        return True
+
+    assert isinstance(a, py_sym_types)
+    return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
 
 
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
@@ -770,28 +818,6 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     elif expr.is_Mul:
         return div_by_factor(expr, integer_coefficient(expr))
     return expr
-
-
-def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
-    """
-    Utility to check if underlying object
-    in SymBool is concrete value. Also returns
-    true if integer is passed in.
-
-    Args:
-        a (SymBool or bool): Object to test if it bool
-    """
-    assert isinstance(a, (SymBool, bool))
-
-    if isinstance(a, bool):
-        return True
-
-    if isinstance(
-        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
-    ):
-        return True
-
-    return False
 
 
 def is_nested_int(s: Union[int, SymInt]) -> TypeGuard[SymInt]:
