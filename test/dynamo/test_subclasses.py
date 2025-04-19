@@ -3505,7 +3505,12 @@ class GraphModule(torch.nn.Module):
             # varies based on the type of view
             guard_str = "\n".join(guards)
             if nt_view_name == "subclass_dense":
-                self.assertExpectedInline(guard_str, """Eq(s85 - 1, s77)""")
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s4 - 1, s0)
+Eq(s3, s0)""",
+                )
             elif nt_view_name == "dense_subclass_dense_subclass":
                 self.assertExpectedInline(
                     guard_str,
@@ -3523,9 +3528,10 @@ Eq(s72, s71)""",
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s85 - 1, s64)
-Eq(s80 - 1, s77)
-Eq(s72, s71)""",
+Eq(s5 - 1, s1)
+Eq(s4, s1)
+Eq(s14 - 1, s9)
+Eq(s13, s11)""",
                 )
             return gm
 
