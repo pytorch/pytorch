@@ -129,6 +129,17 @@ class TestAccelerator(TestCase):
         ):
             event1.elapsed_time(event2)
 
+        # check default value of enable_timing: False
+        event1 = torch.Event()
+        event2 = torch.Event()
+        event1.record()
+        event2.record()
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
 
 if __name__ == "__main__":
     run_tests()
