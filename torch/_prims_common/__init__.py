@@ -924,24 +924,29 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
     Infers the size of a dim with size -1, if it exists.
     Also checks that new shape is compatible with the number of elements.
     """
+    from torch.fx.experimental.symbolic_shapes import definitely_true, guard_or_false
+
     dim = None
     newsize = 1
     for i, d in enumerate(shape):
-        if d == -1:
+        if guard_or_false(d == -1):
             torch._check(dim is None, lambda: "only one dimension can be inferred")
             dim = i
-        elif d >= 0:
-            newsize *= d
         else:
-            torch._check(False, lambda: f"invalid shape dimension {d}")
+            torch._check(
+                d >= 0,
+                lambda: (
+                    f"invalid shape dimension {d}. If this was symbolic, it was assumed to not be -1."
+                    "If this was meant to be inferred, please explicitly pass in -1."
+                ),
+            )
+            newsize *= d
     if dim is None:
         torch._check(
             numel == newsize,
             lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
         )
     else:
-        from torch.fx.experimental.symbolic_shapes import definitely_true
-
         torch._check(
             newsize != 0,
             lambda: (
