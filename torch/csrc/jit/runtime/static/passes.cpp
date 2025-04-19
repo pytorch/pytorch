@@ -323,13 +323,13 @@ namespace {
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g, %h):
+    graph(%a, %b, %c, %d, %e, %f, %g, %h, %no_hash_neg_salt):
         %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather_lengths_to_offsets(%a, %b, %c, %d)
-        %y2 : Tensor = fb::sigrid_hash_precompute(%y0, %e, %f, %g, %h)
+        %y2 : Tensor = fb::sigrid_hash_precompute(%y0, %e, %f, %g, %h, %no_hash_neg_salt)
         return (%y2, %y1))IR";
   std::string fused_pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g, %h):
-        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_offsets(%b, %a, %c, %e, %f, %g, %h, %d)
+    graph(%a, %b, %c, %d, %e, %f, %g, %h, %no_hash_neg_salt):
+        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_offsets(%b, %a, %c, %e, %f, %g, %h, %d, %no_hash_neg_salt)
         return (%out, %off))IR";
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
@@ -339,14 +339,14 @@ namespace {
 [[maybe_unused]] void ClipRangesGatherRangesSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g):
+    graph(%a, %b, %c, %d, %e, %f, %g, %no_hash_neg_salt):
         %y0 : Tensor = fb::clip_ranges(%b, %c)
         %y1 : Tensor, %y2 : Tensor = fb::gather_ranges(%a, %y0)
-        %y3 : Tensor = fb::sigrid_hash_precompute(%y1, %d, %e, %f, %g)
+        %y3 : Tensor = fb::sigrid_hash_precompute(%y1, %d, %e, %f, %g, %no_hash_neg_salt)
         return (%y3, %y2))IR";
   std::string fused_pattern = R"IR(
-    graph(%a, %b, %c, %d, %e, %f, %g):
-        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%b, %a, %c, %d, %e, %f, %g)
+    graph(%a, %b, %c, %d, %e, %f, %g, %no_hash_neg_salt):
+        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%b, %a, %c, %d, %e, %f, %g, %no_hash_neg_salt)
         return (%out, %off))IR";
 
   SubgraphRewriter fuse;
@@ -358,14 +358,14 @@ namespace {
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
   std::string pattern = R"IR(
-    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
+    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt):
         %clipped : Tensor = fb::clip_ranges(%ranges, %max_length)
         %output : Tensor, %unused : Tensor = fb::gather_ranges(%values, %clipped)
-        %sigrid_hash_out : Tensor = fb::sigrid_hash_precompute(%output, %salt, %max_value, %mul_shift, %hash_into_int32)
+        %sigrid_hash_out : Tensor = fb::sigrid_hash_precompute(%output, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt)
         return (%sigrid_hash_out, %clipped))IR";
   std::string fused_pattern = R"IR(
-    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
-        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt)
         return (%sigrid_hash_out, %clipped))IR";
 
   // the second gather_ranges can be eliminated because the `lengths` is
@@ -373,14 +373,14 @@ namespace {
   // clip_ranges_gather_sigrid_hash_v3 (caveat, the fused ops makes some
   // simplifying assumptions about the ranges input)
   std::string pattern2 = R"IR(
-    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
-        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt)
         %unused : Tensor, %lengths : Tensor = fb::gather_ranges(%gather2_values, %clipped)
         return (%lengths, %sigrid_hash_out))IR";
 
   std::string fused_pattern2 = R"IR(
-    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
-        %lengths : Tensor, %sigrid_hash_out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt):
+        %lengths : Tensor, %sigrid_hash_out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32, %no_hash_neg_salt)
         return (%lengths, %sigrid_hash_out))IR";
 
   SubgraphRewriter fuse;
