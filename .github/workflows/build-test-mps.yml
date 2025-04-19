@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: macos-latest  # 使用标准运行器
+    runs-on: macos-latest-xlarge  # 使用高性能运行器
 
     steps:
     - uses: actions/checkout@v4
