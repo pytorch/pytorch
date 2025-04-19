@@ -112,7 +112,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "nvidia.test.gpu"
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       build-with-debug: true
