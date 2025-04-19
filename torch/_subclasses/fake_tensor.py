@@ -10,6 +10,7 @@ import math
 import os
 import threading
 import traceback
+import types
 import typing
 import weakref
 from collections import defaultdict
@@ -23,6 +24,7 @@ import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
@@ -153,6 +155,16 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
     finally:
         if old is not None:
             torch._C._set_dispatch_mode(old)
+
+
+@contextlib.contextmanager
+def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None, None]:
+    old_value: bool = fake_mode.cache_enabled
+    try:
+        fake_mode.cache_enabled = False
+        yield
+    finally:
+        fake_mode.cache_enabled = old_value
 
 
 def get_plain_tensors(
@@ -855,8 +867,16 @@ class FakeTensor(Tensor):
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None
 
+        # list of ops which can have args(tensor/tensorList) in mixed device
+        mixed_device_fns = ordered_set(
+            aten._foreach_copy.default,
+        )
+
+        def check_cpu_device(device: torch.device) -> bool:
+            return device.type == "cpu"
+
         def cpu_zero_dim(t: Tensor) -> bool:
-            return t.device.type == "cpu" and t.dim() == 0
+            return check_cpu_device(t.device) and t.dim() == 0
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
@@ -885,6 +905,14 @@ class FakeTensor(Tensor):
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
+
+            # if still device mismatches we will check ops which can work
+            # on different devices for ex. _foreach_copy, and one of the
+            # device must be cpu in this case we will return from here without
+            # throwing an error
+            if func in mixed_device_fns:
+                if any(map(check_cpu_device, (common_device, t.device))):
+                    return
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
@@ -970,7 +998,9 @@ class TensorMetadata:
             if isinstance(value, (tuple, list, torch.Size)):
                 # This will recursively flatten the iterable, calling
                 # convert_sym_int() as necessary.
-                mode._prep_args_for_hash(result, value, state)
+                id_hashed_objects: list[object] = []
+                mode._prep_args_for_hash(result, value, state, id_hashed_objects)
+                id_hashed_objects.clear()
             elif isinstance(value, SymInt):
                 state.convert_sym_int(result, value)
             else:
@@ -1177,7 +1207,7 @@ class FakeTensorMode(TorchDispatchMode):
             torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access
         )
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
-        self.cache_enabled = (
+        self.cache_enabled: bool = (
             torch._dynamo.config.fake_tensor_cache_enabled
             and not self.propagate_real_tensors
         )
@@ -1378,7 +1408,8 @@ class FakeTensorMode(TorchDispatchMode):
                 if self.cache_crosscheck_enabled:
                     # For debugging / testing: Validate that the output synthesized
                     # from the cache matches the output created by normal dispatch.
-                    self._crosscheck_cache_output(output, func, types, args, kwargs)
+                    with disable_fake_tensor_cache(self):
+                        self._crosscheck_cache_output(output, func, types, args, kwargs)
             else:
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
@@ -1421,12 +1452,21 @@ class FakeTensorMode(TorchDispatchMode):
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
         ]
+        # Collect the id_hashed objects to attach a weakref finalize later
+        id_hashed_objects: list[object] = []
         # Translate any FakeTensor args to metadata.
         if args:
-            self._prep_args_for_hash(key_values, args, state)
+            self._prep_args_for_hash(key_values, args, state, id_hashed_objects)
         if kwargs:
-            self._prep_args_for_hash(key_values, kwargs, state)
-        return _DispatchCacheKey(tuple(key_values))
+            self._prep_args_for_hash(key_values, kwargs, state, id_hashed_objects)
+        key = _DispatchCacheKey(tuple(key_values))
+
+        for id_hashed_obj in id_hashed_objects:
+            weakref.finalize(
+                id_hashed_obj, functools.partial(evict_fake_tensor_cache_key, key=key)
+            )
+        id_hashed_objects.clear()
+        return key
 
     def _validate_cache_key(
         self,
@@ -1441,10 +1481,79 @@ class FakeTensorMode(TorchDispatchMode):
         # Avoid caching for any ops that would require a more sophisticated
         # caching implementation, e.g., data dependent ops or ops that modify
         # the inputs.
+        from torch._higher_order_ops.utils import (
+            FunctionalizeCtxWrapper,
+            registered_hop_fake_fns,
+        )
+
+        if (
+            isinstance(func, torch._ops.HigherOrderOperator)
+            and func in registered_hop_fake_fns
+        ):
+            # Go through the nodes in the graph modules and check if each
+            # call_function node is cacheable. This relies on the hop to tell us
+            # the index of subgraphs in the args using `subgraph_indexes`
+            # Note that this is only called once - for the first time before you
+            # are about to cache the results. If caching succeeds, this function
+            # is not called at the lookup.
+
+            if not hasattr(func, "subgraph_indexes"):
+                raise NotImplementedError(
+                    f"Add subgraph_indexes in the {func.name()} __init__ method"
+                )
+            for subgraph_index in func.subgraph_indexes:  # type: ignore[attr-defined]
+                subgraph_mod = args[subgraph_index]
+
+                # Special case for AOT Dispatcher first pass, where the fake
+                # tensor is called on the functional wrapper of the subgraph.
+                if isinstance(subgraph_mod, FunctionalizeCtxWrapper):
+                    subgraph_mod = subgraph_mod.subgraph
+                if not isinstance(subgraph_mod, torch.fx.GraphModule):
+                    raise _BypassDispatchCache(
+                        f"{func.name()} hop with a non GraphModule input"
+                    )
+
+                for node in subgraph_mod.graph.nodes:
+                    if node.op == "call_function":
+                        op = node.target
+
+                        # AOTDispatcher first pass does not run make_fx on
+                        # dynamo graphs. As a result, it can have non OpOverload
+                        # ops.
+                        if not isinstance(op, torch._ops.OpOverload):
+                            raise _BypassDispatchCache(
+                                f"{func.name()} hop with a non OpOverload input"
+                            )
+
+                        try:
+                            self._validate_cache_key(op, [], {})
+                        except _BypassDispatchCache as e:
+                            raise _BypassDispatchCache(
+                                f"hop {func.name()} failed because of {str(e)}"
+                            ) from None
+
+            # All nodes in the subgraph are cache-able.
+            return
+
         if torch.Tag.data_dependent_output in func.tags:
             raise _BypassDispatchCache("data dependent output")
 
         if torch.Tag.dynamic_output_shape in func.tags:
+            if func is aten.index.Tensor:
+                _, new_kwargs = normalize_function(  # type: ignore[misc]
+                    func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                )
+                for index in new_kwargs["indices"]:
+                    # index calls nonzero for bool or int8 tensors, and
+                    # therefore has a dynamic shape output. For other dtypes,
+                    # the output shape depends on the input shape (and not data)
+                    if isinstance(index, torch.Tensor) and index.dtype in (
+                        torch.bool,
+                        torch.int8,
+                    ):
+                        raise _BypassDispatchCache("dynamic output shape")
+                return
+
             raise _BypassDispatchCache("dynamic output shape")
 
         if torch.Tag.inplace_view in func.tags:
@@ -1475,6 +1584,7 @@ class FakeTensorMode(TorchDispatchMode):
         result: list[object],
         args: Union[Mapping[str, object], Sequence[object], Iterable[object]],
         state: _CacheKeyState,
+        id_hashed_objects: list[object],
     ) -> None:
         """
         Translate the provided args into a form suitable for caching at FakeTensor
@@ -1482,9 +1592,11 @@ class FakeTensorMode(TorchDispatchMode):
         convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
         unsupported cases that should bypass caching.
         """
+        from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
+
         if isinstance(args, dict):
-            self._prep_args_for_hash(result, args.keys(), state)
-            self._prep_args_for_hash(result, args.values(), state)
+            self._prep_args_for_hash(result, args.keys(), state, id_hashed_objects)
+            self._prep_args_for_hash(result, args.values(), state, id_hashed_objects)
             return
 
         for arg in args:
@@ -1508,7 +1620,22 @@ class FakeTensorMode(TorchDispatchMode):
             elif isinstance(arg, (SymBool, SymFloat)):
                 raise _BypassDispatchCache("symbolic shape")
             elif isinstance(arg, (list, tuple, dict)):
-                self._prep_args_for_hash(result, arg, state)
+                self._prep_args_for_hash(result, arg, state, id_hashed_objects)
+            elif isinstance(arg, types.FunctionType):
+                raise _BypassDispatchCache("function argument")
+            elif isinstance(arg, torch.fx.GraphModule):
+                # This is used for invoke_subgraph where id(graph_module) allows
+                # us to cache fake outputs
+                result.append(type(arg))
+                result.append(id(arg))
+                id_hashed_objects.append(arg)
+            elif isinstance(arg, FunctionalizeCtxWrapper):
+                # Special case for AOT Dispatcher first pass, where the fake
+                # tensor is called on the functional wrapper of the subgraph.
+                result.append(hash(arg))
+                # functional wrapper is destroyed after fake tensor prop. We
+                # need to put the finalizer on the subgraph.
+                id_hashed_objects.append(arg.subgraph)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
@@ -1566,7 +1693,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Otherwise, create an entry that records the output tensor's metadata.
         view_idx = None
-        if func.is_view:
+        if isinstance(func, torch._ops.OpOverload) and func.is_view:
             idxs = [i for i, t in enumerate(args) if isinstance(t, Tensor)]
             assert len(idxs) == 1
             view_idx = idxs[0]
@@ -1715,7 +1842,7 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.is_neg:
             torch._C._set_neg(empty, True)
 
-        if func.is_view:
+        if isinstance(func, torch._ops.OpOverload) and func.is_view:
             # For view ops, the storage should be the same as the tensor input.
             view_arg = args[cast(int, entry.view_idx)]
             assert isinstance(view_arg, FakeTensor)
@@ -1910,6 +2037,21 @@ class FakeTensorMode(TorchDispatchMode):
                         f"fake shape {s_fake} and real shape {s_real}, "
                         f"at output{keystr(path)}.size({j}), for func: {func}"
                     ) from exc
+        elif fake is None and real is not None:
+            if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                dtrace_structured(
+                    "mismatched_fake_kernel",
+                    metadata_fn=lambda: {
+                        "op": str(func),
+                        "reason": f"mismatch between fake value {fake} and real value {real}",  # noqa: F821
+                    },
+                )
+                return _infer_fake_from_real_tensor(self, func, real), True  # type: ignore[arg-type]
+            raise MetadataMismatchError(
+                f"Real tensor propagation found a metadata mismatch between "
+                f"fake tensor {fake} and real tensor {real}, "
+                f" at output{keystr(path)}, for func: {func}"
+            )
         else:
             try:
                 _check_fake_real_vals(fake, real)
@@ -2004,6 +2146,8 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> Optional[FakeTensor]:
+        from torch._higher_order_ops.utils import registered_hop_fake_fns
+
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
         # DO NOT PUT LOGIC BEFORE UNRECOGNIZED TYPE CHECKING
@@ -2114,12 +2258,14 @@ class FakeTensorMode(TorchDispatchMode):
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
         all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
-            torch.Tag.nondeterministic_seeded not in func.tags
+            isinstance(func, torch._ops.OpOverload)
+            and torch.Tag.nondeterministic_seeded not in func.tags
             and torch.Tag.inplace_view not in func.tags
             and all_constant
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
             and not avoiding_device_init
+            and func is not aten._nested_tensor_from_tensor_list.default
         ):
             const_flat_args = [
                 a.constant if self.is_our_fake(a) else a for a in flat_args
@@ -2150,6 +2296,21 @@ class FakeTensorMode(TorchDispatchMode):
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+
+        if (
+            isinstance(func, torch._ops.HigherOrderOperator)
+            and func in registered_hop_fake_fns
+        ):
+            # Reenable the fake tensor mode for the registered fake function
+            maybe_ignore_fresh_unbacked_symbols = (
+                contextlib.nullcontext
+                if self.shape_env is None
+                else self.shape_env.ignore_fresh_unbacked_symbols
+            )
+
+            with self, maybe_ignore_fresh_unbacked_symbols():
+                return registered_hop_fake_fns[func](*args, **kwargs)
+
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
         def maybe_to_real_tensor(
@@ -2180,10 +2341,9 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             self.propagate_real_tensors
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
-            # TODO: Handle SymFloat/SymBool
             and not any(
                 (
-                    isinstance(a, SymInt)
+                    isinstance(a, py_sym_types)
                     and (syms := free_unbacked_symbols(a))
                     and self.shape_env is not None
                     and any(s not in self.shape_env.unbacked_var_to_val for s in syms)
@@ -2384,10 +2544,32 @@ class FakeTensorMode(TorchDispatchMode):
             func.name()
         ).fake_impl.kernel
         if maybe_fake_impl:
-            ctx = torch._library.fake_impl.FakeImplCtx(self, func)
-            with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
-                result = maybe_fake_impl(*args, **kwargs)
-                return maybe_propagate_real_tensors(result)
+            try:
+                ctx = torch._library.fake_impl.FakeImplCtx(self, func)
+                with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
+                    result = maybe_fake_impl(*args, **kwargs)
+                    return maybe_propagate_real_tensors(result)
+
+            except MissingOpProfile as e:
+                # If we have a fake kernel registered generated from OpProfiles
+                # but there doesn't exist a profile for the existing inputs, and we are in
+                if (
+                    self.propagate_real_tensors
+                    and real_out is not nil
+                    and not library_utils.is_builtin(func)
+                    and self.shape_env is not None
+                ):
+                    result = inferred_fake_kernel_from_real_out(self, func, real_out)
+
+                    dtrace_structured(
+                        "missing_fake_kernel",
+                        metadata_fn=lambda: {
+                            "op": str(func),
+                        },
+                    )
+                    return maybe_propagate_real_tensors(result)
+                else:
+                    raise e
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
@@ -2838,6 +3020,11 @@ from torch._subclasses.fake_impls import (  # noqa: F401
 )
 
 
+def evict_fake_tensor_cache_key(key: _DispatchCacheKey) -> None:
+    if key in FakeTensorMode.cache:
+        FakeTensorMode.cache.pop(key)
+
+
 @atexit.register
 def dump_cache_stats() -> None:
     log.info("FakeTensor cache stats:")
@@ -2928,3 +3115,15 @@ def inferred_fake_kernel_from_real_out(
 
     fake_flat_out = [_infer_fake_from_real_tensor(mode, op, t) for t in real_flat_out]
     return pytree.tree_unflatten(fake_flat_out, spec)
+
+
+@contextlib.contextmanager
+def not_progapate_real_tensors(
+    fake_mode: FakeTensorMode,
+) -> Generator[None, None, None]:
+    original_value = fake_mode.propagate_real_tensors
+    fake_mode.propagate_real_tensors = False
+    try:
+        yield
+    finally:
+        fake_mode.propagate_real_tensors = original_value

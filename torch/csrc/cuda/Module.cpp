@@ -51,31 +51,8 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
-#ifndef WIN32
-#include <pthread.h>
-#endif
 
 using namespace torch;
-
-static bool in_bad_fork = false; // True for children forked after cuda init
-
-#ifndef WIN32
-// Called in the forked child if cuda has already been initialized
-static void forked_child() {
-  in_bad_fork = true;
-  torch::utils::set_requires_device_init(at::kCUDA, true);
-}
-#endif
-
-// Should be called before the first cuda call.
-// Note: This is distinct from initExtension because a stub cuda implementation
-// has some working functions (e.g. device_count) but cannot fully initialize.
-static void poison_fork() {
-#ifndef WIN32
-  static auto result [[maybe_unused]] =
-      pthread_atfork(nullptr, nullptr, forked_child);
-#endif
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
@@ -160,14 +137,17 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  poison_fork();
+  // Note: This is distinct from initExtension because a stub cuda
+  // implementation has some working functions (e.g. device_count) but cannot
+  // fully initialize.
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
   return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  poison_fork();
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
 #ifdef CUDA_ARCH_FLAGS
   static const char* flags = C10_STRINGIZE(CUDA_ARCH_FLAGS);
   return THPUtils_packString(flags);
@@ -179,7 +159,7 @@ PyObject* THCPModule_getArchFlags(PyObject* self, PyObject* noargs) {
 
 static PyObject* THCPModule_isInBadFork(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(in_bad_fork);
+  return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kCUDA));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1054,8 +1034,6 @@ std::string uuid_to_string(const char* uuid_bytes) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
-  // until internal build is using a rocm version with uuid attr
-#ifndef FBCODE_CAFFE2
   // CUuuid is defined in either cuda.h or driver_types.h
   // hipified to hipUUID which is defined in hip_runtime_api.h
   py::class_<CUuuid>(m, "_CUuuid")
@@ -1067,7 +1045,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def("__str__", [](const CUuuid& uuid) {
         return uuid_to_string(uuid.bytes);
       });
-#endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
@@ -1105,9 +1082,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::name
 #endif // USE_ROCM
           )
-#ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
-#endif
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
@@ -1118,9 +1093,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-#ifndef FBCODE_CAFFE2
                << ", uuid=" << uuid_to_string(prop.uuid.bytes)
-#endif
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
         return stream.str();
@@ -1128,7 +1101,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool)>(
+      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1137,7 +1110,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
           std::optional<std::string>,
           std::optional<std::string>,
           const std::string&,
-          size_t)>(torch::cuda::_record_memory_history));
+          size_t,
+          bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
@@ -1512,8 +1486,8 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
       "please rebuild pytorch without asan if you need to use this module");
 #endif
   HANDLE_TH_ERRORS
-  TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
-  poison_fork();
+  TORCH_INTERNAL_ASSERT(!torch::utils::is_device_in_bad_fork(at::kCUDA));
+  torch::utils::register_fork_handler_for_device_init(at::kCUDA);
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));

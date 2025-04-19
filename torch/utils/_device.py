@@ -24,7 +24,6 @@ def _device_constructors():
         torch.fft.fftfreq,
         torch.fft.rfftfreq,
         torch.full,
-        torch.fill,
         torch.hamming_window,
         torch.hann_window,
         torch.kaiser_window,
@@ -33,7 +32,6 @@ def _device_constructors():
         torch.nested.nested_tensor,
         # This function doesn't actually take a device argument
         # torch.normal,
-        torch.ones,
         torch.rand,
         torch.randn,
         torch.randint,
@@ -47,14 +45,12 @@ def _device_constructors():
         torch.sparse_bsc_tensor,
         torch.tril_indices,
         torch.triu_indices,
-        torch.vander,
         torch.zeros,
         torch.asarray,
         # weird ones
         torch.tensor,
         torch.as_tensor,
-        torch.scalar_tensor,
-        torch.asarray,
+        torch.scalar_tensor
     }
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp

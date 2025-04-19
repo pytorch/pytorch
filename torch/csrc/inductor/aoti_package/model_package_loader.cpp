@@ -1,6 +1,7 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
 #include <c10/util/error.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -62,7 +63,6 @@ const std::string k_separator = "\\";
 #else
 const std::string k_separator = "/";
 #endif
-
 } // namespace
 
 namespace torch::inductor {
@@ -187,7 +187,7 @@ bool recursive_mkdir(const std::string& dir) {
   }
 
   // Find folder separator and check if we are at the top
-  auto pos = dir.find_last_of("/\\");
+  auto pos = dir.find_last_of(k_separator);
   if (pos == std::string::npos) {
     return false;
   }
@@ -341,7 +341,20 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
-    const bool run_single_threaded) {
+    const bool run_single_threaded,
+    const size_t num_runners) {
+  if (run_single_threaded) {
+    if (num_runners != 1) {
+      throw std::runtime_error(
+          "num_runners must be 1 when run_single_threaded is true");
+    }
+  } else {
+    if (num_runners < 1) {
+      throw std::runtime_error(
+          "num_runners must be >=1 when run_single_threaded is false");
+    }
+  }
+
   // Extract all files within the zipfile to a temporary directory
   mz_zip_archive zip_archive;
   memset(&zip_archive, 0, sizeof(zip_archive));
@@ -359,6 +372,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::string found_filenames; // Saving for bookkeeping
   std::string model_directory =
       "data" + k_separator + "aotinductor" + k_separator + model_name;
+  std::string const_directory = "data" + k_separator + "constants";
 
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
     uint32_t filename_len =
@@ -376,14 +390,30 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     found_filenames += " ";
 
     // Only compile files in the specified model directory
-    if (filename_str.length() >= model_directory.length() &&
-        filename_str.substr(0, model_directory.length()) == model_directory) {
+    if (c10::starts_with(filename_str, model_directory) ||
+        c10::starts_with(filename_str, const_directory)) {
       std::string output_path_str = temp_dir_;
-      output_path_str += k_separator;
-      output_path_str += filename_str;
+
+      if (c10::starts_with(filename_str, model_directory)) {
+        output_path_str += k_separator;
+        output_path_str += filename_str;
+      } else { // startsWith(filename_str, const_directory)
+        // Extract constants to the same directory as the rest of the files
+        // to be consistent with internal implementation
+        size_t lastSlash = filename_str.find_last_of(k_separator);
+        std::string filename = filename_str;
+        if (lastSlash != std::string::npos) {
+          filename = filename_str.substr(lastSlash + 1);
+        }
+        output_path_str +=
+            k_separator + model_directory + k_separator + filename;
+      }
+
+      LOG(INFO) << "Extract file: " << filename_str << " to "
+                << output_path_str;
 
       // Create the parent directory if it doesn't exist
-      size_t parent_path_idx = output_path_str.find_last_of("/\\");
+      size_t parent_path_idx = output_path_str.find_last_of(k_separator);
       if (parent_path_idx == std::string::npos) {
         throw std::runtime_error(
             "Failed to find parent path in " + output_path_str);
@@ -455,7 +485,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
   runner_ = registered_aoti_runner[device](
-      so_path, 1, device, cubin_dir, run_single_threaded);
+      so_path, num_runners, device, cubin_dir, run_single_threaded);
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
@@ -493,7 +523,8 @@ std::vector<std::string> AOTIModelPackageLoader::get_call_spec() {
 void AOTIModelPackageLoader::load_constants(
     std::unordered_map<std::string, at::Tensor>& constants_map,
     bool use_inactive,
-    bool check_full_update) {
+    bool check_full_update,
+    bool user_managed) {
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
   std::unordered_map<std::string, at::string> fqn_to_constant_name;
@@ -511,7 +542,7 @@ void AOTIModelPackageLoader::load_constants(
   }
 
   return runner_->update_constant_buffer(
-      updated_constants_map, use_inactive, check_full_update);
+      updated_constants_map, use_inactive, check_full_update, user_managed);
 }
 
 std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
@@ -525,5 +556,13 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
   return constant_fqns;
 }
 
+void AOTIModelPackageLoader::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool validate_full_updates,
+    bool user_managed) {
+  runner_->update_constant_buffer(
+      tensor_map, use_inactive, validate_full_updates, user_managed);
+}
 } // namespace torch::inductor
 #endif
