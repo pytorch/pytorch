@@ -2,7 +2,6 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <cstddef>
@@ -261,9 +260,8 @@ public:
 // Can't put this directly into the macro function args because of commas
 #define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
 
-// Old name for `GenericPackedTensorAccessor`
 template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-C10_DEFINE_DEPRECATED_USING(PackedTensorAccessor, AT_X)
+using PackedTensorAccessor [[deprecated("Old name for `GenericPackedTensorAccessor`")]] = AT_X;
 
 #undef AT_X
 
