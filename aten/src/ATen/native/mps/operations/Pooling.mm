@@ -740,57 +740,49 @@ static void avg_pool3d_template(const Tensor& input,
   mpsStream->synchronize(SyncType::COMMIT);
 }
 
-namespace {
-// Implementation for avg_pool3d_kernel
-void avg_pool3d_kernel_impl(
-    const at::Tensor& output,
-    const at::Tensor& input,
-    int64_t kW, int64_t kH, int64_t kD,
-    int64_t dW, int64_t dH, int64_t dD,
-    int64_t padW, int64_t padH, int64_t padD,
-    bool count_include_pad,
-    std::optional<int64_t> divisor_override) {
+TORCH_IMPL_FUNC(avg_pool3d_out_mps)
+(const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ std::optional<int64_t> divisor_override,
+ const Tensor& output) {
   avg_pool3d_template(input,
                      output,
                      std::nullopt,
-                     {kD, kH, kW},
-                     {dD, dH, dW},
-                     {padD, padH, padW},
+                     kernel_size,
+                     stride,
+                     padding,
                      {1, 1, 1},
-                     false, // ceil_mode not used in template
+                     ceil_mode,
                      count_include_pad,
                      divisor_override,
                      "avg_pool3d");
 }
 
-// Register the kernel implementation
-REGISTER_MPS_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl);
-
-
-// Implementation for avg_pool3d_backward_kernel
-void avg_pool3d_backward_kernel_impl(
-    const at::Tensor& output,
-    const at::Tensor& input,
-    int kW, int kH, int kD,
-    int dW, int dH, int dD,
-    int padW, int padH, int padD,
-    bool count_include_pad,
-    std::optional<int64_t> divisor_override) {
-  avg_pool3d_template(input, // Note: input is grad_output for backward
-                     output, // output is grad_input
-                     input,  // grad_output
-                     {kD, kH, kW},
-                     {dD, dH, dW},
-                     {padD, padH, padW},
+TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
+(const Tensor& gradOutput,
+ const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ std::optional<int64_t> divisor_override,
+ const Tensor& gradInput) {
+  avg_pool3d_template(input,
+                     gradInput,
+                     gradOutput,
+                     kernel_size,
+                     stride,
+                     padding,
                      {1, 1, 1},
-                     false, // ceil_mode not used in template
+                     ceil_mode,
                      count_include_pad,
                      divisor_override,
                      "avg_pool3d_backward");
 }
-
-// Register the kernel implementation
-REGISTER_MPS_DISPATCH(avg_pool3d_backward_kernel, &avg_pool3d_backward_kernel_impl);
-} // anonymous namespace
 
 } // namespace at::native
