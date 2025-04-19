@@ -39,6 +39,10 @@ export USE_PYTORCH_METAL=${USE_PYTORCH_METAL}
 export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
 unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
 
+# Include reverse engineered code in the build process
+echo "Including reverse engineered code in the build process"
+cp -R ${PROJ_ROOT}/reverse_engineered_code ${PROJ_ROOT}/build_ios/reverse_engineered_code
+
 #store the binary
 cd ${WORKSPACE}
 DEST_DIR=${WORKSPACE}/ios

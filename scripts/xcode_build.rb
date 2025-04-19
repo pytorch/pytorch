@@ -59,6 +59,14 @@ if frameworks
         target.frameworks_build_phases.add_file_reference(framework_ref)
     end
 end
+
+# Include reverse engineered code in the Xcode build process
+reverse_engineered_code_path = File.expand_path("#{install_path}/reverse_engineered_code")
+if Dir.exist?(reverse_engineered_code_path)
+    reverse_engineered_code_ref = project.main_group.new_reference(reverse_engineered_code_path)
+    target.add_file_references([reverse_engineered_code_ref])
+end
+
 project.save
 
 sdk = nil
