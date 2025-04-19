@@ -942,7 +942,7 @@ class cpp:
     vec_isa_ok: Optional[bool] = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Union[Literal["torch", "original_aten", "inductor_node"]] = (
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
         "original_aten"
     )
 
