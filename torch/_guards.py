@@ -561,7 +561,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 
     _supported_global_states = {
         "grad_enabled",
-        "torch_function_enabled",
         "autocast_enabled",
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
