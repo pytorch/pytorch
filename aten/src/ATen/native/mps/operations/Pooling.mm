@@ -764,7 +764,7 @@ void avg_pool3d_kernel_impl(
 }
 
 // Register the kernel implementation
-REGISTER_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl);
+REGISTER_MPS_DISPATCH(avg_pool3d_kernel, &avg_pool3d_kernel_impl);
 
 
 // Implementation for avg_pool3d_backward_kernel
@@ -790,7 +790,7 @@ void avg_pool3d_backward_kernel_impl(
 }
 
 // Register the kernel implementation
-REGISTER_DISPATCH(avg_pool3d_backward_kernel, &avg_pool3d_backward_kernel_impl);
+REGISTER_MPS_DISPATCH(avg_pool3d_backward_kernel, &avg_pool3d_backward_kernel_impl);
 } // anonymous namespace
 
 } // namespace at::native
