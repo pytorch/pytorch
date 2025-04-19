@@ -173,7 +173,6 @@ triton_scaled_grouped_mm_source = r"""
 {% endif %}
     tidx = tl.program_id(0)
 
-    dtype = tl.float8e4nv
     TMA_SIZE: tl.constexpr = tl.constexpr(128)
 
     workspace_base = ws_ptr + tidx * 2 * TMA_SIZE
@@ -259,50 +258,54 @@ triton_scaled_grouped_mm_source = r"""
 {% if not K_IS_DYNAMIC %}
                 tl.static_assert(K % BLOCK_K == 0)
 {% endif %}
-                if USE_TMA_LOAD:
-                    m_offset = (m_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
-                    n_offset = (n_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
 
-                    for k_offset in range(0, k_size, BLOCK_K):
-                        a = tl._experimental_descriptor_load(
-                            a_desc_ptr,
-                            [m_offset, k_start_offset + k_offset],
-                            [BLOCK_M, BLOCK_K],
-                            dtype,
-                        )
-                        b = tl._experimental_descriptor_load(
-                            b_desc_ptr,
-                            [n_offset, k_start_offset + k_offset],
-                            [BLOCK_N, BLOCK_K],
-                            dtype,
-                        )
-                        if USE_FAST_ACCUM:
-                            accumulator = tl.dot(a, b.T, accumulator)
-                        else:
-                            accumulator += tl.dot(a, b.T)
-                else:
-                    offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
-                    offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-                    offs_k = k_start_offset + tl.arange(0, BLOCK_K)
-                    a_ptrs = (
-                        a_ptr
-                        + (m_start_offset + offs_am[:, None]) * A_GLOBAL_SIZE_K
-                        + offs_k[None, :]
+{% if USE_TMA_LOAD %}
+                m_offset = (m_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
+                n_offset = (n_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
+
+                for k_offset in range(0, k_size, BLOCK_K):
+                    a = tl._experimental_descriptor_load(
+                        a_desc_ptr,
+                        [m_offset, k_start_offset + k_offset],
+                        [BLOCK_M, BLOCK_K],
+                        a_ptr.dtype.element_ty,
                     )
-                    b_ptrs = (
-                        b_ptr
-                        + (n_start_offset + offs_bn[:, None]) * B_GLOBAL_SIZE_K
-                        + offs_k[None, :]
+                    b = tl._experimental_descriptor_load(
+                        b_desc_ptr,
+                        [n_offset, k_start_offset + k_offset],
+                        [BLOCK_N, BLOCK_K],
+                        a_ptr.dtype.element_ty,
                     )
-                    for k_offset in range(0, k_size, BLOCK_K):
-                        a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
-                        b = tl.load(b_ptrs, mask=offs_bn[:, None] < n_size)
-                        if USE_FAST_ACCUM:
-                            accumulator = tl.dot(a, b.T, accumulator)
-                        else:
-                            accumulator += tl.dot(a, b.T)
-                        a_ptrs += BLOCK_K
-                        b_ptrs += BLOCK_K
+{% if USE_FAST_ACCUM %}
+                    accumulator = tl.dot(a, b.T, accumulator)
+{% else %}
+                    accumulator += tl.dot(a, b.T)
+{% endif %}
+{% else %}
+                offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
+                offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
+                offs_k = k_start_offset + tl.arange(0, BLOCK_K)
+                a_ptrs = (
+                    a_ptr
+                    + (m_start_offset + offs_am[:, None]) * A_GLOBAL_SIZE_K
+                    + offs_k[None, :]
+                )
+                b_ptrs = (
+                    b_ptr
+                    + (n_start_offset + offs_bn[:, None]) * B_GLOBAL_SIZE_K
+                    + offs_k[None, :]
+                )
+                for k_offset in range(0, k_size, BLOCK_K):
+                    a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
+                    b = tl.load(b_ptrs, mask=offs_bn[:, None] < n_size)
+{% if USE_FAST_ACCUM %}
+                    accumulator = tl.dot(a, b.T, accumulator)
+{% else %}
+                    accumulator += tl.dot(a, b.T)
+{% endif %}
+                    a_ptrs += BLOCK_K
+                    b_ptrs += BLOCK_K
+{% endif %}
 
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -411,6 +414,7 @@ def can_use_triton_kernel(
     if not has_triton_tma_device():
         return False
 
+    # The _scaled_grouped_mm() operator doesn't support bias yet.
     if bias is not None:
         return False
 
