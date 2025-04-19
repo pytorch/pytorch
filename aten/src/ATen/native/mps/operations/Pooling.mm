@@ -740,16 +740,11 @@ static void avg_pool3d_template(const Tensor& input,
   // Dispatch threads
   [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
 
-  // End encoding and commit
+  // End encoding
   [computeEncoder endEncoding];
 
-  // Commit the command buffer
-  [commandBuffer commit];
-
-  // Wait for the command buffer to complete
-  [commandBuffer waitUntilCompleted];
-
   // Synchronize the MPS stream
+  // This will commit the command buffer and wait for it to complete
   mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
