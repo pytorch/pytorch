@@ -30,6 +30,7 @@ from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
+    make_int,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
@@ -324,6 +325,12 @@ class AutogradCompilerInstance:
         ]
         proxies = self.bind_objects_to_proxies(sizes, self.sizes_proxy, sizes_origins)
         for i, symint in enumerate(sizes):
+            proxies[i] = self.fx_tracer.create_proxy(
+                "call_function",
+                make_int,
+                (proxies[i],),
+                {},
+            )
             self.symnode_proxy_lookup[symint.node] = proxies[i]
 
         for idx, val in enumerate(scalars):
@@ -933,6 +940,15 @@ class AutogradCompilerInstance:
         if self.nan_checker:
             self.nan_checker.prep_with_graph(self.fx_tracer.graph)
 
+        # dynamic_ints_idx = []
+        # for node in self.fx_tracer.graph.find_nodes(op="placeholder"):
+        #     if node.name != "sizes":
+        #         continue
+
+        #     for getitem_node in node.users.keys():
+        #         if getitem_node.users:
+        #             dynamic_ints_idx.append(getitem_node.args[1])
+
         graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
@@ -950,6 +966,10 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks, packed_inputs):
+            # for idx in dynamic_ints_idx:
+            for i in range(len(sizes)):
+                sizes[i] = torch.empty(0, sizes[i])
+                torch._dynamo.maybe_mark_dynamic(sizes[i], 1)
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
