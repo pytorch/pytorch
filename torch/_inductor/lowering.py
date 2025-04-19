@@ -2353,7 +2353,9 @@ def searchsorted(
     )
 
 
-@register_lowering(aten.bucketize, type_promotion_kind=None)
+@register_lowering(
+    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+)
 def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
