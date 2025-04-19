@@ -2167,7 +2167,7 @@ class GraphModuleDeserializer(metaclass=Final):
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = vr.lower
-                    if vr.upper >= 2:  # max is >= 2, not sym bool range
+                    if vr.upper >= 2 and not k.startswith(unbacked_symint_prefix):  # max is >= 2, not sym bool range
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower, -int_oo), vr.upper)
                     if k.startswith(unbacked_symfloat_prefix):
