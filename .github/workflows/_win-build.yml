@@ -56,6 +56,10 @@ on:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
@@ -170,6 +174,13 @@ jobs:
         run: |
           .ci/pytorch/win-build.sh
 
+      - name: Configure AWS Credentials - Upload Build Artifacts
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts
+          role-session-name: gha-windows-build-upload-build-artifacts
+          aws-region: us-east-1
+
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
         if: steps.build.outcome != 'skipped'
@@ -179,6 +190,13 @@ jobs:
           if-no-files-found: error
           name: ${{ inputs.build-environment }}
           path: C:\${{ github.run_id }}\build-results
+
+      - name: Configure AWS Credentials - Upload sccache
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload_benchmark_results
+          role-session-name: gha-windows-build-sccache
+          aws-region: us-east-1
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
