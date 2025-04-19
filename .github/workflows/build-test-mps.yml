@@ -1,0 +1,50 @@
+name: Build and Test MPS
+
+on:
+  push:
+    branches: [ feature/mps-avg-pool3d ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest-xlarge  # 使用高性能运行器
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install numpy pyyaml setuptools wheel typing_extensions pytest
+        brew install cmake ninja
+    
+    - name: Build PyTorch
+      env:
+        USE_CUDA: 0
+        USE_ROCM: 0
+        USE_NCCL: 0
+        USE_DISTRIBUTED: 0
+        USE_MPS: 1
+        CMAKE_BUILD_TYPE: Release  # 使用Release模式加速构建
+        MAX_JOBS: 8  # 使用所有可用核心
+      run: |
+        python setup.py develop
+    
+    - name: Test MPS implementation
+      run: |
+        python -m pytest test/test_mps.py::TestMPS::test_avg_pool3d -v
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: pytorch-mps-build
+        path: |
+          build/
+          torch/lib/
