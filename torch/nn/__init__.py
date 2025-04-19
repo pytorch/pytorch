@@ -44,19 +44,20 @@ def factory_kwargs(kwargs):
     """
     if kwargs is None:
         return {}
+
     simple_keys = {"device", "dtype", "memory_format"}
-    expected_keys = simple_keys | {"factory_kwargs"}
-    if not kwargs.keys() <= expected_keys:
-        raise TypeError(f"unexpected kwargs {kwargs.keys() - expected_keys}")
+    all_valid_keys = simple_keys | {"factory_kwargs"}
+
+    extra_keys = kwargs.keys() - all_valid_keys
+    if extra_keys:
+        raise TypeError(f"unexpected kwargs {extra_keys}")
 
     # guarantee no input kwargs is untouched
-    r = dict(kwargs.get("factory_kwargs", {}))
-    for k in simple_keys:
-        if k in kwargs:
-            if k in r:
-                raise TypeError(
-                    f"{k} specified twice, in **kwargs and in factory_kwargs"
-                )
-            r[k] = kwargs[k]
+    r = kwargs.get("factory_kwargs", {}).copy()
 
+    overlap = simple_keys & r.keys() & kwargs.keys()
+    if overlap:
+        raise TypeError(f"{next(iter(overlap))} specified twice, in **kwargs and in factory_kwargs")
+
+    r.update({k: kwargs[k] for k in simple_keys if k in kwargs})
     return r
