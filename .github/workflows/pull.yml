@@ -85,6 +85,9 @@ jobs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
     needs: linux-jammy-py3_9-gcc11-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-jammy-py3.9-gcc11
       docker-image: ${{ needs.linux-jammy-py3_9-gcc11-build.outputs.docker-image }}
