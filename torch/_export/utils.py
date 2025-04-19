@@ -382,7 +382,9 @@ def _check_symint(
         if i is not None:
             path += f".shape[{i}]"
         raise RuntimeError(
-            f"Expected input at {path} to be equal to {symint}, but got {arg}",
+            f"Expected input at {path} to be equal to {symint}, but got {arg}. "
+            "If you meant for this dimension to be dynamic, please re-export and specify dynamic_shapes "
+            "(e.g. with Dim.DYNAMIC)"
         )
 
 
