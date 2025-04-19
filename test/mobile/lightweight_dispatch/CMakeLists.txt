@@ -8,7 +8,11 @@ add_executable(test_codegen_unboxing
   ${TEST_ROOT}/test_codegen_unboxing.cpp
 )
 
-target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE})
+if(QNX)
+  target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE} ${TORCH_ROOT}/torch/csrc/api/include)
+else()
+  target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE})
+endif()
 
 target_compile_definitions(test_codegen_unboxing PRIVATE USE_GTEST)
 
