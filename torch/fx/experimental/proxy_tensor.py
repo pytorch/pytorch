@@ -14,7 +14,6 @@ import operator
 import traceback
 import typing
 import typing_extensions
-import warnings
 import weakref
 from collections import defaultdict, OrderedDict
 from collections.abc import Generator, Mapping, Sequence
@@ -131,6 +130,13 @@ pytree.register_pytree_node(
     ),
     serialized_type_name="torch.Size",
 )
+# Ideally unflattening should not lose info, but we unflatten
+# torch.Size to tuple (see above). This is necessary because the
+# torch.Size constructor only accepts ints whereas our infra often
+# transforms them to non-ints, e.g. symint proxies. Anyway, losing
+# such info can cause pytree mapping or spec matching to fail, so
+# work around this problem using the following dict as needed.
+_pytree_subclasses_that_lose_info = {torch.Size: tuple}
 
 
 def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
@@ -806,6 +812,12 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
+            from .symbolic_shapes import guard_size_oblivious
+
+            if guard_size_oblivious(args[0].numel() != 1):  # type: ignore[attr-defined]
+                raise RuntimeError(
+                    "Boolean value of Tensor with more than one value is ambiguous"
+                )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
@@ -1112,18 +1124,53 @@ class PythonKeyTracer(Tracer):
                 return None
             return extract_val(v.meta["val"])
 
-        # TODO: opt-in mechanism ?
-        if isinstance(
-            target,
-            (
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-            ),
-        ):
+        if _should_save_eager_input_vals(target, (args, kwargs)):
+            # NOTE "eager_input_vals"
+            # We save the original (args, kwargs) FakeTensor values for nodes
+            # that have exact stride requirements. This is useful downstream.
+            # We use this information inside Inductor to ensure that inputs to
+            # stride-sensitive operators have the correct strides.
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
-            node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
+            node.meta["eager_input_vals"] = (arg_inp, kwarg_inp)
 
         return node
+
+
+def _should_save_eager_input_vals(
+    target: Any,
+    args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
+) -> bool:
+    if not callable(target):
+        return False
+    if isinstance(
+        target,
+        (
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ),
+    ):
+        return True
+    if args_kwargs is not None and (
+        target is torch.ops.higher_order.auto_functionalized
+        or target is torch.ops.higher_order.auto_functionalized_v2
+    ):
+        args = args_kwargs[0]
+        assert isinstance(args[0], torch._ops.OpOverload)
+        return _should_save_eager_input_vals(args[0], None)
+    if target is torch.ops.higher_order.with_effects:
+        # TODO: inductor lowering for with_effects needs to be updated to propagate
+        # the arg_kwarg_vals
+        return False
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        if pytree.tree_any(_should_save_eager_input_vals, args_kwargs):
+            raise RuntimeError(
+                f"NYI: The HOP {target} has an input that is an OpOverload that "
+                f"needs exact strides. We probably need special logic to "
+                f"propagate the FakeTensor vals. Please file an issue."
+            )
+    if isinstance(target, torch._ops.OpOverload):
+        return torch._C.Tag.needs_exact_strides in target.tags
+    return False
 
 
 def _make_temp_remove_mode_context_manager(
@@ -1357,10 +1404,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
-        self.decomp_layers = 0
+        self.decomp_layers: int = 0
         from torch._inductor import config
 
-        self.emulate_precision_casts = config.emulate_precision_casts
+        self.emulate_precision_casts: bool = config.emulate_precision_casts
 
     @count
     def __torch_dispatch__(
@@ -1807,11 +1854,12 @@ class _ModuleStackTracer(PythonKeyTracer):
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
         except _ModuleNotInstalledAsSubmoduleError:
-            warnings.warn(
-                f"Unable to find the path of the module {m}. "
+            log.debug(
+                "Unable to find the path of the module %s. "
                 "This might be because the module was not properly registered "
                 "as a submodule, which is not good practice. We will trace "
-                "through the module without recording stack information."
+                "through the module without recording stack information.",
+                str(m),
             )
             return forward(*args, **kwargs)
 

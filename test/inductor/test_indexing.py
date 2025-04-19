@@ -320,6 +320,18 @@ class ExprPrinterTests(InductorTestCase):
             texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
         )
 
+    def test_print_integer(self):
+        expr = sympy.S((-1) << 63)
+        self.assertExpectedInline(cexpr(expr), f"""(-1{LONG_SUFFIX} << 63)""")
+
+        expr = sympy.S(((-1) << 63) - 1)
+        with self.assertRaises(OverflowError):
+            cexpr(expr)
+
+        expr = sympy.S(1 << 63)
+        with self.assertRaises(OverflowError):
+            cexpr(expr)
+
     def test_print_mod(self):
         x = sympy.Symbol("x", integer=True)
         expr = Mod(x - 1, 2)
@@ -420,9 +432,9 @@ class ExprPrinterTests(InductorTestCase):
             )
             self.assertEqual(
                 cexpr(expr),
-                f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                f"std::{s}<int64_t>({{x, 2LL*x, 3LL*x}})"
                 if sys.platform in ["darwin", "win32"]
-                else f"std::{s}({{x, 2L*x, 3L*x}})",
+                else f"std::{s}<int64_t>({{x, 2L*x, 3L*x}})",
             )
 
 
