@@ -21,7 +21,8 @@ void THCPMemPool_init(PyObject* module) {
           }))
       .def_property_readonly("id", &::c10::cuda::MemPool::id)
       .def_property_readonly("allocator", &::c10::cuda::MemPool::allocator)
-      .def("use_count", &::c10::cuda::MemPool::use_count);
+      .def("use_count", &::c10::cuda::MemPool::use_count)
+      .def("device", &::c10::cuda::MemPool::device);
   shared_ptr_class_<::c10::cuda::MemPoolContext>(torch_C_m, "_MemPoolContext")
       .def(py::init<c10::cuda::MemPool*>())
       .def_static(
