@@ -42,7 +42,7 @@ jobs:
         python -m pytest test/test_mps.py::TestMPS::test_avg_pool3d -v
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: pytorch-mps-build
         path: |
