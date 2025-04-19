@@ -855,5 +855,12 @@ API Reference
 .. automodule:: torch.export.custom_obj
 
 .. automodule:: torch.export.experimental
+.. automodule:: torch.export.experimental.package
+.. autofunction:: torch.export.experimental.package.package_model
+.. automodule:: torch.export.experimental.package.pt2_archive
+.. autoclass:: PT2ArchiveReader
+    :members:
+.. autoclass:: PT2ArchiveWriter
+    :members:
 .. automodule:: torch.export.passes
 .. autofunction:: torch.export.passes.move_to_device_pass
