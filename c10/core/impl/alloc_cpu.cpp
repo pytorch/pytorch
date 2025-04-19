@@ -64,7 +64,7 @@ static inline bool is_thp_alloc_enabled() {
   return value;
 }
 
-inline size_t c10_compute_alignment(size_t nbytes) {
+static inline size_t c10_compute_alignment(size_t /*nbytes*/) {
   static const auto pagesize = sysconf(_SC_PAGESIZE);
   // for kernels that don't provide page size, default it to 4K
   const size_t thp_alignment = (pagesize < 0 ? gPagesize : pagesize);
@@ -76,7 +76,7 @@ inline bool is_thp_alloc(size_t nbytes) {
   return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
 }
 #elif !defined(__ANDROID__) && !defined(_MSC_VER)
-constexpr size_t c10_compute_alignment([[maybe_unused]] size_t nbytes) {
+static constexpr size_t c10_compute_alignment(size_t /*nbytes*/) {
   return gAlignment;
 }
 

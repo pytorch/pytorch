@@ -213,11 +213,11 @@ bool CUDAKernelLaunchRegistry::check_env_for_dsa_enabled() const {
 }
 
 uint32_t CUDAKernelLaunchRegistry::insert(
-    const char* launch_filename,
-    const char* launch_function,
-    const uint32_t launch_linenum,
-    const char* kernel_name,
-    const int32_t stream_id) {
+    const char* /*launch_filename*/,
+    const char* /*launch_function*/,
+    const uint32_t /*launch_linenum*/,
+    const char* /*kernel_name*/,
+    const int32_t /*stream_id*/) {
 #ifdef TORCH_USE_CUDA_DSA
   if (!enabled_at_runtime) {
     return 0;
