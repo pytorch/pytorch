@@ -757,11 +757,6 @@ class MultiOutputLine(WrapperLine):
         )
 
 
-@dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
-
-
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -770,6 +765,8 @@ class PythonWrapperCodegen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
     """
+
+    supports_caching = True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
