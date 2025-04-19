@@ -187,6 +187,19 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
   return ret;
 }
 
+template <typename T>
+inline bool allElementsEqual(const std::vector<T>& vec) {
+    if (vec.empty()) {
+        return true;
+    }
+    
+    const auto& firstElement = vec[0];
+    return std::all_of(vec.begin(), vec.end(), 
+                      [&firstElement](const T& elem) { 
+                          return elem == firstElement; 
+                      });
+}
+
 inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
