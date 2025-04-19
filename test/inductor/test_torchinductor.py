@@ -1369,7 +1369,7 @@ class CommonTemplate:
             b = torch.add(args[0], args[0])
             return (a, b)
 
-        x = torch.randn(41, dtype=torch.complex64, device=self.device)
+        x = torch.randn(41, dtype=torch.complex64)
         y = x.clone()
         # should not inplace write to the input
         fn(x)
