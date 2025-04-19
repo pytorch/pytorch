@@ -34,7 +34,7 @@ std::string stringSlice(
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
   const int64_t num_vals =
-      slice_indices_adjust(string.size(), &start_val, &end_val, step);
+      slice_indices_adjust(static_cast<int64_t>(string.size()), &start_val, &end_val, step);
 
   int64_t i = start_val;
   std::string result;
@@ -456,7 +456,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           } else if (scalar.isDouble()) {
             push(stack, c10::complex<double>(scalar.toDouble(), 0));
           } else {
-            push(stack, c10::complex<double>(scalar.toInt(), 0));
+            push(stack, c10::complex<double>(static_cast<double>(scalar.toInt()), 0));
           }
         },
         aliasAnalysisFromSchema()),
@@ -491,7 +491,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Size(int[] sizes) -> int[]"),
-        [](Stack& stack) {},
+        [](Stack& /*stack*/) {},
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::size(Tensor self) -> int[]"),
@@ -823,8 +823,9 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           std::stringstream ss;
           bool first = true;
           for (const IValue& i : last(stack, num_inputs)) {
-            if (!first)
+            if (!first) {
               ss << " ";
+            }
             first = false;
             ss << i;
           }
@@ -1100,7 +1101,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          auto norm_index = normalizeIndex(index, string.size());
+          auto norm_index = normalizeIndex(index, static_cast<int64_t>(string.size()));
           char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
         },
@@ -1347,7 +1348,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         auto string = pop(stack).toStringRef();                        \
         push(                                                          \
             stack,                                                     \
-            string.size() != 0 &&                                      \
+            !string.empty() &&                                      \
                 std::all_of(string.begin(), string.end(), [](char c) { \
                   return char_op(c);                                   \
                 }));                                                   \
@@ -1708,7 +1709,7 @@ int64_t stringFindImpl(
     int64_t start,
     int64_t end,
     bool reverse = false) {
-  int64_t size = string.size();
+  int64_t size = static_cast<int64_t>(string.size());
   if (start < 0) {
     start = std::max(int64_t(0), int64_t(size + start));
   }
@@ -1732,7 +1733,7 @@ int64_t stringFindImpl(
       } while (rpos != std::string::npos);
     }
     if (pos != std::string::npos) {
-      result = pos + start;
+      result = static_cast<int64_t>(pos) + start;
     }
   }
   return result;
@@ -1958,7 +1959,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           int64_t start = pop(stack).toInt();
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
-          int64_t size = string.size();
+          int64_t size = static_cast<int64_t>(string.size());
           if (start > size) {
             push(stack, 0);
             return;
@@ -1991,7 +1992,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           int64_t start = pop(stack).toInt();
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
-          int64_t size = string.size();
+          int64_t size = static_cast<int64_t>(string.size());
           if (start < 0) {
             start = std::max(int64_t(0), int64_t(size + start));
           }
@@ -2017,7 +2018,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           int64_t start = pop(stack).toInt();
           std::string substr = pop(stack).toStringRef();
           std::string string = pop(stack).toStringRef();
-          int64_t size = string.size();
+          int64_t size = static_cast<int64_t>(string.size());
           if (start < 0) {
             start = std::max(int64_t(0), int64_t(size + start));
           }
@@ -2682,7 +2683,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
             "aten::warn(str message, int stacklevel=2) -> ()"),
-        [](Stack& stack) {
+        [](Stack& /*stack*/) {
           TORCH_CHECK(false, "warn is implemented directly in the interpreter");
         },
         aliasAnalysisFromSchema()),
@@ -2708,7 +2709,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           auto sizes_tensor = torch::empty(
               {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
           auto accessor = sizes_tensor.accessor<int64_t, 1>();
-          for (const auto i : c10::irange(sizes.size())) {
+          for (const auto i : c10::irange(static_cast<int64_t>(sizes.size()))) {
             accessor[i] = sizes[i];
           }
           stack.emplace_back(sizes_tensor);
@@ -3025,7 +3026,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         [](Stack& stack) {
           auto index = pop(stack).toInt();
           auto string = pop(stack).toStringRef();
-          auto norm_index = normalizeIndex(index, string.size());
+          auto norm_index = normalizeIndex(index, static_cast<int64_t>(string.size()));
           char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
         },
@@ -3039,7 +3040,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
               i >= 0 && i < 1114111,
               "chr() arg not in range(0x110000), found ",
               i);
-          char c = i;
+          char c = static_cast<char>(i);
           ss << c;
           push(stack, ss.str());
         },
@@ -3075,7 +3076,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           double a = 0;
           int64_t b = 0;
           pop(stack, a, b);
-          push(stack, std::ldexp(a, b));
+          push(stack, std::ldexp(a, static_cast<int>(b)));
         },
         aliasAnalysisFromSchema()),
     DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
@@ -3209,7 +3210,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           c10::List<int64_t> l = pop(stack).toIntList();
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
-          for (const auto i : c10::irange(l.size())) {
+          for (const auto i : c10::irange(static_cast<int64_t>(l.size()))) {
             t[i] = l.get(i);
           }
           push(stack, std::move(t));
@@ -3219,7 +3220,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         TORCH_SELECTIVE_SCHEMA("aten::sum.int(int[] self) -> int"),
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
-          auto sum = 0;
+          int64_t sum = 0;
           for (const auto& elem : l) {
             sum += elem;
           }
@@ -3292,7 +3293,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         [](Stack& stack) {
           c10::List<double> l = pop(stack).toDoubleList();
           for (const auto& elem : l) {
-            if (elem) {
+            if (elem != 0.0) {
               push(stack, true);
               return;
             }
@@ -3331,7 +3332,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         [](Stack& stack) {
           c10::List<double> l = pop(stack).toDoubleList();
           for (const auto& elem : l) {
-            if (!elem) {
+            if (elem == 0.0) {
               push(stack, false);
               return;
             }
@@ -3384,7 +3385,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           }
           double rem = fmod(a, b);
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-          if (rem && (a < 0) != (b < 0)) {
+          if ((rem != 0.0) && (a < 0) != (b < 0)) {
             rem += b;
           }
           push(stack, (a - rem) / b, rem);
