@@ -2004,7 +2004,7 @@ class TestMPS(TestCaseMPS):
                 stride = kernel_size
 
             # Create input tensor
-            x_cpu = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x_cpu = torch.randn(input_shape, device='cpu', dtype=torch.float32, requires_grad=True)
             x_mps = x_cpu.detach().clone().to('mps').requires_grad_()
 
             # Apply avg_pool3d
