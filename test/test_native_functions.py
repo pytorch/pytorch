@@ -1,6 +1,6 @@
 # Owner(s): ["module: unknown"]
 
-from typing import Optional, List
+from typing import Optional
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 
@@ -8,12 +8,12 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorc
 
 
 class FloatListWrapperModule(torch.nn.Module):
-    def forward(self, values, incr: Optional[List[float]]):
+    def forward(self, values, incr: Optional[list[float]]):
         return torch._C._nn._test_optional_floatlist(values, incr)
 
 
 class IntListWrapperModule(torch.nn.Module):
-    def forward(self, values, incr: Optional[List[int]]):
+    def forward(self, values, incr: Optional[list[int]]):
         return torch._C._nn._test_optional_intlist(values, incr)
 
 

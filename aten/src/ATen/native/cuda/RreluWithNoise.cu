@@ -71,7 +71,7 @@ template <typename scalar_t>
 inline void _rrelu_with_noise_cuda_train(
     Tensor& output,
     const Tensor& input_,
-    const Tensor& noise_,
+    Tensor& noise_,
     const Scalar& lower_,
     const Scalar& upper_,
     std::optional<Generator> generator) {
@@ -80,12 +80,8 @@ inline void _rrelu_with_noise_cuda_train(
   Tensor tmp_output = output.contiguous();
 
   int64_t numel = input.numel();
-  const int unroll_factor = std::is_same<scalar_t, double>::value ? 2 : 4;
-  auto execution_policy = calc_execution_policy(numel, unroll_factor);
-
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
+  const int unroll_factor = std::is_same_v<scalar_t, double> ? 2 : 4;
+  auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
 
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(
       generator, cuda::detail::getDefaultCUDAGenerator());
@@ -105,7 +101,7 @@ inline void _rrelu_with_noise_cuda_train(
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  if (std::is_same<scalar_t, double>::value) {
+  if (std::is_same_v<scalar_t, double>) {
     rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
         numel,
         rng_engine_inputs,
@@ -139,7 +135,7 @@ inline void _rrelu_with_noise_cuda_train(
 }
 
 Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
@@ -173,7 +169,7 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
 
 Tensor rrelu_with_noise_cuda(
     const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
@@ -184,7 +180,7 @@ Tensor rrelu_with_noise_cuda(
 
 Tensor& rrelu_with_noise_cuda_(
     Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,

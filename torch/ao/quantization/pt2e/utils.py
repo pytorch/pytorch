@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
+import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
-from torch._export import capture_pre_autograd_graph
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -34,28 +34,6 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
-# Example inputs for conv-bn1d patterns
-_conv1d_bn_example_inputs = (
-    torch.randn(1, 1, 3),  # x
-    torch.randn(1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
-)
-
-# Example inputs for conv-bn2d patterns
-_conv2d_bn_example_inputs = (
-    torch.randn(1, 1, 3, 3),  # x
-    torch.randn(1, 1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
-)
-
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
@@ -76,7 +54,7 @@ def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
 
 def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
-) -> Tuple[Any, Any]:
+) -> tuple[Any, Any]:
     """
     Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
@@ -107,8 +85,8 @@ def _find_q_dq_node_for_user(
 
     q_node = None
     if (
-        dq_node.args[0].op == "call_function"
-        and dq_node.args[0].target in _QUANTIZE_OPS
+        dq_node.args[0].op == "call_function"  # type: ignore[union-attr]
+        and dq_node.args[0].target in _QUANTIZE_OPS  # type: ignore[union-attr]
     ):
         q_node = dq_node.args[0]
     return (q_node, dq_node)
@@ -124,7 +102,7 @@ def _is_sym_size_node(node: Node):
     )
 
 
-def _filter_sym_size_users(node: torch.fx.Node) -> List[torch.fx.Node]:
+def _filter_sym_size_users(node: torch.fx.Node) -> list[torch.fx.Node]:
     node_users = list(filter((lambda x: (_is_sym_size_node(x) is False)), node.users))
     return node_users
 
@@ -171,6 +149,7 @@ def _is_supported_batch_norm_for_training(node: Node):
     Return True if the given node refers to an aten batch norm op QAT supports.
     """
     supported_ops = [
+        torch.ops.aten.batch_norm.default,
         torch.ops.aten._native_batch_norm_legit.default,
         # Note: we won't need this op anymore after batch norm consolidation
         # For now, we need to continue to support it because it gives better
@@ -279,25 +258,35 @@ def fold_bn_weights_into_conv_node(
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
     # and we want to replace the uses of getitem 0 with the output of conv
     #
-    # Before:
-    # conv -> bn - (first output) -> users1
-    #          \ - (second output) -> users2
-    #          \ - (third output) -> users3
-    # After:
-    # conv -> (first output) -> users1
-    #       bn -
-    #          \ - (second output) -> users2
-    #          \ - (third output) -> users3
-    # if users2 and users3 are empty then bn will be removed through dead code elimination
-
-    for user in bn_node.users:
-        if (
-            user.op != "call_function"
-            or user.target != operator.getitem
-            or user.args[1] != 0
-        ):
-            continue
-        user.replace_all_uses_with(conv_node)
+    if bn_node.target == torch.ops.aten.batch_norm.default:
+        # With the new training ir, instead of batch_norm + getitem,
+        # we only have the batch_norm node.
+        #
+        # Before:
+        # conv -> bn -> users
+        # After:
+        # conv -> users
+        #       bn has no users now
+        bn_node.replace_all_uses_with(conv_node)
+    else:
+        # Before:
+        # conv -> bn - (first output) -> users1
+        #          \ - (second output) -> users2
+        #          \ - (third output) -> users3
+        # After:
+        # conv -> (first output) -> users1
+        #       bn -
+        #          \ - (second output) -> users2
+        #          \ - (third output) -> users3
+        # if users2 and users3 are empty then bn will be removed through dead code elimination
+        for user in bn_node.users:
+            if (
+                user.op != "call_function"
+                or user.target != operator.getitem
+                or user.args[1] != 0
+            ):
+                continue
+            user.replace_all_uses_with(conv_node)
 
     # If the BN node does not have users, erase it from the graph
     # Note: we need to do this manually because the model can still be in train
@@ -315,9 +304,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     if not has_bn:
         return
     for n in m.graph.nodes:
-        if (
-            n.op != "call_function"
-            or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default
+        if n.op != "call_function" or n.target not in (
+            torch.ops.aten._native_batch_norm_legit_no_training.default,
+            torch.ops.aten.batch_norm.default,
         ):
             continue
         bn_node = n
@@ -335,9 +324,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     m.recompile()
 
 
-def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
+def _get_node_name_to_scope(model: GraphModule) -> dict[str, tuple[str, type]]:
     # TODO: move this information to fx node itself
-    node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+    node_name_to_scope: dict[str, tuple[str, type]] = {}
     for n in model.graph.nodes:
         nn_module_stack = n.meta.get("nn_module_stack", None)
         current_scope = ("", type(None))
@@ -350,7 +339,7 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
 
 def _get_aten_graph_module_for_pattern(
     pattern: Callable,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     is_cuda: bool = False,
     **kwargs,
 ) -> GraphModule:
@@ -361,28 +350,30 @@ def _get_aten_graph_module_for_pattern(
         example_inputs = tuple(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
-    aten_pattern = capture_pre_autograd_graph(
-        pattern,
+
+    aten_pattern = torch.export.export_for_training(
+        pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
-    )
-    aten_pattern.graph.eliminate_dead_code()
-    aten_pattern.recompile()
+    ).module()
+
+    aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
+    aten_pattern.recompile()  # type: ignore[operator]
 
     # ep.module() adds copy_ nodes for the mutated inputs.
     # For patterns, it doesn't matter
-    for node in aten_pattern.graph.nodes:
+    for node in aten_pattern.graph.nodes:  # type: ignore[union-attr]
         if (
             node.op == "call_function"
             and node.target == torch.ops.aten.copy_.default
             and len(node.users) == 0
         ):
-            aten_pattern.graph.erase_node(node)
+            aten_pattern.graph.erase_node(node)  # type: ignore[operator, union-attr]
 
-    aten_pattern.graph.eliminate_dead_code()
-    aten_pattern.recompile()
+    aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
+    aten_pattern.recompile()  # type: ignore[operator]
 
-    return aten_pattern
+    return aten_pattern  # type: ignore[return-value]
 
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
@@ -418,7 +409,7 @@ def _is_literal(arg):
 def _replace_literals_with_new_placeholders(
     gm: torch.fx.GraphModule,
     merge_dup: bool = False,
-    exclude_literals: Optional[List[Any]] = None,
+    exclude_literals: Optional[list[Any]] = None,
 ):
     """Replace the literals in the graph with placeholder nodes that's created on the fly while we
     traverse the graph, so that the literal arguments in the graph can be matched and replaced
@@ -469,7 +460,7 @@ def _replace_literals_with_new_placeholders(
     """
     last_ph = None
     cnt = 0
-    literal_to_ph: Dict[Union[float, bool, int, torch.dtype], Node] = {}
+    literal_to_ph: dict[Union[float, bool, int, torch.dtype], Node] = {}
     if exclude_literals is None:
         exclude_literals = []
 
@@ -507,8 +498,8 @@ def _replace_literals_with_new_placeholders(
 
 def _replace_literals_with_existing_placeholders(
     gm: torch.fx.GraphModule,
-    exclude_literals: Optional[List[Any]] = None,
-    literal_to_ph_idx: Optional[Dict[Union[float, int, bool, torch.dtype], int]] = None,
+    exclude_literals: Optional[list[Any]] = None,
+    literal_to_ph_idx: Optional[dict[Union[float, int, bool, torch.dtype], int]] = None,
 ):
     """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
     in the graph can be matched and replaced

@@ -14,12 +14,10 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-
 namespace at::native {
 
 DEFINE_DISPATCH(nested_dense_elementwise_stub);
-REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub);
+REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub)
 
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
 static get_elementwise_nested_tensor_impl(
@@ -74,7 +72,7 @@ static get_elementwise_nested_tensor_impl(
 }
 
 template <typename Func>
-Tensor NestedTensor_elementwise_Tensor(
+static Tensor NestedTensor_elementwise_Tensor(
     const Tensor& self,
     const Tensor& other,
     const std::string& op_name,
@@ -114,7 +112,7 @@ Tensor NestedTensor_elementwise_Tensor(
         self_ptr->size(0) == other.size(0) &&
         other.size(1) == 1 &&
         self_ptr->opt_size(2).has_value() &&
-        self_ptr->opt_size(2).value() == other.size(2));
+        self_ptr->opt_size(2) == other.size(2));
     // check for the [B, *], [B, 1] case -> treat as 3D with [B, *, 1], [B, 1, 1]
     bool is_broadcastable_2d = (
         self_ptr->dim() == 2 &&
@@ -236,7 +234,7 @@ Tensor NestedTensor_masked_fill(
 
 
 template <typename Func>
-Tensor& NestedTensor_elementwise__Tensor(
+static Tensor& NestedTensor_elementwise__Tensor(
     Tensor& self,
     const Tensor& other,
     const std::string& op_name,
@@ -316,6 +314,15 @@ Tensor gt_scalar_nested(const Tensor& self, const Scalar& other) {
 Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
   return NestedTensor_elementwise_Tensor(
       self, wrapped_scalar_tensor(other), "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
+}
+
+Tensor eq_tensor_nested(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!other.is_nested(), "eq does not support nested tensor as other value.");
+  return NestedTensor_elementwise_Tensor(
+      self, other, "eq", false /*supports_striding*/,
       [](const Tensor& b1, const Tensor& b2) {
         return b1.eq(b2);
       });

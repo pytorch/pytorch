@@ -8,8 +8,7 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
 
-namespace std {
-
+namespace c10 {
 template <typename T>
 struct is_reduced_floating_point
     : std::integral_constant<
@@ -19,187 +18,201 @@ struct is_reduced_floating_point
 template <typename T>
 constexpr bool is_reduced_floating_point_v =
     is_reduced_floating_point<T>::value;
+} // namespace c10
+
+namespace std {
+
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
+using c10::is_reduced_floating_point;
+using c10::is_reduced_floating_point_v;
+#endif // !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T acos(T a) {
   return std::acos(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T asin(T a) {
   return std::asin(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T atan(T a) {
   return std::atan(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T atanh(T a) {
   return std::atanh(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T erf(T a) {
   return std::erf(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T erfc(T a) {
   return std::erfc(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T exp(T a) {
   return std::exp(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T expm1(T a) {
   return std::expm1(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
+inline bool isfinite(T a) {
+  return std::isfinite(float(a));
+}
+template <
+    typename T,
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T log(T a) {
   return std::log(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T log10(T a) {
   return std::log10(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T log1p(T a) {
   return std::log1p(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T log2(T a) {
   return std::log2(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T ceil(T a) {
   return std::ceil(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T cos(T a) {
   return std::cos(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T floor(T a) {
   return std::floor(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T nearbyint(T a) {
   return std::nearbyint(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T sin(T a) {
   return std::sin(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T tan(T a) {
   return std::tan(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T sinh(T a) {
   return std::sinh(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T cosh(T a) {
   return std::cosh(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T tanh(T a) {
   return std::tanh(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T trunc(T a) {
   return std::trunc(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T lgamma(T a) {
   return std::lgamma(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T sqrt(T a) {
   return std::sqrt(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T rsqrt(T a) {
   return 1.0 / std::sqrt(float(a));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T abs(T a) {
   return std::abs(float(a));
 }
 #if defined(_MSC_VER) && defined(__CUDACC__)
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T pow(T a, double b) {
   return std::pow(float(a), float(b));
 }
 #else
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T pow(T a, double b) {
   return std::pow(float(a), b);
 }
 #endif
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T pow(T a, T b) {
   return std::pow(float(a), float(b));
 }
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 inline T fmod(T a, T b) {
   return std::fmod(float(a), float(b));
 }
@@ -232,15 +245,14 @@ inline T fmod(T a, T b) {
  */
 template <
     typename T,
-    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+    typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, int> = 0>
 C10_HOST_DEVICE inline T nextafter(T from, T to) {
   // Reference:
   // https://git.musl-libc.org/cgit/musl/tree/src/math/nextafter.c
   using int_repr_t = uint16_t;
-  using float_t = T;
   constexpr uint8_t bits = 16;
   union {
-    float_t f;
+    T f;
     int_repr_t i;
   } ufrom = {from}, uto = {to};
 

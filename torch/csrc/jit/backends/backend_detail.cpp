@@ -11,9 +11,7 @@
 #include <stack>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace detail {
+namespace torch::jit::detail {
 namespace {
 
 /*
@@ -361,7 +359,7 @@ Module codegen_backend_module(
 
     wrapper_method_te.v("def_inputs", def_inputs);
     wrapper_method_te.v("fwd_inputs", fwd_inputs);
-    wrapper_methods.push_back(wrapper_method_ct.format(wrapper_method_te));
+    wrapper_methods.emplace_back(wrapper_method_ct.format(wrapper_method_te));
 
     // If the output type is a single element tuple then add an extra comma
     // to ensure the final output maintains this type.
@@ -408,6 +406,4 @@ Module codegen_backend_module(
 
   return wrapper;
 }
-} // namespace detail
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::detail

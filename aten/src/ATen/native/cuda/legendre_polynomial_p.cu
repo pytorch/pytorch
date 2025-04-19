@@ -27,5 +27,5 @@ namespace at::native {
             } // legendre_polynomial_p_kernel_cuda
         } // namespace (anonymous)
 
-        REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel_cuda);
+        REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel_cuda)
 } // namespace at::native

@@ -99,9 +99,10 @@ def sharded_type_as(args, kwargs, pg):
     tensor = args[1]
     if isinstance(tensor, ShardedTensor):
         tensor = tensor.local_tensor()
-    new_local_shards = []
-    for shard in st.local_shards():
-        new_local_shards.append(Shard(shard.tensor.type_as(tensor), shard.metadata))
+    new_local_shards = [
+        Shard(shard.tensor.type_as(tensor), shard.metadata)
+        for shard in st.local_shards()
+    ]
     st_meta = copy.deepcopy(st._metadata)
     st_meta.tensor_properties.dtype = tensor.dtype
     return new_local_shards, st_meta

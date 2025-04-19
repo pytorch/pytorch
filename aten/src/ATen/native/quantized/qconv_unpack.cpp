@@ -19,6 +19,7 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -27,13 +28,6 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 #include <ATen/ops/_empty_per_channel_affine_quantized.h>
 #include <ATen/ops/from_blob.h>
 #endif
-
-template <int kSpatialDim = 2>
-int register_conv_params();
-
-extern template int register_conv_params<2>();
-extern template int register_conv_params<3>();
-
 
 
 namespace at::native {

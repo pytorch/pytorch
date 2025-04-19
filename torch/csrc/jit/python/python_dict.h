@@ -98,12 +98,12 @@ class ScriptDict final {
   // not exist.
   at::IValue getItem(const at::IValue& key) {
     return dict_.at(key);
-  };
+  }
 
   // Set the value for the given key.
   void setItem(const at::IValue& key, const at::IValue& value) {
     dict_.insert_or_assign(key, value);
-  };
+  }
 
   // Check whether the dictionary contains the given key.
   bool contains(const at::IValue& key) {

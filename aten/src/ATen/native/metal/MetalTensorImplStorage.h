@@ -8,7 +8,7 @@ class MetalTensorImplStorage final {
   class Impl;
 
  public:
-  MetalTensorImplStorage(){};
+  MetalTensorImplStorage() = default;
   MetalTensorImplStorage(const std::vector<int64_t>& sizes);
   MetalTensorImplStorage(
       const std::vector<int64_t>& sizes,

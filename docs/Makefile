@@ -19,7 +19,6 @@ figures:
 
 onnx:
 	@$(PYCMD) source/scripts/onnx/build_onnx_torchscript_supported_aten_op_csv_table.py
-	@$(PYCMD) source/scripts/onnx/build_onnx_dynamo_diagnostics_rules_md.py $(SOURCEDIR)/generated/onnx_dynamo_diagnostics_rules
 
 opset:
 	@$(PYCMD) source/scripts/build_opsets.py
@@ -41,7 +40,10 @@ html-stable:
 	# See conf.py for more details.
 	RELEASE=1 make html
 
-.PHONY: help Makefile docset onnx exportdb
+.PHONY: help Makefile docset onnx exportdb serve
+
+serve:
+	@cd $(BUILDDIR)/html && $(PYCMD) -m http.server $(PORT)
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

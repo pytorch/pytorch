@@ -228,6 +228,7 @@ namespace c10 {
   _(aten, is_autocast_cpu_enabled)   \
   _(aten, is_autocast_xla_enabled)   \
   _(aten, get_autocast_dtype)        \
+  _(aten, is_autocast_mps_enabled)   \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

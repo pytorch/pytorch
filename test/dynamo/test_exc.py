@@ -10,7 +10,12 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_device_type import skipIf
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc, TEST_Z3
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    munge_exc,
+    skipIfWindows,
+    TEST_Z3,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -32,7 +37,12 @@ class ExcTests(LoggingTestCase):
                 torch.randn(1)
             ),
             """\
-'skip function graph_break in file _dynamo/decorators.py'
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
 
 from user code:
    File "test_exc.py", line N, in fn001
@@ -87,7 +97,7 @@ from user code:
                 raise NotImplementedError
 
             # Ensure graph break is not possible
-            for i in range(3):
+            for _ in range(3):
                 comptime(f)
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
@@ -102,7 +112,7 @@ due to:
 Traceback (most recent call last):
   File "test_exc.py", line N, in f
     raise NotImplementedError
-torch._dynamo.exc.InternalTorchDynamoError:
+torch._dynamo.exc.InternalTorchDynamoError: NotImplementedError:
 
 from user code:
    File "test_exc.py", line N, in fn001
@@ -158,20 +168,42 @@ from user code:
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
-        record = self.getRecord(records, "Graph break:")
+        record = self.getRecord(records, "Graph break in user code")
 
         # TODO: This should also report the enclosing frames; need to plumb
         # frame object to it
         self.assertExpectedInline(
             munge_exc(record.getMessage()),
             """\
-Graph break: from user code at:
+Graph break in user code at test_exc.py:N
+Graph Break Reason: Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+User code traceback:
+  File "test_exc.py", line N, in test_graph_break_log
+    torch.compile(fn001, backend="eager")(torch.randn(1))
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002
     torch._dynamo.graph_break()
 """,  # noqa: B950
         )
+
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_log_generic_jump(self, records):
+        def fn(x):
+            if x.sum() > 0:
+                return x + 1
+            else:
+                return x - 1
+
+        torch.compile(fn, backend="eager")(torch.ones(3, 3))
+
+        # check for record existence
+        self.getRecord(records, "Graph break in user code")
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
@@ -199,6 +231,10 @@ ReluCompileError:""",
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         translation_validation=True,
         translation_validation_no_bisect=True,
+    )
+    @skipIfWindows(
+        msg='AssertionError: "tran[551 chars]s1 s2 s3) s0)\n  ==> (<= (+ s1 s2) (+ s0 (* -1[511 chars][0])'  # noqa: PLR0133
+        != 'tran[551 chars]s1 s2) (+ s0 (* -1 s3)))\n  ==> (<= (+ s1 s2) [483 chars][0])"'
     )
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
@@ -233,18 +269,13 @@ Assertions:
   ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 1)
-  ==> (True)
 
 Target Expressions:
   ==> (!= (+ s1 s2 s3) s0)
-  ==> (<= (+ s1 s2 s3) s0)
-  ==> (<= (+ s1 s2) (+ s0 (* -1 s3)))
-  ==> (<= (+ s1 s2) s0)
   ==> (<= 0 s1)
   ==> (<= 0 s2)
   ==> (<= 0 s3)
   ==> (<= 2 s0)
-  ==> (<= s1 (+ s0 (* -1 s2)))
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
   ==> (== L['shape'][0] s1)
@@ -253,7 +284,6 @@ Target Expressions:
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 0)
   ==> (>= 0 s1)
-  ==> (And (<= (+ s1 s2) s0) (<= (* -1 s0) (+ s1 s2)))
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",

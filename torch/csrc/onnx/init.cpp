@@ -218,7 +218,7 @@ void initONNXBindings(PyObject* module) {
                   &std::cerr, [](std::ostream*) {});
             } else {
               std::cerr << "ERROR: only `stdout` and `stderr`"
-                        << "are supported as `stream_name`" << std::endl;
+                        << "are supported as `stream_name`" << '\n';
             }
             ::torch::jit::onnx::set_log_output_stream(out);
           },
@@ -231,7 +231,7 @@ void initONNXBindings(PyObject* module) {
               for (auto arg : args) {
                 out << ::c10::str(arg);
               }
-              out << std::endl;
+              out << '\n';
             }
           },
           "Write `args` to the previously specified ONNX log stream.")

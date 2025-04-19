@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections import namedtuple
-from typing import Any, Optional, Type, Union
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -102,6 +102,8 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
 
     """
 
+    __slots__ = ()
+
     def __new__(cls, activation, weight):
         # catch common mistakes
         if isinstance(activation, nn.Module) or isinstance(weight, nn.Module):
@@ -132,6 +134,8 @@ class QConfigDynamic(namedtuple("QConfigDynamic", ["activation", "weight"])):
 
       my_qconfig = QConfigDynamic(weight=default_observer.with_args(dtype=torch.qint8))
     """
+
+    __slots__ = ()
 
     def __new__(cls, activation=torch.nn.Identity, weight=torch.nn.Identity):
         # catch common mistakes
@@ -281,7 +285,7 @@ def get_default_qconfig(backend="x86", version=0):
                 weight=default_weight_observer,
             )
         elif backend == "onednn":
-            if not torch.cpu._is_cpu_support_vnni():
+            if not torch.cpu._is_vnni_supported():
                 warnings.warn(
                     "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
                     "on CPU without Vector Neural Network Instruction support."
@@ -613,7 +617,7 @@ def _add_module_to_qconfig_obs_ctr(
 
 
 _ObserverOrFakeQuantizeConstructor = Union[
-    _PartialWrapper, Type[ObserverBase], Type[FakeQuantizeBase]
+    _PartialWrapper, type[ObserverBase], type[FakeQuantizeBase]
 ]
 
 

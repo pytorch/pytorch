@@ -3,7 +3,7 @@
 import collections
 import enum
 import itertools as it
-from typing import DefaultDict, List, Optional, Tuple
+from typing import Optional
 
 from torch.utils.benchmark.utils import common
 from torch import tensor as _tensor
@@ -29,14 +29,14 @@ class Colorize(enum.Enum):
 class _Column:
     def __init__(
         self,
-        grouped_results: List[Tuple[Optional[common.Measurement], ...]],
+        grouped_results: list[tuple[Optional[common.Measurement], ...]],
         time_scale: float,
         time_unit: str,
         trim_significant_figures: bool,
         highlight_warnings: bool,
     ):
         self._grouped_results = grouped_results
-        self._flat_results = list(it.chain(*grouped_results))
+        self._flat_results = [*it.chain.from_iterable(grouped_results)]
         self._time_scale = time_scale
         self._time_unit = time_unit
         self._trim_significant_figures = trim_significant_figures
@@ -88,10 +88,10 @@ class _Row:
         self._row_name_str_len = row_name_str_len
         self._time_scale = time_scale
         self._colorize = colorize
-        self._columns: Tuple[_Column, ...] = ()
+        self._columns: tuple[_Column, ...] = ()
         self._num_threads = num_threads
 
-    def register_columns(self, columns: Tuple[_Column, ...]):
+    def register_columns(self, columns: tuple[_Column, ...]):
         self._columns = columns
 
     def as_column_strings(self):
@@ -152,7 +152,7 @@ class _Row:
 class Table:
     def __init__(
             self,
-            results: List[common.Measurement],
+            results: list[common.Measurement],
             colorize: Colorize,
             trim_significant_figures: bool,
             highlight_warnings: bool
@@ -174,17 +174,17 @@ class Table:
         self.rows, self.columns = self.populate_rows_and_columns()
 
     @staticmethod
-    def row_fn(m: common.Measurement) -> Tuple[int, Optional[str], str]:
+    def row_fn(m: common.Measurement) -> tuple[int, Optional[str], str]:
         return m.num_threads, m.env, m.as_row_name
 
     @staticmethod
     def col_fn(m: common.Measurement) -> Optional[str]:
         return m.description
 
-    def populate_rows_and_columns(self) -> Tuple[Tuple[_Row, ...], Tuple[_Column, ...]]:
-        rows: List[_Row] = []
-        columns: List[_Column] = []
-        ordered_results: List[List[Optional[common.Measurement]]] = [
+    def populate_rows_and_columns(self) -> tuple[tuple[_Row, ...], tuple[_Column, ...]]:
+        rows: list[_Row] = []
+        columns: list[_Column] = []
+        ordered_results: list[list[Optional[common.Measurement]]] = [
             [None for _ in self.column_keys]
             for _ in self.row_keys
         ]
@@ -204,7 +204,7 @@ class Table:
         prior_num_threads = -1
         prior_env = ""
         row_group = -1
-        rows_by_group: List[List[List[Optional[common.Measurement]]]] = []
+        rows_by_group: list[list[list[Optional[common.Measurement]]]] = []
         for (num_threads, env, _), row in zip(self.row_keys, ordered_results):
             thread_transition = (num_threads != prior_num_threads)
             if thread_transition:
@@ -244,8 +244,7 @@ class Table:
 
     def render(self) -> str:
         string_rows = [[""] + self.column_keys]
-        for r in self.rows:
-            string_rows.append(r.as_column_strings())
+        string_rows.extend(r.as_column_strings() for r in self.rows)
         num_cols = max(len(i) for i in string_rows)
         for sr in string_rows:
             sr.extend(["" for _ in range(num_cols - len(sr))])
@@ -283,8 +282,8 @@ class Compare:
     Args:
         results: List of Measurment to display.
     """
-    def __init__(self, results: List[common.Measurement]):
-        self._results: List[common.Measurement] = []
+    def __init__(self, results: list[common.Measurement]):
+        self._results: list[common.Measurement] = []
         self.extend_results(results)
         self._trim_significant_figures = False
         self._colorize = Colorize.NONE
@@ -327,18 +326,16 @@ class Compare:
     def _render(self):
         results = common.Measurement.merge(self._results)
         grouped_results = self._group_by_label(results)
-        output = []
-        for group in grouped_results.values():
-            output.append(self._layout(group))
+        output = [self._layout(group) for group in grouped_results.values()]
         return output
 
-    def _group_by_label(self, results: List[common.Measurement]):
-        grouped_results: DefaultDict[str, List[common.Measurement]] = collections.defaultdict(list)
+    def _group_by_label(self, results: list[common.Measurement]):
+        grouped_results: collections.defaultdict[str, list[common.Measurement]] = collections.defaultdict(list)
         for r in results:
             grouped_results[r.label].append(r)
         return grouped_results
 
-    def _layout(self, results: List[common.Measurement]):
+    def _layout(self, results: list[common.Measurement]):
         table = Table(
             results,
             self._colorize,

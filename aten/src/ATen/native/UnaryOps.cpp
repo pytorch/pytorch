@@ -620,7 +620,8 @@ Tensor _conj_physical(const Tensor& self) {
   if (self.is_conj()) {
     return self.conj().clone();
   }
-  return unary_op_impl(self, at::conj_physical_out);
+  auto result = at::empty_like(self);
+  return at::conj_physical_out(result, self);
 }
 
 Tensor conj_physical(const Tensor& self) {
@@ -932,11 +933,11 @@ Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
 
 Tensor special_multigammaln(const Tensor& self, int64_t p) {
   return self.mvlgamma(p);
-};
+}
 
 Tensor& special_multigammaln_out(const Tensor& self, int64_t p, Tensor& result) {
   return at::mvlgamma_out(result, self, p);
-};
+}
 
 std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor mantissa = at::empty_like(self);

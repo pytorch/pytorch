@@ -16,6 +16,10 @@ struct C10_API AutoGradMode {
   AutoGradMode(bool enabled) : prev_mode(GradMode::is_enabled()) {
     GradMode::set_enabled(enabled);
   }
+  AutoGradMode(const AutoGradMode&) = delete;
+  AutoGradMode(AutoGradMode&&) = delete;
+  AutoGradMode& operator=(const AutoGradMode&) = delete;
+  AutoGradMode& operator=(AutoGradMode&&) = delete;
   ~AutoGradMode() {
     GradMode::set_enabled(prev_mode);
   }
@@ -35,6 +39,10 @@ struct C10_API AutoFwGradMode {
       : prev_mode(AutogradState::get_tls_state().get_fw_grad_mode()) {
     AutogradState::get_tls_state().set_fw_grad_mode(enabled);
   }
+  AutoFwGradMode(const AutoFwGradMode&) = delete;
+  AutoFwGradMode(AutoFwGradMode&&) = delete;
+  AutoFwGradMode& operator=(const AutoFwGradMode&) = delete;
+  AutoFwGradMode& operator=(AutoFwGradMode&&) = delete;
   ~AutoFwGradMode() {
     AutogradState::get_tls_state().set_fw_grad_mode(prev_mode);
   }

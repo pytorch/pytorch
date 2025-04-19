@@ -3,7 +3,7 @@
 
 import os
 import time
-from typing import List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -723,7 +723,7 @@ class SummaryWriter:
     def add_figure(
         self,
         tag: str,
-        figure: Union["Figure", List["Figure"]],
+        figure: Union["Figure", list["Figure"]],
         global_step: Optional[int] = None,
         close: bool = True,
         walltime: Optional[float] = None,

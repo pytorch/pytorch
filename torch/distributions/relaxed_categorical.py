@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
@@ -34,6 +35,7 @@ class ExpRelaxedCategorical(Distribution):
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al., 2017)
     """
+
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = (
         constraints.real_vector
@@ -62,18 +64,18 @@ class ExpRelaxedCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self._categorical.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self._categorical.probs
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         uniforms = clamp_probs(
             torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device)
@@ -115,6 +117,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         probs (Tensor): event probabilities
         logits (Tensor): unnormalized log probability for each event
     """
+
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
@@ -130,13 +133,13 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def temperature(self):
+    def temperature(self) -> Tensor:
         return self.base_dist.temperature
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self.base_dist.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self.base_dist.probs

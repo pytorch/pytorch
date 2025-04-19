@@ -219,10 +219,6 @@ void RpcAgent::rpcRetryCallback(
       // If the RPC Agent has shutdown, we cannot retry messages. Thus we mark
       // the future with an error since the RPC was never completed
       // successfully.
-      std::string errorMessage = c10::str(
-          "RPC Agent is no longer running on Node ",
-          RpcAgent::getWorkerInfo().id_,
-          ". Cannot retry message.");
       earliestRpc->originalFuture_->setError(jitFuture.exception_ptr());
     } else if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
       // If the previous future completed with an error and we haven't

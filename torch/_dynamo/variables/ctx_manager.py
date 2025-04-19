@@ -1,21 +1,42 @@
 # mypy: ignore-errors
+
+"""
+This file contains a collection of context manager classes used by Dynamo for tracking
+and managing various PyTorch runtime states during graph compilation. These context
+managers handle different aspects of PyTorch's execution environment, including:
+
+- Autograd states (grad mode, inference mode)
+- CUDA streams and events
+- Profiling contexts
+- Deterministic algorithms
+- Forward/backward AD modes
+- SDPA (Scaled Dot Product Attention) kernels
+- FSDP (Fully Sharded Data Parallel) states
+- AMP (Automatic Mixed Precision) autocast states
+
+The context managers ensure proper state transitions during graph compilation by
+tracking enter/exit points and managing cleanup operations. They help maintain
+consistency between eager execution and compiled graph behavior by capturing and
+restoring state changes.
+"""
+
 import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_setup_with,
 )
 from ..device_interface import get_interface_for_device
-from ..exc import unimplemented, Unsupported
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
@@ -34,7 +55,7 @@ if TYPE_CHECKING:
 
 
 @dataclasses.dataclass
-class ContextMangerState:
+class ContextManagerState:
     """
     Mutating `self` in VariableTracker is not allowed because we copy
     them.  This is a mutable container pointed to by context managers
@@ -69,7 +90,7 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.state = ContextMangerState() if state is None else state
+        self.state = ContextManagerState() if state is None else state
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -111,8 +132,8 @@ class ContextWrappingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
@@ -124,6 +145,12 @@ class ContextWrappingVariable(VariableTracker):
 
         if isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
+
+    def supports_graph_breaks(self):
+        return True
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
@@ -146,42 +173,27 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def enter(self, tx):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
-        try:
-            return variables.UserMethodVariable(
-                self.cm_obj.__enter__.__func__,
-                self,
-                source=source,
-            ).call_function(tx, [], {})
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function",
-                from_exc=e,
-            )
+        return variables.UserMethodVariable(
+            self.cm_obj.__enter__.__func__,
+            self,
+            source=source,
+        ).call_function(tx, [], {})
 
     def exit(self, tx: "InstructionTranslator", *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
-        try:
-            x = variables.UserMethodVariable(
-                self.cm_obj.__exit__.__func__,
-                self,
-                source=source,
-            ).call_function(
-                tx,
-                [
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                ],
-                {},
-            )
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __exit__ function",
-                from_exc=e,
-            )
-
-        tx.generic_context_manager_depth -= 1
+        x = variables.UserMethodVariable(
+            self.cm_obj.__exit__.__func__,
+            self,
+            source=source,
+        ).call_function(tx, args, {})
+        tx.active_generic_context_managers.pop()
         return x
+
+    def supports_graph_breaks(self):
+        return False
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
@@ -219,6 +231,42 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
             "call_function",
             torch._C._functorch.set_inplace_requires_grad_allowed,
             (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
+    """represents torch._functorch.pyfunction.temporarily_pop_interpreter_stack()"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", target_values, **kwargs):
+        return TemporarilyPopInterpreterStackCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        self.saved = torch._C._functorch.pop_dynamic_layer_stack()
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.push_dynamic_layer_stack(self.saved),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.pop_dynamic_layer_stack,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.push_dynamic_layer_stack,
+            (self.state.proxy,),
             {},
         )
         return variables.ConstantVariable.create(None)
@@ -433,12 +481,21 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     def enter(self, tx):
         install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
-        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        if isinstance(batch_size, variables.SymNodeVariable):
+            batch_size_value = batch_size.sym_num
+            batch_size_node = batch_size.as_proxy().node
+        else:
+            batch_size_value = batch_size.as_python_constant()
+            batch_size_node = batch_size.as_python_constant()
+        randomness = randomness.as_python_constant()
+        vmap_level = torch._C._functorch._vmap_increment_nesting(
+            batch_size_value, randomness
+        )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._vmap_increment_nesting,
-            (batch_size, randomness),
+            (batch_size_node, randomness),
             {},
         )
         return variables.ConstantVariable.create(vmap_level)
@@ -486,8 +543,8 @@ class GradModeVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -637,6 +694,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
+        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
         tx.output.set_torch_function_state(values[0])
 
 
@@ -670,9 +729,11 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-        ),
+        (
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            ),
+        )
         torch._C._set_deterministic_algorithms(value)
 
     def module_name(self):
@@ -796,8 +857,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 class NullContextVariable(ContextWrappingVariable):
     """
     This class represents Python contextlib.nullcontext.
-    It's used as a placeholder for other context managers that Dynamo doesn't
-    support yet, e.g, torch.autograd.profiler.record_function.
     """
 
     def __init__(self, target_values=None, **kwargs) -> None:
@@ -814,6 +873,41 @@ class NullContextVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "nullcontext"
+
+
+class ProfilerContextVariable(ContextWrappingVariable):
+    """
+    This class represents a set of torch profiler context objects, where Dynamo
+    ignores all the side-effects in the __init__, __enter__ and __exit__ methods
+    by treating the object mostly as a `contextlib.nullcontext`, except for edge
+    cases like the `__enter__` method which returns the object itself rather
+    than `None`, per implementation of the torch objects.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(target_values=None, **kwargs)
+
+    def enter(self, tx):
+        return self
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "contextlib"
+
+    def fn_name(self):
+        return "nullcontext"
+
+    def reconstruct(self, cg):
+        unimplemented_v2(
+            gb_type="torch.profiler object escaped from compiled region",
+            context=str(self),
+            explanation="Dynamo doesn't support compiling a region that returns a torch.profiler context manager.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 class StreamContextVariable(ContextWrappingVariable):
@@ -886,19 +980,38 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     """
 
     @staticmethod
+    def _create_lambda_from_tensors(tx, tensors):
+        if isinstance(tensors, variables.TensorVariable):
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in [tensors]]
+            )
+            tensors = variables.TupleVariable([tensors])
+        else:
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in tensors.items]
+            )
+        return PreserveVersionContextVariable(tensors, versions)
+
+    @staticmethod
     def constructor(tx):
         return variables.LambdaVariable(
-            lambda tensor: PreserveVersionContextVariable(
-                tensor,
-                tensor.var_getattr(tx, "_version"),
+            lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
+                tx, tensors
             )
         )
 
-    def __init__(self, tensor, prev_version, **kwargs) -> None:
+    def __init__(self, tensors, prev_versions, **kwargs) -> None:
         kwargs.setdefault("target_values", None)
         super().__init__(**kwargs)
-        self.tensor = tensor
-        self.prev_version = prev_version
+        self.tensors = tensors
+        self.prev_versions = prev_versions
+        # The context manager accepts Union[Tensor, Tuple[Tensor]]
+        if isinstance(self.tensors, variables.TensorVariable):
+            self.tensors = variables.TupleVariable([self.tensors])
+        if isinstance(
+            self.prev_versions, (variables.ConstantVariable, variables.SymNodeVariable)
+        ):
+            self.prev_versions = variables.TupleVariable([self.prev_versions])
 
     def enter(self, tx):
         pass
@@ -908,11 +1021,19 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
         return variables.TorchInGraphFunctionVariable(
             _unsafe_set_version_counter
-        ).call_function(tx, [self.tensor, self.prev_version], {})
+        ).call_function(tx, [self.tensors, self.prev_versions], {})
 
     def reconstruct(self, codegen):
-        unimplemented(
-            "torch.autograd._unsafe_preserve_version_counter with graph break"
+        unimplemented_v2(
+            gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
+            context=str(self),
+            explanation=(
+                "Dynamo doesn't support compiling a region that returns "
+                "a torch.autograd._unsafe_preserve_version_counter context manager."
+            ),
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
         )
 
 
@@ -949,8 +1070,8 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ):
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
@@ -971,41 +1092,120 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
             self.param_group_var.value._training_state = value
 
     def module_name(self):
-        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+        return "torch.distributed.fsdp._fully_shard._fsdp_param_group.FSDPParamGroup"
 
     def fn_name(self):
         return "use_training_state"
+
+
+class SDPAKernelVariable(ContextWrappingVariable):
+    """represents torch.nn.attention.sdpa_kernel"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", backends, set_priority=False, **kwargs):
+        if isinstance(backends, torch.nn.attention.SDPBackend):
+            backends = [backends]
+        var = SDPAKernelVariable(
+            target_values=backends,
+            initial_values=None,
+            set_priority=set_priority,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values: list[torch.nn.attention.SDPBackend],
+        initial_values=None,
+        set_priority: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.set_priority = set_priority
+
+    @staticmethod
+    def _backends_to_nodes(tx, backends):
+        # convert to/from string in order to bake the backend into FX graph
+        nodes = [
+            tx.output.create_node(
+                "call_function",
+                torch.nn.attention._backend_from_string,
+                (backend.name,),
+                {},
+            )
+            for backend in backends
+        ]
+        return nodes
+
+    def enter(self, tx):
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(
+            with_priority=self.set_priority
+        )
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch.nn.attention._sdpa_kernel(
+                self.prev_backends, set_priority=self.set_priority
+            ),
+        )
+        torch.nn.attention._sdpa_kernel(
+            self.target_values, set_priority=self.set_priority
+        )
+        arg = self._backends_to_nodes(tx, self.target_values)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg, bool(self.set_priority)),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        arg = self._backends_to_nodes(tx, self.prev_backends)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg, bool(self.set_priority)),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.nn.attention"
+
+    # use a private version of sdpa_kernel that accepts variadic arguments
+    # since dynamo reconstructs the contents of target_values one-by-one
+    def fn_name(self):
+        return "_sdpa_kernel_variadic"
 
 
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert (
-            value.device.type == device.type
-        ), "stream value is not equal to the passed device"
+        assert value.device.type == device.type, (
+            "stream value is not equal to the passed device"
+        )
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
         self.device = device
 
+    def python_type(self):
+        return torch.Stream
+
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
-        assert name in [
-            "wait_stream",
-            "synchronize",
-            "query",
-            "record_event",
-            "wait_event",
-        ], f" unsupported stream method {name}"
 
-        from ..utils import proxy_args_kwargs
+        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name in ("wait_stream", "synchronize", "wait_event"):
@@ -1029,8 +1229,17 @@ class StreamVariable(VariableTracker):
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
             )
-        else:
-            unimplemented(self.device + " stream method " + name + " unsupported")
+        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(other, StreamVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.value, other.value)
+            )
+
+        return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):
         return self.proxy
@@ -1062,8 +1271,8 @@ class EventVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..utils import proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
@@ -1082,7 +1291,17 @@ class EventVariable(VariableTracker):
                 ),
             )
         else:
-            unimplemented(f"event method {name} unsupported")
+            unimplemented_v2(
+                gb_type="Unsupported torch.cuda.Event method",
+                context=str(name),
+                explanation=(
+                    f"Dynamo doesn't support tracing the torch.cuda.Event.{name} method. "
+                    f"We currently support wait, record, synchronize, and query.",
+                ),
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     def as_proxy(self):
         return self.proxy
@@ -1119,8 +1338,8 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert not kwargs
         return self.ctx.exit(tx, *args)

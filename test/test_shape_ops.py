@@ -581,6 +581,16 @@ class TestShapeOps(TestCase):
         self.compare_with_numpy(torch_fn, np_fn, t_in)
         del t_in
 
+    @onlyCPU
+    @unittest.expectedFailure
+    @dtypes(torch.quint4x2, torch.quint2x4)
+    def test_flip_unsupported_dtype(self, dtype):
+        scale, zero_point = 0.1, 5
+        qt = torch.quantize_per_tensor(
+            torch.randn(16, 16), scale=scale, zero_point=zero_point, dtype=dtype
+        )
+        torch.flip(qt, dims=(0,))
+
     def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
         for dim in range(min_dim, max_dim + 1):
             shape = self._rand_shape(dim, 5, 10)
@@ -751,7 +761,7 @@ class TestShapeOps(TestCase):
             return tuple_result, nontuple_result, out
 
         with self.assertRaises(RuntimeError):
-            scripted_foo = torch.jit.script(_foo)
+            torch.jit.script(_foo)
 
         # Verifies that JIT tracing works fine
         traced_foo = torch.jit.trace(_foo, t)
@@ -804,6 +814,31 @@ class TestShapeOps(TestCase):
                 x = torch.randint(-9, 9, shape, device=device, dtype=dtype)
             self.assertEqual(x.sparse_dim(), 0)
             self.assertEqual(x.dense_dim(), len(shape))
+
+    def test_unfold_all_devices_and_dtypes(self, device):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
+            if dt == torch.bool:
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
+                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+            else:
+                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
+                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+
+    def test_unfold_scalars(self, device):
+        x = torch.tensor(0.5, device=device)
+        # unfold on a 0-dimensional tensor should always return a 1-d dimensional
+        # tensor of shape [size] (i.e., the second parameter to unfold)
+
+        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 1))
+        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 2))
+        self.assertEqual(torch.tensor([0.5], device=device), x.unfold(0, 1, 1))
+
+    def test_unfold_errors(self, device):
+        x = torch.arange(1.0, 8, device=device)
+        with self.assertRaisesRegex(RuntimeError, "size is -1 but must be >= 0"):
+            x.unfold(0, -1, 1)
+        with self.assertRaisesRegex(RuntimeError, "step is -1 but must be > 0"):
+            x.unfold(0, 1, -1)
 
 
 instantiate_device_type_tests(TestShapeOps, globals())

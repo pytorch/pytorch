@@ -9,7 +9,7 @@ TEST(SourceRangeTest, test_find) {
   strings.push_back(std::make_shared<std::string>("hello world"));
   strings.push_back(std::make_shared<std::string>("nihaoma"));
 
-  std::vector<c10::string_view> pieces{*strings[0], *strings[1]};
+  std::vector<std::string_view> pieces{*strings[0], *strings[1]};
 
   StringCordView view(pieces, strings);
 
@@ -22,7 +22,7 @@ TEST(SourceRangeTest, test_substr) {
   strings.push_back(std::make_shared<std::string>("hello world"));
   strings.push_back(std::make_shared<std::string>("nihaoma"));
 
-  std::vector<c10::string_view> pieces{*strings[0], *strings[1]};
+  std::vector<std::string_view> pieces{*strings[0], *strings[1]};
 
   StringCordView view(pieces, strings);
 
@@ -36,7 +36,7 @@ TEST(SourceRangeTest, test_iter) {
   strings.push_back(std::make_shared<std::string>("hello world"));
   strings.push_back(std::make_shared<std::string>("nihaoma"));
 
-  std::vector<c10::string_view> pieces{*strings[0], *strings[1]};
+  std::vector<std::string_view> pieces{*strings[0], *strings[1]};
 
   StringCordView view(pieces, strings);
 

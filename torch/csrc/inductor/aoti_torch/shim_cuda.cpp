@@ -46,8 +46,9 @@ AOTITorchError aoti_torch_delete_cuda_stream_guard(
       { delete reinterpret_cast<at::cuda::CUDAStreamGuard*>(guard); });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream) {
+AOTITorchError aoti_torch_get_current_cuda_stream(
+    int32_t device_index,
+    void** ret_stream) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     *(cudaStream_t*)(ret_stream) = at::cuda::getCurrentCUDAStream(device_index);
   });

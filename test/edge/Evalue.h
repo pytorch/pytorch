@@ -283,9 +283,9 @@ struct EValue {
     return tag == Tag::String;
   }
 
-  at::string_view toString() const {
+  std::string_view toString() const {
     ET_CHECK_MSG(isString(), "EValue is not a String.");
-    return at::string_view(
+    return std::string_view(
         payload.copyable_union.as_string.data(),
         payload.copyable_union.as_string.size());
   }
@@ -452,7 +452,7 @@ EVALUE_DEFINE_TO(at::Scalar, toScalar)
 EVALUE_DEFINE_TO(int64_t, toInt)
 EVALUE_DEFINE_TO(bool, toBool)
 EVALUE_DEFINE_TO(double, toDouble)
-EVALUE_DEFINE_TO(at::string_view, toString)
+EVALUE_DEFINE_TO(std::string_view, toString)
 EVALUE_DEFINE_TO(at::ScalarType, toScalarType)
 EVALUE_DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 EVALUE_DEFINE_TO(std::optional<at::Tensor>, toOptional<at::Tensor>)

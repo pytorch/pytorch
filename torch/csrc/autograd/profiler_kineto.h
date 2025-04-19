@@ -47,6 +47,7 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::string> moduleHierarchy() const;
   int64_t debugHandle() const;
   std::string name() const;
+  std::string overload_name() const;
   c10::DeviceType deviceType() const;
   int deviceIndex() const;
   int64_t nBytes() const;

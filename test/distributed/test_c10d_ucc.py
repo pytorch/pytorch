@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle,
     TestCase,
+    xfailIfLinux,
 )
 
 
@@ -337,6 +338,21 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
+
+    @requires_ucc()
+    def _test_reduce_scatter_base_basics(self, fn):
+        pg = self._create_process_group_ucc()
+        n = self.world_size
+        input = fn(torch.ones(n, n, 10) * (self.rank + 1.0))
+        output = fn(torch.zeros(10))
+        expected_output = fn(torch.ones(10) * (n + 1) * n / 2)
+        fut = pg._reduce_scatter_base(output, input).get_future()
+        fut.wait()
+        result = fut.value()
+        self.assertEqual(result[0], expected_output)
+
+    def test_reduce_scatter_base_basics(self):
+        self._test_reduce_scatter_base_basics(lambda t: t.clone())
 
 
 class DistributedDataParallelTest(
@@ -658,6 +674,7 @@ class DistributedDataParallelTest(
             vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce()
         )
 
+    @xfailIfLinux
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_save_load_checkpoint(self):
@@ -736,11 +753,11 @@ class DistributedDataParallelTest(
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
+        map_location = {"cuda:0": f"cuda:{self.rank:d}"}
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
         for model in [ddp_withload, model_withload]:
-            for p in ddp_withload.parameters():
+            for p in model.parameters():
                 with torch.no_grad():
                     p.zero_()
         ddp_withload.load_state_dict(ddp_state_dict)

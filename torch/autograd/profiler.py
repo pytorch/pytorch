@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
+import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter_ns
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Optional
 from warnings import warn
 
 import torch
@@ -209,6 +211,7 @@ class profile:
         use_cpu=True,
         experimental_config=None,
         acc_events=False,
+        custom_trace_id_callback=None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -245,14 +248,15 @@ class profile:
         self.profiling_start_time_ns = 0
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
-
+        self.custom_trace_id_callback = custom_trace_id_callback
+        self.trace_id = ""
         if not self.use_cpu:
             assert (
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
         if self.use_device is not None:
-            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia"]
+            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia", "hpu"]
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
@@ -266,6 +270,12 @@ class profile:
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
                 warn("XPU is not available, disabling XPU profiling")
+                self.use_device = None
+
+            if self.use_device == "hpu" and not (
+                hasattr(torch, "hpu") and torch.hpu.is_available()
+            ):
+                warn("HPU is not available, disabling HPU profiling")
                 self.use_device = None
 
         self.kineto_activities = set()
@@ -289,6 +299,11 @@ class profile:
                 use_kineto and ProfilerActivity.MTIA in _supported_activities()
             ), "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
             self.kineto_activities.add(ProfilerActivity.MTIA)
+        elif self.use_device == "hpu":
+            assert (
+                use_kineto and ProfilerActivity.HPU in _supported_activities()
+            ), "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+            self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
@@ -305,7 +320,22 @@ class profile:
             len(self.kineto_activities) > 0
         ), "No activities specified for the profiler"
 
-    def config(self):
+    def default_trace_id(self):
+        # Generate a UUID
+        uuid_raw = uuid.uuid4()
+
+        return f"{uuid_raw.int:032X}"
+
+    def create_trace_id(self):
+        if self.custom_trace_id_callback:
+            return self.custom_trace_id_callback()
+        return self.default_trace_id()
+
+    def config(self, create_trace_id=False):
+        # only need to generate new trace id upon prepare trace not start trace
+        if create_trace_id:
+            trace_id = self.create_trace_id()
+            self.trace_id = trace_id
         return ProfilerConfig(
             self.profiler_kind,
             self.record_shapes,
@@ -314,6 +344,7 @@ class profile:
             self.with_flops,
             self.with_modules,
             self.experimental_config,
+            self.trace_id,
         )
 
     def __enter__(self):
@@ -328,7 +359,7 @@ class profile:
     def _prepare_trace(self):
         self.entered = True
         t0 = perf_counter_ns()
-        _prepare_profiler(self.config(), self.kineto_activities)
+        _prepare_profiler(self.config(create_trace_id=True), self.kineto_activities)
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
@@ -336,7 +367,7 @@ class profile:
         self.entered = True
         _run_on_profiler_start()
         t0 = perf_counter_ns()
-        _enable_profiler(self.config(), self.kineto_activities)
+        _enable_profiler(self.config(create_trace_id=False), self.kineto_activities)
         t1 = perf_counter_ns()
         self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_start_time_ns = t1
@@ -477,11 +508,16 @@ class profile:
         """
         return _toggle_collection_dynamic(enabled, set(activities))
 
-    def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
+    def key_averages(
+        self,
+        group_by_input_shape=False,
+        group_by_stack_n=0,
+        group_by_overload_name=False,
+    ):
         self._ensure_function_events()
         assert self._function_events is not None, "Expected profiling results"
         return self._function_events.key_averages(
-            group_by_input_shape, group_by_stack_n
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
@@ -538,7 +574,7 @@ class profile:
         # frontend_function_events contains the events in aten or torch frontend level,
         # whose correlation id is 0
         frontend_function_events = []
-        device_corr_map: Dict[int, List[FunctionEvent]] = {}
+        device_corr_map: dict[int, list[FunctionEvent]] = {}
         max_evt_id = 0
         for kineto_event in result.events():
             if _filter_name(kineto_event.name()):
@@ -565,6 +601,7 @@ class profile:
             fe = FunctionEvent(
                 id=kineto_event.correlation_id(),
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
+                overload_name=kineto_event.overload_name(),
                 trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
                 thread=kineto_event.start_thread_id(),
                 start_us=rel_start_ns / 1000,
@@ -644,6 +681,7 @@ class profile:
             fe = FunctionEvent(
                 id=max_evt_id,
                 name=evt.name(),
+                overload_name="",
                 trace_name=None,  # not outputting in the trace
                 thread=evt.start_thread_id(),
                 start_us=rel_start_ns / 1000,
@@ -1122,7 +1160,7 @@ class KinetoStepTracker:
     """
 
     _current_step = 0
-    _step_dict: Dict[str, int] = defaultdict(int)
+    _step_dict: dict[str, int] = defaultdict(int)
 
     @classmethod
     def init_step_count(cls, requester: str):

@@ -4,37 +4,37 @@ import copy
 import functools
 import itertools
 import unittest
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import (
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp import (
     FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.distributed._composable.fsdp._fsdp_collectives import (
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
 )
-from torch.distributed._composable.fsdp._fsdp_common import FSDPMeshInfo, TrainingState
-from torch.distributed._composable.fsdp._fsdp_init import (
+from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed._composable.fsdp._fsdp_param import ShardedState
-from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
-from torch.distributed._tensor.experimental import implicit_replication
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -58,7 +58,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_ops = torch.ops.c10d
 
 # For recording FSDP events like unshard or post-backward
-EventType = Tuple[str, str, TrainingState]
+EventType = tuple[str, str, TrainingState]
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -70,7 +70,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def device(self) -> torch.device:
         return torch.device("cuda:0")
 
-    def _get_param_sizes(self) -> List[torch.Size]:
+    def _get_param_sizes(self) -> list[torch.Size]:
         # For world size 128, the fp32 all-gather and reduce-scatter testing
         # requires ~0.22 GB
         return [
@@ -84,7 +84,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             torch.Size([64, 297]),
         ]
 
-    def _init_params(self, param_sizes: List[torch.Size]) -> List[nn.Parameter]:
+    def _init_params(self, param_sizes: list[torch.Size]) -> list[nn.Parameter]:
         torch.manual_seed(42)
         orig_params = [
             nn.Parameter(torch.randn(size, device=self.device)) for size in param_sizes
@@ -96,7 +96,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: List[nn.Parameter], reshard_after_forward: Union[bool, int]
+        self, params: list[nn.Parameter], reshard_after_forward: Union[bool, int]
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -109,6 +109,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
+            None,  # shard_placement_fn
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
@@ -142,7 +143,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
     def _test_all_gather(
         self,
-        param_sizes: List[torch.Size],
+        param_sizes: list[torch.Size],
         reshard_after_forward: Union[bool, int],
         async_op: bool,
         all_gather_copy_in_stream: torch.cuda.Stream,
@@ -164,7 +165,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             fsdp_param_group._to_unsharded()
 
         def check_all_gathered_params(
-            orig_params: List[nn.Parameter], module: nn.Module
+            orig_params: list[nn.Parameter], module: nn.Module
         ):
             for orig_param, param in zip(orig_params, module.parameters()):
                 self.assertIsInstance(param, torch.Tensor)
@@ -227,7 +228,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
     def _test_reduce_scatter(
         self,
-        param_sizes: List[torch.Size],
+        param_sizes: list[torch.Size],
         reduce_scatter_stream: torch.cuda.Stream,
         reduce_scatter_dtype: torch.dtype,
     ):
@@ -235,7 +236,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
         fsdp_params = fsdp_param_group.fsdp_params
-        fsdp_param_group.comm_ctx.lazy_init()
+        fsdp_param_group.comm_ctx.lazy_init(self.device)
 
         # Run one unshard to initialize metadata
         fsdp_param_group.unshard()
@@ -249,9 +250,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = torch.cuda.Stream()
         (
-            reduce_scatter_input,
-            reduce_scatter_event,
+            _,
+            _,
             post_reduce_event,
+            _,
+            _,
             _,
         ) = foreach_reduce(
             fsdp_params,
@@ -264,6 +267,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             reduce_scatter_reduce_op=None,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
+            all_reduce_hook=None,
             all_reduce_grads=True,
             partial_reduce_output=None,
         )
@@ -403,7 +407,7 @@ class TestFullyShardCommunication(FSDPTest):
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
 
-        for iter_idx in range(10):
+        for _ in range(10):
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
             for param in ref_model.parameters():
@@ -450,7 +454,7 @@ class TestFullyShardPrefetch(FSDPTest):
         model, optim, inp = self._init_transformer(
             n_layers, reshard_after_forward, checkpoint_impl
         )
-        events: List[EventType] = []
+        events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
         )
@@ -498,10 +502,10 @@ class TestFullyShardPrefetch(FSDPTest):
         self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
     ):
         n_layers = 3
-        model, optim, inp = self._init_transformer(
+        model, _, inp = self._init_transformer(
             n_layers, reshard_after_forward, checkpoint_impl
         )
-        events: List[EventType] = []
+        events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
         )
@@ -579,7 +583,7 @@ class TestFullyShardPrefetch(FSDPTest):
         fully_shard(model[1].lin2, reshard_after_forward=reshard_after_forward)
         fully_shard(model, reshard_after_forward=reshard_after_forward)
         inp = torch.randn((4, dim), device="cuda")
-        events: List[EventType] = []
+        events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
         )
@@ -608,6 +612,8 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("post_backward", "1.lin2", TrainingState.POST_BACKWARD),
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
+                # `1.lin1` post-backward hook runs but is a no-op
+                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_events)
             events.clear()
@@ -621,6 +627,8 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
                 ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
+                # `1.lin2` post-backward hook runs but is a no-op
+                ("post_backward", "1.lin2", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_events)
             events.clear()
@@ -645,7 +653,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 ]
                 layer.set_modules_to_forward_prefetch(layers_to_prefetch)
 
-        events: List[EventType] = []
+        events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
         )
@@ -735,7 +743,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 ]
                 layer.set_modules_to_backward_prefetch(layers_to_prefetch)
 
-        events: List[EventType] = []
+        events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
         )
@@ -827,7 +835,7 @@ class TestFullyShardPrefetch(FSDPTest):
         fully_shard(model)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
-        events: List[EventType] = []
+        events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
         )
@@ -840,7 +848,7 @@ class TestFullyShardPrefetch(FSDPTest):
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
         ):
-            for iter_idx in range(3):
+            for _ in range(3):
                 loss = model(inp)
                 expected_events = [
                     (
@@ -908,7 +916,7 @@ class TestFullyShardPrefetch(FSDPTest):
         fully_shard(model)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
-        events: List[EventType] = []
+        events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
         )
@@ -919,7 +927,7 @@ class TestFullyShardPrefetch(FSDPTest):
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
         ):
-            for iter_idx in range(3):
+            for _ in range(3):
                 loss = model(inp)
                 expected_events = [
                     ("unshard", "", TrainingState.FORWARD),
@@ -950,6 +958,37 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.step()
                 optim.zero_grad()
 
+    @skip_if_lt_x_gpu(2)
+    def test_backward_misprefetch(self):
+        torch.manual_seed(42)
+        model = MLP(dim=16, device="cuda")
+        ref_model = copy.deepcopy(model)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        fully_shard(model.in_proj)
+        fully_shard(model.out_proj)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        # Backward should run through `out_proj` -> `in_proj`, so if `in_proj`
+        # prefetches for `out_proj`, then this is a misprefetch, as `out_proj`
+        # should not be needed anymore for backward.
+        model.in_proj.set_modules_to_backward_prefetch([model.out_proj])
+
+        torch.manual_seed(self.rank + 1)
+        inp = torch.randn((2, 16), device="cuda")
+        for _ in range(3):
+            ref_optim.zero_grad()
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            ref_optim.step()
+            optim.zero_grad()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(ref_loss, loss)
+
     def _init_transformer(
         self,
         n_layers: int,
@@ -973,7 +1012,7 @@ class TestFullyShardPrefetch(FSDPTest):
         return model, optim, inp
 
     def _get_unshard_with_record(
-        self, orig_unshard: Callable, events: List[EventType]
+        self, orig_unshard: Callable, events: list[EventType]
     ) -> Callable:
         def unshard_with_record(self, *args, **kwargs):
             nonlocal events
@@ -987,7 +1026,7 @@ class TestFullyShardPrefetch(FSDPTest):
         return unshard_with_record
 
     def _get_reshard_with_record(
-        self, orig_reshard: Callable, events: List[EventType]
+        self, orig_reshard: Callable, events: list[EventType]
     ) -> Callable:
         def reshard_with_record(self, *args, **kwargs):
             nonlocal events
@@ -1002,7 +1041,7 @@ class TestFullyShardPrefetch(FSDPTest):
         return reshard_with_record
 
     def _get_post_backward_with_record(
-        self, orig_post_backward: Callable, events: List[EventType]
+        self, orig_post_backward: Callable, events: list[EventType]
     ) -> Callable:
         def post_backward_with_record(self, *args, **kwargs):
             nonlocal events
@@ -1042,7 +1081,7 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
                 self.mlp2 = MLP(dim)
                 self.mlp3 = MLP(dim)
 
-            def forward(self, ys: List[torch.Tensor], works: List[dist.Work]):
+            def forward(self, ys: list[torch.Tensor], works: list[dist.Work]):
                 (y1, y2, y3), (work1, work2, work3) = ys, works
                 work1.wait()
                 z1 = self.mlp1(y1)
@@ -1088,7 +1127,7 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((batch_size, dim), device="cuda")
         for _ in range(10):
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 losses.append(_model(inp).sum())
                 losses[-1].backward()

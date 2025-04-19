@@ -22,9 +22,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
 
-  static void inc_pending_event_queries();
-  static void dec_pending_event_queries();
-  static int num_pending_event_queries();
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
@@ -41,8 +38,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
  protected:
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
-
-  static std::atomic<int> pending_event_queries;
 
   // internal states so reset() can do its best cleaning up
   // Set to true in capture_end if cudaStreamEndCapture succeeded
@@ -82,7 +77,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,
   // not CUDA itself.  We can straightforwardly modify CUDAGraph to support multi-device
   // captures if needed.
-  int capture_dev_;
+  // init capture_dev_ as UNDEFINED_DEVICE to check that it stores the real device id in the destructor
+  static constexpr c10::DeviceIndex UNDEFINED_DEVICE = -1;
+  c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
 };
 
 } // namespace cuda

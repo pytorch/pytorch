@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
@@ -49,6 +53,11 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
+    amax = torch.amax(x, dim, keepdim=True)
+    return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
+
+
 # Custom prims used for handling randomness
 seed = make_prim(
     "inductor_seed(Device device) -> Tensor",
@@ -65,12 +74,19 @@ seeds = make_prim(
 lookup_seed = make_prim(
     # if inductor_lookup_seed changes, update partitioners.py
     "inductor_lookup_seed(Tensor seeds, int index) -> Tensor",
-    lambda seeds, index: seeds[index],
+    lambda seeds, index: seeds[index].clone(),
     doc="Extract a single seed from the result of inductor_seeds()",
 )
+# inductor_random() doesn't accept a dtype.
+# instead, its lowering always burns in float32, and conversions to a different type
+# are explicit in the graph. We therefore need this impl (used during tracing) to hardcoded
+# the dtype, so it always faithfully produces a float32 tensor during tracing,
+# even if the default dtype is set to something else.
 random = make_prim(
     "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
-    lambda size, seed, mode: getattr(torch, mode)(size, device=seed.device),
+    lambda size, seed, mode: getattr(torch, mode)(
+        size, device=seed.device, dtype=torch.float32
+    ),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
 )
 randint = make_prim(
@@ -94,6 +110,12 @@ fma = make_prim(
     "fma(Tensor a, Tensor b, Tensor c) -> Tensor",
     lambda a, b, c: (a * b) + c,
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
+)
+prepare_softmax_online = make_prim(
+    "prepare_softmax_online(Tensor a, int dim) -> (Tensor, Tensor)",
+    eager_prepare_softmax,
+    return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
+    doc="Prepare the softmax by computing the max and sum.",
 )
 
 

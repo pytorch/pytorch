@@ -3,13 +3,14 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch {
-namespace lazy {
+#include <utility>
+
+namespace torch::lazy {
 
 TSLoweringContext::TSLoweringContext(
     const std::string& name,
     BackendDevice device)
-    : torch::lazy::LoweringContext(name, device),
+    : torch::lazy::LoweringContext(name, std::move(device)),
       graph_(std::make_shared<torch::jit::Graph>()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {}
@@ -19,7 +20,11 @@ TSLoweringContext::TSLoweringContext(
     BackendDevice device,
     c10::ArrayRef<const Node*> post_order,
     Util::EmissionMap emit_status)
-    : torch::lazy::LoweringContext(name, device, post_order, emit_status),
+    : torch::lazy::LoweringContext(
+          name,
+          std::move(device),
+          post_order,
+          std::move(emit_status)),
       graph_(std::make_shared<torch::jit::Graph>()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
@@ -55,15 +60,16 @@ void TSLoweringContext::AssignOutputOp(
   emitted_outputs_[output] = op;
 }
 
-torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
+torch::jit::Value* TSLoweringContext::GetParameter(const BackendDataPtr& data) {
   const auto ts_data = std::static_pointer_cast<TSData>(data);
   BackendData::Handle handle = ts_data->GetHandle();
   auto it = parameters_map_.find(handle);
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =
         graph_->addInput(c10::str("p", parameters_.size()));
-    if (ts_data->scalar.has_value()) {
-      auto scalarType = ts_data->scalar.value().type();
+    const auto& scalar = ts_data->scalar;
+    if (scalar.has_value()) {
+      auto scalarType = scalar.value().type();
       if (isFloatingType(scalarType)) {
         param->setType(c10::FloatType::get());
       } else if (isIntegralType(scalarType, /*includeBool=*/true)) {
@@ -81,5 +87,4 @@ torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
   return it->second.param;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -154,6 +154,7 @@ PT2 Export (pt2e) Numeric Debugger
     :template: classtemplate.rst
 
     generate_numeric_debug_handle
+    CUSTOM_KEY
     NUMERIC_DEBUG_HANDLE_KEY
     prepare_for_propagation_comparison
     extract_results_from_loggers
@@ -249,6 +250,18 @@ the values observed during calibration (PTQ) or training (QAT).
     default_per_channel_weight_observer
     default_dynamic_quant_observer
     default_float_qparams_observer
+    AffineQuantizedObserverBase
+    Granularity
+    MappingType
+    PerAxis
+    PerBlock
+    PerGroup
+    PerRow
+    PerTensor
+    PerToken
+    TorchAODType
+    ZeroPointDomain
+    get_block_size
 
 torch.ao.quantization.fake_quantize
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

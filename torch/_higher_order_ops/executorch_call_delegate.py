@@ -25,7 +25,15 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.utils._pytree import tree_flatten
 
 
-executorch_call_delegate = HigherOrderOperator("executorch_call_delegate")
+class ExecutorchCallDelegate(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("executorch_call_delegate")
+
+    def __call__(self, lowered_module, *args):
+        return super().__call__(lowered_module, *args)
+
+
+executorch_call_delegate = ExecutorchCallDelegate()
 executorch_call_delegate.fallthrough(torch._C.DispatchKey.PythonDispatcher)
 executorch_call_delegate.fallthrough(torch._C.DispatchKey.PythonTLSSnapshot)
 executorch_call_delegate.fallthrough(torch._C.DispatchKey.ADInplaceOrView)
@@ -66,7 +74,7 @@ def trace_call_delegate(proxy_mode, func_overload, lowered_module, *args):
 # pyre-ignore
 def call_delegate_cpu(lowered_module, *args):
     # FX creates this immutable_dict/list concept. Get rid of this.
-    map_types = {
+    map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
         torch.fx.immutable_collections.immutable_list: list,
     }

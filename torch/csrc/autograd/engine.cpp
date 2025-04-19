@@ -59,9 +59,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_autograd_child);
 #endif
 }
 
@@ -262,7 +261,6 @@ auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this] { return !heap_.empty(); });
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto task = std::move(const_cast<NodeTask&>(heap_.top()));
   heap_.pop();
   return task;
@@ -735,14 +733,14 @@ void GraphTask::exec_post_processing() {
       // the stashed streams should be enough. If leaf_stream.device_index()
       // happens to be for a new device, operator* on the std::nullopt should
       // throw an error.
-      const auto caller_current_stream =
-          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          *caller_current_streams_[leaf_stream.device_index()];
+      const auto& caller_current_stream =
+          caller_current_streams_[leaf_stream.device_index()];
 
-      if (caller_current_stream != leaf_stream) {
+      if (caller_current_stream.has_value() &&
+          caller_current_stream != leaf_stream) {
         auto event = c10::Event{leaf_stream.device_type()};
         event.record(leaf_stream);
-        caller_current_stream.wait(event);
+        caller_current_stream->wait(event);
       }
     }
 
@@ -819,9 +817,15 @@ static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
 static variable_list call_post_hooks(
     Node& fn,
     variable_list outputs,
-    const variable_list& inputs) {
+    const variable_list& inputs,
+    const bool had_post_hooks) {
   for (const auto& hook : fn.post_hooks()) {
-    outputs = (*hook)(outputs, inputs);
+    if (had_post_hooks) {
+      outputs = (*hook)(outputs, inputs);
+    } else {
+      variable_list null_inputs;
+      outputs = (*hook)(outputs, null_inputs);
+    }
   }
   return outputs;
 }
@@ -849,22 +853,82 @@ void set_device(int device) {
   worker_device = device;
 }
 
-void validate_outputs(
-    const edge_list& edges,
+// validate_outputs has two overloads, one that accepts edge_list and one that
+// accepts vector<optional<InputMetadata>>. The former is stateful (it requires
+// the autograd graph to actually use) and the latter is for functional
+// autograd. (where we want to be able to take an autograd graph and then
+// construct a FX graph out of it without specializing on the properties of the
+// gradients).
+//
+// We do some templating to avoid dynamic allocations in the hot path (the eager
+// autograd case). Otherwise, the problem is that we are given a vector<Edge>
+// and would need to materialize a vector<optional<InputMetadata>> (or some
+// other vector) to pass to a common helper function. The alternative is to use
+// C++20's ranges which we don't have access to yet.
+
+// Given an Edge or optional<InputMetdata>, return the InputMetadata
+template <typename T>
+const static InputMetadata& get_input_metadata(const T& thing);
+
+template <>
+const InputMetadata& get_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return thing.value();
+}
+
+template <>
+const InputMetadata& get_input_metadata<Edge>(const Edge& thing) {
+  return thing.function->input_metadata(thing.input_nr);
+}
+
+// Given an Edge or optional<InputMetdata>, return if there is an InputMetadata.
+template <typename T>
+static bool has_input_metadata(const T& thing);
+
+template <>
+bool has_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
+  return thing.has_value();
+}
+
+template <>
+bool has_input_metadata<Edge>(const Edge& thing) {
+  return thing.is_valid();
+}
+
+std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges) {
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  for (const auto& edge : edges) {
+    if (!edge.is_valid()) {
+      input_metadata.emplace_back(std::nullopt);
+      continue;
+    }
+    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
+  }
+  return input_metadata;
+}
+
+// Given an vector<Edge> or vector<optional<InputMetdata>>, validate the
+// outputs. This involves using the InputMetadata to check the outputs and also
+// potentially calling .sum_to on the outputs.
+template <typename T>
+static void validate_outputs_impl(
+    const std::vector<T>& input_metadata_container,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
-  if (grads.size() != edges.size()) {
+  if (grads.size() != input_metadata_container.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
-    ss << edges.size() << ", but got " << grads.size();
+    ss << input_metadata_container.size() << ", but got " << grads.size();
     TORCH_CHECK(false, format_error(ss.str()));
   }
   for (const auto i : c10::irange(grads.size())) {
-    const auto& edge = edges[i];
-    if (!edge.is_valid())
+    if (!has_input_metadata(input_metadata_container[i])) {
       continue;
-
-    const auto& metadata = edge.function->input_metadata(edge.input_nr);
+    }
+    const auto& metadata = get_input_metadata(input_metadata_container[i]);
     auto& grad = grads[i];
     if (!grad.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.
@@ -932,6 +996,20 @@ void validate_outputs(
   }
 }
 
+void validate_outputs(
+    const edge_list& edges,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error) {
+  return validate_outputs_impl(edges, grads, format_error);
+}
+
+void validate_outputs(
+    const std::vector<std::optional<InputMetadata>>& input_metadata,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error) {
+  return validate_outputs_impl(input_metadata, grads, format_error);
+}
+
 static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
@@ -976,11 +1054,8 @@ static variable_list call_function(
     return ss.str();
   });
 
-  if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), inputs);
-  }
-  return outputs;
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  return call_post_hooks(fn, std::move(outputs), inputs, has_post_hooks);
 }
 
 void Engine::evaluate_function(
@@ -1107,7 +1182,7 @@ void Engine::evaluate_function(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
@@ -1122,7 +1197,7 @@ void Engine::evaluate_function(
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
@@ -1131,7 +1206,7 @@ void Engine::evaluate_function(
   }
 }
 
-inline static uint64_t compute_min_topological_nr(const edge_list& outputs) {
+static uint64_t compute_min_topological_nr(const edge_list& outputs) {
   // Computes the mininum topological number among all the outputs
   if (outputs.empty()) {
     return 0;
@@ -1258,6 +1333,8 @@ auto Engine::execute(
     TORCH_CHECK(
         !AnomalyMode::is_enabled(),
         "compiled_autograd does not support AnomalyMode")
+    GraphTaskGuard guard(graph_task);
+    CheckpointValidGuard cpvguard(graph_task);
     return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }
@@ -1295,8 +1372,11 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  c10::call_once(
-      start_device_threads_flag_, &Engine::start_device_threads, this);
+  // Ensures device_ready_queues_ are initialized only once
+  static bool start_device_threads_flag_ [[maybe_unused]] = [this]() {
+    this->start_device_threads();
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
@@ -1307,7 +1387,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
+  auto queue = ready_queue(graph_task->cpu_ready_queue_, graph_root->device());
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call
@@ -1383,7 +1463,7 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
-std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
+static std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);
@@ -1400,7 +1480,7 @@ void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
       num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
-      "compiled_autograd.enable() requires no threads in backwards()");
+      "compiled_autograd._enable() requires no threads in backwards()");
   the_compiled_autograd.store(fn);
 }
 
@@ -1539,6 +1619,7 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
 // Remembers current streams on all devices where a context has been created for
 // This function assumes the accelerator device is available.
 void GraphTask::stash_current_streams() {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto accelerator = at::getAccelerator(true).value();
   const auto guard = c10::impl::VirtualGuardImpl{accelerator};
   auto num_devices = guard.deviceCount();

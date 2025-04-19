@@ -15,8 +15,7 @@
 
 // TODO: Consolidate this file with util.h
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Converts an iterable container to a vector of int64's.
 template <typename S>
@@ -66,7 +65,6 @@ TORCH_API std::vector<int64_t> GetPromotedShape(
 TORCH_API Shape
 GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2);
 
-TORCH_API std::vector<std::string> StrSplit(c10::string_view text, char delim);
+TORCH_API std::vector<std::string> StrSplit(std::string_view text, char delim);
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

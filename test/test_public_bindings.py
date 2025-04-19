@@ -3,13 +3,14 @@
 import importlib
 import inspect
 import json
+import logging
 import os
 import pkgutil
 import unittest
 from typing import Callable
 
 import torch
-from torch._utils_internal import get_file_path_2
+from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
@@ -18,6 +19,9 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class TestPublicBindings(TestCase):
@@ -267,25 +271,46 @@ class TestPublicBindings(TestCase):
         failures = []
 
         def onerror(modname):
-            failures.append((modname, ImportError))
+            failures.append(
+                (modname, ImportError("exception occurred importing package"))
+            )
 
         for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
             modname = mod.name
             try:
-                # TODO: fix "torch/utils/model_dump/__main__.py"
-                # which calls sys.exit() when we try to import it
                 if "__main__" in modname:
                     continue
                 importlib.import_module(modname)
             except Exception as e:
                 # Some current failures are not ImportError
-
-                failures.append((modname, type(e)))
+                log.exception("import_module failed")
+                failures.append((modname, e))
 
         # It is ok to add new entries here but please be careful that these modules
         # do not get imported by public code.
+        # DO NOT add public modules here.
         private_allowlist = {
             "torch._inductor.codegen.cuda.cuda_kernel",
+            # TODO(#133647): Remove the onnx._internal entries after
+            # onnx and onnxscript are installed in CI.
+            "torch.onnx._internal.exporter",
+            "torch.onnx._internal.exporter._analysis",
+            "torch.onnx._internal.exporter._building",
+            "torch.onnx._internal.exporter._capture_strategies",
+            "torch.onnx._internal.exporter._compat",
+            "torch.onnx._internal.exporter._core",
+            "torch.onnx._internal.exporter._decomp",
+            "torch.onnx._internal.exporter._dispatching",
+            "torch.onnx._internal.exporter._fx_passes",
+            "torch.onnx._internal.exporter._ir_passes",
+            "torch.onnx._internal.exporter._isolated",
+            "torch.onnx._internal.exporter._onnx_program",
+            "torch.onnx._internal.exporter._registration",
+            "torch.onnx._internal.exporter._reporting",
+            "torch.onnx._internal.exporter._schemas",
+            "torch.onnx._internal.exporter._tensors",
+            "torch.onnx._internal.exporter._torchlib.ops",
+            "torch.onnx._internal.exporter._verification",
             "torch.onnx._internal.fx._pass",
             "torch.onnx._internal.fx.analysis",
             "torch.onnx._internal.fx.analysis.unsupported_nodes",
@@ -354,6 +379,7 @@ class TestPublicBindings(TestCase):
             "torch.distributed._spmd.experimental_ops",
             "torch.distributed._spmd.parallel_mode",
             "torch.distributed._tensor",
+            "torch.distributed._tools.sac_ilp",
             "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
             "torch.distributed.algorithms._optimizer_overlap",
             "torch.distributed.rpc._testing.faulty_agent_backend_registry",
@@ -379,61 +405,19 @@ class TestPublicBindings(TestCase):
             "torch.utils.tensorboard._utils",
         }
 
-        # No new entries should be added to this list.
-        # All public modules should be importable on all platforms.
-        public_allowlist = {
-            "torch.distributed.algorithms.ddp_comm_hooks",
-            "torch.distributed.algorithms.model_averaging.averagers",
-            "torch.distributed.algorithms.model_averaging.hierarchical_model_averager",
-            "torch.distributed.algorithms.model_averaging.utils",
-            "torch.distributed.checkpoint",
-            "torch.distributed.constants",
-            "torch.distributed.distributed_c10d",
-            "torch.distributed.elastic.agent.server",
-            "torch.distributed.elastic.rendezvous",
-            "torch.distributed.fsdp",
-            "torch.distributed.launch",
-            "torch.distributed.launcher",
-            "torch.distributed.nn",
-            "torch.distributed.nn.api.remote_module",
-            "torch.distributed.optim",
-            "torch.distributed.optim.optimizer",
-            "torch.distributed.rendezvous",
-            "torch.distributed.rpc.api",
-            "torch.distributed.rpc.backend_registry",
-            "torch.distributed.rpc.constants",
-            "torch.distributed.rpc.internal",
-            "torch.distributed.rpc.options",
-            "torch.distributed.rpc.rref_proxy",
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous",
-            "torch.distributed.elastic.rendezvous.etcd_rendezvous_backend",
-            "torch.distributed.elastic.rendezvous.etcd_store",
-            "torch.distributed.rpc.server_process_global_profiler",
-            "torch.distributed.run",
-            "torch.distributed.tensor.parallel",
-            "torch.distributed.utils",
-            "torch.utils.tensorboard",
-            "torch.utils.tensorboard.summary",
-            "torch.utils.tensorboard.writer",
-            "torch.ao.quantization.experimental.fake_quantize",
-            "torch.ao.quantization.experimental.linear",
-            "torch.ao.quantization.experimental.observer",
-            "torch.ao.quantization.experimental.qconfig",
-        }
-
         errors = []
-        for mod, excep_type in failures:
-            if mod in public_allowlist:
-                # TODO: Ensure this is the right error type
-
-                continue
+        for mod, exc in failures:
             if mod in private_allowlist:
+                # make sure mod is actually private
+                assert any(t.startswith("_") for t in mod.split("."))
                 continue
-            errors.append(f"{mod} failed to import with error {excep_type}")
+            errors.append(
+                f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
+            )
         self.assertEqual("", "\n".join(errors))
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS or IS_JETSON or IS_MACOS, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     @skipIfTorchDynamo("Broken and not relevant for now")
     def test_correct_module_names(self):
         """

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import re
 from collections import defaultdict, OrderedDict
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, Union
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule
@@ -25,7 +25,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 def _maybe_adjust_qconfig_for_module_name_object_type_order(
@@ -92,11 +92,11 @@ def _update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMappi
 
 def _generate_node_name_to_qconfig(
     root: torch.nn.Module,
-    modules: Dict[str, torch.nn.Module],
+    modules: dict[str, torch.nn.Module],
     input_graph: Graph,
     qconfig_mapping: QConfigMapping,
-    node_name_to_scope: Dict[str, Tuple[str, type]],
-) -> Dict[str, QConfigAny]:
+    node_name_to_scope: dict[str, tuple[str, type]],
+) -> dict[str, QConfigAny]:
     global_qconfig = qconfig_mapping.global_qconfig
     node_name_to_qconfig = {}
 
@@ -106,7 +106,7 @@ def _generate_node_name_to_qconfig(
     #
     # meaning in submodule 'foo.bar', we have seen 0 F.linear and
     # 1 F.conv2d invocations so far.
-    submodule_to_object_type_to_cur_idx: Dict[str, Dict[Callable, int]] = defaultdict(
+    submodule_to_object_type_to_cur_idx: dict[str, dict[Callable, int]] = defaultdict(
         lambda: defaultdict(int)
     )
     for node in input_graph.nodes:
@@ -197,7 +197,7 @@ def _generate_node_name_to_qconfig(
 
 
 def _check_is_valid_config_dict(
-    config_dict: Any, allowed_keys: Set[str], dict_name: str
+    config_dict: Any, allowed_keys: set[str], dict_name: str
 ) -> None:
     r"""Checks if the given config_dict has the correct keys
 
@@ -230,12 +230,12 @@ def _compare_prepare_convert_qconfig_mappings(
     assert qconfig_equals(
         prepare_qconfig_mapping.global_qconfig, convert_qconfig_mapping.global_qconfig
     ), "Expected global qconfigs to be the same in the prepare and convert quantization configs"
-    prepare_dicts: List[OrderedDict] = [
+    prepare_dicts: list[OrderedDict] = [
         prepare_qconfig_mapping.object_type_qconfigs,
         prepare_qconfig_mapping.module_name_qconfigs,
         prepare_qconfig_mapping.module_name_regex_qconfigs,
     ]
-    convert_dicts: List[OrderedDict] = [
+    convert_dicts: list[OrderedDict] = [
         convert_qconfig_mapping.object_type_qconfigs,
         convert_qconfig_mapping.module_name_qconfigs,
         convert_qconfig_mapping.module_name_regex_qconfigs,
@@ -258,7 +258,7 @@ def _compare_prepare_convert_qconfig_mappings(
 
 
 def _is_qconfig_supported_by_dtype_configs(
-    qconfig: QConfig, dtype_configs: List[DTypeConfig]
+    qconfig: QConfig, dtype_configs: list[DTypeConfig]
 ):
     for dtype_config in dtype_configs:
         is_dynamic = dtype_config.is_dynamic
@@ -349,7 +349,7 @@ def _maybe_adjust_qconfig_for_module_type_or_name(
 
 def _get_flattened_qconfig_dict(
     qconfig_mapping: QConfigMapping,
-) -> Dict[Union[Callable, str], QConfigAny]:
+) -> dict[Union[Callable, str], QConfigAny]:
     """flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
     propagate_qconfig_ function.
@@ -373,13 +373,11 @@ def _get_flattened_qconfig_dict(
       "conv": qconfig
     }
     """
-    flattened: Dict[Union[Callable, str], QConfigAny] = {
+    flattened: dict[Union[Callable, str], QConfigAny] = {
         "": qconfig_mapping.global_qconfig
     }
-    for obj, qconfig in qconfig_mapping.object_type_qconfigs.items():
-        flattened[obj] = qconfig
-    for obj, qconfig in qconfig_mapping.module_name_qconfigs.items():
-        flattened[obj] = qconfig
+    flattened.update(qconfig_mapping.object_type_qconfigs)
+    flattened.update(qconfig_mapping.module_name_qconfigs)  # type: ignore[arg-type]
     return flattened
 
 

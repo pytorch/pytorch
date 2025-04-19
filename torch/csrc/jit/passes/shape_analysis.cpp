@@ -1536,7 +1536,7 @@ class ShapePropagator : public PropertyPropBase {
         case aten::_cast_Short:
           return at::kShort;
         default:
-          AT_ASSERTM(
+          TORCH_INTERNAL_ASSERT(
               false,
               "unknown node kind in get_cast_scalar_type: ",
               node->kind().toQualString());

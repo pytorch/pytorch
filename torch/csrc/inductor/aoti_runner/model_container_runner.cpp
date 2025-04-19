@@ -5,14 +5,23 @@
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-// TODO: Investigate why this is necessary, but fixes build problems in FRL
-#if __has_include("filesystem")
+#ifndef _WIN32
+#include <sys/stat.h>
+#else
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
 #endif
+
+namespace {
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc {};
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+} // namespace
 
 namespace torch::inductor {
 
@@ -20,51 +29,65 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir) {
+    const std::string& cubin_dir,
+    const bool run_single_threaded) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
-  create_func_ = reinterpret_cast<decltype(create_func_)>(
-      model_so_->sym("AOTInductorModelContainerCreateWithDevice"));
-  delete_func_ = reinterpret_cast<decltype(delete_func_)>(
-      model_so_->sym("AOTInductorModelContainerDelete"));
-  get_num_outputs_func_ = reinterpret_cast<decltype(get_num_outputs_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetNumOutputs"));
-  run_func_ = reinterpret_cast<decltype(run_func_)>(
-      model_so_->sym("AOTInductorModelContainerRun"));
-  get_num_constants_func_ = reinterpret_cast<decltype(get_num_constants_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetNumConstants"));
-  get_constant_name_func_ = reinterpret_cast<decltype(get_constant_name_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetConstantName"));
-  get_constant_original_fqn_func_ =
-      reinterpret_cast<decltype(get_constant_original_fqn_func_)>(
-          model_so_->sym("AOTInductorModelContainerGetConstantOriginalFQN"));
-  get_constant_dtype_func_ =
-      reinterpret_cast<decltype(get_constant_dtype_func_)>(
-          model_so_->sym("AOTInductorModelContainerGetConstantDtype"));
-  update_constant_buffer_func_ =
-      reinterpret_cast<decltype(update_constant_buffer_func_)>(
-          model_so_->sym("AOTInductorModelContainerUpdateConstantBuffer"));
-  update_inactive_constant_buffer_func_ =
-      reinterpret_cast<decltype(update_inactive_constant_buffer_func_)>(
-          model_so_->sym(
-              "AOTInductorModelContainerUpdateInactiveConstantBuffer"));
-  run_const_fold_func_ = reinterpret_cast<decltype(run_const_fold_func_)>(
-      model_so_->sym("AOTInductorModelContainerRunConstantFolding"));
-  swap_constant_buffer_func_ =
-      reinterpret_cast<decltype(swap_constant_buffer_func_)>(
-          model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
-  get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
-      model_so_->sym("AOTInductorModelContainerGetCallSpec"));
+
+#define LOAD_SYMBOL(var, name_str) \
+  var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));
+  LOAD_SYMBOL(create_func_, "AOTInductorModelContainerCreateWithDevice")
+  LOAD_SYMBOL(delete_func_, "AOTInductorModelContainerDelete")
+  LOAD_SYMBOL(get_num_outputs_func_, "AOTInductorModelContainerGetNumOutputs")
+  LOAD_SYMBOL(
+      run_func_,
+      run_single_threaded ? "AOTInductorModelContainerRunSingleThreaded"
+                          : "AOTInductorModelContainerRun")
+  LOAD_SYMBOL(
+      get_num_constants_func_, "AOTInductorModelContainerGetNumConstants")
+  LOAD_SYMBOL(
+      get_constant_name_func_, "AOTInductorModelContainerGetConstantName")
+  LOAD_SYMBOL(
+      get_constant_original_fqn_func_,
+      "AOTInductorModelContainerGetConstantOriginalFQN")
+  LOAD_SYMBOL(
+      get_constant_dtype_func_, "AOTInductorModelContainerGetConstantDtype")
+  LOAD_SYMBOL(
+      update_constant_buffer_func_,
+      "AOTInductorModelContainerUpdateConstantBuffer")
+  LOAD_SYMBOL(
+      update_inactive_constant_buffer_func_,
+      "AOTInductorModelContainerUpdateInactiveConstantBuffer")
+  LOAD_SYMBOL(
+      run_const_fold_func_, "AOTInductorModelContainerRunConstantFolding")
+  LOAD_SYMBOL(
+      swap_constant_buffer_func_, "AOTInductorModelContainerSwapConstantBuffer")
+  LOAD_SYMBOL(get_call_spec_func_, "AOTInductorModelContainerGetCallSpec")
+#undef LOAD_SYMBOL
+
+#define TRY_LOAD_SYMBOL(var, name_str)                               \
+  try {                                                              \
+    var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str)); \
+  } catch (const at::DynamicLibraryError& e) {                       \
+    std::cerr << "Could not dlsym " << name_str << std::endl;        \
+  }
+
+  TRY_LOAD_SYMBOL(
+      free_inactive_constant_buffer_func_,
+      "AOTInductorModelContainerFreeInactiveConstantBuffer")
+#undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
   size_t lastindex = model_so_path.find_last_of('.');
   std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
 
-  if (fs::exists(json_filename)) {
+  if (file_exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  } else {
+    proxy_executor_handle_ = nullptr;
   }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
@@ -80,12 +103,9 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
       result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    std::vector<at::Tensor>& inputs,
-    AOTInductorStreamHandle cuda_stream_handle) {
-  auto input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-
+std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
+    std::vector<AtenTensorHandle>& input_handles,
+    void* stream_handle) {
   // For outputs, we only allocate a vector to hold returned tensor handles,
   // not allocating the actual output tensor storage here
   size_t num_outputs = 0;
@@ -99,11 +119,28 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
       input_handles.size(),
       output_handles.data(),
       output_handles.size(),
-      cuda_stream_handle,
+      reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
       proxy_executor_handle_));
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::run(
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  return run_impl(input_handles, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  std::move(inputs).clear();
+  return run_impl(input_handles, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::
@@ -153,6 +190,21 @@ void AOTIModelContainerRunner::update_constant_buffer(
       check_full_update));
 }
 
+void AOTIModelContainerRunner::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool check_full_update) {
+  TensorConstantMap const_map;
+  for (auto& [k, v] : tensor_map) {
+    const_map.emplace(k, &v);
+  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&const_map,
+      use_inactive,
+      check_full_update));
+}
+
 void AOTIModelContainerRunner::update_inactive_constant_buffer(
     const TensorConstantMap& const_map) {
   AOTI_RUNTIME_ERROR_CODE_CHECK(update_inactive_constant_buffer_func_(
@@ -171,6 +223,15 @@ void AOTIModelContainerRunner::run_const_fold(
 
 void AOTIModelContainerRunner::swap_constant_buffer() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(swap_constant_buffer_func_(container_handle_));
+}
+
+void AOTIModelContainerRunner::free_inactive_constant_buffer() {
+  if (!free_inactive_constant_buffer_func_) {
+    throw std::runtime_error(
+        "No free_inactive_constant_buffer in .so! Consider rebuild .so with latest package.");
+  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      free_inactive_constant_buffer_func_(container_handle_));
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {

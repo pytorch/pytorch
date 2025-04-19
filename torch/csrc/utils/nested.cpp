@@ -48,9 +48,9 @@ at::Tensor nested_tensor_ctor(
   // Check whether we are dealing with lists of tensors or not
   std::vector<at::Tensor> new_list(PyList_Size(data));
   for (const auto i : c10::irange(PyList_Size(data))) {
-    PyObject* elem = PyList_GetItem(data, i);
-    if (THPVariable_Check(elem)) {
-      new_list[i] = THPVariable_Unpack(PyList_GetItem(data, i)).detach();
+    THPObjectPtr elem = THPObjectPtr(PyList_GetItemRef(data, i));
+    if (THPVariable_Check(elem.get())) {
+      new_list[i] = THPVariable_Unpack(elem.get()).detach();
       TORCH_CHECK(
           !new_list[i].is_nested(),
           "We do not accept nested tensors as input to nested tensors");
@@ -60,7 +60,7 @@ at::Tensor nested_tensor_ctor(
     } else {
       PythonArgs elem_r(r);
       std::array<PyObject*, 6> elem_args = {
-          elem, // data
+          elem.get(), // data
           r.args[1], // dtpye
           nullptr, // device (cpu)
           nullptr, // no pinned memory

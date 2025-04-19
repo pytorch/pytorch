@@ -1,9 +1,9 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import functools
 import logging
 import operator
 import sys
-from typing import Any, Dict, Optional, Set, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
@@ -93,8 +93,9 @@ def insert_deferred_runtime_asserts(
     # Import sympy locally
     import sympy
 
+    from torch._export.passes._node_metadata_hook import _set_node_metadata_hook
     from torch.fx.experimental.symbolic_shapes import (
-        _has_unsupported_sympy_function,
+        _has_uninterpretable_sympy_function,
         CallMethodKey,
         cast_symbool_to_symint_guardless,
         ConvertIntKey,
@@ -104,12 +105,16 @@ def insert_deferred_runtime_asserts(
         resolve_unbacked_bindings,
     )
     from torch.utils._sympy.numbers import int_oo
-    from torch.utils._sympy.reference import PythonReferenceAnalysis
+    from torch.utils._sympy.reference import (
+        OptimizedPythonReferenceAnalysis,
+        PythonReferenceAnalysis,
+    )
     from torch.utils._sympy.value_ranges import ValueRanges
 
     # TODO: Request simplification on runtime asserts before emitting them
     ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
     graph = gm.graph
+    tracer = fx.proxy.GraphAppendingTracer(graph)
     graph_code_log.debug(
         "%s",
         lazy_format_graph_code(
@@ -118,7 +123,7 @@ def insert_deferred_runtime_asserts(
     )
 
     # We are going to mutate the dict
-    expr_to_proxy: Dict[sympy.Expr, fx.Proxy] = {}
+    expr_to_proxy: dict[sympy.Expr, fx.Proxy] = {}
     placeholders = set()
     first_non_placeholder = None
     for node in graph.nodes:
@@ -137,7 +142,7 @@ def insert_deferred_runtime_asserts(
             (val := _get_sym_val(node)) is not None
             and not isinstance(val, sympy.Number)
             # this holds back from reifying anything in torch.utils._sympy.functions.py that's unsupported
-            and not _has_unsupported_sympy_function(val)
+            and not _has_uninterpretable_sympy_function(val)
             and any(
                 isinstance(arg, fx.Node)
                 and isinstance(_get_example_value(arg), (torch.Tensor, torch.Size))
@@ -146,9 +151,48 @@ def insert_deferred_runtime_asserts(
             )
         )
 
+    # Figure out what key to use, val or example_value
+    val_key = "val"
+    for node in graph.nodes:
+        if "example_value" in node.meta:
+            val_key = "example_value"
+            break
+        elif "val" in node.meta:
+            break
+
+    def _node_metadata_hook(
+        node: torch.fx.Node,
+        stack_trace: Optional[str] = None,
+        nn_module_stack: Optional[dict[str, Any]] = None,
+    ) -> None:
+        fake_args = pytree.tree_map(
+            lambda arg: (
+                _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
+            ),
+            node.args,
+        )
+        try:
+            target = node.target
+            if node.op == "call_method":
+                assert isinstance(node.target, str)
+                target = getattr(fake_args[0], node.target)
+                fake_args = fake_args[1:]
+            node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
+        except NotImplementedError:
+            # This can happen when attempting to reify a symbol with an unsupported call_function node,
+            # e.g. with NestedTensors + sym_size.int via match_symbol().
+            # This seems to be fine, as the node gets CSE'd and deleted later in favor of a SymInt graph input.
+            pass
+        if stack_trace is not None:
+            node.meta["stack_trace"] = stack_trace
+        if nn_module_stack is not None:
+            node.meta["nn_module_stack"] = nn_module_stack
+
     # Track asserts/checks we've added
-    added_asserts: Set[sympy.Expr] = set()
-    constrained_unbacked_symbols: Set[sympy.Symbol] = set()
+    added_asserts: set[sympy.Expr] = set()
+    constrained_unbacked_symbols: set[sympy.Symbol] = set()
+
+    Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 
     def _sympy_interp(expr_to_proxy, expr):
         # sympy_interp() with hash consing
@@ -162,11 +206,11 @@ def insert_deferred_runtime_asserts(
             return expr_to_proxy[expr]
         # base cases, don't cache
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
-            return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
+            return sympy_interp(Analysis, expr_to_proxy, expr)
 
         # hash cons on arguments, run expr handler
         expr_to_proxy[expr] = _run_sympy_handler(
-            PythonReferenceAnalysis,
+            Analysis,
             [_sympy_interp(expr_to_proxy, arg) for arg in expr.args],
             expr,
         )
@@ -196,7 +240,7 @@ def insert_deferred_runtime_asserts(
                     and _is_bound_expr_for_symbol(ra.expr)
                 )
                 # don't try to reify sympy functions we can't turn into FX nodes
-                or _has_unsupported_sympy_function(ra.expr)
+                or _has_uninterpretable_sympy_function(ra.expr)
             ):
                 continue
 
@@ -212,16 +256,17 @@ def insert_deferred_runtime_asserts(
             else:
                 # Convert the sympy expression into a sequence of FX
                 # nodes
-                res = _sympy_interp(expr_to_proxy, ra.expr).node
-                graph.call_function(
-                    torch.ops.aten._assert_scalar.default,
-                    # TODO: use ra.msg here, but it's pretty
-                    # useless right now
-                    (
-                        res,
-                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
-                    ),
-                )
+                with _set_node_metadata_hook(gm, _node_metadata_hook):
+                    res = _sympy_interp(expr_to_proxy, ra.expr).node
+                    graph.call_function(
+                        torch.ops.aten._assert_scalar.default,
+                        # TODO: use ra.msg here, but it's pretty
+                        # useless right now
+                        (
+                            res,
+                            f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
+                        ),
+                    )
                 added_asserts.add(ra.expr)
 
     nodes = list(graph.nodes)
@@ -248,7 +293,8 @@ def insert_deferred_runtime_asserts(
                         and isinstance(s := symint.node.expr, sympy.Symbol)
                         and s not in expr_to_proxy
                     ):
-                        expr_to_proxy[s] = fx.Proxy(cb())
+                        with _set_node_metadata_hook(gm, _node_metadata_hook):
+                            expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
                 match_symbol(example_value, lambda: node)
@@ -309,16 +355,26 @@ def insert_deferred_runtime_asserts(
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
-                new_untracked_symbols = sym_expr.free_symbols - expr_to_proxy.keys()
+                def has_new_untracked_symbols():
+                    for symbol in sym_expr.free_symbols:
+                        if symbol not in expr_to_proxy:
+                            return True
+                    return False
+
                 # this guards against deleting calls that produce unbacked bindings we haven't yet seen.
                 # in this case looking at sym_expr.free_symbols might not be enough, if the example value has a hint
                 # (is backed), but produces an unbacked symbol. In this case keep the node alive.
-                new_unbacked_bindings = (
-                    resolve_unbacked_bindings(
-                        shape_env, node.meta.get("unbacked_bindings", {})
-                    ).keys()
-                    - expr_to_proxy.keys()
+                resolved_unbacked_bindings = resolve_unbacked_bindings(
+                    shape_env, node.meta.get("unbacked_bindings", {})
                 )
+
+                assert resolved_unbacked_bindings is not None
+
+                def has_new_unbacked_bindings():
+                    for key in resolved_unbacked_bindings.keys():
+                        if key not in expr_to_proxy:
+                            return True
+                    return False
 
                 # maybe re-reify expression, replace current node
                 if (
@@ -326,13 +382,21 @@ def insert_deferred_runtime_asserts(
                     or (  # example value is redundant
                         _is_intermediate_tensor_sym_call(node)
                         # shape call on intermediate tensor, turn into computation on input shapes
-                        and not new_untracked_symbols
+                        and not has_new_untracked_symbols()
                     )
-                ) and not new_unbacked_bindings:
+                ) and not has_new_unbacked_bindings():
                     if _is_intermediate_tensor_sym_call(
                         node
                     ):  # reify from input shapes
-                        expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
+                        with _set_node_metadata_hook(
+                            gm,
+                            functools.partial(
+                                _node_metadata_hook,
+                                stack_trace=node.meta.get("stack_trace"),
+                                nn_module_stack=node.meta.get("nn_module_stack"),
+                            ),
+                        ):
+                            expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
                     hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
                     node.replace_all_uses_with(hash_node)
@@ -345,7 +409,7 @@ def insert_deferred_runtime_asserts(
                 elif sym_expr not in expr_to_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):  # don't hash cons primitives
-                    expr_to_proxy[sym_expr] = fx.Proxy(node)  # type: ignore[arg-type]
+                    expr_to_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)  # type: ignore[arg-type]
 
             # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
             # so calls before that are redundant.
@@ -437,7 +501,10 @@ def insert_deferred_runtime_asserts(
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
                     if s not in expr_to_proxy:
-                        expr_to_proxy[s] = fx.Proxy(go(node, keypath))
+                        with _set_node_metadata_hook(gm, _node_metadata_hook):
+                            expr_to_proxy[s] = fx.Proxy(
+                                go(node, keypath), tracer=tracer
+                            )
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
             for i0 in defs:
@@ -477,10 +544,10 @@ def insert_deferred_runtime_asserts(
                 # effort basis should do.
                 #
                 # The second issue is a preexisting one. It can be mitigated
-                # with a normalisation algorithm. In general, it may also
+                # with a normalization algorithm. In general, it may also
                 # be on a best effort basis, but since our grammar is not
                 # terribly difficult, chances are we could even fully
-                # normalise SymPy expressions... who knows.
+                # normalize SymPy expressions... who knows.
                 if i0 in constrained_unbacked_symbols:
                     continue  # constrain symbol just once
 
@@ -520,26 +587,34 @@ def insert_deferred_runtime_asserts(
                         # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
                         # raises AOTAutograd errors on cast_symbool_to_symint_guardless
 
-                        if (min_val := convert(vr.lower)) is not None:
-                            ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
-                            graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                (
-                                    ge,
-                                    f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
-                                ),
-                            )
-                            added_asserts.add(i0 >= min_val)
-                        if (max_val := convert(vr.upper)) is not None:
-                            le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
-                            graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                (
-                                    le,
-                                    f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
-                                ),
-                            )
-                            added_asserts.add(i0 <= max_val)
+                        with _set_node_metadata_hook(
+                            gm,
+                            functools.partial(
+                                _node_metadata_hook,
+                                stack_trace=node.meta.get("stack_trace"),
+                                nn_module_stack=node.meta.get("nn_module_stack"),
+                            ),
+                        ):
+                            if (min_val := convert(vr.lower)) is not None:
+                                ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
+                                graph.call_function(
+                                    torch.ops.aten._assert_scalar.default,
+                                    (
+                                        ge,
+                                        f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
+                                    ),
+                                )
+                                added_asserts.add(i0 >= min_val)
+                            if (max_val := convert(vr.upper)) is not None:
+                                le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
+                                graph.call_function(
+                                    torch.ops.aten._assert_scalar.default,
+                                    (
+                                        le,
+                                        f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
+                                    ),
+                                )
+                                added_asserts.add(i0 <= max_val)
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)

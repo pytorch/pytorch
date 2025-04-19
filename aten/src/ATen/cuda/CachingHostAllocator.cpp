@@ -76,6 +76,10 @@ struct CUDACachingHostAllocatorImpl
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
     // primary context, if available. See pytorch/pytorch#21081.
+    // This can be a large performance hit if we cross NUMA nodes by allocating
+    // and pinning memory on one side of the NUMA node and then using it on the
+    // other side. Thankfully, we use one process per GPU, so we don't run into
+    // this issue.
     at::OptionalDeviceGuard device_guard;
     auto primary_ctx_device_index =
         c10::cuda::getDeviceIndexWithPrimaryContext();
@@ -84,6 +88,7 @@ struct CUDACachingHostAllocatorImpl
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
+    auto start = std::chrono::system_clock::now();
     if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
             pinned_use_cuda_host_register()) {
       allocWithCudaHostRegister(ptr, size);
@@ -91,16 +96,34 @@ struct CUDACachingHostAllocatorImpl
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
+    auto end = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Update the statistics on the time spent on cudaHostAlloc/hostRegister
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_alloc_time.increase(duration.count());
+    }
   }
 
   void free_block(Block* block) override {
+    auto start = std::chrono::system_clock::now();
     if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
             pinned_use_cuda_host_register()) {
       void* ptr = block->ptr_;
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
-      free(ptr);
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      std::free(ptr);
     } else {
       AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
+    }
+    auto end = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Update the statistics on the time spent on cudaFreeHost/hostUnregister
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_free_time.increase(duration.count());
     }
   }
 
@@ -123,6 +146,11 @@ struct CUDACachingHostAllocatorImpl
     return true;
   }
 
+  bool pinned_use_background_threads() override {
+    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+        pinned_use_background_threads();
+  }
+
   EventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
     static auto* event_pool = new EventPool();
@@ -131,8 +159,8 @@ struct CUDACachingHostAllocatorImpl
 
   TaskThreadPool* getThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(
-        c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-            pinned_max_register_threads());
+        static_cast<int>(c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            pinned_max_register_threads()));
     return pool;
   }
 
@@ -152,6 +180,7 @@ struct CUDACachingHostAllocatorImpl
     uintptr_t alignedStart =
         (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
     for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }
   }
@@ -175,7 +204,8 @@ struct CUDACachingHostAllocatorImpl
     // Here we do regular allocation, pre-fault/map the pages, and then do
     // cudaHostRegister with GPU mapping flags to lock the pages, so we
     // can minimize the cost for the cuda global lock.
-    *ptr = malloc(roundSize);
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    *ptr = std::malloc(roundSize);
 
     // Parallelize the mapping/registering of pages to reduce wall time
     size_t pageSize = (1 << 12); // 4kB pages
@@ -263,6 +293,18 @@ void CachingHostAllocator_emptyCache() {
 
 at::Allocator* getCachingHostAllocator() {
   return &getCUDACachingHostAllocator();
+}
+
+at::HostStats CachingHostAllocator_getStats() {
+  return getCUDACachingHostAllocator().getStats();
+}
+
+void CachingHostAllocator_resetAccumulatedStats() {
+  return getCUDACachingHostAllocator().resetAccumulatedStats();
+}
+
+void CachingHostAllocator_resetPeakStats() {
+  return getCUDACachingHostAllocator().resetPeakStats();
 }
 
 } // namespace at::cuda

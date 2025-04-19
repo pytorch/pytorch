@@ -8,12 +8,16 @@ import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, Dict as _Dict, Optional as _Optional, Type, TypeVar, Union
+from typing import Any, cast, Optional as _Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import DeviceLikeType
 
 
 __all__ = ["TypedStorage", "UntypedStorage"]
@@ -29,7 +33,7 @@ except ModuleNotFoundError:
 
 
 _share_memory_lock = threading.Lock()
-_share_memory_map: _Dict[int, threading.RLock] = {}
+_share_memory_map: dict[int, threading.RLock] = {}
 
 T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
 
@@ -39,6 +43,12 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
+    # Used when
+    # (1) stashing FakeTensor device onto storage in torch.serialization.skip_data
+    # (2) stashing device onto storage to propagate to FakeTensor when torch.load under FakeTensorMode
+    _fake_device: _Optional[torch.device] = None
+    # Used when loading with FakeTensorMode to give information about offset of storage in torch.saved-file
+    _checkpoint_offset: _Optional[int] = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -121,35 +131,35 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def _new_using_filename_cpu(cls: Type[T], size: _int) -> T:
+    def _new_using_filename_cpu(cls, size: _int) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def _new_using_fd_cpu(cls: Type[T], size: _int) -> T:
+    def _new_using_fd_cpu(cls, size: _int) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def from_buffer(cls: Type[T], *args, **kwargs) -> T:
+    def from_buffer(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     @classmethod
     def _new_shared_filename_cpu(
-        cls: Type[T],
+        cls,
         manager,
         obj,
         size,
         *,
         device=None,
         dtype=None,
-    ) -> T:
+    ) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def _release_ipc_counter_cuda(cls: Type[T], *args, **kwargs) -> T:
+    def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def _new_with_weak_ptr(cls: Type[T], *args, **kwargs) -> T:
+    def _new_with_weak_ptr(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     def _shared_decref(self) -> Union[_StorageBase, TypedStorage]:
@@ -177,7 +187,7 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def _new_shared_cuda(cls: Type[T], *args, **kwargs) -> T:
+    def _new_shared_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     def _shared_incref(self, *args, **kwargs):
@@ -271,9 +281,9 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(
-        self, *, device: torch.device, non_blocking: _bool = False
-    ) -> Union[_StorageBase, TypedStorage]:
+    def to(self, *, device: DeviceLikeType, non_blocking: _bool = False):
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
         return _to(self, device, non_blocking)
 
     def double(self):
@@ -344,7 +354,8 @@ class _StorageBase:
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A boolean variable.
@@ -359,7 +370,8 @@ class _StorageBase:
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A pinned CPU storage.
@@ -518,7 +530,7 @@ def _load_from_bytes(b):
     return torch.load(io.BytesIO(b), weights_only=False)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _new_dtypes():
     # These are dtypes serialized as UntypedStorage unlike those in
     # _dtype_to_storage_type_map
@@ -527,16 +539,20 @@ def _new_dtypes():
         torch.float8_e4m3fn,
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
         torch.bits8,
         torch.bits16,
         torch.bits1x8,
         torch.bits2x4,
         torch.bits4x2,
         torch.complex32,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
     }
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _dtype_to_storage_type_map():
     # NOTE: We should no longer add dtypes to this map. This map
     # is only used for BC/FC with older PyTorch versions. Going forward,
@@ -564,7 +580,7 @@ def _dtype_to_storage_type_map():
     }
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _storage_type_to_dtype_map():
     dtype_map = {val: key for key, val in _dtype_to_storage_type_map().items()}
     return dtype_map
@@ -649,6 +665,8 @@ def _get_device_from_module(module: str):
 
 class TypedStorage:
     is_sparse: _bool = False
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    _fake_device: _Optional[torch.device] = None
 
     dtype: torch.dtype
 
@@ -1054,8 +1072,10 @@ class TypedStorage:
         hpu_storage = self._untyped_storage.hpu(device, non_blocking)
         return self._new_wrapped_storage(hpu_storage)
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> Self:
+    def to(self, *, device: DeviceLikeType, non_blocking: bool = False) -> Self:
         _warn_typed_storage_removal()
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
         if self.dtype in [
             torch.quint8,
             torch.quint4x2,
@@ -1136,7 +1156,8 @@ class TypedStorage:
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A boolean variable.
@@ -1148,7 +1169,8 @@ class TypedStorage:
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
-            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A pinned CPU storage.

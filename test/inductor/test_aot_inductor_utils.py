@@ -1,15 +1,23 @@
 # Owner(s): ["module: inductor"]
 
+import copy
 import os
 import shutil
 import tempfile
+import types
+from typing import Any, Optional, Union
 
 import torch
 import torch._export
 import torch._inductor
 import torch.export._trace
 import torch.fx._pytree as fx_pytree
+from torch._dynamo.testing import same
+from torch._inductor import config
+from torch._inductor.test_case import TestCase
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
 
 
@@ -24,7 +32,7 @@ class WrapperModule(torch.nn.Module):
 
 class AOTIRunnerUtil:
     @staticmethod
-    def compile(
+    def legacy_compile(
         model,
         example_inputs,
         options=None,
@@ -65,9 +73,9 @@ class AOTIRunnerUtil:
         return so_path
 
     @staticmethod
-    def load_runner(device, so_path):
+    def legacy_load_runner(device, so_path):
         if IS_FBCODE:
-            from .fb import test_aot_inductor_model_runner_pybind
+            from .fb import test_aot_inductor_model_runner_pybind  # @manual
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 # copy *.so file to a unique path just before loading
@@ -76,21 +84,28 @@ class AOTIRunnerUtil:
                 temp_so_path = os.path.join(temp_dir, "model.so")
                 shutil.copy(so_path, temp_so_path)
 
+                # We also need to copy over the serialized extern_kernel_nodes for custom ops
+                extern_kernel_nodes_path = f"{so_path[:-3]}.json"
+                if os.path.isfile(extern_kernel_nodes_path):
+                    temp_extern_kernel_nodes_path = os.path.join(temp_dir, "model.json")
+                    shutil.copy(extern_kernel_nodes_path, temp_extern_kernel_nodes_path)
+
                 return test_aot_inductor_model_runner_pybind.Runner(
                     temp_so_path, device == "cpu"
                 )
         else:
-            return (
-                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-                if device == "cpu"
-                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
-            )
+            if device == "cpu":
+                return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+            elif device == "xpu":
+                return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+            else:
+                return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
 
     @staticmethod
-    def load(device, so_path):
+    def legacy_load(device, so_path):
         # TODO: unify fbcode and oss behavior to only use torch._export.aot_load
         if IS_FBCODE:
-            runner = AOTIRunnerUtil.load_runner(device, so_path)
+            runner = AOTIRunnerUtil.legacy_load_runner(device, so_path)
 
             def optimized(*args, **kwargs):
                 call_spec = runner.get_call_spec()
@@ -106,40 +121,172 @@ class AOTIRunnerUtil:
             return torch._export.aot_load(so_path, device)
 
     @staticmethod
-    def run(
-        device,
+    def legacy_run(
+        device: str,
         model,
         example_inputs,
         options=None,
         dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
-        so_path = AOTIRunnerUtil.compile(
+        so_path = AOTIRunnerUtil.legacy_compile(
             model,
             example_inputs,
             options=options,
             dynamic_shapes=dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
         )
-        optimized = AOTIRunnerUtil.load(device, so_path)
+        optimized = AOTIRunnerUtil.legacy_load(device, so_path)
+        return optimized(*example_inputs)
+
+    @staticmethod
+    def compile(
+        model: Union[torch.nn.Module, types.FunctionType],
+        example_inputs: list[torch.Tensor],
+        inductor_configs: Optional[dict[str, Any]] = None,
+        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    ):
+        if not isinstance(model, torch.nn.Module):
+            # This should really be the default behavior of torch.export.export
+            model = WrapperModule(model)
+
+        with torch.no_grad():
+            # strict=False needs extra migration work
+            ep = torch.export.export(
+                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+            )
+            package_path = torch._inductor.aoti_compile_and_package(
+                ep, inductor_configs=inductor_configs
+            )
+        return package_path
+
+    @staticmethod
+    def run(
+        model: Union[torch.nn.Module, types.FunctionType],
+        example_inputs: list[torch.Tensor],
+        inductor_configs: Optional[dict[str, Any]] = None,
+        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    ):
+        package_path = AOTIRunnerUtil.compile(
+            model,
+            example_inputs,
+            inductor_configs=inductor_configs,
+            dynamic_shapes=dynamic_shapes,
+        )
+        optimized = torch._inductor.aoti_load_package(package_path)
         return optimized(*example_inputs)
 
     @staticmethod
     def run_multiple(
-        device,
-        model,
-        list_example_inputs,
-        options=None,
-        dynamic_shapes=None,
+        model: Union[torch.nn.Module, types.FunctionType],
+        list_example_inputs: list[list[torch.Tensor]],
+        inductor_configs: Optional[dict[str, Any]] = None,
+        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     ):
-        so_path = AOTIRunnerUtil.compile(
+        package_path = AOTIRunnerUtil.compile(
             model,
             list_example_inputs[0],
-            options=options,
+            inductor_configs=inductor_configs,
             dynamic_shapes=dynamic_shapes,
         )
-        optimized = AOTIRunnerUtil.load(device, so_path)
+        optimized = torch._inductor.aoti_load_package(package_path)
         list_output_tensors = []
         for example_inputs in list_example_inputs:
             list_output_tensors.append(optimized(*example_inputs))
         return list_output_tensors
+
+
+def check_model(
+    self: TestCase,
+    model,
+    example_inputs,
+    options=None,
+    dynamic_shapes=None,
+    atol=None,
+    rtol=None,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        torch.manual_seed(0)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
+
+        # For non mixed device inputs with default "cpu",set the device manully.
+        if all(
+            t.device.type == "cpu"
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
+        ):
+            example_inputs = tuple(
+                clone_preserve_strides_offset(x, device=self.device)
+                for x in example_inputs
+            )
+
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(example_inputs)
+        expected = ref_model(*ref_inputs)
+
+        torch.manual_seed(0)
+        actual = AOTIRunnerUtil.run(
+            model,
+            example_inputs,
+            options,
+            dynamic_shapes,
+        )
+
+    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+
+
+def check_model_with_multiple_inputs(
+    self: TestCase,
+    model,
+    list_example_inputs,
+    options=None,
+    dynamic_shapes=None,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        torch.manual_seed(0)
+        model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(list_example_inputs)
+        list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+
+        torch.manual_seed(0)
+        list_actual = AOTIRunnerUtil.run_multiple(
+            model, list_example_inputs, options, dynamic_shapes
+        )
+
+    self.assertTrue(same(list_actual, list_expected))
+
+
+def code_check_count(
+    self: TestCase,
+    model,
+    example_inputs,
+    target_str: str,
+    target_count: int,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        package_path = torch._export.aot_compile(model, example_inputs)
+
+    with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+        src_code = cpp.read()
+        FileCheck().check_count(
+            target_str,
+            target_count,
+            exactly=True,
+        ).run(src_code)

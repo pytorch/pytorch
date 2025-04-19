@@ -366,7 +366,7 @@ Tensor select_batching_rule(const Tensor& self, int64_t dim, int64_t index) {
 }
 
 static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int64_t num_batch_dims) {
-  return maybe_wrap_dim(dim, input_sizes.size()) + num_batch_dims;
+  return maybe_wrap_dim(dim, static_cast<int64_t>(input_sizes.size())) + num_batch_dims;
 }
 
 Tensor select_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
@@ -1209,10 +1209,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
   {
-    using Binop = Tensor (*)(const Tensor&, const Tensor&, std::optional<c10::string_view>);
-    using Unop = Tensor (*)(const Tensor&, const Scalar&, std::optional<c10::string_view>);
-    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, std::optional<c10::string_view>>);
-    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, const Scalar&, std::optional<c10::string_view>>);
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, std::optional<std::string_view>);
+    using Unop = Tensor (*)(const Tensor&, const Scalar&, std::optional<std::string_view>);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, std::optional<std::string_view>>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, const Scalar&, std::optional<std::string_view>>);
   }
 
   // at::pow has three out-of-place overloads

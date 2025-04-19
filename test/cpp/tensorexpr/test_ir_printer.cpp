@@ -37,6 +37,14 @@ TEST(IRPrinter, BasicValueTest02) {
   ASSERT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
+TEST(IRPrinter, BasicValueTest03) {
+  ExprHandle a(3.402823466385289e+38f);
+  ExprHandle b(-3.402823466385289e+38f);
+  std::stringstream ss;
+  ss << a << ", " << b;
+  ASSERT_EQ(ss.str(), "3.402823466385289e+38f, -3.402823466385289e+38f");
+}
+
 TEST(IRPrinter, CastTest) {
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);

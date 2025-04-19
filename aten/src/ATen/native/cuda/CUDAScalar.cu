@@ -26,6 +26,7 @@ namespace at::native {
 
 Scalar _local_scalar_dense_cuda(const Tensor& self) {
   Scalar r;
+  TORCH_CHECK(self.numel() > 0, "_local_scalar_dense: Empty tensor not supported");
 #if defined(USE_ROCM)
   if (!use_sync_mode()){
 #endif
@@ -44,7 +45,7 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
           cudaStream_t stream = at::cuda::getCurrentCUDAStream();
           at::cuda::memcpy_and_sync((void *)value.const_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), sizeof(scalar_t), cudaMemcpyDeviceToHost, stream);
           r = Scalar(*value.const_data_ptr<scalar_t>());
-        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 #if defined(USE_ROCM)
   } else {
     auto cpu_self = self.cpu();

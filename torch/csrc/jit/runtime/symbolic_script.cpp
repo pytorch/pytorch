@@ -936,8 +936,8 @@ const std::vector<std::string> functions = {
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
-                m = (self > 3.).type_as(result)
-                m = torch.where((self >= -3.) & (self <= 3.),  self / 3. + .5, m)
+                m = (self >= 3.).type_as(result)
+                m = torch.where((self > -3.) & (self < 3.),  self / 3. + .5, m)
                 return grad_output * m
             return result, backward
 
@@ -1556,12 +1556,12 @@ static void loadModule(const CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw ErrorReport(forward_tuple->sourceRange())
-          << "gradient must return literal a tuple";
+      throw(
+          ErrorReport(forward_tuple->sourceRange())
+          << "gradient must return literal a tuple");
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* context;
+    Value* context = nullptr;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
 

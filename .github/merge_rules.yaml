@@ -79,24 +79,32 @@
   - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
   - pull
   - inductor
 
+- name: OSS CI / pytorchbot / slow tests
+  patterns:
+  - test/slow_tests.json
+  approved_by:
+  - pytorchbot
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+  - slow
+
 - name: OSS CI /pytorchbot / Executorch
   patterns:
   - .ci/docker/ci_commit_pins/executorch.txt
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-jammy-py3-clang12-executorch / build
-  - pull / linux-jammy-py3-clang12-executorch / test (executorch, 1, 1, linux.2xlarge)
+  - pull
 
 - name: OSS CI / pytorchbot / XLA
   patterns:
@@ -107,8 +115,7 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-focal-py3_8-clang9-xla / build
-  - pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull
 
 - name: Documentation
   patterns:
@@ -235,25 +242,6 @@
   - Lint
   - pull
 
-- name: XPU ATen
-  patterns:
-  - aten/src/ATen/xpu/**
-  - c10/xpu/**
-  - torch/csrc/xpu/**
-  - torch/xpu/**
-  - test/xpu/**
-  - test/test_xpu.py
-  - third_party/xpu.txt
-  - .ci/docker/ci_commit_pins/triton-xpu.txt
-  approved_by:
-  - EikanWang
-  - jgong5
-  - gujinghui
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: Distributions
   patterns:
   - torch/distributions/**
@@ -282,9 +270,11 @@
   - torch/_C/_distributed*
   - torch/csrc/distributed/**
   - torch/testing/_internal/distributed/**
+  - torch/multiprocessing/**
   - test/distributed/**
   - test/cpp/dist_autograd/**
   - test/cpp/rpc/**
+  - test/*multiprocessing*
   approved_by:
   - wconstab
   - mrshenli
@@ -315,6 +305,7 @@
 
 - name: DCP
   patterns:
+  - docs/source/distributed.checkpoint.rst
   - torch/distributed/checkpoint/**
   approved_by:
   - LucasLLC
@@ -343,6 +334,7 @@
   - XiaobingSuper
   - jgong5
   - mingfeima
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -375,6 +367,7 @@
   - jgong5
   - vfdev-5
   - leslie-fang-intel
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -388,6 +381,7 @@
   approved_by:
   - leslie-fang-intel
   - jgong5
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -504,6 +498,19 @@
   - Lint
   - pull
 
+- name: XPU
+  patterns:
+  - '**xpu**'
+  - '**sycl**'
+  approved_by:
+  - EikanWang
+  - jgong5
+  - gujinghui
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: superuser
   patterns:
   - '*'
@@ -530,6 +537,7 @@
   - anijain2305
   - bdhirsh
   - zou3519
+  - isuruf
   mandatory_checks_name:
   - EasyCLA
   - Lint

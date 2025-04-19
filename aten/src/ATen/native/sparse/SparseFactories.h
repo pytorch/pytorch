@@ -10,6 +10,6 @@ namespace native {
 using spdiags_kernel_fn_t =
     void (*)(TensorIterator&, const TensorBase&, TensorBase&, TensorBase&);
 
-DECLARE_DISPATCH(spdiags_kernel_fn_t, spdiags_kernel_stub);
+DECLARE_DISPATCH(spdiags_kernel_fn_t, spdiags_kernel_stub)
 } // namespace native
 } // namespace at

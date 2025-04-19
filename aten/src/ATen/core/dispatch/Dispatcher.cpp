@@ -17,8 +17,22 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
-    return temp != nullptr;
+  static auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN(
+        "ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ",
+        envar,
+        " valid values are 0 or 1.");
+  }
+
+  return false;
 }
 
 static thread_local int64_t dispatch_trace_nesting_value_;
@@ -99,7 +113,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
-    return findOp(schema.operator_name()) != std::nullopt;
+    return findOp(schema.operator_name()).has_value();
   });
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
@@ -170,7 +184,7 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findOp(op_name);
-  if (found != std::nullopt) {
+  if (found.has_value()) {
     return *found;
   }
 

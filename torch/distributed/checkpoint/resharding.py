@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple
 
 from torch.distributed.checkpoint.metadata import ChunkStorageMetadata
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 def _check_shard_metadata_pair_overlap(
@@ -27,7 +26,7 @@ def _check_shard_metadata_pair_overlap(
 
 def _shards_get_overlap_region_wrt_saved_tensor(
     saved_shard: ChunkStorageMetadata, current_shard: ChunkStorageMetadata
-) -> List[Tuple[int, int, int, int]]:
+) -> list[tuple[int, int, int, int]]:
     """
     Return the overlapping region between saved_shard and current_shard.
 

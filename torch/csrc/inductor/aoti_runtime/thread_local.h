@@ -63,6 +63,7 @@ struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
  private:
   void realloc(const ArrayRefTensor<T>& t) {
     capacity_ = t.numel();
+    // NOLINTNEXTLINE(*arrays*)
     storage_ = std::make_unique<T[]>(t.numel());
     AtenTensorHandle handle = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
@@ -78,6 +79,7 @@ struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
     tensor_ = handle;
   }
 
+  // NOLINTNEXTLINE(*arrays*)
   std::unique_ptr<T[]> storage_;
   int64_t capacity_ = 0;
   RAIIAtenTensorHandle tensor_;
@@ -140,6 +142,7 @@ struct ThreadLocalCachedOutputArray<ArrayRefTensor<T>> {
   void copy_data_from(const ArrayRefTensor<T>& t) {
     if (t.numel() > capacity_) {
       capacity_ = t.numel();
+      // NOLINTNEXTLINE(*arrays*)
       storage_ = std::make_unique<T[]>(capacity_);
     }
     std::copy(t.data(), t.data() + t.numel(), storage_.get());
@@ -148,6 +151,7 @@ struct ThreadLocalCachedOutputArray<ArrayRefTensor<T>> {
   }
 
  private:
+  // NOLINTNEXTLINE(*arrays*)
   std::unique_ptr<T[]> storage_;
   uint32_t capacity_ = 0;
   ArrayRefTensor<T> tensor_;

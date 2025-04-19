@@ -42,6 +42,7 @@ runs:
         PR_NUMBER: ${{ github.event.pull_request.number }}
         SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
         SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+        SCCACHE_REGION: us-east-1
         DOCKER_IMAGE: ${{ inputs.docker-image  }}
         MATRIX_ARCH: ${{ inputs.arch }}
       run: |
@@ -56,6 +57,7 @@ runs:
           -e SHA1 \
           -e BRANCH \
           -e SCCACHE_BUCKET \
+          -e SCCACHE_REGION \
           -e SKIP_SCCACHE_INITIALIZATION=1 \
           --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
           --security-opt seccomp=unconfined \

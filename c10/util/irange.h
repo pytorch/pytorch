@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <c10/util/TypeSafeSignMath.h>
 
 #include <algorithm>
@@ -25,28 +24,28 @@ struct integer_iterator {
   using pointer = I*;
   using reference = I&;
 
-  explicit integer_iterator(I value) : value(value) {}
+  explicit constexpr integer_iterator(I value) : value(value) {}
 
-  I operator*() const {
+  constexpr I operator*() const {
     return value;
   }
 
-  I const* operator->() const {
+  constexpr I const* operator->() const {
     return &value;
   }
 
-  integer_iterator& operator++() {
+  constexpr integer_iterator& operator++() {
     ++value;
     return *this;
   }
 
-  integer_iterator operator++(int) {
+  constexpr integer_iterator operator++(int) {
     const auto copy = *this;
     ++*this;
     return copy;
   }
 
-  bool operator==(const integer_iterator& other) const {
+  constexpr bool operator==(const integer_iterator& other) const {
     if constexpr (one_sided) {
       // Range-for loops' end test is `begin != end`, not `begin <
       // end`. To handle `c10::irange(n)` where n < 0 (which should be
@@ -65,7 +64,7 @@ struct integer_iterator {
     return false; // Horrible hack
   }
 
-  bool operator!=(const integer_iterator& other) const {
+  constexpr bool operator!=(const integer_iterator& other) const {
     return !(*this == other);
   }
 
@@ -81,12 +80,12 @@ template <
     std::enable_if_t<std::is_integral_v<I>, bool> = true>
 struct integer_range {
  public:
-  integer_range(I begin, I end) : begin_(begin), end_(end) {}
+  constexpr integer_range(I begin, I end) : begin_(begin), end_(end) {}
   using iterator = detail::integer_iterator<I, one_sided>;
-  iterator begin() const {
+  constexpr iterator begin() const {
     return begin_;
   }
-  iterator end() const {
+  constexpr iterator end() const {
     return end_;
   }
 
@@ -104,7 +103,7 @@ template <
     typename Integer2,
     std::enable_if_t<std::is_integral_v<Integer1>, bool> = true,
     std::enable_if_t<std::is_integral_v<Integer2>, bool> = true>
-integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
+constexpr integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
   // If end<=begin then the range is empty; we can achieve this effect by
   // choosing the larger of {begin, end} as the loop terminator
   return {
@@ -117,7 +116,7 @@ integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
 template <
     typename Integer,
     std::enable_if_t<std::is_integral_v<Integer>, bool> = true>
-integer_range<Integer, true> irange(Integer end) {
+constexpr integer_range<Integer, true> irange(Integer end) {
   return {Integer(), end};
 }
 

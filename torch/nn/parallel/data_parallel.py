@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
 import warnings
+from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, Generic, Optional, TypeVar, Union
 
 import torch
 from torch._utils import (
@@ -141,7 +142,7 @@ class DataParallel(Module, Generic[T]):
         super().__init__()
         torch._C._log_api_usage_once("torch.nn.parallel.DataParallel")
         device_type = _get_available_device_type()
-        if device_type is None:
+        if device_type is None or device_type == "mps":
             self.module = module
             self.device_ids = []
             return
@@ -195,20 +196,20 @@ class DataParallel(Module, Generic[T]):
 
     def replicate(
         self, module: T, device_ids: Sequence[Union[int, torch.device]]
-    ) -> List[T]:
+    ) -> list[T]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
     def scatter(
         self,
-        inputs: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]],
+        inputs: tuple[Any, ...],
+        kwargs: Optional[dict[str, Any]],
         device_ids: Sequence[Union[int, torch.device]],
     ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
     def parallel_apply(
         self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any
-    ) -> List[Any]:
+    ) -> list[Any]:
         return parallel_apply(
             replicas, inputs, kwargs, self.device_ids[: len(replicas)]
         )

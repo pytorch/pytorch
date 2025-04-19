@@ -10,19 +10,8 @@ import logging
 import os
 import unittest
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-)
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import onnxruntime
@@ -32,7 +21,6 @@ import pytorch_test_common
 import torch
 from torch import export as torch_export
 from torch.onnx import _constants, verification
-from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
@@ -46,8 +34,7 @@ _InputArgsType = Optional[
 _OutputsType = Sequence[_NumericType]
 
 onnx_model_dir = os.path.join(
-    os.path.dirname(os.path.realpath(__file__)),
-    os.pardir,
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
     "repos",
     "onnx",
     "onnx",
@@ -55,11 +42,7 @@ onnx_model_dir = os.path.join(
     "test",
     "data",
 )
-
-
 pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
-
-
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
 
@@ -110,12 +93,12 @@ def assert_dynamic_shapes(onnx_program: torch.onnx.ONNXProgram, dynamic_shapes: 
             for dim in inp.type.tensor_type.shape.dim
             if dim.dim_value == 0 and dim.dim_param != ""
         ]
-    assert dynamic_shapes == (
-        len(dynamic_inputs) > 0
-    ), "Dynamic shape check failed for graph inputs"
+    assert dynamic_shapes == (len(dynamic_inputs) > 0), (
+        "Dynamic shape check failed for graph inputs"
+    )
 
 
-def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+def parameterize_class_name(cls: type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
     This function is passed to `parameterized.parameterized_class` as the
@@ -214,10 +197,10 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         atol: Optional[float] = 1e-7,
         has_mutation: bool = False,
         additional_test_inputs: Optional[
-            List[
+            list[
                 Union[
-                    Tuple[Sequence[_InputArgsType], Mapping[str, _InputArgsType]],
-                    Tuple[Sequence[_InputArgsType]],
+                    tuple[Sequence[_InputArgsType], Mapping[str, _InputArgsType]],
+                    tuple[Sequence[_InputArgsType]],
                 ]
             ]
         ] = None,
@@ -266,15 +249,17 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ref_input_args = input_args
             ref_input_kwargs = input_kwargs
 
-        assert isinstance(ref_model, torch.nn.Module) or callable(
-            ref_model
-        ), "Model must be a torch.nn.Module or callable"
+        assert isinstance(ref_model, torch.nn.Module) or callable(ref_model), (
+            "Model must be a torch.nn.Module or callable"
+        )
         if (
             self.model_type
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
             with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
-                ref_model = torch.export.export(ref_model, args=ref_input_args)
+                ref_model = torch.export.export(
+                    ref_model, args=ref_input_args, strict=True
+                )
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
@@ -286,34 +271,18 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
         # since ONNX doesn't represent kwargs.
-        export_error: Optional[torch.onnx.OnnxExporterError] = None
-        try:
-            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
-                onnx_program = torch.onnx.dynamo_export(
-                    ref_model,
-                    *ref_input_args,
-                    **ref_input_kwargs,
-                    export_options=torch.onnx.ExportOptions(
-                        dynamic_shapes=self.dynamic_shapes,
-                        diagnostic_options=torch.onnx.DiagnosticOptions(
-                            verbosity_level=logging.DEBUG
-                        ),
+        with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+            onnx_program = torch.onnx.dynamo_export(
+                ref_model,
+                *ref_input_args,
+                **ref_input_kwargs,
+                export_options=torch.onnx.ExportOptions(
+                    dynamic_shapes=self.dynamic_shapes,
+                    diagnostic_options=torch.onnx.DiagnosticOptions(
+                        verbosity_level=logging.DEBUG
                     ),
-                )
-        except torch.onnx.OnnxExporterError as e:
-            export_error = e
-            onnx_program = e.onnx_program
-
-        if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
-            onnx_program.save_diagnostics(
-                f"test_report_{self._testMethodName}"
-                f"_dynamic_axes_{self.dynamic_shapes}"
-                f"_model_type_{self.model_type}"
-                ".sarif"
+                ),
             )
-
-        if export_error is not None:
-            raise export_error
 
         if not skip_dynamic_shapes_check:
             assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
@@ -438,19 +407,9 @@ def _compare_pytorch_onnx_with_ort(
     # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
     # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
     # NOTE: `model_with_state_dict=ref_model` is specified to cover runs with FakeTensor support
-    ort_outputs = onnx_program(*input_args, **input_kwargs)
+    onnx_outputs = onnx_program(*input_args, **input_kwargs)
     ref_outputs = ref_model(*ref_input_args, **ref_input_kwargs)
-    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(ref_outputs)
-
-    if len(ref_outputs) != len(ort_outputs):
-        raise AssertionError(
-            f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
-        )
-
-    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-        torch.testing.assert_close(
-            ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
-        )
+    torch.testing.assert_close(onnx_outputs, ref_outputs, rtol=rtol, atol=atol)
 
 
 # The min onnx opset version to test for
@@ -681,9 +640,9 @@ def add_decorate_info(
             # Skip does not apply to this opset
             continue
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
-        assert (
-            opinfo is not None
-        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        assert opinfo is not None, (
+            f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        )
         assert decorate_meta.model_type is None, (
             f"Tested op: {decorate_meta.op_name} in wrong position! "
             "If model_type needs to be specified, it should be "

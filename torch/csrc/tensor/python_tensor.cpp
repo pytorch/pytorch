@@ -172,7 +172,8 @@ static struct PyGetSetDef metaclass_properties[] = {
     {nullptr}};
 
 static PyTypeObject metaclass = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.tensortype", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.tensortype", /* tp_name */
     sizeof(PyTypeObject) /* tp_basicsize */
 };
 
@@ -188,7 +189,8 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 }
 
 static PyTypeObject tensor_type_prototype = {
-    PyVarObject_HEAD_INIT(&metaclass, 0) nullptr, /* tp_name */
+    PyVarObject_HEAD_INIT(&metaclass, 0)
+    nullptr, /* tp_name */
     sizeof(PyTensorType) /* tp_basicsize */
 };
 

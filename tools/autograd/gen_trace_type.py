@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import itertools
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import DispatcherSignature
@@ -9,6 +9,10 @@ from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Note [Manual Backend kernels]
@@ -75,8 +79,7 @@ DONT_RECORD_TRACE = {
 def should_trace(f: NativeFunction) -> bool:
     # Operations involving Storage or Type are not traceable at the moment
     if any(
-        str(arg.type) in {"Storage", "Type", "ConstQuantizerPtr"}
-        for arg in f.func.schema_order_arguments()
+        str(arg.type) in {"Storage", "Type"} for arg in f.func.schema_order_arguments()
     ):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
@@ -378,9 +381,9 @@ def format_postrecord_trace(f: NativeFunction) -> str:
 
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
-        return f'auto {f.func.returns[0].name or "result"}'
+        return f"auto {f.func.returns[0].name or 'result'}"
     names = cpp.return_names(f)
-    return f'auto [{", ".join(names)}]'
+    return f"auto [{', '.join(names)}]"
 
 
 def get_return_value(f: NativeFunction) -> str:
@@ -388,7 +391,7 @@ def get_return_value(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
         return names[0]
     if f.func.kind() == SchemaKind.out:
-        return f'std::forward_as_tuple({", ".join(names)})'
+        return f"std::forward_as_tuple({', '.join(names)})"
     else:
         moved = ", ".join(f"std::move({name})" for name in names)
         return f"std::make_tuple({moved})"
@@ -471,7 +474,7 @@ def method_definition(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
+            f"{cpp.argument_type(a, binds='__placeholder__', symint=True).cpp_type()} {a.name}"
             for a in f.func.schema_order_arguments()
         ]
     )

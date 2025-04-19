@@ -88,7 +88,7 @@ class TORCH_API TensorBase {
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
   explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
-      : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
+      : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>(rhs.impl_.get(), c10::raw::DontIncreaseRefcount{})) {}
   friend MaybeOwnedTraits<TensorBase>;
 
  public:
@@ -104,6 +104,7 @@ class TORCH_API TensorBase {
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
+  ~TensorBase() noexcept = default;
 
  public:
   // Creates a new wrapper from TensorImpl. Intentionally a free method because
@@ -625,7 +626,7 @@ class TORCH_API TensorBase {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     T* ptr = nullptr;
-    if constexpr (std::is_const<T>::value) {
+    if constexpr (std::is_const_v<T>) {
       ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();
@@ -645,7 +646,7 @@ class TORCH_API TensorBase {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     T* ptr = nullptr;
-    if constexpr (std::is_const<T>::value) {
+    if constexpr (std::is_const_v<T>) {
       ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();
@@ -925,7 +926,6 @@ inline DeviceIndex get_device(const TensorBase& self) {
 }
 
 template <typename T>
-// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type

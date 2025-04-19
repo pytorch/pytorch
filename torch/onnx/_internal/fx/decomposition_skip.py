@@ -11,11 +11,12 @@ https://github.com/pytorch/pytorch/issues/115883
 
 This solution will no longer be required once the issue is resolved.
 """
+
 from __future__ import annotations
 
 import abc
 import contextlib
-from typing import Callable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-found]
     core as torchlib_core,
@@ -24,6 +25,10 @@ from onnxscript.function_libs.torch_lib.ops import (  # type: ignore[import-not-
 
 import torch
 from torch._decomp import decompositions
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 _NEW_OP_NAMESPACE: str = "onnx_export"

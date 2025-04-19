@@ -289,7 +289,7 @@ class CausalBias(torch.Tensor):
             )
         return cls._dispatch(*args, **kwargs)
 
-    def __repr__(self):
+    def __repr__(self):  # type:ignore[override]
         return self._materialize().__repr__()
 
 

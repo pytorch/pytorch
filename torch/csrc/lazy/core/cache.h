@@ -12,8 +12,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Generic key and object cache with LRU expiration policy. The objects of type
 // T will be stored as std::shared_ptr<T> and taken and returned as such, by the
@@ -135,10 +134,10 @@ class Cache {
   }
 
   mutable std::mutex lock_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t max_size_ = 0;
   ElementList element_list_;
   ElementMap element_map_;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import auto, Enum
 from functools import partial
 from io import BytesIO
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -23,6 +23,8 @@ from torch.distributed.checkpoint.state_dict import (
     set_state_dict,
 )
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
+from torch.distributed.checkpoint.state_dict_saver import AsyncCheckpointerType
+from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -94,9 +96,9 @@ class ModelType(Enum):
 class TestTrainState:
     step: int = 0
     current_loss: float = -1
-    losses: List[float] = field(default_factory=list)
+    losses: list[float] = field(default_factory=list)
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         loss_bytes = BytesIO()
         torch.save(self.losses, loss_bytes)
         return {
@@ -213,17 +215,31 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    @parametrize("cache_staged_state_dict", [False, True])
-    def test_e2e_async_cached(self, cache_staged_state_dict):
+    @parametrize(
+        "cache_staged_state_dict, async_checkpointer_type",
+        [
+            (False, AsyncCheckpointerType.THREAD),
+            (True, AsyncCheckpointerType.THREAD),
+            (False, AsyncCheckpointerType.PROCESS),
+            (True, AsyncCheckpointerType.PROCESS),
+        ],
+    )
+    def test_e2e_async_cached(self, cache_staged_state_dict, async_checkpointer_type):
         self._run_e2e_test(
             compile=False,
             model_type=ModelType.FSDP,
             async_op=True,
             cache_staged_state_dict=cache_staged_state_dict,
+            async_checkpointer_type=async_checkpointer_type,
         )
 
     def _run_e2e_test(
-        self, compile, model_type, async_op=False, cache_staged_state_dict=False
+        self,
+        compile,
+        model_type,
+        async_op=False,
+        cache_staged_state_dict=False,
+        async_checkpointer_type=None,
     ):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
@@ -243,7 +259,13 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             writer = DCP.FileSystemWriter(
                 self.temp_dir, cache_staged_state_dict=cache_staged_state_dict
             )
-            f = saver.async_save(sd, storage_writer=writer)
+            f = saver.async_save(
+                sd,
+                storage_writer=writer,
+                async_checkpointer_type=async_checkpointer_type
+                if async_checkpointer_type
+                else AsyncCheckpointerType.THREAD,
+            )
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)
@@ -276,10 +298,53 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(loss, dist_loss)
 
         dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        model_sd, optim_sd = get_state_dict(model, optimizers=optim)
+        model_sd, _ = get_state_dict(model, optimizers=optim)
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
+
+    @with_temp_dir
+    def test_stateful_and_non_stateful_loads(self) -> None:
+        class StateDict(dict):
+            def __init__(self):
+                self.set_sd_item_called = False
+
+            def __setitem__(self, item, value):
+                self.set_sd_item_called = True
+                super().__setitem__(item, value)
+
+        class Foo(Stateful):
+            def __init__(self):
+                self.load_state_dict_called = False
+
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                self.load_state_dict_called = True
+
+        stateful_foo = Foo()
+        sd = StateDict()
+        sd["foo"] = stateful_foo
+        sd.set_sd_item_called = False
+
+        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        # Validate that the stateful object was loaded in-place
+        self.assertTrue(stateful_foo.load_state_dict_called)
+        # Validate that the stateful object was NOT replaced in the state dict
+        self.assertFalse(sd.set_sd_item_called)
+
+        sd = StateDict()
+        sd["foo"] = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
+        sd.set_sd_item_called = False
+
+        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+        # Validate that the non-stateful state dict was replaced with the loaded state dict
+        self.assertTrue(sd.set_sd_item_called)
 
     @with_comms
     @with_temp_dir

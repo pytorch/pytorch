@@ -3,9 +3,9 @@ from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
-    assert (
-        sparsity <= 1.0 and sparsity >= 0.0
-    ), "sparsity should be a value between 0 and 1"
+    assert sparsity <= 1.0 and sparsity >= 0.0, (
+        "sparsity should be a value between 0 and 1"
+    )
     assert M % blocksize[0] == 0
     assert N % blocksize[1] == 0
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]
@@ -28,9 +28,7 @@ def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
 
 
 def _test_worker(test_func):
-    ms, ms_min, ms_max = benchmarker.benchmark_gpu(
-        test_func, warmup=500, rep=100, fast_flush=False
-    )
+    ms, ms_min, ms_max = benchmarker.benchmark_gpu(test_func, warmup=500, rep=100)
 
     tflops = 2 * m * k * n * 1e-12 / (ms * 1e-3)
     return ms, tflops
@@ -376,7 +374,7 @@ if __name__ == "__main__":
                 for r in range(args.repeat):
                     try:
                         time_ms, performance_tflops = test_func(x, y, **meta)
-                    except triton.compiler.OutOfResources as msg:
+                    except triton.compiler.OutOfResources:
                         print(
                             f"op={op}[{meta_str}]({bsr_size},{k}x{n}) dtype={args.dtype} {sparsity=}(nnz={x._nnz()})"
                             f" blocksize={bm}x{bk} OutOfResources",

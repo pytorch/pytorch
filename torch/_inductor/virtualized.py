@@ -59,9 +59,12 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, cast, Generic, TYPE_CHECKING, TypeVar, Union
+
+from torch.utils._ordered_set import OrderedSet
 
 from .ops_handler import (  # noqa: F401
+    DefaultHandler,
     KernelFormatterHandler,
     MockHandler,
     OpsHandler,
@@ -73,10 +76,11 @@ from .ops_handler import (  # noqa: F401
 
 if TYPE_CHECKING:
     import torch
+    from torch._inductor.choices import InductorChoices
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import InterpreterShim
+    from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
 
 threadlocal = local()
@@ -92,6 +96,14 @@ class NullHandler:
     """
 
 
+# If a virtualized value is set to _PoisonedVirtual then any attempt to get the
+# value will result an an exception being raised. This is useful if we want to
+# trap uninitialized reads of virtualized globals - for example when compiling
+# in a subprocess we don't want the child reading globals that weren't copied
+# from the parent.
+_PoisonedVirtual = object()
+
+
 class Virtualized(Generic[T]):
     """
     Implements a global variable that redirects via thread local variable
@@ -105,12 +117,13 @@ class Virtualized(Generic[T]):
     store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default: Union[Callable[[], T], Type[NullHandler]]):
+    def __init__(self, vname: str, default: Union[Callable[[], T], type[NullHandler]]):
+        self._vname = vname
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
     def _set_handler(self, value: T) -> AbstractContextManager[None]:
-        prior = self._get_handler()
+        prior = self._get_handler(False)
         setattr(threadlocal, self._key, value)
 
         @contextmanager
@@ -122,9 +135,14 @@ class Virtualized(Generic[T]):
 
         return ctx()
 
-    def _get_handler(self) -> T:
+    def _get_handler(self, check_poisoned: bool = True) -> T:
         try:
-            return getattr(threadlocal, self._key)
+            value = getattr(threadlocal, self._key)
+            if check_poisoned and value is _PoisonedVirtual:
+                raise RuntimeError(
+                    f"Attempt to use poisoned virtualized value '{self._vname}'."
+                )
+            return value
         except AttributeError:
             # TODO: To be honest, I feel we probably should just error in this
             # case, instead of making a null handler that will probably error
@@ -146,14 +164,16 @@ class NullKernelHandler(NullHandler):
 
     def __init__(self):
         super().__init__()
-        self.removed_buffers = set()
-        self.inplaced_to_remove = set()
+        self.removed_buffers = OrderedSet[Any]()
+        self.inplaced_to_remove = OrderedSet[Any]()
         self.index_dtype = "tl.int64"
 
 
-_ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
+_ops: Virtualized[OpsHandler[Any]] = Virtualized(
+    "ops", cast(type[OpsHandler[Any]], MockHandler)
+)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
-_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_real_inputs: Virtualized[list[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
 _kernel: Virtualized[NullKernelHandler] = Virtualized(
     "kernel", NullKernelHandler
@@ -165,6 +185,22 @@ _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHand
 _local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
     "local_buffer_context", NullHandler
 )
+
+
+def _choices_default():
+    """
+    Lazy init the global choices handler
+
+    We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
+    """
+    from torch._inductor.choices import InductorChoices
+
+    rv = InductorChoices()
+    setattr(threadlocal, _choices._key, rv)
+    return rv
+
+
+_choices: Virtualized[InductorChoices] = Virtualized("choices", _choices_default)
 
 
 class OpsValue:
@@ -253,18 +289,15 @@ class OpsValue:
         return ops.bitwise_left_shift(self, n)
 
 
-class OpsWrapper:
+class OpsWrapper(DefaultHandler):
     """This wraps any returned IR values into an `OpsValue` instance, so that we
     can overload the magic methods for writing mathematical expressions fluently.
     """
 
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            new_args = [OpsWrapper._unwrap(a) for a in args]
-            new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
-
-        return inner
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        new_args = [OpsWrapper._unwrap(a) for a in args]
+        new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
+        return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
     @staticmethod
     def _unwrap(x):
@@ -287,7 +320,7 @@ class OpsWrapper:
         return _ops.indirect_indexing(index, size, check, wrap_neg)
 
 
-ops = OpsWrapper()
+ops: OpsHandler[Any] = OpsWrapper()
 
 
 class _V:
@@ -295,8 +328,10 @@ class _V:
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler: Callable[[Any], Any] = _ops._set_handler
-    get_ops_handler: Callable[[], Any] = _ops._get_handler
+    set_ops_handler: Callable[[OpsHandler[Any]], AbstractContextManager[None]] = (
+        _ops._set_handler
+    )
+    get_ops_handler: Callable[[], OpsHandler[Any]] = _ops._get_handler
     set_graph_handler: Callable[[GraphLowering], Any] = _graph._set_handler
     set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
     get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
@@ -311,6 +346,7 @@ class _V:
     get_current_node: Callable[[], Any] = _current_node._get_handler
     set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
     get_local_buffer_context: Callable[[], Any] = _local_buffer_context._get_handler
+    set_choices_handler: Callable[[Any], Any] = _choices._set_handler
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -347,7 +383,7 @@ class _V:
 
     @property
     def aot_compilation(self):
-        return _aot_compilation._get_handler()
+        return _aot_compilation._get_handler() is True
 
     @property
     def current_node(self):
@@ -356,6 +392,10 @@ class _V:
     @property
     def local_buffer_context(self):
         return _local_buffer_context._get_handler()
+
+    @property
+    def choices(self) -> InductorChoices:
+        return _choices._get_handler()
 
 
 V = _V()

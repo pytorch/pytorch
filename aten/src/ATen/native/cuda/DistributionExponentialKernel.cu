@@ -10,6 +10,6 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<G
   at::native::templates::cuda::exponential_kernel(iter, lambda, generator);
 }
 
-REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
+REGISTER_DISPATCH(exponential_stub, &exponential_kernel)
 
 } // namespace at::native

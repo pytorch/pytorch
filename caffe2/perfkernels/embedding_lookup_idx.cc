@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include "caffe2/perfkernels/common.h"
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-prototypes")
 namespace caffe2 {
 
 /**
@@ -87,7 +88,7 @@ static bool EmbeddingLookupGenericSlowIdx(
           const int64_t data_size,                                                                    \
           const InType* input,                                                                        \
           const IndexType* indices,                                                                   \
-          const IndexType* offsets,                                                                     \
+          const IndexType* offsets,                                                                   \
           const float* weights,                                                                       \
           const float* scale_bias,                                                                    \
           bool normalize_by_lengths,                                                                  \
@@ -112,6 +113,9 @@ static bool EmbeddingLookupGenericSlowIdx(
   decltype(                                                                                           \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__avx2_fma; \
+  decltype(                                                                                           \
+      EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
+      EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__sve;      \
   bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(             \
           const int64_t block_size,                                                                   \
@@ -120,16 +124,29 @@ static bool EmbeddingLookupGenericSlowIdx(
           const int64_t data_size,                                                                    \
           const InType* input,                                                                        \
           const IndexType* indices,                                                                   \
-          const IndexType* offsets,                                                                     \
+          const IndexType* offsets,                                                                   \
           const float* weights,                                                                       \
           const float* scale_bias,                                                                    \
           bool normalize_by_lengths,                                                                  \
           OutType* out) {                                                                             \
-    if (std::is_same<InType, uint8_t>::value) {                                                       \
+    if constexpr (std::is_same_v<InType, uint8_t>) {                                             \
       CAFFE_ENFORCE(scale_bias != nullptr, "scale_bias must not be nullptr");                         \
     } else {                                                                                          \
       CAFFE_ENFORCE(scale_bias == nullptr, "scale_bias must be nullptr");                             \
     }                                                                                                 \
+    SVE_DO(                                                                                           \
+        EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
+        block_size,                                                                                   \
+        output_size,                                                                                  \
+        index_size,                                                                                   \
+        data_size,                                                                                    \
+        input,                                                                                        \
+        indices,                                                                                      \
+        offsets,                                                                                      \
+        weights,                                                                                      \
+        scale_bias,                                                                                   \
+        normalize_by_lengths,                                                                         \
+        out);                                                                                         \
     AVX2_FMA_DO(                                                                                      \
         EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
         block_size,                                                                                   \
@@ -165,7 +182,7 @@ static bool EmbeddingLookupGenericSlowIdx(
       const int64_t data_size,                                                                        \
       const InType* input,                                                                            \
       const IndexType* indices,                                                                       \
-      const IndexType* offsets,                                                                         \
+      const IndexType* offsets,                                                                       \
       const float* weights,                                                                           \
       const float* scale_bias,                                                                        \
       bool normalize_by_lengths,                                                                      \
@@ -210,24 +227,25 @@ static bool EmbeddingLookupGenericSlowIdx(
   }
 // clang-format on
 
-EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false)
 
-EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true)
 
 #undef EMBEDDING_IDX_SPECIALIZATION
 
 } // namespace caffe2
+C10_DIAGNOSTIC_POP()

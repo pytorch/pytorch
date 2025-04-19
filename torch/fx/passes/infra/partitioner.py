@@ -1,22 +1,24 @@
 # mypy: allow-untyped-defs
-from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 import collections
 import itertools
 import logging
-
-from copy import copy
-from typing import Dict, Iterable, List, Optional, Sequence, Set
+from collections.abc import Iterable, Sequence
+from typing import Optional
 
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node, _get_qualified_name
+from torch.fx.node import _get_qualified_name, Node
 from torch.fx.passes.operator_support import OperatorSupportBase
+from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
+
 class Partition:
-    def __init__(self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None):
+    def __init__(
+        self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None
+    ):
         self.id = id
         self.nodes = dict.fromkeys(nodes) if nodes is not None else {}
 
@@ -32,16 +34,10 @@ class Partition:
     def size(self):
         return len(self.nodes)
 
+
 class _DependencyViewer:
     def __init__(self, graph_module: GraphModule):
-        self.upstreams = collections.defaultdict(set)
         self.downstreams = collections.defaultdict(set)
-
-        for node in graph_module.graph.nodes:
-            for input_node in node.all_input_nodes:
-                # add input_node and input_node's upstream dependency
-                self.upstreams[node].add(input_node)
-                self.upstreams[node].update(self.upstreams[input_node])
 
         for node in reversed(graph_module.graph.nodes):
             for output_node in node.users:
@@ -49,21 +45,19 @@ class _DependencyViewer:
                 self.downstreams[node].add(output_node)
                 self.downstreams[node].update(self.downstreams[output_node])
 
-    def downstreams_of(self, node: Node) -> Set[Node]:
+    def downstreams_of(self, node: Node) -> set[Node]:
         return self.downstreams[node]
 
-    def upstreams_of(self, node: Node) -> Set[Node]:
-        return self.upstreams[node]
 
 class CapabilityBasedPartitioner:
-
-    def __init__(self,
-                 graph_module: GraphModule,
-                 operator_support: OperatorSupportBase,
-                 allows_single_node_partition: bool = False,
-                 non_compute_ops: Optional[Sequence[str]] = None,
-                 allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
-                 ) -> None:
+    def __init__(
+        self,
+        graph_module: GraphModule,
+        operator_support: OperatorSupportBase,
+        allows_single_node_partition: bool = False,
+        non_compute_ops: Optional[Sequence[str]] = None,
+        allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
+    ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
@@ -76,19 +70,30 @@ class CapabilityBasedPartitioner:
         self.dependency_viewer = _DependencyViewer(graph_module)
 
     def __is_node_supported(self, node: Node) -> bool:
-        return (
-            self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
+        return self.operator_support.is_node_supported(
+            dict(self.graph_module.named_modules()), node
         )
 
-    def propose_partitions(self) -> List[Partition]:
+    def propose_partitions(self) -> list[Partition]:
         # partition_map is a mapping from partition id to a set of partition id's.
         # The value set contains all the partition ids that can be reached by doing a
         # DFS starting from the partition id in the key.
-        partition_map : Dict[int, Set] = collections.defaultdict(set)
+        partition_map: dict[int, set] = collections.defaultdict(set)
 
         # assumptions: nodes in candidate list is sorted in topological order
-        assignment: Dict[Node, int] = {}   # mapping from node to partition_id
-        partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
+        assignment: dict[Node, int] = {}  # mapping from node to partition_id
+        partitions_by_id: dict[
+            int, Partition
+        ] = {}  # mapping from partition_id to partition
+        nodes_order: dict[
+            Node, int
+        ] = {}  # mapping from nodes to reversed topological order
+        partitions_order: dict[
+            int, int
+        ] = {}  # mapping from partition_id to minimum topo order of nodes in partition
+        partition_users: dict[
+            int, set
+        ] = {}  # mapping from partition_id to partition users
         new_partition_id = itertools.count()
 
         # try to merge partition other_id into partition self_id
@@ -96,17 +101,17 @@ class CapabilityBasedPartitioner:
         # returns `True` when merge happens, `False` otherwise.
         def maybe_merge_partition(self_id: int, other_id: int):
             # merged_nodes is the union of nodes in two partition to-be-merged
-            merged_nodes = copy(partitions_by_id[self_id].nodes)
-            merged_nodes.update(partitions_by_id[other_id].nodes)
+            self_nodes = partitions_by_id[self_id].nodes
+            other_nodes = partitions_by_id[other_id].nodes
 
-            def dfs_iter_find_cycle(all_user_nodes: Set[Node]):
+            def dfs_iter_find_cycle(all_user_nodes: set[Node]):
                 for user_node in all_user_nodes:
                     visited_partition_ids = set()
 
                     for path_node in self.dependency_viewer.downstreams_of(user_node):
                         # If any of the nodes in the dfs path of this node are in the merged_nodes
                         # list then there is a cycle in the graph.
-                        if path_node in merged_nodes:
+                        if path_node in self_nodes or path_node in other_nodes:
                             return True
 
                         # If any of the nodes in the dfs path of this node are in the assignment
@@ -128,51 +133,53 @@ class CapabilityBasedPartitioner:
 
                 return False
 
-            # check if merge would create cyclic dependency.
-            all_user_nodes = set()
-            for node in merged_nodes:
-                for user_node in node.users:
-                    if user_node not in merged_nodes:
-                        all_user_nodes.add(user_node)
+            # find new partition users if merge.
+            all_user_nodes = partition_users[self_id] | partition_users[other_id]
+            all_user_nodes.difference_update(other_nodes, self_nodes)
 
+            # check if merge would create cyclic dependency.
             if dfs_iter_find_cycle(all_user_nodes):
                 # return false indicating cyclic dependency found and
                 # merge is aborted
-                return False
+                return self_id, False
 
+            # merge the smaller partition into the larger.
+            merge_id, removed_id = self_id, other_id
+            if len(self_nodes) < len(other_nodes):
+                merge_id, removed_id = removed_id, merge_id
             # no cyclic dependency found, move forward with the merge
             # updating partition nodes
-            partitions_by_id[self_id].nodes = merged_nodes
+            partitions_by_id[merge_id].nodes.update(partitions_by_id[removed_id].nodes)
             # updating assignment map
-            for node in partitions_by_id[other_id].nodes:
-                assignment[node] = self_id
+            for node in partitions_by_id[removed_id].nodes:
+                assignment[node] = merge_id
             # delete other partition
-            del partitions_by_id[other_id]
+            del partitions_by_id[removed_id]
 
-            partition_map[self_id] = partition_map[self_id].union(partition_map[other_id])
-            del partition_map[other_id]
+            partitions_order[merge_id] = min(
+                partitions_order[merge_id], partitions_order[removed_id]
+            )
+            del partitions_order[removed_id]
 
-            return True
+            partition_map[merge_id] = partition_map[merge_id].union(
+                partition_map[removed_id]
+            )
+            del partition_map[removed_id]
+
+            partition_users[merge_id] = all_user_nodes
+            del partition_users[removed_id]
+
+            return merge_id, True
 
         def merge_single_node(node: Node, id: Optional[int]):
             def _update_partition_map(node: Node, id: int):
-                # Iterate through all the downstream nodes of this node and update the partition map
-                # to indicate that there is a path from the partition id of this node to the target
-                # partition id.
-                downstream_nodes = self.dependency_viewer.downstreams_of(node)
-                for curr_node in downstream_nodes:
-                    target_id = assignment.get(curr_node, None)
+                # Iterate through all the users of this node and update the partition map to indicate
+                # that there is a path from the partition id of this node to the target partition id.
+                for user_node in node.users:
+                    target_id = assignment.get(user_node, None)
                     if target_id is not None:
                         partition_map[id].add(target_id)
-
-                # Iterate through all the upstream nodes of this node and update the partition map
-                # to indicate that there is a path from the partition id of the upstream node to the
-                # current node's partition id.
-                upstream_nodes = self.dependency_viewer.upstreams_of(node)
-                for curr_node in upstream_nodes:
-                    source_id = assignment.get(curr_node, None)
-                    if source_id is not None:
-                        partition_map[source_id].add(id)
+                        partition_map[id].update(partition_map[target_id])
 
             if node in assignment:
                 partitions_by_id[assignment[node]].remove_node(node)
@@ -182,17 +189,17 @@ class CapabilityBasedPartitioner:
             elif id not in partitions_by_id:
                 assignment[node] = id
                 partitions_by_id[id] = Partition(id=id, nodes=[node])
+                partition_users[id] = set(node.users)
                 _update_partition_map(node, id)
             else:
                 assignment[node] = id
                 partitions_by_id[id].add_node(node)
-                _update_partition_map(node, id)
 
         logger.debug("Proposing partitions...")
 
         for node in reversed(self.graph_module.graph.nodes):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
-            merge_candidates: Dict[int, None] = {}
+            merge_candidates: dict[int, None] = {}
 
             # Note a limited horizontal fusion is enabled:
             #   when `node` is not supported, the code below attempts to fuse consumer of `node`.
@@ -201,38 +208,43 @@ class CapabilityBasedPartitioner:
             # the fusion by adding an `else` block here to skip horizontal fusion.
             if self.__is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
+                nodes_order[node] = partition_id
+                partitions_order[partition_id] = partition_id
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
 
             # merge all possible partitions
-            for node in assignment:
-                merge_candidates[assignment[node]] = None
+            for partition_id, _ in sorted(
+                partitions_order.items(), key=lambda item: item[1]
+            ):
+                merge_candidates[partition_id] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:
-                    # note: merge partition `other_id` into partition `self_id` if
-                    # it doesn't create cyclic dependency in the graph, otherwise,
-                    # this is a no-op
-                    maybe_merge_partition(self_id, other_id)
+                    # note: merge partitions if it doesn't create cyclic dependency
+                    # in the graph, otherwise, this is a no-op
+                    self_id, _ = maybe_merge_partition(self_id, other_id)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
-        nodes_reassignment: Dict[Node, int] = {}
+        nodes_reassignment: dict[Node, int] = {}
         for node in self.graph_module.graph.nodes:
             is_tuple_output = True
             for user in node.users:
-                if user.op != "call_function" or \
-                   _get_qualified_name(user.target) != "_operator.getitem":     # type: ignore[arg-type]
+                if (
+                    user.op != "call_function"
+                    or _get_qualified_name(user.target) != "_operator.getitem"
+                ):  # type: ignore[arg-type]
                     is_tuple_output = False
                     break
 
             # node has tuple outputs, re-assign all following getitem node into node's partition
             if is_tuple_output:
-                id = assignment.get(node, None)     # type: ignore[arg-type]
+                id = assignment.get(node, None)  # type: ignore[arg-type]
                 for user in node.users:
-                    if assignment.get(user, None) != id:    # type: ignore[arg-type]
+                    if assignment.get(user, None) != id:  # type: ignore[arg-type]
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             merge_single_node(node, id)
@@ -242,7 +254,7 @@ class CapabilityBasedPartitioner:
             logger.debug("Filtering out single node partitions...")
             default_non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
             non_compute_ops = default_non_compute_ops.union(set(self.non_compute_ops))
-            partitions_to_remove: List[int] = []
+            partitions_to_remove: list[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
@@ -250,7 +262,10 @@ class CapabilityBasedPartitioner:
                         assert callable(node.target)
                         if _get_qualified_name(node.target) not in non_compute_ops:
                             compute_node_count += 1
-                        if _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
+                        if (
+                            _get_qualified_name(node.target)
+                            in self.allowed_single_node_partition_ops
+                        ):
                             compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)
@@ -259,33 +274,47 @@ class CapabilityBasedPartitioner:
 
         logger.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
+            logger.debug(
+                "partition #%s: %s", id, [node.name for node in partition.nodes]
+            )
 
-        return [partition for partition in partitions_by_id.values() if partition.size() > 0]
+        return [
+            partition for partition in partitions_by_id.values() if partition.size() > 0
+        ]
 
-    def fuse_partitions(self, partitions: List[Partition], prefix: str = "fused_") -> GraphModule:
+    def fuse_partitions(
+        self, partitions: list[Partition], prefix: str = "fused_"
+    ) -> GraphModule:
         logger.debug("Fusing partitions...")
-        # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
+        # fuse_by_partitions expects partitions in List[Dict[Node, None]]: [ {node0 : None}, {node1 : None} ]
         return fuse_by_partitions(
             self.graph_module,
-            [list(partition.nodes) for partition in partitions],
+            [partition.nodes for partition in partitions],
             prefix=prefix,
         )
 
     # remove non-compute-ops that sits at the boundary of a partition.
-    def remove_bookend_non_compute_ops(self, partitions: List[Partition]):
+    def remove_bookend_non_compute_ops(self, partitions: list[Partition]):
         non_compute_ops = set(self.non_compute_ops)
 
         def is_non_compute_node(node: Node):
-            return node.op == "call_function" and \
-                _get_qualified_name(node.target) in non_compute_ops  # type: ignore[arg-type]
+            return (
+                node.op == "call_function"
+                and _get_qualified_name(node.target) in non_compute_ops  # type: ignore[arg-type]
+            )
 
         # cache transparent nodes
-        transparent_input_nodes: Dict[Node, bool] = {}
-        transparent_output_nodes: Dict[Node, bool] = {}
+        transparent_input_nodes: dict[Node, bool] = {}
+        transparent_output_nodes: dict[Node, bool] = {}
 
-        def is_transparent_input_node(node: Node, partition: Set[Node], removed_nodes: Set[Node]):
-            if node.op == "placeholder" or (node not in partition) or (node in removed_nodes):
+        def is_transparent_input_node(
+            node: Node, partition: set[Node], removed_nodes: set[Node]
+        ):
+            if (
+                node.op == "placeholder"
+                or (node not in partition)
+                or (node in removed_nodes)
+            ):
                 return True
             if node in transparent_input_nodes:
                 return transparent_input_nodes[node]
@@ -299,14 +328,22 @@ class CapabilityBasedPartitioner:
             transparent_input_nodes[node] = False
             return False
 
-        def is_transparent_output_node(node: Node, partition: Set[Node], removed_nodes: Set[Node]):
-            if node.op == "placeholder" or (node not in partition) or (node in removed_nodes):
+        def is_transparent_output_node(
+            node: Node, partition: set[Node], removed_nodes: set[Node]
+        ):
+            if (
+                node.op == "placeholder"
+                or (node not in partition)
+                or (node in removed_nodes)
+            ):
                 return True
             if node in transparent_output_nodes:
                 return transparent_output_nodes[node]
             if is_non_compute_node(node):
                 for output_n in node.users:
-                    if not is_transparent_output_node(output_n, partition, removed_nodes):
+                    if not is_transparent_output_node(
+                        output_n, partition, removed_nodes
+                    ):
                         transparent_output_nodes[node] = False
                         return False
                 transparent_output_nodes[node] = True
@@ -318,11 +355,14 @@ class CapabilityBasedPartitioner:
             # Note it's ok to use `set` here, since we are only query if a node
             # has been removed. We are NEVER going to iterate on nodes inside
             # the set.
-            remove_node: Set[Node] = set()
+            remove_node: set[Node] = set()
             for node in partition.nodes:
-                if is_non_compute_node(node) and \
-                    (is_transparent_input_node(node, set(partition.nodes), remove_node) or
-                     is_transparent_output_node(node, set(partition.nodes), remove_node)):
+                if is_non_compute_node(node) and (
+                    is_transparent_input_node(node, set(partition.nodes), remove_node)
+                    or is_transparent_output_node(
+                        node, set(partition.nodes), remove_node
+                    )
+                ):
                     remove_node.add(node)
 
             if len(remove_node) != 0:

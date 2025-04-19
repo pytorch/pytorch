@@ -135,7 +135,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     }
     err << ". Please define serialization methods via def_pickle() for "
            "this class.";
-    AT_ERROR(err.str());
+    TORCH_CHECK(false, err.str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     TORCH_CHECK(
@@ -154,7 +154,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushIValue(enum_holder->value());
     push<PickleOpCode>(PickleOpCode::REDUCE);
   } else {
-    AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
+    TORCH_CHECK(false, "Unknown IValue type for pickling: ", ivalue.tagKind());
   }
 }
 
@@ -338,8 +338,8 @@ void Pickler::pushBytes(const std::string& string) {
 }
 
 void Pickler::pushGlobal(
-    c10::string_view module_name,
-    c10::string_view class_name) {
+    std::string_view module_name,
+    std::string_view class_name) {
   std::string key;
   key.reserve(module_name.size() + class_name.size() + 2);
   key.append(module_name.data(), module_name.size());
@@ -539,7 +539,8 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-static inline double swapDouble(double value) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+static double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
   double flipped = 0;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
@@ -548,6 +549,7 @@ static inline double swapDouble(double value) {
   }
   return *reinterpret_cast<double*>(out_bytes);
 }
+#endif
 
 void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);

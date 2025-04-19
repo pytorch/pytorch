@@ -30,7 +30,7 @@ TEST(ssizeTest, size_t) {
 
 TEST(ssizeTest, size_t_overflow) {
 #if defined(NDEBUG)
-  GTEST_SKIP() << "Only valid if assert is enabled." << std::endl;
+  GTEST_SKIP() << "Only valid if assert is enabled." << '\n';
 #endif
 
   constexpr auto ptrdiff_t_max =
@@ -47,7 +47,7 @@ TEST(ssizeTest, small_container_promotes_to_ptrdiff_t) {
 
 TEST(ssizeTest, promotes_to_64_bit_on_32_bit_platform) {
   if (sizeof(std::intptr_t) != 4) {
-    GTEST_SKIP() << "Only valid in 64-bits." << std::endl;
+    GTEST_SKIP() << "Only valid in 64-bits." << '\n';
   }
 
   auto signed_size = ssize(Container(std::uint64_t{3}));

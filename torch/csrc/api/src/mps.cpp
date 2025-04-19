@@ -1,8 +1,7 @@
 #include <ATen/Context.h>
 #include <torch/mps.h>
 
-namespace torch {
-namespace mps {
+namespace torch::mps {
 
 bool is_available() {
   return at::detail::getMPSHooks().hasMPS();
@@ -11,7 +10,7 @@ bool is_available() {
 /// Sets the seed for the MPS's default generator.
 void manual_seed(uint64_t seed) {
   if (is_available()) {
-    auto gen = at::detail::getMPSHooks().getDefaultMPSGenerator();
+    auto gen = at::detail::getMPSHooks().getDefaultGenerator();
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen.mutex());
@@ -36,5 +35,4 @@ DispatchQueue_t get_dispatch_queue() {
   return at::detail::getMPSHooks().getDispatchQueue();
 }
 
-} // namespace mps
-} // namespace torch
+} // namespace torch::mps

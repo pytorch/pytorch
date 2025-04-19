@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # The Tensor classes are added to this module by python_tensor.cpp
 # A workaround to support both TorchScript and MyPy:
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
@@ -19,11 +19,11 @@ from .semi_structured import (
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, Tuple[int, ...], List[int]]]
+    DimOrDims = Optional[Union[int, tuple[int, ...], list[int]]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[Tuple[int]]
+    DimOrDims = Optional[tuple[int]]
 
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "mm",
     "sum",
     "softmax",
+    "solve",
     "log_softmax",
     "SparseSemiStructuredTensor",
     "SparseSemiStructuredTensorCUTLASS",
@@ -296,6 +297,26 @@ Args:
 """,
 )
 
+
+spsolve = _add_docstr(
+    _sparse._spsolve,
+    r"""
+sparse.spsolve(input, other, *, left=True) -> Tensor
+
+Computes the solution of a square system of linear equations with
+a unique solution. Its purpose is similar to :func:`torch.linalg.solve`,
+except that the system is defined by a sparse CSR matrix with layout
+`sparse_csr`.
+
+Args:
+    input (Tensor): a sparse CSR matrix of shape `(n, n)` representing the
+        coefficients of the linear system.
+    other (Tensor): a dense matrix of shape `(n, )` representing the right-hand
+        side of the linear system.
+    left (bool, optional): whether to solve the system for `input @ out = other`
+        (default) or `out @ input = other`. Only `left=True` is supported.
+""",
+)
 
 log_softmax = _add_docstr(
     _sparse._sparse_log_softmax,
@@ -570,7 +591,7 @@ def as_sparse_gradcheck(gradcheck):
             """Convert differentiable non-strided tensors to a representation containing differentiable strided tensors."""
             if not isinstance(args, (list, tuple)):
                 args = (args,)
-            new_args: List[Any] = []
+            new_args: list[Any] = []
             for obj in args:
                 if (
                     isinstance(obj, torch.Tensor)

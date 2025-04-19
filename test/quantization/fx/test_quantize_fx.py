@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 from collections import OrderedDict
 import contextlib
@@ -203,7 +204,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional, List, Tuple
+from typing import Callable, Optional
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -4750,7 +4751,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 super().__init__()
                 self.lstm = nn.LSTM(50, 50, 1)
 
-            def forward(self, inputs: torch.Tensor, state: List[torch.Tensor]):
+            def forward(self, inputs: torch.Tensor, state: list[torch.Tensor]):
                 h = state[0]
                 c = state[1]
                 return self.lstm(inputs, (h, c))
@@ -5937,7 +5938,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        all_qconfigs: List[Tuple[QConfig, str]] = [
+        all_qconfigs: list[tuple[QConfig, str]] = [
             (get_default_qconfig("qnnpack", version=0), "default_qnnpack_qconfig_v0"),
             (get_default_qat_qconfig("qnnpack", version=0), "default_qat_qnnpack_qconfig_v0"),
             (get_default_qat_qconfig("qnnpack", version=1), "default_qat_qnnpack_qconfig_v1"),
@@ -6638,6 +6639,112 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_function(torch.ops.quantized.linear): 1,
         }
         self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
+
+    @skipIfNoFBGEMM
+    def test_keep_original_weights(self):
+        class SubModule(nn.Module):
+            """
+            A simple submodule containing a linear layer.
+            """
+
+            def __init__(self, input_dim, output_dim):
+                super(__class__, self).__init__()
+                self.w = nn.Parameter(torch.randn(input_dim, output_dim))
+                self.b = nn.Parameter(torch.randn(input_dim))
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        class MainModule(nn.Module):
+            """
+            The main module containing the submodule.
+            """
+
+            def __init__(self, input_dim, hidden_dim, output_dim):
+                super(__class__, self).__init__()
+                self.submodule_1 = SubModule(hidden_dim, input_dim)
+                setattr(self, 'submodule|2', SubModule(hidden_dim, hidden_dim))
+                setattr(self, 'submodule/3', SubModule(hidden_dim, hidden_dim))
+                setattr(self, 'submodule:4', SubModule(hidden_dim, hidden_dim))
+                setattr(self, 'submodule: 5', SubModule(hidden_dim, hidden_dim))
+                self._w = nn.Parameter(torch.randn(output_dim, hidden_dim))
+
+            def forward(self, x):
+                x1 = self.submodule_1(x)
+                x2 = getattr(self, 'submodule|2')(x1)
+                x3 = getattr(self, 'submodule/3')(x2)
+                x4 = getattr(self, 'submodule:4')(x3)
+                x5 = getattr(self, 'submodule: 5')(x4)
+                x6 = F.linear(x5, self._w)
+                return x6
+
+        input_dim = 10
+        hidden_dim = 20
+        output_dim = 5
+        model = MainModule(input_dim, hidden_dim, output_dim)
+        model.eval()
+        example_inputs = torch.randn(1, input_dim)
+        _ = model(*example_inputs)
+        qconfig_mapping = QConfigMapping().set_object_type(nn.functional.linear, float16_dynamic_qconfig)
+        prepared_model = prepare_fx(model, qconfig_mapping, example_inputs)
+        prepared_model(example_inputs)
+        quantized_model = convert_fx(prepared_model, keep_original_weights=True)
+
+        self.assertTrue(len(quantized_model.original_weights_lookup) == 6)
+        self.assertTrue("submodule_1_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_1_packed_weight_0"][0],
+            model.submodule_1.w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_1_packed_weight_0"][1],
+            model.submodule_1.b
+        )
+        self.assertTrue("submodule_2_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_2_packed_weight_0"][0],
+            getattr(model, "submodule|2").w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_2_packed_weight_0"][1],
+            getattr(model, "submodule|2").b
+        )
+        self.assertTrue("submodule_3_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_3_packed_weight_0"][0],
+            getattr(model, "submodule/3").w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_3_packed_weight_0"][1],
+            getattr(model, "submodule/3").b
+        )
+        self.assertTrue("submodule_4_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_4_packed_weight_0"][0],
+            getattr(model, "submodule:4").w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_4_packed_weight_0"][1],
+            getattr(model, "submodule:4").b
+        )
+        self.assertTrue("submodule_5_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_5_packed_weight_0"][0],
+            getattr(model, "submodule: 5").w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["submodule_5_packed_weight_0"][1],
+            getattr(model, "submodule: 5").b
+        )
+        self.assertTrue("_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["_packed_weight_0"][0],
+            model._w
+        )
+        torch.testing.assert_close(
+            quantized_model.original_weights_lookup["_packed_weight_0"][1],
+            None
+        )
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

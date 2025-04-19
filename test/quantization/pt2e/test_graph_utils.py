@@ -32,7 +32,7 @@ class TestGraphUtils(TestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
-        m, guards = torchdynamo.export(
+        m, guards = torchdynamo.export(  # noqa: F841©
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
@@ -76,7 +76,7 @@ class TestGraphUtils(TestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
-        m, guards = torchdynamo.export(
+        m, guards = torchdynamo.export(  # noqa: F841
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
@@ -108,7 +108,7 @@ class TestGraphUtils(TestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
-        m, guards = torchdynamo.export(
+        m, guards = torchdynamo.export(  # noqa: F841
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,

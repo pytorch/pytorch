@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import heapq
+import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
+from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .dependencies import WeakDep
@@ -23,13 +26,14 @@ from .utils import (
 )
 
 
+log = logging.getLogger(__name__)
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
     """
@@ -38,7 +42,7 @@ def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
     )
 
 
-def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules comms as early as possible.
     """
@@ -48,8 +52,8 @@ def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
 
 
 def reorder_compute_for_overlap(
-    snodes: List[BaseSchedulerNode],
-) -> List[BaseSchedulerNode]:
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
     """
     This achieves the following overall scheduling procedure:
         Step 1: Given that we've currently scheduled comm N, we now schedule all compute nodes
@@ -67,11 +71,11 @@ def reorder_compute_for_overlap(
 
 
 def _schedule_for_comm(
-    snodes: List[BaseSchedulerNode],
+    snodes: list[BaseSchedulerNode],
     raise_comms: bool,
     sink_waits: bool,
     reorder_for_overlap: bool,
-) -> List[BaseSchedulerNode]:
+) -> list[BaseSchedulerNode]:
     """
     Schedule `snodes` for various comm optimization objectives.
 
@@ -145,12 +149,13 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
-        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
+    unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
+        snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
+        for snode in snodes
     }
 
-    ready: List[Runnable] = []
-    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
+    ready: list[Runnable] = []
+    buffer_users: dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
 
     for snode, deps in unmet_deps.items():
@@ -214,32 +219,21 @@ def _schedule_for_comm(
 
     for snode, deps in unmet_deps.items():
         assert len(deps) == 0, (
-            "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
+            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
         )
     return scheduled
 
 
 def decide_global_ordering_of_comms(
-    nodes: List[BaseSchedulerNode], name_to_buf, name_to_fused_node
-) -> List[BaseSchedulerNode]:
+    nodes: list[BaseSchedulerNode], name_to_buf, name_to_fused_node
+) -> list[BaseSchedulerNode]:
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    # If FSDP2 is used, we apply FSDP-specific passes.
-    if any(
-        is_fallback_op(
-            x.node,
-            {
-                torch.ops.fsdp.all_gather_copy_in.default,
-                torch.ops.fsdp.chunk_cat.default,
-            },
-        )
-        for x in nodes
-    ):
-        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
+    if not torch.distributed.is_available():
+        return nodes
 
     comm_nodes = [n for n in nodes if contains_collective(n)]
 
@@ -269,17 +263,10 @@ def node_summary(snode):
     if isinstance(snode.node, ir.ExternKernelOut):
         detail = f" ({snode.node.python_kernel_name})"
     out_tensor_info = ""
-    if (
-        hasattr(snode.node, "layout")
-        and hasattr(snode.node.layout, "size")
-        and hasattr(snode.node.layout, "stride")
-    ):
-        out_tensor_info = (
-            f" (size={snode.node.layout.size}, stride={snode.node.layout.stride})"
-        )
-    node_name = ""
-    if hasattr(snode.node, "name"):
-        node_name = snode.node.name
+    layout = snode.node.get_output_spec()
+    if isinstance(layout, ir.Layout):
+        out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
+    node_name = snode.node.maybe_get_name() or ""
     return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name})"
 
 
@@ -315,8 +302,8 @@ def visualize_overlap(order):
 
 
 def reorder_compute_and_comm_for_overlap(
-    snodes: List[BaseSchedulerNode],
-) -> List[BaseSchedulerNode]:
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
     order = snodes
 
     for p in config.reorder_for_compute_comm_overlap_passes:
@@ -342,9 +329,205 @@ def reorder_compute_and_comm_for_overlap(
     return order
 
 
+def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
+    """
+    This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
+    graph intermediates that were fsdp.copy_ into the unsharded params in the original graph.
+
+    NOTE: Can only apply this pass to any of the FSDP2 unsharded params that have this pattern
+    (or repetition of): `resize_(full) -> copy_ -> resize_(0)`. Because of this, for partial-graph case
+    where `resize_(full) -> copy_` is in one graph and `resize_(0)` is in another graph, we can't
+    remove these resize and copy ops and thus we will have worse performance there.
+
+    In other words, "do we try to remove all the resize_(full) -> copy_ -> resize_(0) nodes for this unsharded param"
+    is actually a per-unsharded-param decision, since for each unsharded param, we look at its resize sequence pattern
+    (in `check_resize_pattern()`) to determine if its set of resize and copy nodes can be removed.
+    """
+    node_list = list(graph.nodes)
+
+    # Find all graph inputs and their resize counts
+    graph_input_to_resized_to_full_node_idxes = defaultdict(list)
+    graph_input_to_resized_to_0_node_idxes = defaultdict(list)
+    for idx, node in enumerate(node_list):
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.inductor.resize_storage_bytes_.default
+        ):
+            assert node.args[0].op == "placeholder", f"""\
+Resize can only operate on graph inputs, but got {node} which is resizing non-graph-input {node.args[0]}
+"""
+            graph_input = node.args[0]
+            new_size = node.args[1]
+            if new_size > 0:
+                graph_input_to_resized_to_full_node_idxes[graph_input].append(idx)
+            else:
+                graph_input_to_resized_to_0_node_idxes[graph_input].append(idx)
+
+    def check_resize_pattern(graph_input):
+        # Check the number of resize-to-full and resize-to-0 nodes are equal,
+        # and that for each (resize-to-full, resize-to-0) pair, the resize-to-full node
+        # always happens before the resize-to-0 node.
+        # This is the precondition for being able to remove all the resize and copy nodes
+        # for this specific unsharded param.
+        resized_to_full_idxes = graph_input_to_resized_to_full_node_idxes.get(
+            graph_input, []
+        )
+        resized_to_0_idxes = graph_input_to_resized_to_0_node_idxes.get(graph_input, [])
+
+        if not len(resized_to_full_idxes) == len(resized_to_0_idxes):
+            log.warning(
+                f"""
+Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
+{len(resized_to_full_idxes)} vs. {len(resized_to_0_idxes)}.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
+"""  # noqa: G004
+            )
+            return False
+
+        # Check the sequence: (resize_to_full -> resize_to_0)+
+        for resize_to_full_idx, resize_to_0_idx in zip(
+            resized_to_full_idxes, resized_to_0_idxes
+        ):
+            if resize_to_full_idx >= resize_to_0_idx:
+                log.warning(
+                    f"""
+For graph input {graph_input}: resize-to-full node {node_list[resize_to_full_idx]} at index {resize_to_full_idx}
+happens after resize-to-0 node {node_list[resize_to_0_idx]} at index {resize_to_0_idx}.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that unsharded param.
+"""  # noqa: G004
+                )
+                return False
+        return True
+
+    # Find all eligible unsharded params and their corresponding graph intermediates.
+    unsharded_param_to_fsdp_copy_node_idxes = defaultdict(list)
+    for idx, node in enumerate(node_list):
+        if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
+            fsdp_copy_node = node
+            unsharded_param = node.args[0]
+            assert unsharded_param.op == "placeholder", f"""
+Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!
+Offending node: {unsharded_param}. Graph: {graph}
+"""
+            if check_resize_pattern(unsharded_param):
+                unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
+
+    def is_allowed_mutation(node):
+        return (
+            node.target == torch.ops.fsdp.copy_.default
+            or node.target == torch.ops.inductor.resize_storage_bytes_.default
+        )
+
+    def is_node_mutating_unsharded_param_or_its_alias(node, unsharded_params):
+        # Check whether the node is mutating any of the unsharded params or their aliases.
+        mutated_arg_idxes = (
+            [
+                i
+                for i, x in enumerate(node.target._schema.arguments)
+                if x.alias_info is not None and x.alias_info.is_write
+            ]
+            if isinstance(node.target, torch._ops.OpOverload)
+            else []
+        )
+        mutated_node_arg_storages = OrderedSet(
+            [
+                StorageWeakRef(node.args[i].meta["val"].untyped_storage())
+                for i in mutated_arg_idxes
+            ]
+        )
+        storages_of_unsharded_params = OrderedSet(
+            [
+                StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
+                for unsharded_param in unsharded_params
+            ]
+        )
+        return len(mutated_node_arg_storages & storages_of_unsharded_params) > 0
+
+    # Check no user mutation on any unsharded_param
+    for node in node_list:
+        if (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and node.target._schema.is_mutable
+            and not is_allowed_mutation(node)
+        ):
+            assert not is_node_mutating_unsharded_param_or_its_alias(
+                node, unsharded_param_to_fsdp_copy_node_idxes.keys()
+            ), f"""\
+User mutation on FSDP2 unsharded param is not allowed when Traceable FSDP2 is used. Violating node: {node}
+"""
+
+    # For each `fsdp.copy_(unsharded_param, Y)`, replace downstream usage of `unsharded_param` with `Y`.
+    #
+    # NOTE: Because of "layer reuse" use case, there could be multiple `fsdp.copy_` to the same `unsharded_param` graph input.
+    # e.g.
+    # ```
+    #     fsdp_copy_1 = fsdp.copy_(unsharded_param_1, Y1)
+    #     ... (use of unsharded_param_1)                     -> Subgraph 1
+    #     fsdp_copy_2 = fsdp.copy_(unsharded_param_1, Y2)
+    #     ... (use of unsharded_param_1)                     -> Subgraph 2
+    #     fsdp_copy_3 = fsdp.copy_(unsharded_param_1, Y3)
+    #     ... (use of unsharded_param_1)                     -> Subgraph 3
+    # ```
+    # We must do the replacement only within each subgraph.
+    for (
+        unsharded_param,
+        fsdp_copy_node_idxes,
+    ) in unsharded_param_to_fsdp_copy_node_idxes.items():
+        for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
+            fsdp_copy_node = node_list[fsdp_copy_node_idx]
+            assert fsdp_copy_node.args[0] is unsharded_param
+            _, replacement = fsdp_copy_node.args
+            # subgraph_start_idx is exclusive
+            subgraph_start_idx = fsdp_copy_node_idx + 1
+            # subgraph_end_idx is exclusive (also intentionally don't replace args in return op)
+            subgraph_end_idx = (
+                fsdp_copy_node_idxes[i + 1]
+                if i < len(fsdp_copy_node_idxes) - 1
+                else len(node_list) - 1
+            )
+            subgraph_nodes = node_list[subgraph_start_idx:subgraph_end_idx]
+            assert not any(
+                is_node_mutating_unsharded_param_or_its_alias(node, [unsharded_param])
+                for node in subgraph_nodes
+            ), f"""\
+Assumed no ops mutating unsharded param {unsharded_param} in subgraph {subgraph_nodes}, but it's not true!
+Graph: {graph}
+"""
+            for node in subgraph_nodes:
+                if (
+                    node.op == "call_function"
+                    and unsharded_param in node.args
+                    and node.target != torch.ops.inductor.resize_storage_bytes_.default
+                ):  # TODO(yf225): implement replacement in kwargs
+                    new_args = tuple(
+                        replacement if arg is unsharded_param else arg
+                        for arg in node.args
+                    )
+                    node.args = new_args
+
+    # Delete `fsdp.copy_(unsharded_param, Y)` nodes
+    for (
+        unsharded_param,
+        fsdp_copy_node_idxes,
+    ) in unsharded_param_to_fsdp_copy_node_idxes.items():
+        for i, fsdp_copy_node_idx in enumerate(fsdp_copy_node_idxes):
+            fsdp_copy_node = node_list[fsdp_copy_node_idx]
+            graph.erase_node(fsdp_copy_node)
+
+    # Delete `resize_(unsharded_param, ...)` nodes
+    for node in node_list:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            and node.args[0] in unsharded_param_to_fsdp_copy_node_idxes
+        ):
+            graph.erase_node(node)
+
+
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     try:
-        import torch.distributed._composable.fsdp._fsdp_collectives
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
 
         assert torch.distributed.is_available()
         # Assert existence of these ops
@@ -465,14 +648,14 @@ def get_op_idx(snode):
 
 
 def enforce_comm_ordering_for_fsdp(
-    snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_buf: Dict[str, torch._inductor.scheduler.SchedulerBuffer],
-    name_to_fused_node: Dict[str, BaseSchedulerNode],
-) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
+    snodes: list[torch._inductor.scheduler.BaseSchedulerNode],
+    name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
+    name_to_fused_node: dict[str, BaseSchedulerNode],
+) -> list[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
-    scheduled = set()
+    scheduled = OrderedSet[Any]()
     ag_exists = False
     rs_exists = False
     ag_grouped_node_to_wait_grouped_node = {}
@@ -499,7 +682,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             ag_exists = True
             ag_snode = snode
-            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
 
             # Find the "cast + copy_in + getitem + all_gather" code block
             find_recursive_deps_of_node(
@@ -509,13 +692,14 @@ def enforce_comm_ordering_for_fsdp(
                 name_to_fused_node,
             )
 
-            # Find the "all_gather + all_gather_wait_tensor + copy_out + set_" code block
-            allowed_ops = {
-                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                torch.ops._c10d_functional.wait_tensor.default,
-                torch.ops.fsdp.split_with_sizes_copy.default,
-                torch.ops.aten.set_.source_Tensor,
-            }
+            # Find the "all_gather + all_gather_wait_tensor + copy_out" code block
+            allowed_ops = OrderedSet(
+                [
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops.fsdp.split_with_sizes_copy.default,
+                ]
+            )
             find_recursive_users_of_node(
                 ag_snode,
                 ag_related_snode_set,
@@ -560,7 +744,7 @@ def enforce_comm_ordering_for_fsdp(
             assert wait_node_idx is not None
             ag_group_node = _create_group_node(ag_related_snodes[:wait_node_idx])
 
-            # Group "all_gather_wait_tensor + copy_out + set_" into one GroupedSchedulerNode
+            # Group "all_gather_wait_tensor + copy_out" into one GroupedSchedulerNode
             ag_wait_group_node = _create_group_node(ag_related_snodes[wait_node_idx:])
 
             ag_grouped_node_to_wait_grouped_node[ag_group_node] = ag_wait_group_node
@@ -571,7 +755,7 @@ def enforce_comm_ordering_for_fsdp(
             rs_snode = snode
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
             find_recursive_users_of_node(
                 rs_snode,
                 rs_related_snode_set,

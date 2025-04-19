@@ -8,8 +8,7 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
 
+// NOLINTNEXTLINE(misc-unused-alias-decls)
 namespace py = pybind11;
 
-namespace pybind11 {
-namespace detail {}
-} // namespace pybind11
+namespace pybind11::detail {} // namespace pybind11::detail

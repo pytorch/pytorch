@@ -32,7 +32,7 @@ void for_each_tensor_in_ivalue(
       for_each_tensor_in_ivalue(it.value(), func);
     }
   } else {
-    AT_ERROR("Unhandled type of IValue. Got ", iv.tagKind());
+    TORCH_CHECK(false, "Unhandled type of IValue. Got ", iv.tagKind());
   }
 }
 } // namespace torch::jit::mobile

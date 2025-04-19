@@ -106,6 +106,6 @@ void transform_bias_rescale_qkv_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(transform_bias_rescale_qkv_stub, &transform_bias_rescale_qkv_kernel_impl);
+REGISTER_DISPATCH(transform_bias_rescale_qkv_stub, &transform_bias_rescale_qkv_kernel_impl)
 
 } // at::native

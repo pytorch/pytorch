@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -200,7 +200,7 @@ class TestIndexing(TestCase):
         b[(Ellipsis,)] = 2
         assert_equal(b, 2)
 
-    @xpassIfTorchDynamo  # 'torch_.np.array() does not have base attribute.
+    @xpassIfTorchDynamo_np  # 'torch_.np.array() does not have base attribute.
     def test_ellipsis_index_2(self):
         a = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
         assert_(a[...] is not a)
@@ -413,7 +413,7 @@ class TestIndexing(TestCase):
 
         # A tuple subclass should also be an nd-index
         class TupleSubclass(tuple):
-            pass
+            __slots__ = ()
 
         index = ([1], [1])
         index = TupleSubclass(index)
@@ -421,7 +421,7 @@ class TestIndexing(TestCase):
         # Unlike the non nd-index:
         assert_(arr[index,].shape != (1,))
 
-    @xpassIfTorchDynamo  # (reason="XXX: low-prio behaviour to support")
+    @xpassIfTorchDynamo_np  # (reason="XXX: low-prio behaviour to support")
     def test_broken_sequence_not_nd_index(self):
         # See https://github.com/numpy/numpy/issues/5063
         # If we have an object which claims to be a sequence, but fails
@@ -588,7 +588,7 @@ class TestBroadcastedAssignments(TestCase):
 
 
 class TestFancyIndexingCast(TestCase):
-    @xpassIfTorchDynamo  # (
+    @xpassIfTorchDynamo_np  # (
     #    reason="XXX: low-prio to support assigning complex values on floating arrays"
     # )
     def test_boolean_index_cast_assign(self):
@@ -602,16 +602,21 @@ class TestFancyIndexingCast(TestCase):
         zero_array[bool_index] = np.array([1])
         assert_equal(zero_array[0, 1], 1)
 
+        # np.ComplexWarning moved to np.exceptions in numpy>=2.0.0
+        # np.exceptions only available in numpy>=1.25.0
+        has_exceptions_ns = hasattr(np, "exceptions")
+        ComplexWarning = (
+            np.exceptions.ComplexWarning if has_exceptions_ns else np.ComplexWarning
+        )
+
         # Fancy indexing works, although we get a cast warning.
         assert_warns(
-            np.ComplexWarning, zero_array.__setitem__, ([0], [1]), np.array([2 + 1j])
+            ComplexWarning, zero_array.__setitem__, ([0], [1]), np.array([2 + 1j])
         )
         assert_equal(zero_array[0, 1], 2)  # No complex part
 
         # Cast complex to float, throwing away the imaginary portion.
-        assert_warns(
-            np.ComplexWarning, zero_array.__setitem__, bool_index, np.array([1j])
-        )
+        assert_warns(ComplexWarning, zero_array.__setitem__, bool_index, np.array([1j]))
         assert_equal(zero_array[0, 1], 0)
 
 
@@ -1012,6 +1017,15 @@ class TestMultiIndexingAutomated(TestCase):
             # This is so that np.array(True) is not accepted in a full integer
             # index, when running the file separately.
             warnings.filterwarnings("error", "", DeprecationWarning)
+            # np.VisibleDeprecationWarning moved to np.exceptions in numpy>=2.0.0
+            # np.exceptions only available in numpy>=1.25.0
+            has_exceptions_ns = hasattr(np, "exceptions")
+            VisibleDeprecationWarning = (  # noqa: F841
+                np.exceptions.VisibleDeprecationWarning
+                if has_exceptions_ns
+                else np.VisibleDeprecationWarning
+            )
+            # FIXME(rec): should this use VisibleDeprecationWarning instead?
             warnings.filterwarnings("error", "", np.VisibleDeprecationWarning)
 
             def isskip(idx):

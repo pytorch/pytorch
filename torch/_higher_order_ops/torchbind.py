@@ -6,7 +6,11 @@ import torch
 from torch._C import DispatchKey  # @manual
 from torch._functorch._aot_autograd.utils import KNOWN_TYPES
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import _ns_and_class_name, FakeScriptObject
+from torch._library.fake_class_registry import (
+    _is_script_object,
+    _ns_and_class_name,
+    FakeScriptObject,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -16,12 +20,40 @@ from torch.utils import _pytree as pytree
 
 log = logging.getLogger(__name__)
 
+
 # The call_torchbind operator represents a method invocation on a torchbind
 # object. The calling convention is:
 #   call_torchbind(self: ScriptObject, method_name: str, *method_args, **method_kwargs)
 # We do not expect users to write this operator directly. Instead it will be
 # emitted by Dynamo when tracing encounters a torchbind object.
-call_torchbind = HigherOrderOperator("call_torchbind")
+class CallTorchBind(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("call_torchbind")
+
+    def __call__(self, obj, method, *args, **kwargs):
+        return super().__call__(obj, method, *args, **kwargs)
+
+    @staticmethod
+    def schema(obj, method) -> torch.FunctionSchema:
+        """
+        Returns the schema of ``CallTorchbind.__call__``.
+        """
+        assert isinstance(obj, torch._inductor.ir.TorchBindObject)
+        val = obj.get_real_obj()
+        schema = val._get_method(method).schema
+        schema_str = str(schema)
+        new_schema_str = (
+            "call_torchbind(" + str(schema.arguments[0].real_type) + " obj,"
+        )
+        first_comma_index = schema_str.find(",")
+        new_schema_str = (
+            new_schema_str + " str method," + schema_str[first_comma_index + 1 :]
+        )
+        new_schema = torch._C.parse_schema(new_schema_str)
+        return new_schema
+
+
+call_torchbind = CallTorchBind()
 
 # Register this operator as side-effectful with FX.
 # TODO: this is not really sufficient. While passes (hopefully) check
@@ -34,7 +66,7 @@ _orig_scriptmethod_call = torch.ScriptMethod.__call__
 
 
 def torchbind_method_redispatch(self, *args, **kwargs):
-    if isinstance(self.raw_owner, torch.ScriptObject):
+    if _is_script_object(self.raw_owner):
         return call_torchbind(self.raw_owner, self.name, *args, **kwargs)
     return _orig_scriptmethod_call(self, *args, **kwargs)
 
@@ -79,7 +111,7 @@ def inner(mode, *args, **kwargs):
     )
     out = call_torchbind(*args, **kwargs)
 
-    obj, method, *rest_args = args
+    obj, method, *_rest_args = args
     if isinstance(obj, torch.ScriptObject):
         ns, class_name = _ns_and_class_name(
             obj._type().qualified_name()  # type: ignore[attr-defined]

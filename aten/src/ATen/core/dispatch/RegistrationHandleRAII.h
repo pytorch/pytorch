@@ -5,7 +5,7 @@
 namespace c10 {
 
 class RegistrationHandleRAII final {
-public:
+ public:
   explicit RegistrationHandleRAII(std::function<void()> onDestruction)
       : onDestruction_(std::move(onDestruction)) {}
 
@@ -29,8 +29,8 @@ public:
     return *this;
   }
 
-private:
+ private:
   std::function<void()> onDestruction_;
 };
 
-}
+} // namespace c10

@@ -1,0 +1,13 @@
+tools/test/set_linter_testdata/includes.py.txt:18:1: Add import for OrderedSet
+   16 | )
+   17 | from .base import MutableLocal, VariableTracker, VariableTrackerContainer
+   18 |
+        ^
+   19 | if TYPE_CHECKING:
+   20 |     from torch._dynamo.codegen import PyCodegen
+
+tools/test/set_linter_testdata/includes.py.txt:24:21: Builtin `set` is deprecated
+   22 |
+   23 | class BaseListVariable(VariableTrackerContainer):
+   24 |     our_container = set
+                            ^^^

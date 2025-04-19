@@ -16,7 +16,7 @@ at::Tensor& metal_copy_(at::Tensor& self, const at::Tensor& src) {
   if (p) {
     return p->metal_copy_(self, src);
   }
-  AT_ERROR("Metal backend was not linked to the build");
+  TORCH_CHECK(false, "Metal backend was not linked to the build");
 }
 } // namespace at::metal
 

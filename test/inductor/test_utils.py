@@ -2,11 +2,32 @@
 
 from sympy import Symbol
 
+import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import sympy_subs
 
 
 class TestUtils(TestCase):
+    def test_zip_schema(self):
+        def foo(x: torch.Tensor) -> None:
+            pass
+
+        result = torch.library.custom_op("mylib::foo", foo, mutates_args={"x"})
+        schema = result._opoverload._schema
+        g = torch.tensor([11, 2])
+        found = False
+        for arg, val in torch._library.utils.zip_schema(schema, [], {"x": g}):
+            if arg.name == "x":
+                found = True
+
+        self.assertTrue(found)
+
+        found = False
+        for arg, val in torch._library.utils.zip_schema(schema, [g], {}):
+            if arg.name == "x":
+                found = True
+        self.assertTrue(found)
+
     def testSympySubs(self):
         # integer and nonnegetaive attributes are preserved.
         expr = Symbol("x")

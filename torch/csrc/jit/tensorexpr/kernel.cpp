@@ -984,7 +984,6 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
 // we use the debug names in printing cuda code, they need to be removed
 // of characters that can't be used in a variable identifier
 void TensorExprKernel::genInputDebugNames() {
-  std::unordered_map<std::string, const torch::jit::Value*> name_to_value;
   std::unordered_set<std::string> name_set;
   std::unordered_map<const torch::jit::Value*, std::string> value_to_name;
   for (const torch::jit::Value* input : graph_->inputs()) {
@@ -1449,7 +1448,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
       ToDtype(scalar_type));
 
   if (!const_tensor.is_contiguous()) {
-    const_tensor = const_tensor.clone().contiguous();
+    const_tensor = const_tensor.clone(at::MemoryFormat::Contiguous);
     unpacked_constant_tensors_.push_back(const_tensor);
   }
 
@@ -1747,7 +1746,6 @@ void TensorExprKernel::compile() {
             VarPtr v = t.buf()->base_handle();
             scalars_[output] = VarHandle(v);
             block->append_stmt(t.stmt());
-            std::vector<ExprPtr> dims;
             BufHandle buf(
                 "scalar_" + sanitizeName(output->debugName()), {}, v->dtype());
             StmtPtr store = Store::make(buf, {}, ExprHandle(v));

@@ -9,7 +9,7 @@ from torch._export.db.examples import (
     filter_examples_by_support_level,
     get_rewrite_cases,
 )
-from torch.export import export
+from torch.export import export_for_training
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -35,11 +35,12 @@ class ExampleTests(TestCase):
         kwargs_export = case.example_kwargs
         args_model = copy.deepcopy(args_export)
         kwargs_model = copy.deepcopy(kwargs_export)
-        exported_program = export(
+        exported_program = export_for_training(
             model,
             args_export,
             kwargs_export,
             dynamic_shapes=case.dynamic_shapes,
+            strict=True,
         )
         exported_program.graph_module.print_readable()
 
@@ -67,11 +68,12 @@ class ExampleTests(TestCase):
         with self.assertRaises(
             (torchdynamo.exc.Unsupported, AssertionError, RuntimeError)
         ):
-            export(
+            export_for_training(
                 model,
                 case.example_args,
                 case.example_kwargs,
                 dynamic_shapes=case.dynamic_shapes,
+                strict=True,
             )
 
     exportdb_not_supported_rewrite_cases = [
@@ -92,7 +94,7 @@ class ExampleTests(TestCase):
             self, name: str, rewrite_case: ExportCase
         ) -> None:
             # pyre-ignore
-            export(
+            export_for_training(
                 rewrite_case.model,
                 rewrite_case.example_args,
                 rewrite_case.example_kwargs,

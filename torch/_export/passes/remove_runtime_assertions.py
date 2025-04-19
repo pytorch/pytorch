@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
@@ -9,7 +8,7 @@ class _RemoveRuntimeAssertionsPass(PassBase):
     _AddRuntimeAssertionsForInlineConstraintsPass.
     """
 
-    def call(self, graph_module) -> PassResult:
+    def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         modified = False
         for module in graph_module.modules():
             if not isinstance(module, torch.fx.GraphModule):

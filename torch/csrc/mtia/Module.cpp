@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
-#include <c10/util/CallOnce.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
+#include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
@@ -11,8 +11,7 @@
 #include <pthread.h>
 #endif
 
-namespace torch {
-namespace mtia {
+namespace torch::mtia {
 
 static bool in_bad_fork = false; // True for children forked after mtia init
 
@@ -29,8 +28,8 @@ static void forked_child() {
 // has some working functions (e.g. device_count) but cannot fully initialize.
 static void poison_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_child);
 #endif
 }
 
@@ -40,7 +39,7 @@ void initModule(PyObject* module) {
   m.def("_mtia_init", []() {
     TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
     poison_fork();
-    at::globalContext().lazyInitMTIA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
   });
 
   m.def("_mtia_isBuilt", []() {
@@ -59,6 +58,13 @@ void initModule(PyObject* module) {
     torch::utils::device_lazy_init(at::kMTIA);
     at::detail::getMTIAHooks().deviceSynchronize(
         at::detail::getMTIAHooks().getCurrentDevice());
+  });
+
+  m.def("_mtia_exchangeDevice", [](c10::DeviceIndex device_index) {
+    if (device_index < 0) {
+      return static_cast<c10::DeviceIndex>(-1);
+    }
+    return at::detail::getMTIAHooks().exchangeDevice(device_index);
   });
 
   m.def("_mtia_getDefaultStream", [](c10::DeviceIndex device_index) {
@@ -80,7 +86,36 @@ void initModule(PyObject* module) {
         at::detail::getMTIAHooks().memoryStats(device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
+
+  m.def("_mtia_getDeviceCapability", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().getDeviceCapability(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_emptyCache", []() { at::detail::getMTIAHooks().emptyCache(); });
+
+  m.def(
+      "_mtia_recordMemoryHistory",
+      [](const std::optional<std::string>& enabled,
+         const std::string& stacks,
+         size_t max_entries) {
+        at::detail::getMTIAHooks().recordMemoryHistory(
+            enabled, stacks, max_entries);
+      });
+
+  m.def("_mtia_memorySnapshot", []() {
+    PyObject* raw_pyobject = at::detail::getMTIAHooks().memorySnapshot();
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_getDeviceCount", []() {
+    return at::detail::getMTIAHooks().deviceCount();
+  });
+
+  m.def("_mtia_resetPeakMemoryStats", [](c10::DeviceIndex device_index) {
+    at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
+  });
 }
 
-} // namespace mtia
-} // namespace torch
+} // namespace torch::mtia

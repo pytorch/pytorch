@@ -358,10 +358,12 @@ struct TORCH_API ViewFunc {
   /// Sets the values of any SymInts in the saved state. The input vector size
   /// must match the number of SymInts in the saved state (i.e. the size of the
   /// list returned by get_symints()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
   virtual void set_symints(std::vector<c10::SymInt>) {}
   /// Sets the values of any Tensors in the saved state. The input vector size
   /// must match the number of Tensors in the saved state (i.e. the size of the
   /// list returned by get_tensors()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
   virtual void set_tensors(std::vector<at::Tensor>) {}
 };
 
@@ -724,6 +726,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   const ViewInfo& get_backward_view() const {
     TORCH_CHECK(
         has_bw_view(), "backward view info can only exist for backward views.");
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return backward_info_.value();
   }
 
@@ -761,6 +764,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
     TORCH_CHECK(
         !shared_view_info_ || has_bw_view(),
         "forward view info can only exist for forward views.");
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return shared_view_info_ ? backward_info_.value() : forward_info_.value();
   }
 
@@ -879,7 +883,7 @@ inline Variable make_variable(
       } else {
         data_impl_copy->set_autograd_meta(nullptr);
       }
-      return Variable(data_impl_copy);
+      return Variable(std::move(data_impl_copy));
     }
   }
   return Variable();

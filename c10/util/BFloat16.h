@@ -13,9 +13,6 @@
 #if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
 #endif
-#if defined(__HIPCC__) && defined(USE_ROCM)
-#include <hip/hip_bf16.h>
-#endif
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 #if defined(CL_SYCL_LANGUAGE_VERSION)
@@ -109,10 +106,6 @@ struct alignas(2) BFloat16 {
 #if defined(__CUDACC__) && !defined(USE_ROCM)
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
-#endif
-#if defined(__HIPCC__) && defined(USE_ROCM)
-  inline C10_HOST_DEVICE BFloat16(const __hip_bfloat16& value);
-  explicit inline C10_HOST_DEVICE operator __hip_bfloat16() const;
 #endif
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)

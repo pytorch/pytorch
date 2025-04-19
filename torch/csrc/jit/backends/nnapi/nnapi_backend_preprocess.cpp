@@ -43,7 +43,7 @@ c10::IValue preprocess(
   // Test that method_compile_spec contains the necessary keys and
   // Tensor/TensorList input
   c10::IValue inp;
-  std::string error = "";
+  std::string error;
   if (!method_compile_spec.contains("forward")) {
     error = R"(method_compile_spec does not contain the "forward" key.)";
   } else {

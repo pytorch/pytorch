@@ -77,7 +77,7 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
         PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
       } else {
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*m));
+        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(m.value()));
       }
     }
   }
@@ -148,8 +148,6 @@ static PyObject* THPSize_repr(THPSize* self) {
   return THPUtils_packString(repr);
   END_HANDLE_TH_ERRORS
 }
-
-extern PyTypeObject THPSizeType;
 
 template <typename FnType, FnType fn, typename... Args>
 static PyObject* wrap_tuple_fn(Args... args) {
@@ -234,7 +232,8 @@ static PyMethodDef THPSize_methods[] = {
     {nullptr}};
 
 PyTypeObject THPSizeType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Size", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Size", /* tp_name */
     sizeof(THPSize), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

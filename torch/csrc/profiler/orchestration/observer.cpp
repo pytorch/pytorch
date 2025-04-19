@@ -4,9 +4,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 using GlobalManager = GlobalStateManager<ProfilerStateBase>;
 
@@ -19,12 +17,20 @@ ExperimentalConfig::ExperimentalConfig(
     bool verbose,
     std::vector<std::string> performance_events,
     bool enable_cuda_sync_events,
+    bool adjust_profiler_step,
+    bool disable_external_correlation,
+    bool profile_all_threads,
+    bool capture_overload_names,
     bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
       performance_events(std::move(performance_events)),
       enable_cuda_sync_events{enable_cuda_sync_events},
+      adjust_profiler_step{adjust_profiler_step},
+      disable_external_correlation{disable_external_correlation},
+      profile_all_threads{profile_all_threads},
+      capture_overload_names{capture_overload_names},
       adjust_timestamps{adjust_timestamps} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
@@ -38,14 +44,16 @@ ProfilerConfig::ProfilerConfig(
     bool with_stack,
     bool with_flops,
     bool with_modules,
-    ExperimentalConfig experimental_config)
+    ExperimentalConfig experimental_config,
+    std::string trace_id)
     : state{state},
       experimental_config{std::move(experimental_config)},
       report_input_shapes{report_input_shapes},
       profile_memory{profile_memory},
       with_stack{with_stack},
       with_flops{with_flops},
-      with_modules{with_modules} {}
+      with_modules{with_modules},
+      trace_id{std::move(trace_id)} {}
 
 bool ProfilerConfig::disabled() const {
   return state == torch::profiler::impl::ProfilerState::Disabled;
@@ -53,6 +61,10 @@ bool ProfilerConfig::disabled() const {
 
 bool ProfilerConfig::global() const {
   return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
+}
+
+bool ProfilerConfig::pushGlobalCallbacks() const {
+  return global() || experimental_config.profile_all_threads;
 }
 
 namespace {
@@ -110,14 +122,15 @@ ProfilerStateBase::~ProfilerStateBase() {
       ? GlobalManager::get()
       : static_cast<ProfilerStateBase*>(
             c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !out || out->config().pushGlobalCallbacks() == global);
   return out;
 }
 
 /*static*/ void ProfilerStateBase::push(
     std::shared_ptr<ProfilerStateBase>&& state) {
   TORCH_INTERNAL_ASSERT(state != nullptr);
-  if (state->config().global()) {
+  if (state->config().pushGlobalCallbacks()) {
     GlobalManager::push(std::move(state));
   } else {
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
@@ -182,6 +195,4 @@ torch::profiler::impl::ProfilerConfig getProfilerConfig() {
   return state_ptr->config();
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

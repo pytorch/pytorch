@@ -11,10 +11,7 @@
 #include <iostream>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
 static const std::string getTempPath() {
@@ -59,7 +56,7 @@ static bool programExists(const std::string& program) {
 }
 
 #ifdef _MSC_VER
-std::optional<std::wstring> exec(const std::wstring& cmd) {
+static std::optional<std::wstring> exec(const std::wstring& cmd) {
   std::array<wchar_t, 128> buffer;
   std::wstring result;
   std::unique_ptr<FILE, decltype(&_pclose)> pipe(
@@ -79,7 +76,7 @@ inline std::wstring& rtrim(std::wstring& s, const wchar_t* t = L" \t\n\r\f\v") {
   return s;
 }
 
-void activate() {
+static void activate() {
   wchar_t* root = nullptr;
   std::wstring cmd;
   std::optional<std::wstring> exec_out;
@@ -148,7 +145,7 @@ void activate() {
 
 intptr_t run(const std::string& cmd) {
   // Getting the path of `cmd.exe`
-  wchar_t* comspec = _wgetenv(L"COMSPEC");
+  const wchar_t* comspec = _wgetenv(L"COMSPEC");
   if (!comspec) {
     comspec = L"C:\\Windows\\System32\\cmd.exe";
   }
@@ -357,7 +354,4 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
 }
 
 RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cpu

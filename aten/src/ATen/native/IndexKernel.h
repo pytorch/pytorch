@@ -26,16 +26,16 @@ using masked_fill_fn = void(*)(TensorIterator &, const Scalar& scalar);
 using masked_select_fn = void(*)(TensorIterator &, int64_t orig_stride);
 using masked_scatter_fn = void(*)(TensorIterator &, const TensorBase &);
 
-DECLARE_DISPATCH(index_fn, index_stub);
-DECLARE_DISPATCH(index_fill_fn, index_fill_stub);
-DECLARE_DISPATCH(index_copy_fn, index_copy_stub);
-DECLARE_DISPATCH(index_put_fn, index_put_stub);
-DECLARE_DISPATCH(put_fn, put_stub);
-DECLARE_DISPATCH(take_fn, take_stub);
-DECLARE_DISPATCH(flip_fn, flip_stub);
-DECLARE_DISPATCH(masked_fill_fn, masked_fill_stub);
-DECLARE_DISPATCH(masked_select_fn, masked_select_serial_stub);
-DECLARE_DISPATCH(masked_select_fn, masked_select_stub);
-DECLARE_DISPATCH(masked_scatter_fn, masked_scatter_stub);
+DECLARE_DISPATCH(index_fn, index_stub)
+DECLARE_DISPATCH(index_fill_fn, index_fill_stub)
+DECLARE_DISPATCH(index_copy_fn, index_copy_stub)
+DECLARE_DISPATCH(index_put_fn, index_put_stub)
+DECLARE_DISPATCH(put_fn, put_stub)
+DECLARE_DISPATCH(take_fn, take_stub)
+DECLARE_DISPATCH(flip_fn, flip_stub)
+DECLARE_DISPATCH(masked_fill_fn, masked_fill_stub)
+DECLARE_DISPATCH(masked_select_fn, masked_select_serial_stub)
+DECLARE_DISPATCH(masked_select_fn, masked_select_stub)
+DECLARE_DISPATCH(masked_scatter_fn, masked_scatter_stub)
 
 } // namespace at::native

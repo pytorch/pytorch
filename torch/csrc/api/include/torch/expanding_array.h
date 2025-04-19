@@ -27,18 +27,18 @@ class ExpandingArray {
   /// the length is checked against the `ExpandingArray`'s extent parameter `D`
   /// at runtime.
   /*implicit*/ ExpandingArray(std::initializer_list<T> list)
-      : ExpandingArray(at::ArrayRef<T>(list)) {}
+      : ExpandingArray(c10::ArrayRef<T>(list)) {}
 
   /// Constructs an `ExpandingArray` from an `std::vector`. The extent of
   /// the length is checked against the `ExpandingArray`'s extent parameter `D`
   /// at runtime.
   /*implicit*/ ExpandingArray(std::vector<T> vec)
-      : ExpandingArray(at::ArrayRef<T>(vec)) {}
+      : ExpandingArray(c10::ArrayRef<T>(vec)) {}
 
-  /// Constructs an `ExpandingArray` from an `at::ArrayRef`. The extent of
+  /// Constructs an `ExpandingArray` from an `c10::ArrayRef`. The extent of
   /// the length is checked against the `ExpandingArray`'s extent parameter `D`
   /// at runtime.
-  /*implicit*/ ExpandingArray(at::ArrayRef<T> values) {
+  /*implicit*/ ExpandingArray(c10::ArrayRef<T> values) {
     // clang-format off
     TORCH_CHECK(
         values.size() == D,
@@ -78,7 +78,7 @@ class ExpandingArray {
   }
 
   /// Returns an `ArrayRef` to the underlying `std::array`.
-  operator at::ArrayRef<T>() const {
+  operator c10::ArrayRef<T>() const {
     return values_;
   }
 
@@ -100,7 +100,7 @@ std::ostream& operator<<(
   if (expanding_array.size() == 1) {
     return stream << expanding_array->at(0);
   }
-  return stream << static_cast<at::ArrayRef<T>>(expanding_array);
+  return stream << static_cast<c10::ArrayRef<T>>(expanding_array);
 }
 
 /// A utility class that accepts either a container of `D`-many
@@ -118,18 +118,18 @@ class ExpandingArrayWithOptionalElem
   /// of the underlying type `T`. The extent of the length is checked against
   /// the `ExpandingArrayWithOptionalElem`'s extent parameter `D` at runtime.
   /*implicit*/ ExpandingArrayWithOptionalElem(std::initializer_list<T> list)
-      : ExpandingArrayWithOptionalElem(at::ArrayRef<T>(list)) {}
+      : ExpandingArrayWithOptionalElem(c10::ArrayRef<T>(list)) {}
 
   /// Constructs an `ExpandingArrayWithOptionalElem` from an `std::vector` of
   /// the underlying type `T`. The extent of the length is checked against the
   /// `ExpandingArrayWithOptionalElem`'s extent parameter `D` at runtime.
   /*implicit*/ ExpandingArrayWithOptionalElem(std::vector<T> vec)
-      : ExpandingArrayWithOptionalElem(at::ArrayRef<T>(vec)) {}
+      : ExpandingArrayWithOptionalElem(c10::ArrayRef<T>(vec)) {}
 
-  /// Constructs an `ExpandingArrayWithOptionalElem` from an `at::ArrayRef` of
+  /// Constructs an `ExpandingArrayWithOptionalElem` from an `c10::ArrayRef` of
   /// the underlying type `T`. The extent of the length is checked against the
   /// `ExpandingArrayWithOptionalElem`'s extent parameter `D` at runtime.
-  /*implicit*/ ExpandingArrayWithOptionalElem(at::ArrayRef<T> values)
+  /*implicit*/ ExpandingArrayWithOptionalElem(c10::ArrayRef<T> values)
       : ExpandingArray<D, std::optional<T>>(0) {
     // clang-format off
     TORCH_CHECK(
@@ -174,7 +174,7 @@ std::ostream& operator<<(
       str_array.emplace_back(
           elem.has_value() ? c10::str(elem.value()) : "None");
     }
-    stream << at::ArrayRef<std::string>(str_array);
+    stream << c10::ArrayRef<std::string>(str_array);
   }
   return stream;
 }

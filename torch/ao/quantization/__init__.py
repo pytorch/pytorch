@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -11,6 +11,7 @@ from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
 from .pt2e._numeric_debugger import (  # noqa: F401
     compare_results,
+    CUSTOM_KEY,
     extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
@@ -162,10 +163,25 @@ __all__ = [
     "swap_module",
     "weight_observer_range_neg_127_to_127",
     "generate_numeric_debug_handle",
+    "CUSTOM_KEY",
     "NUMERIC_DEBUG_HANDLE_KEY",
     "prepare_for_propagation_comparison",
     "extract_results_from_loggers",
     "compare_results",
+    # from torchao, should be merged with torchao
+    # in the future
+    "AffineQuantizedObserverBase",
+    "Granularity",
+    "MappingType",
+    "PerAxis",
+    "PerBlock",
+    "PerGroup",
+    "PerRow",
+    "PerTensor",
+    "PerToken",
+    "TorchAODType",
+    "ZeroPointDomain",
+    "get_block_size",
 ]
 
 
@@ -175,7 +191,7 @@ def default_eval_fn(model, calib_data):
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    for data, target in calib_data:
+    for data, _target in calib_data:
         model(data)
 
 
@@ -187,9 +203,9 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
     def __init__(
         self,
         dtype: torch.dtype,
-        obs_or_fqs: List[ObserverOrFakeQuantize],
+        obs_or_fqs: list[ObserverOrFakeQuantize],
         derive_qparams_fn: Callable[
-            [List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]
+            [list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
         ],
         quant_min: Optional[int] = None,
         quant_max: Optional[int] = None,
@@ -214,5 +230,5 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
     def forward(self, x: Tensor) -> Tensor:
         return x
 
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type:ignore[override]
         return self.derive_qparams_fn(self.obs_or_fqs)

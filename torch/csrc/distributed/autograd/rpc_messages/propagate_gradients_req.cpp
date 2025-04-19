@@ -4,9 +4,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using rpc::Message;
 using rpc::MessageType;
@@ -65,10 +63,8 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   bool retainGraph = tupleElements.back().toBool();
 
   // Build AutogradMetadata.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t autogradContextId, autogradMessageId;
-  autogradMessageId = tupleElements[tupleElements.size() - 2].toInt();
-  autogradContextId = tupleElements[tupleElements.size() - 3].toInt();
+  int64_t autogradMessageId = tupleElements[tupleElements.size() - 2].toInt();
+  int64_t autogradContextId = tupleElements[tupleElements.size() - 3].toInt();
 
   AutogradMetadata autogradMetadata(autogradContextId, autogradMessageId);
 
@@ -95,6 +91,4 @@ bool PropagateGradientsReq::retainGraph() {
   return retainGraph_;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

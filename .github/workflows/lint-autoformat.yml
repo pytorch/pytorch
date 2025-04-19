@@ -1,0 +1,46 @@
+name: Apply lint suggestions
+
+on:
+
+  push:
+    tags:
+      - ciflow/autoformat/*
+
+jobs:
+  lintrunner-autoformat:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: lf.linux.2xlarge
+    if: ${{ github.repository_owner == 'pytorch' && github.event.pull_request.user.login != 'ezyang' && github.event.pull_request.user.login != 'malfet' && !startsWith(github.head_ref, 'export-') }}
+    steps:
+      - name: Checkout pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+          fetch-depth: 0
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: "3.10"
+      - name: Run lintrunner (nonretryable)
+        continue-on-error: true
+        # we can't run all files here because only changes around where the diff are shown in the PR UI
+        run: |
+          export ADDITIONAL_LINTRUNNER_ARGS="format"
+          bash .github/scripts/lintrunner.sh
+      - name: Check for changes
+        id: git-check
+        continue-on-error: true
+        run: |
+          git diff --exit-code || echo "changes=true" >> "$GITHUB_OUTPUT"
+      - name: Suggest changes
+        if: steps.git-check.outputs.changes == 'true'
+        continue-on-error: true
+        uses: parkerbxyz/suggest-changes@v1
+        with:
+          comment: "Please commit the suggested changes from pytorch's linter."
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

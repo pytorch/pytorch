@@ -3,7 +3,7 @@ import ast
 import functools
 import inspect
 from textwrap import dedent
-from typing import Any, List, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 
 from torch._C import ErrorReport
 from torch._C._jit_tree_views import SourceRangeFactory
@@ -12,7 +12,7 @@ from torch._C._jit_tree_views import SourceRangeFactory
 def get_source_lines_and_file(
     obj: Any,
     error_msg: Optional[str] = None,
-) -> Tuple[List[str], int, Optional[str]]:
+) -> tuple[list[str], int, Optional[str]]:
     """
     Wrapper around inspect.getsourcelines and inspect.getsourcefile.
 
@@ -35,7 +35,7 @@ def get_source_lines_and_file(
     return sourcelines, file_lineno, filename
 
 
-def normalize_source_lines(sourcelines: List[str]) -> List[str]:
+def normalize_source_lines(sourcelines: list[str]) -> list[str]:
     """
     This helper function accepts a list of source lines. It finds the
     indentation level of the function definition (`def`), then it indents
@@ -100,7 +100,7 @@ class SourceContext(SourceRangeFactory):
         self.funcname = funcname
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def make_source_context(*args):
     return SourceContext(*args)
 

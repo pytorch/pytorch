@@ -55,4 +55,53 @@ class TensorRepr(gdb.Command):  # type: ignore[misc, no-any-unimported]
             gdb.parse_and_eval(f"(void)free({int(res)})")
 
 
+class IntArrayRefRepr(gdb.Command):  # type: ignore[misc, no-any-unimported]
+    """
+    Print human readable representation of c10::IntArrayRef
+    """
+
+    def __init__(self) -> None:
+        gdb.Command.__init__(
+            self, "torch-int-array-ref-repr", gdb.COMMAND_USER, gdb.COMPLETE_EXPRESSION
+        )
+
+    def invoke(self, args: str, from_tty: bool) -> None:
+        args = gdb.string_to_argv(args)
+        if len(args) != 1:
+            print("Usage: torch-int-array-ref-repr EXP")
+            return
+        name = args[0]
+        with DisableBreakpoints():
+            res = gdb.parse_and_eval(f"torch::gdb::int_array_ref_string({name})")
+            res = str(res)
+            print(res[res.find('"') + 1 : -1])
+
+
+class DispatchKeysetRepr(gdb.Command):  # type: ignore[misc, no-any-unimported]
+    """
+    Print human readable representation of c10::DispatchKeyset
+    """
+
+    def __init__(self) -> None:
+        gdb.Command.__init__(
+            self,
+            "torch-dispatch-keyset-repr",
+            gdb.COMMAND_USER,
+            gdb.COMPLETE_EXPRESSION,
+        )
+
+    def invoke(self, args: str, from_tty: bool) -> None:
+        args = gdb.string_to_argv(args)
+        if len(args) != 1:
+            print("Usage: torch-dispatch-keyset-repr EXP")
+            return
+        keyset = args[0]
+        with DisableBreakpoints():
+            res = gdb.parse_and_eval(f"torch::gdb::dispatch_keyset_string({keyset})")
+            res = str(res)
+            print(res[res.find('"') + 1 : -1])
+
+
 TensorRepr()
+IntArrayRefRepr()
+DispatchKeysetRepr()

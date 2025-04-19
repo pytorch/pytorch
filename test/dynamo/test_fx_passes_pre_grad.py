@@ -24,7 +24,7 @@ class FxPassesPreGradTests(torch._dynamo.test_case.TestCase):
         sample_input = torch.randn(4, 4)
         m = TestModule()
         m(sample_input)
-        exported_program = torch.export.export(m, (sample_input,))
+        exported_program = torch.export.export(m, (sample_input,), strict=True)
         gm = exported_program.graph_module
 
         pass_execution_and_save(fx_pass, gm, sample_input, "Apply testing pass")

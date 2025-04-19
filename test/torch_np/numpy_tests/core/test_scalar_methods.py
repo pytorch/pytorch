@@ -7,7 +7,7 @@ import fractions
 import functools
 import sys
 import types
-from typing import Any, Type
+from typing import Any
 from unittest import skipIf as skipif, SkipTest
 
 import pytest
@@ -165,7 +165,6 @@ class TestIsInteger(TestCase):
 
 
 @skip(reason="XXX: implementation details of the type system differ")
-@skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     @parametrize(
@@ -179,7 +178,7 @@ class TestClassGetItem(TestCase):
             np.floating,
         ],
     )
-    def test_abc(self, cls: Type[np.number]) -> None:
+    def test_abc(self, cls: type[np.number]) -> None:
         alias = cls[Any]
         assert isinstance(alias, types.GenericAlias)
         assert alias.__origin__ is cls
@@ -200,7 +199,7 @@ class TestClassGetItem(TestCase):
                 np.complexfloating[arg_tup]
 
     @parametrize("cls", [np.generic])
-    def test_abc_non_numeric(self, cls: Type[np.generic]) -> None:
+    def test_abc_non_numeric(self, cls: type[np.generic]) -> None:
         with pytest.raises(TypeError):
             cls[Any]
 
@@ -227,9 +226,8 @@ class TestClassGetItem(TestCase):
 class TestClassGetitemMisc(TestCase):
     @skipif(sys.version_info >= (3, 9), reason="Requires python 3.8")
     @parametrize("cls", [np.number, np.complexfloating, np.int64])
-    def test_class_getitem_38(self, cls: Type[np.number]) -> None:
-        match = "Type subscription requires python >= 3.9"
-        with pytest.raises(TypeError):  # , match=match):
+    def test_class_getitem_38(self, cls: type[np.number]) -> None:
+        with pytest.raises(TypeError):
             cls[Any]
 
 

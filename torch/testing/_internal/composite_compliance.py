@@ -136,10 +136,21 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             if elem.requires_grad:
                 # CompositeCompliantTensor steals the "requires_grad"-ness.
                 # Why a new copy of `elem`? Because sometimes OpInfo shares inputs between tests...
-                tmp = torch.empty_strided(elem.shape, elem.stride(), dtype=elem.dtype,
-                                          device=elem.device, layout=elem.layout,
-                                          requires_grad=False)
-                tmp.copy_(elem.detach())
+                tmp = torch.empty(
+                    (),
+                    dtype=elem.dtype,
+                    device=elem.device,
+                    layout=elem.layout,
+                    requires_grad=False,
+                )
+                # Use set_ rather than empty_strided() + copy_ so that we can preserve
+                # things like storage_offset.
+                tmp.set_(
+                    source=elem.untyped_storage().clone(),
+                    storage_offset=elem.storage_offset(),
+                    size=elem.size(),
+                    stride=elem.stride(),
+                )
                 r.elem = tmp
             else:
                 r.elem = elem
@@ -402,8 +413,8 @@ def check_with_mode(op, args, kwargs, assert_equal_fn):
 
 def gather_leaf_tensors(args, kwargs):
     leaf_tensors = []
-    args, args_spec = tree_flatten(args)
-    kwargs, kwargs_spec = tree_flatten(kwargs)
+    args, _args_spec = tree_flatten(args)
+    kwargs, _kwargs_spec = tree_flatten(kwargs)
     args = args + kwargs
     for arg in args:
         if not isinstance(arg, torch.Tensor):

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 
 import torch.nn.functional as F
 from torch import Tensor
@@ -108,11 +108,22 @@ class MaxPool1d(_MaxPoolNd):
 
     Shape:
         - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
-        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`,
+
+          where ``ceil_mode = False``
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
-                    \times (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+                   \times (\text{kernel\_size} - 1) - 1}{\text{stride}}\right\rfloor + 1
+
+          where ``ceil_mode = True``
+
+          .. math::
+              L_{out} = \left\lceil \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1 + (stride - 1)}{\text{stride}}\right\rceil + 1
+
+        - Ensure that the last pooling starts inside the image, make :math:`L_{out} = L_{out} - 1`
+          when :math:`(L_{out} - 1) * \text{stride} >= L_{in} + \text{padding}`.
 
     Examples::
 
@@ -384,7 +395,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
         self.padding = _single(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         return F.max_unpool1d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
@@ -479,7 +490,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
         self.padding = _pair(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         return F.max_unpool2d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
@@ -557,7 +568,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
         self.padding = _triple(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         return F.max_unpool3d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size

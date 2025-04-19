@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 from torch import _C, _ops, autograd, Tensor
 from torch.utils import _pytree
@@ -28,7 +28,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     @dataclass
     class Metadata:
         keyset: _C.DispatchKeySet
-        keyword_only_args: Dict[str, Any]
+        keyword_only_args: dict[str, Any]
 
     def forward_no_grad(*args):
         metadata = args[-1]

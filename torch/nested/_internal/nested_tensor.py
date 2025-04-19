@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 from typing import *  # noqa: F403
-from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
+from torch.nested._internal.nested_int import NestedIntNode
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -25,7 +25,7 @@ def get_tensor_symint(tensor, *, coeff=1):
 
     tensor_symint = _tensor_symint_registry.get(tensor)
     if tensor_symint is None:
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
+        tensor_symint = torch.SymInt(NestedIntNode(_tensor_id_counter, coeff))
         _tensor_id_counter += 1
         _tensor_symint_registry[tensor] = tensor_symint
     return tensor_symint
@@ -43,6 +43,11 @@ def _store_val_in_tensor(val) -> torch.Tensor:
 
 def _load_val_from_tensor(t: torch.Tensor):
     return t.shape[0]
+
+
+# serialization function must be defined at top level
+def _rebuild_njt(constructor_kwargs):
+    return NestedTensor(**constructor_kwargs)
 
 
 class NestedTensor(torch.Tensor):
@@ -63,8 +68,8 @@ class NestedTensor(torch.Tensor):
     # We also use nested ints to represent the strides of this tensor.
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
-    _size: Tuple[int, ...]
-    _strides: Tuple[int, ...]
+    _size: tuple[int, ...]
+    _strides: tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     _metadata_cache: Dict[str, Any]
@@ -209,7 +214,19 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
-    def __repr__(self):
+    # Convenience accessors that return a min / max seqlen if one is present and do NOT
+    # compute / cache them if they're not.
+    @property
+    def _maybe_max_seqlen(self) -> Optional[int]:
+        mt = self._max_seqlen_tensor
+        return None if mt is None else _load_val_from_tensor(mt)
+
+    @property
+    def _maybe_min_seqlen(self) -> Optional[int]:
+        mt = self._min_seqlen_tensor
+        return None if mt is None else _load_val_from_tensor(mt)
+
+    def __repr__(self):  # type: ignore[override]
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
             f", requires_grad={self.requires_grad}" if self.requires_grad else ""
@@ -218,18 +235,30 @@ class NestedTensor(torch.Tensor):
             grad_fn_str = f", grad_fn={self.grad_fn}"
         return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
 
+    # TODO: Remove this in favor of the default tensor subclass serialization logic.
+    # We don't do this today because of https://github.com/pytorch/pytorch/issues/125622.
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)
 
+        # Cached PyCapsules for sizes / strides are not serializable.
+        # See Note [Tensor Subclass custom size/stride caching strategy]
+        self._clear_non_serializable_cached_data()
         # SymNodes are not serializable
         assert "_size" in state and "_strides" in state
         state = dict(state)
         del state["_size"]
         del state["_strides"]
 
-        # TODO: Update this to handle the other inner tensors
-        func = NestedTensor
-        args = (self._values, self._offsets)
+        func = _rebuild_njt
+        constructor_kwargs = {
+            "values": self._values,
+            "offsets": self._offsets,
+            "lengths": self._lengths,
+            "_ragged_idx": self._ragged_idx,
+            "_metadata_cache": self._metadata_cache,
+            "requires_grad": self.requires_grad,
+        }
+        args = (constructor_kwargs,)
         return (torch._tensor._rebuild_from_type_v2, (func, type(self), args, state))
 
     def __tensor_flatten__(self):
@@ -283,6 +312,8 @@ class NestedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # If you're wondering why there's a nested tensor with one of its
+        # size = -1, see note: [NJT outer_size in AOTDispatcher]
         kwargs = {} if kwargs is None else kwargs
 
         # Lazy import to avoid circular dependency
@@ -291,6 +322,20 @@ class NestedTensor(torch.Tensor):
         fn = lookup_jagged(func, *args, **kwargs)
         if fn is not None:
             return fn(*args, **kwargs)
+
+        # Poor man's redispatch for composite ops. This becomes relevant under inference
+        # mode, where disabling autograd key dispatch prevents decomposition.
+        all_dks = (
+            # We want to handle both the cases where NestedTensor overrides the
+            # composite implicit autograd kernel, and the case where it doesn't.
+            # Prioritize calling into NestedTensor's kernel if it exists.
+            torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor,
+            torch._C.DispatchKey.CompositeImplicitAutograd,
+        )
+        for dk in all_dks:
+            if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+                with torch.overrides.enable_reentrant_dispatch():
+                    return func._op_dk(dk, *args, **kwargs)
 
         raise NotImplementedError(func)
 
@@ -378,9 +423,11 @@ def jagged_from_list(
     offsets: Optional[torch.Tensor],
     dtype=None,
     device=None,
-) -> Tuple[NestedTensor, torch.Tensor]:
+) -> tuple[NestedTensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
 
+    if len(tensors) == 0:
+        raise RuntimeError("Cannot construct a nested tensor from an empty tensor list")
     if not len(set(t.dtype for t in tensors)) == 1:  # noqa: C401
         raise RuntimeError(
             "When constructing a nested tensor, all tensors in list must have the same dtype"
@@ -389,22 +436,40 @@ def jagged_from_list(
         raise RuntimeError(
             "When constructing a nested tensor, all tensors in list must be on the same device"
         )
-
-    # Check that the NT is representable by the jagged layout.
-    # Jagged layout represents (B, *, D_0, D_1, ..., D_N), where the only
-    # raggedness allowed is for the single dim immediately adjacent to the batch dim.
-    sizes = [t.shape for t in tensors]
-    non_first_sizes = [s[1:] for s in sizes]
-    at_most_first_ragged = all(s == non_first_sizes[0] for s in non_first_sizes)
-    if not at_most_first_ragged:
+    if not len(set(t.dim() for t in tensors)) == 1:  # noqa: C401
         raise RuntimeError(
-            "Cannot represent given tensor list as a nested tensor with the jagged layout. "
-            "Note that the jagged layout only represents shapes of the form "
-            "(B, *, D_0, D_1, ..., D_N), with only * allowed to be ragged."
+            "When constructing a nested tensor, all tensors in list must have the same dim"
+        )
+    component_dim = tensors[0].dim()
+    if component_dim == 0:
+        raise RuntimeError(
+            "Cannot construct a nested tensor from a list of zero-dim tensors"
         )
 
+    # Check that the NT is representable by the jagged layout, which
+    # allows for a single ragged dimension after the batch dim.
+    # e.g. (B, *, D_0, ..., D_N), (B, D_0, *, ..., D_N), etc.
+    sizes = [t.shape for t in tensors]
+    ragged_idx = None
+    for d in range(component_dim):
+        dim_is_ragged = any(size[d] != sizes[0][d] for size in sizes)
+        if dim_is_ragged:
+            if ragged_idx is None:
+                # add 1 to convert to outer NJT dim space
+                ragged_idx = d + 1
+            else:
+                raise RuntimeError(
+                    "Cannot represent given tensor list as a nested tensor with the jagged layout. "
+                    "Note that the jagged layout only allows for a single ragged dimension. "
+                    "For example: (B, *, D_0, D_1, ..., D_N), with ragged * dim."
+                )
+
+    # allow for a rectangular NJT and default the ragged dim next to the batch dim
+    if ragged_idx is None:
+        ragged_idx = 1
+
     # Set properties appropriately.
-    values = torch.cat(tensors, dim=0)
+    values = torch.cat(tensors, dim=(ragged_idx - 1))
     to_kwargs = {}
     if device is not None:
         to_kwargs["device"] = device
@@ -420,22 +485,28 @@ def jagged_from_list(
         offsets = torch.cat(
             [
                 torch.zeros(1, dtype=torch.int64, device=values.device),
-                torch.tensor([s[0] for s in sizes], device=values.device).cumsum(dim=0),
+                torch.tensor(
+                    [s[ragged_idx - 1] for s in sizes], device=values.device
+                ).cumsum(dim=0),
             ]
         )
 
     # compute this now since it's easy
-    min_seqlen = min(t.shape[0] for t in tensors)
-    max_seqlen = max(t.shape[0] for t in tensors)
+    min_seqlen = min(t.shape[ragged_idx - 1] for t in tensors)
+    max_seqlen = max(t.shape[ragged_idx - 1] for t in tensors)
     ret_nt = nested_view_from_values_offsets(
-        values, offsets, min_seqlen=min_seqlen, max_seqlen=max_seqlen
+        values,
+        offsets,
+        min_seqlen=min_seqlen,
+        max_seqlen=max_seqlen,
+        ragged_idx=ragged_idx,
     )
     return (ret_nt, offsets)  # type: ignore[return-value]
 
 
 def jagged_from_tensor_and_lengths(
     tensor: torch.Tensor, starts: torch.Tensor, lengths: torch.Tensor
-) -> Tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
     """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
     batch_size = tensor.shape[0]
     if is_expandable_to(starts.shape, (batch_size,)) and is_expandable_to(
@@ -562,3 +633,25 @@ def nested_view_from_values_offsets_lengths(
         min_seqlen_tensor,
         max_seqlen_tensor,
     )  # type: ignore[return-value]
+
+
+def nested_from_padded(
+    padded, offsets, ragged_idx=1, min_seqlen=None, max_seqlen=None, sum_S=None
+):
+    min_seqlen_tensor = None
+    if min_seqlen is not None:
+        min_seqlen_tensor = _store_val_in_tensor(min_seqlen)
+
+    max_seqlen_tensor = None
+    if max_seqlen is not None:
+        max_seqlen_tensor = _store_val_in_tensor(max_seqlen)
+
+    return torch._nested_from_padded_tensor(
+        padded,
+        offsets,
+        _nt_view_dummy(),
+        ragged_idx,
+        min_seqlen_tensor,
+        max_seqlen_tensor,
+        sum_S,
+    )

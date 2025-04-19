@@ -40,7 +40,7 @@ echo "Building PyTorch C++ API docs..."
 rm -rf cppdocs
 git clone https://github.com/pytorch/cppdocs
 
-set -ex
+set -ex -o pipefail
 
 # Generate ATen files
 pushd "${pt_checkout}"

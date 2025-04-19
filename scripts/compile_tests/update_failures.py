@@ -194,7 +194,7 @@ if __name__ == "__main__":
         "filename",
         nargs="?",
         default=str(
-            Path(__file__).absolute().parent.parent.parent
+            Path(__file__).absolute().parents[2]
             / "torch/testing/_internal/dynamo_test_failures.py"
         ),
         help="Optional path to dynamo_test_failures.py",
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "test_dir",
         nargs="?",
-        default=str(Path(__file__).absolute().parent.parent.parent / "test"),
+        default=str(Path(__file__).absolute().parents[2] / "test"),
         help="Optional path to test folder",
     )
     parser.add_argument(
@@ -221,5 +221,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     assert Path(args.filename).exists(), args.filename
     assert Path(args.test_dir).exists(), args.test_dir
-    dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
-    update(args.filename, args.test_dir, dynamo38, dynamo311, args.also_remove_skips)
+    dynamo39, dynamo311 = download_reports(args.commit, ("dynamo39", "dynamo311"))
+    update(args.filename, args.test_dir, dynamo39, dynamo311, args.also_remove_skips)

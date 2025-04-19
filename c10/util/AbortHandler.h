@@ -47,6 +47,8 @@ class AbortHandlerHelper {
  public:
   AbortHandlerHelper(AbortHandlerHelper const&) = delete;
   void operator=(AbortHandlerHelper const&) = delete;
+  AbortHandlerHelper(AbortHandlerHelper&&) = delete;
+  void operator=(AbortHandlerHelper&&) = delete;
 };
 
 namespace detail {

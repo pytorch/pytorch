@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 import functools
 from contextlib import contextmanager
-from typing import Callable, Dict
+from typing import Callable
 
 import torch
 from torch._decomp import decomposition_table
 from torch.utils._pytree import tree_map_only
 
 
-HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
+HANDLED_FUNCTIONS: dict[Callable, torch.autograd.Function] = {}
 
 aten = torch._ops.ops.aten
 # __torch_function__ runs before the pydispatcher so we need to manually use the same

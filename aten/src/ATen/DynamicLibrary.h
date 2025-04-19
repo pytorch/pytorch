@@ -16,6 +16,8 @@ namespace at {
 
 struct DynamicLibrary {
   AT_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary);
+  DynamicLibrary(DynamicLibrary&& other) = delete;
+  DynamicLibrary& operator=(DynamicLibrary&&) = delete;
 
   TORCH_API DynamicLibrary(
       const char* name,

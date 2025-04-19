@@ -28,7 +28,7 @@ void initCommMethods(PyObject* module) {
        py::call_guard<py::gil_scoped_release>())
       .def(
           "_broadcast",
-          [](at::Tensor& tensor, std::vector<int64_t> devices) {
+          [](at::Tensor& tensor, const std::vector<int64_t>& devices) {
             return broadcast(tensor, devices);
           },
           py::call_guard<py::gil_scoped_release>(),
@@ -46,7 +46,7 @@ void initCommMethods(PyObject* module) {
           "_scatter",
           [](at::Tensor& tensor,
              std::vector<int64_t>& devices,
-             std::optional<std::vector<int64_t>> chunk_sizes,
+             const std::optional<std::vector<int64_t>>& chunk_sizes,
              int64_t dim,
              std::optional<py::object> py_streams) {
             std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>

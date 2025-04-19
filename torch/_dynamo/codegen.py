@@ -1,14 +1,29 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides utilities for generating Python bytecode in PyTorch's Dynamo system.
+It includes functionality for:
+- Constructing bytecode sequences for Python operations
+- Managing stack operations and variable tracking
+- Handling graph outputs and their conversions
+- Supporting different Python versions (3.11+, 3.12+, 3.13+)
+- Converting high-level operations to low-level bytecode instructions
+- Managing constant loading and attribute access
+- Supporting function creation and closure handling
+"""
+
 import collections
 import dataclasses
 import re
 import sys
 import types
-from typing import Counter, Dict, List, Optional
+from collections import Counter
+from typing import Optional, Union
 
 import torch.nn
+from torch.utils._ordered_set import OrderedSet
 
-from . import utils
+from . import graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
@@ -16,14 +31,19 @@ from .bytecode_transformation import (
     create_call_method,
     create_dup_top,
     create_instruction,
+    create_load_const,
     create_load_method,
     create_rot_n,
     Instruction,
 )
-from .exc import unimplemented
-from .source import AttrSource, Source
+from .exc import IncorrectUsage, unimplemented_v2
+from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
-from .variables.base import VariableTracker
+from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.functions import (
+    ContextlibContextManagerLocalGeneratorObjectVariable,
+    LocalGeneratorObjectVariable,
+)
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -51,30 +71,35 @@ class PyCodegen:
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
+        overridden_sources=None,
     ) -> None:
         self.root = root
-        self.top_of_stack: Optional[VariableTracker] = None
+        self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
         self.uses: Counter[VariableTracker] = collections.Counter()
-        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
-        self._output: List[Instruction] = []
+        self.graph_outputs: dict[int, GraphOutputEntry] = {}
+        self._output: list[Instruction] = []
+        # This determines which VariableTracker/Source should be stored as
+        # locals, and maps the VariableTracker/Source to the local variable
+        # name. Note that it could map to None initially, in which case we'll
+        # overwrite it to map to real temporary names via `add_cache`.
         self.tempvars = tempvars or {}
         self.tx = tx
         self.graph_output_var = graph_output_var
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
-        self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
+        # This serves as a way for codegen to use a different source; we need
+        # this because sometimes we can't easily modify the original source
+        # without affecting other components, e.g., guards.
+        self.overridden_sources: dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
-        prior = self.mutable_side_effects_from_source
-        self.mutable_side_effects_from_source = True
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
         finally:
-            self.mutable_side_effects_from_source = prior
             self.value_from_source = prev
 
     def graph_output_vars(self):
@@ -114,46 +139,129 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(self, value, allow_cache=True):
-        """Generate code such that top-of-stack (TOS) is set to value"""
+        """
+        Generate code such that top-of-stack (TOS) is set to value.
+
+        `allow_cache` controls the behavior in the following manner. `value` can
+        either be a VariableTracker or a Source.
+
+        If `value` is a `Source`, `allow_cache` must be True (invariant asserted
+        below). If the source was reconstructed earlier, we will reuse the
+        generated code by loading from top of stack or tempvars.
+
+        If `value` is a `VariableTracker`, we have the following cases:
+
+        1) `allow_cache=True`
+            a) If the value.source is not None, we will emit the code based on
+            `value.source` to handle aliasing.
+            b) If value.source is None (example reconstructing a local list
+            returned by the compiled function), we will reconstruct the variable
+            tracker (w/o any source) to emit bytecode that generates a new
+            python object.
+
+            In both cases of value.source being None or not, if the value was
+            reconstructed earlier, we will reuse the generated code by loading from
+            top of stack or tempvars.
+
+        2) `allow_cache=False` - This is a special case (allow_cache defaults to
+        True).
+            a) If the value.source is not None, we reconstruct the variable
+            tracker and emit a new python object. You might wonder what about
+            aliasing? The place where we use this config also has the followup
+            code where the original python object is assigned to this new python
+            value to handle aliasing (check side_effects.py and search for
+            allow_cache=False).
+
+            b) If value.source is None, this is not allowed. TODO - assert this.
+
+        Notable effects:
+        1. `self.top_of_stack` will be set to `value`, if we don't codegen
+           `value` based on source.
+        2. `self.uses[value]` will increment, if we don't codegen `value` based
+           on source or cache/top-of-stack reuse; in other words, if we codegen
+           as if `value` is modelling some brand new python value.
+        """
         if isinstance(value, Source):
-            self.call_reconstruct(value)
-            self.clear_tos()
+            # If the source needs to be overridden, use the new one.
+            source = self.overridden_sources.get(value, value)
+            assert allow_cache is True, "allow_cache must be True for Source"
+            if self.top_of_stack is value:
+                self._output.append(create_dup_top())
+                return
+
+            if self.tempvars.get(source) is not None:
+                self._output.append(self.create_load(self.tempvars[source]))
+                self.top_of_stack = source
+                return
+
+            try:
+                self.call_reconstruct(source)
+            except NotImplementedError:
+                unimplemented_v2(
+                    gb_type="Reconstruction failure: source.reconstruct not implemented",
+                    context=str(source),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
+
+            self._output.append(create_dup_top())
+            self.add_cache(source)
+            self.top_of_stack = source
+
             return
 
         assert isinstance(value, VariableTracker)
         output = self._output
         graph_outputs = self.graph_outputs
 
-        if self.top_of_stack is value and allow_cache:
-            output.append(create_dup_top())
-            return
-
-        if self.mutable_side_effects_from_source:
-            # this is needed to get aliasing relationships right
-            # value.mutable_local.source will get mutated to hold `value`
-            # mutable_side_effects_from_source=False is used to codegen the mutation
-            # mutable_side_effects_from_source=True is used to codegen a reference
-            from .side_effects import MutableSideEffects
-
-            if isinstance(value.mutable_local, MutableSideEffects):
-                self(value.mutable_local.source)
-                return
-
         if allow_cache:
-            if value.mutable_local and value.mutable_local in self.tempvars:
-                output.append(self.create_load(self.tempvars[value.mutable_local]))
-                self.top_of_stack = value
+            if self.top_of_stack is value:
+                output.append(create_dup_top())
                 return
+
             if self.tempvars.get(value) is not None:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache and self.value_from_source:
-            self.call_reconstruct(value.source)
-        elif value.is_python_constant() and is_safe_constant(
-            value.as_python_constant()
+        if value.is_realized() and isinstance(
+            value, ContextlibContextManagerLocalGeneratorObjectVariable
         ):
+            raise IncorrectUsage(
+                "NYI: Returning a @contextmanager object from a torch.compile function"
+            )
+
+        # Dynamo normally prefers codegen from source to account for aliasing.
+        if (
+            value.source is not None
+            and allow_cache
+            and not (
+                value.is_realized() and isinstance(value, LocalGeneratorObjectVariable)
+            )
+        ):
+            # There's a corner case for export: for instance, if the computation
+            # graph is just identity on an input tensor, Dynamo would just emit
+            # a `LOAD_FAST` from the input source, rather than generating an
+            # identity FX graph.
+            #
+            # However, export wants to maximize graph capture; in the case
+            # above, export _wants to_ obtain an identity FX graph (despite it
+            # appears unnecessarily expensive for `torch.compile`), so we have
+            # the following option to override Dynamo's preference for codegen
+            # from source. Morever, this option applies recursively, for cases
+            # like input tensor being returned in a new dictionary.
+            #
+            # And why the `ValueMutationExisting` check? Not sure, so leaving it
+            # to keep the old behavior, as when `value_from_source` was
+            # introduced. TODO sort out the invariants among side effect,
+            # codegen and export.
+            if (
+                isinstance(value.mutation_type, ValueMutationExisting)
+                or self.value_from_source
+            ):
+                return self(value.source)
+
+        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
@@ -180,7 +288,9 @@ class PyCodegen:
             # NB: It works to add_graph_output on a computed expression
             # as_tensor here, because we memoize as_tensor calls on
             # SymNodeVariable!
-            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
+            graph_outputs_key = self.add_graph_output(
+                value.as_tensor(self.tx, torch.float64)
+            )
 
             def gen_fn():
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
@@ -222,7 +332,7 @@ class PyCodegen:
                 parts = parts[1:]
             else:
                 assert self.root is not None
-                output.append(self.create_load_output(self.root))
+                output.append(self.create_load_const_unchecked(self.root))
             for part in parts:
                 output.append(self.create_load_attr(part))
         else:
@@ -230,7 +340,18 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {value}")
+                unimplemented_v2(
+                    gb_type="Reconstruction failure",
+                    context=str(value),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
+                    hints=[
+                        "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
+                        "that Dynamo cannot reconstruct, then remove it from the return statement.",
+                        *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have"
+                        "reconstruction rules may be fundamentally unreconstructable.",
+                    ],
+                )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
@@ -248,19 +369,20 @@ class PyCodegen:
     def load_graph_output(self, index):
         output = self._output
         output.append(self.create_load(self.graph_output_var))
-        output.append(self._create_load_const(index))
-        output.append(create_instruction("BINARY_SUBSCR"))
+        output.append(self.create_load_const(index))
+        output.append(self.create_binary_subscr())
 
     def add_cache(self, value):
         var = self.new_var()
         self.tempvars[value] = var
-        if value.mutable_local:
-            self.tempvars[value.mutable_local] = var
         self._output.append(self.create_store(var))
 
     def foreach(self, items):
         for i in items:
             self(i)
+
+    def create_binary_subscr(self) -> Instruction:
+        return create_instruction("BINARY_SUBSCR")
 
     def setup_globally_cached(self, name, value):
         """Store value in a new global"""
@@ -285,12 +407,10 @@ class PyCodegen:
         self._output.extend(insts)
         self.clear_tos()
 
-    def get_instructions(self) -> List[Instruction]:
+    def get_instructions(self) -> list[Instruction]:
         return self._output
 
     def create_load(self, name) -> Instruction:
-        if name in self.cell_and_freevars():
-            return create_instruction("LOAD_DEREF", argval=name)
         assert name in self.code_options["co_varnames"], f"{name} missing"
         return create_instruction("LOAD_FAST", argval=name)
 
@@ -299,11 +419,17 @@ class PyCodegen:
         inst_name = "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
         return create_instruction(inst_name, argval=name)
 
+    def create_load_deref(self, name) -> Instruction:
+        assert name in self.cell_and_freevars()
+        return create_instruction("LOAD_DEREF", argval=name)
+
     def create_store(self, name) -> Instruction:
-        if name in self.cell_and_freevars():
-            return create_instruction("STORE_DEREF", argval=name)
-        assert name in self.code_options["co_varnames"]
+        assert name in self.code_options["co_varnames"], f"{name} missing"
         return create_instruction("STORE_FAST", argval=name)
+
+    def create_store_deref(self, name) -> Instruction:
+        assert name in self.cell_and_freevars()
+        return create_instruction("STORE_DEREF", argval=name)
 
     def create_load_global(self, name, add=False) -> Instruction:
         if add:
@@ -312,13 +438,10 @@ class PyCodegen:
         return create_instruction("LOAD_GLOBAL", argval=name)
 
     def create_load_const(self, value) -> Instruction:
-        assert is_safe_constant(value), f"unsafe constant {value}"
-        return self._create_load_const(value)
+        return create_load_const(value)
 
-    def _create_load_const(self, value) -> Instruction:
-        return create_instruction("LOAD_CONST", argval=value)
-
-    create_load_output = _create_load_const
+    def create_load_const_unchecked(self, value) -> Instruction:
+        return create_load_const(value, checked=False)
 
     def load_method(self, name):
         self.tx.output.update_co_names(name)
@@ -374,7 +497,7 @@ class PyCodegen:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
             return [
                 create_instruction("BUILD_TUPLE", arg=n),
-                self._create_load_const(rot_n_helper(n)),
+                self.create_load_const_unchecked(rot_n_helper(n)),
                 *create_rot_n(2),
                 create_instruction("CALL_FUNCTION_EX", arg=0),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
@@ -385,7 +508,7 @@ class PyCodegen:
         # nop function, calling it (which consumes the null), and popping the result.
         assert sys.version_info >= (3, 11)
         return [
-            self._create_load_const(lambda: None),
+            self.create_load_const_unchecked(lambda: None),
             # 3.13 swapped NULL and callable
             *(
                 (create_instruction("SWAP", arg=2),)
@@ -408,6 +531,9 @@ class PyCodegen:
     def store(self, varname):
         self.append_output(self.create_store(varname))
 
+    def load_deref(self, varname):
+        self.append_output(self.create_load_deref(varname))
+
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
     ):
@@ -416,12 +542,13 @@ class PyCodegen:
         output = self._output
 
         def gen_fn():
+            # Emitting `LOAD_FAST/LOAD_CLOSURE` with names in `co_freevars`
+            # requires that in the generated bytecode, these cells would keep
+            # their original local names, which we ensure via
+            # `CellVariable.local_name`.
             for var in freevars:
                 assert var in self.cell_and_freevars()
-                inst_name = (
-                    "LOAD_FAST" if sys.version_info >= (3, 13) else "LOAD_CLOSURE"
-                )
-                output.append(create_instruction(inst_name, argval=var))
+                output.append(self.create_load_closure(var))
             output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
             output.append(self.create_load_const(code))
             if sys.version_info < (3, 11):
@@ -458,18 +585,53 @@ class PyCodegen:
         global_name = self.tx.output.install_global_by_id(prefix, mod)
         return self.create_load_global(global_name, add=True)
 
+    def mark_source_temp(self, source: Source) -> None:
+        """
+        Mark a source as a temp variable, so that it can be reused.
+        """
+        if source not in self.tempvars:
+            self.tempvars[source] = None
+
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
 
         graphargs = self.tx.output.graphargs
+
+        seen_sources: OrderedSet[Source] = OrderedSet()
+
+        def collect_temp_source(source):
+            if source in seen_sources:
+                # This source is used atleast twice, so it can be reused
+                self.mark_source_temp(source)
+                # Dont trace source further. This prevents us from marking too
+                # many nodes as temp sources.
+                return
+
+            seen_sources.add(source)
+
+            if isinstance(source, ChainedSource):
+                collect_temp_source(source.base)
+
+            if isinstance(source, DictGetItemSource) and isinstance(
+                source.index, Source
+            ):
+                collect_temp_source(source.index)
+
+        # Collect all the sources that are used more than once, so that we can
+        # generate tmp variables in the generated pre-graph bytecode. This
+        # essentially implements CSE.
+        for arg in graphargs:
+            if arg.source is not None:
+                collect_temp_source(arg.source)
+
         for arg in graphargs:
             if arg.pass_arg_as_tensor:
                 self.add_push_null(
                     lambda: self.extend_output(
                         [
                             self.create_load_python_module(torch),
-                            self.create_load_attr("as_tensor"),
+                            self.create_load_attr("_as_tensor_fullprec"),
                         ]
                     )
                 )
@@ -481,9 +643,15 @@ class PyCodegen:
         self.extend_output(create_call_function(len(graphargs), False))
 
     def load_import_from(self, module_name, object_name) -> None:
-        self(AttrSource(self.tx.import_source(module_name), object_name))
+        source = AttrSource(self.tx.import_source(module_name), object_name)
+        # Note: This approach is somewhat aggressive because typically, a source is marked
+        # as a tempvar only when it is used more than once. In this case, we're marking it
+        # as a tempvar without performing that analysis. However, this is a simple solution,
+        # and in many cases, load imports are reused multiple times.
+        self.mark_source_temp(source)
+        self(source)
 
-    def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
+    def create_call_function_kw(self, nargs, kw_names, push_null) -> list[Instruction]:
         if sys.version_info >= (3, 13):
             output = create_call_function(nargs, push_null)
             assert output[-1].opname == "CALL"

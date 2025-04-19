@@ -1,10 +1,8 @@
 #pragma once
 #include <torch/csrc/python_headers.h>
 
-namespace torch {
-namespace cpu {
+namespace torch::cpu {
 
 void initModule(PyObject* module);
 
-} // namespace cpu
-} // namespace torch
+} // namespace torch::cpu

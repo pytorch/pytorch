@@ -22,7 +22,6 @@ class GeneralQuantModule(torch.nn.Module):
         )
         input1 = torch.randn(1, 16, 4)
         input2 = torch.randn(1, 16, 4, 4)
-        input3 = torch.randn(1, 16, 4, 4, 4)
         return len(
             self.func.add(a, b),
             self.func.cat((a, a), 0),

@@ -26,6 +26,7 @@ namespace c10 {
  * std::char_traits if we wanted to use it with our constexpr basic_string_view.
  */
 template <class CharT>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class basic_string_view final {
  public:
   using value_type = CharT;
@@ -53,13 +54,17 @@ class basic_string_view final {
   /* implicit */ basic_string_view(const ::std::basic_string<CharT>& str)
       : basic_string_view(str.data(), str.size()) {}
 
+  /* implicit */ constexpr basic_string_view(
+      const ::std::basic_string_view<CharT>& str)
+      : basic_string_view(str.data(), str.size()) {}
+
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
 
   constexpr basic_string_view& operator=(
-      const basic_string_view& rhs) noexcept {
-    begin_ = rhs.begin_;
-    size_ = rhs.size_;
-    return *this;
+      const basic_string_view& rhs) noexcept = default;
+
+  constexpr operator ::std::basic_string_view<CharT>() const {
+    return ::std::basic_string_view<CharT>(data(), size());
   }
 
   explicit operator ::std::basic_string<CharT>() const {
@@ -149,7 +154,7 @@ class basic_string_view final {
     return std::numeric_limits<difference_type>::max();
   }
 
-  C10_NODISCARD constexpr bool empty() const noexcept {
+  [[nodiscard]] constexpr bool empty() const noexcept {
     return size() == 0;
   }
 
@@ -587,8 +592,37 @@ constexpr inline void swap(
     basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
+using string_view = std::string_view;
+using c10_string_view = basic_string_view<char>;
 
-using string_view = basic_string_view<char>;
+// NOTE: In C++20, this function should be replaced by string_view.starts_with
+constexpr bool starts_with(
+    const std::string_view s,
+    const std::string_view prefix) noexcept {
+  return (prefix.size() > s.size()) ? false
+                                    : prefix == s.substr(0, prefix.size());
+}
+
+// NOTE: In C++20, this function should be replaced by string_view.starts_with
+constexpr bool starts_with(
+    const std::string_view s,
+    const char prefix) noexcept {
+  return !s.empty() && prefix == s.front();
+}
+
+// NOTE: In C++20, this function should be replaced by string_view.ends_with
+constexpr bool ends_with(
+    const std::string_view s,
+    const std::string_view suffix) noexcept {
+  return (suffix.size() > s.size())
+      ? false
+      : suffix == s.substr(s.size() - suffix.size(), suffix.size());
+}
+
+// NOTE: In C++20, this function should be replaced by string_view.ends_with
+constexpr bool ends_with(const std::string_view s, const char prefix) noexcept {
+  return !s.empty() && prefix == s.back();
+}
 
 } // namespace c10
 

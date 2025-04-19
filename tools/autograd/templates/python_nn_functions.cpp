@@ -31,7 +31,7 @@ using namespace torch::autograd::utils;
 
 namespace torch::autograd {
 
-static PyObject* THPNNVariableFunctionsModule = NULL;
+static PyObject* THPNNVariableFunctionsModule = nullptr;
 
 static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObject* kwargs)
 {
@@ -84,14 +84,14 @@ static PyMethodDef nn_functions[] = {
   {"_parse_to", castPyCFunctionWithKeywords(THPVariable__parse_to),
     METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
-  {NULL}
+  {nullptr}
 };
 
 void initNNFunctions(PyObject* module) {
   static struct PyModuleDef def = {
      PyModuleDef_HEAD_INIT,
      "torch._C._nn",
-     NULL,
+     nullptr,
      -1,
      nn_functions
   };

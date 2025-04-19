@@ -7,7 +7,7 @@ import dataclasses
 import os
 import sys
 import unittest
-from typing import Tuple
+from pathlib import Path
 
 import onnxruntime
 from parameterized import parameterized
@@ -24,7 +24,8 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(str(Path(__file__).absolute().parents[1]))
+
 import onnx_test_common
 
 
@@ -51,17 +52,19 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         OrtBackend.clear_cached_instances()
 
     def test_get_ort_device_type(self):
+        from onnxruntime.capi import _pybind_state as ORTC
+
         self.assertEqual(
             torch.onnx._internal.onnxruntime._get_ort_device_type("cuda"),
-            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cuda(),
+            ORTC.OrtDevice.cuda(),
         )
         self.assertEqual(
             torch.onnx._internal.onnxruntime._get_ort_device_type("cpu"),
-            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cpu(),
+            ORTC.OrtDevice.cpu(),
         )
         self.assertEqual(
             torch.onnx._internal.onnxruntime._get_ort_device_type("maia"),
-            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.npu(),
+            ORTC.OrtDevice.npu(),
         )
 
     def test_torch_compile_backend_registration(self):
@@ -179,9 +182,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                             baseline_param.grad, param.grad, atol=atol, rtol=rtol
                         )
             else:
-                assert (
-                    test_backward is False
-                ), "Calculating backward with multiple outputs is not supported yet."
+                assert test_backward is False, (
+                    "Calculating backward with multiple outputs is not supported yet."
+                )
                 for baseline_elem, result_elem in zip(baseline_result, result):
                     torch.testing.assert_close(
                         baseline_elem, result_elem, atol=atol, rtol=rtol
@@ -202,7 +205,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         # number_of_exported_onnx_models[i] contains # of ONNX models exported from
         # the i-th element (type: torch.fx.GraphModule) in
         # OrtBackend._all_ort_execution_info.execution_info_per_graph_module.values().
-        number_of_exported_onnx_models_for_all_graph_modules: Tuple[int, ...],
+        number_of_exported_onnx_models_for_all_graph_modules: tuple[int, ...],
     ):
         self.assertEqual(expected_execution_count, ort_backend.execution_count)
         self.assertEqual(
@@ -694,9 +697,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return tensor_x
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, _ = make_aot_ort(dynamic=True)
         else:
-            local_aot_ort, local_ort = "onnxrt", None
+            local_aot_ort, _ = "onnxrt", None
 
         prefix = f"test_dump_model_{'local' if test_local_backend else 'onnxrt'}_"
         expected = f"{prefix}0.onnx"
@@ -720,12 +723,12 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         with onnxrt_dump_path(prefix):
             example_args = example_args_collection[0]
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertTrue(os.path.exists(expected_graph))
             self.assertFalse(os.path.exists(not_expected))
 
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertFalse(os.path.exists(not_expected))
 

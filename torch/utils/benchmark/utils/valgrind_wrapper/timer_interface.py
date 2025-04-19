@@ -11,8 +11,9 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, DefaultDict, Dict, Iterator, List, NamedTuple,
-    Optional, Tuple, Union, TYPE_CHECKING)
+    cast, Any, Callable, NamedTuple,
+    Optional, Union, TYPE_CHECKING)
+from collections.abc import Iterator
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
@@ -47,7 +48,7 @@ class FunctionCounts:
         4) Two higher order methods (`filter` and `transform`) for custom
            manipulation.
     """
-    _data: Tuple[FunctionCount, ...]
+    _data: tuple[FunctionCount, ...]
     inclusive: bool
     truncate_rows: bool = True
 
@@ -62,9 +63,9 @@ class FunctionCounts:
         return len(self._data)
 
     def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
-        data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
+        data: Union[FunctionCount, tuple[FunctionCount, ...]] = self._data[item]
         return (
-            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
+            FunctionCounts(cast(tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
 
@@ -115,7 +116,7 @@ class FunctionCounts:
         parts of the file path), coalesce entries by mapping multiple functions
         to the same name (in which case the counts are added together), etc.
         """
-        counts: DefaultDict[str, int] = collections.defaultdict(int)
+        counts: collections.defaultdict[str, int] = collections.defaultdict(int)
         for c, fn in self._data:
             counts[map_fn(fn)] += c
 
@@ -144,7 +145,7 @@ class FunctionCounts:
         merge_fn: Callable[[int], int]
     ) -> "FunctionCounts":
         assert self.inclusive == second.inclusive, "Cannot merge inclusive and exclusive counts."
-        counts: DefaultDict[str, int] = collections.defaultdict(int)
+        counts: collections.defaultdict[str, int] = collections.defaultdict(int)
         for c, fn in self:
             counts[fn] += c
 
@@ -154,7 +155,7 @@ class FunctionCounts:
         return self._from_dict(counts, self.inclusive)
 
     @staticmethod
-    def _from_dict(counts: Dict[str, int], inclusive: bool) -> "FunctionCounts":
+    def _from_dict(counts: dict[str, int], inclusive: bool) -> "FunctionCounts":
         flat_counts = (FunctionCount(c, fn) for fn, c in counts.items() if c)
         return FunctionCounts(tuple(sorted(flat_counts, reverse=True)), inclusive)
 
@@ -178,7 +179,6 @@ class CallgrindStats:
     stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
-        newline = "\n"  # `\` cannot appear in fstring code section.
         base_stats = self.baseline_exclusive_stats
         output = f"""
 {super().__repr__()}
@@ -297,7 +297,7 @@ class Serialization(enum.Enum):
     TORCH_JIT = 2
 
 
-_GLOBALS_ALLOWED_TYPES: Dict[Serialization, Tuple[Any, ...]] = {
+_GLOBALS_ALLOWED_TYPES: dict[Serialization, tuple[Any, ...]] = {
     Serialization.PICKLE: (str, bytes, bool, int, float, complex),
     Serialization.TORCH_JIT: (torch.jit.ScriptFunction, torch.jit.ScriptModule),
     Serialization.TORCH: (torch.nn.Module,),
@@ -340,7 +340,7 @@ class CopyIfCallgrind:
         return self._serialization
 
     @staticmethod
-    def unwrap_all(globals: Dict[str, Any]) -> Dict[str, Any]:
+    def unwrap_all(globals: dict[str, Any]) -> dict[str, Any]:
         return {
             k: (v.value if isinstance(v, CopyIfCallgrind) else v)
             for k, v in globals.items()
@@ -420,8 +420,8 @@ class GlobalsBridge:
         operations.
     """
 
-    def __init__(self, globals: Dict[str, Any], data_dir: str) -> None:
-        self._globals: Dict[str, CopyIfCallgrind] = {}
+    def __init__(self, globals: dict[str, Any], data_dir: str) -> None:
+        self._globals: dict[str, CopyIfCallgrind] = {}
         self._data_dir = data_dir
         if not os.path.exists(data_dir):
             os.mkdir(data_dir)
@@ -458,7 +458,10 @@ class GlobalsBridge:
 
             elif wrapped_value.serialization == Serialization.TORCH:
                 path = os.path.join(self._data_dir, f"{name}.pt")
-                load_lines.append(f"{name} = torch.load({repr(path)})")
+                # TODO: Figure out if we can use torch.serialization.add_safe_globals here
+                # Using weights_only=False after the change in
+                # https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573
+                load_lines.append(f"{name} = torch.load({repr(path)}, weights_only=False)")
                 torch.save(wrapped_value.value, path)
 
             elif wrapped_value.serialization == Serialization.TORCH_JIT:
@@ -491,7 +494,7 @@ class _ValgrindWrapper:
             assert all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols)
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
-        self._commands_available: Dict[str, bool] = {}
+        self._commands_available: dict[str, bool] = {}
         if self._supported_platform:
             # Only bother checking on supported platforms.
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
@@ -517,14 +520,14 @@ class _ValgrindWrapper:
     def collect_callgrind(
         self,
         task_spec: common.TaskSpec,
-        globals: Dict[str, Any],
+        globals: dict[str, Any],
         *,
         number: int,
         repeats: int,
         collect_baseline: bool,
         is_python: bool,
         retain_out_file: bool,
-    ) -> Tuple[CallgrindStats, ...]:
+    ) -> tuple[CallgrindStats, ...]:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
         assert is_python or not collect_baseline
@@ -558,13 +561,13 @@ class _ValgrindWrapper:
         self,
         *,
         task_spec: common.TaskSpec,
-        globals: Dict[str, Any],
+        globals: dict[str, Any],
         number: int,
         repeats: int,
         collect_baseline: bool,
         is_python: bool,
         retain_out_file: bool,
-    ) -> Tuple[Tuple[FunctionCounts, FunctionCounts, Optional[str]], ...]:
+    ) -> tuple[tuple[FunctionCounts, FunctionCounts, Optional[str]], ...]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -593,7 +596,7 @@ class _ValgrindWrapper:
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
 
-        def run(args: List[str], **kwargs: Any) -> Tuple[CompletedProcessType, str]:
+        def run(args: list[str], **kwargs: Any) -> tuple[CompletedProcessType, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
             f_stdout_stderr = open(stdout_stderr_log, "wb")
             try:
@@ -665,7 +668,7 @@ class _ValgrindWrapper:
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
             def parse_output(fpath: str, inclusive: bool) -> FunctionCounts:
-                annotate_invocation, annotate_invocation_output = run([
+                _annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
                     "--threshold=100",
@@ -717,7 +720,7 @@ class _ValgrindWrapper:
                 assert scan_state == ScanState.PARSING, f"Failed to parse {fpath}"
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
 
-            def read_results(i: int) -> Tuple[FunctionCounts, FunctionCounts, Optional[str]]:
+            def read_results(i: int) -> tuple[FunctionCounts, FunctionCounts, Optional[str]]:
                 if i == repeats and not collect_baseline:
                     # Null baseline.
                     return (

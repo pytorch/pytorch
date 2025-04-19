@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Tuple, Union
+from typing import Union
 
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.device_mesh import _mesh_resources
+from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor.placement_types import Placement
 
 
 try:
@@ -15,7 +15,7 @@ except Exception:
         return False
 
 
-LayoutsType = Union[Placement, Tuple[Placement, ...]]
+LayoutsType = Union[Placement, tuple[Placement, ...]]
 
 
 def _deprecate_warnings(func_name: str, extra_msg: str) -> None:

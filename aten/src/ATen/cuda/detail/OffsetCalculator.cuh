@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <type_traits>
 #include <c10/macros/Macros.h>
-#include <ATen/core/Array.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cuda/detail/IntegerDivider.cuh>
 
@@ -29,7 +28,7 @@ struct OffsetCalculator {
   // On CUDA, zero sized array is not allowed, so when we are handling nullary
   // operators, we need to create a size 1 offset to avoid compiler failure.
   // This size 1 offset is just a placeholder, and we will not use it.
-  using offset_type = at::detail::Array<stride_t, std::max<int>(NARGS, 1)>;
+  using offset_type = std::array<stride_t, std::max<int>(NARGS, 1)>;
 
   // if element_sizes is nullptr, then the strides will be in bytes, otherwise
   // the strides will be in # of elements.
@@ -80,7 +79,7 @@ struct TrivialOffsetCalculator {
   // On CUDA, zero sized array is not allowed, so when we are handling nullary
   // operators, we need to create a size 1 offset to avoid compiler failure.
   // This size 1 offset is just a placeholder, and we will not use it.
-  using offset_type = at::detail::Array<index_t, std::max<int>(NARGS, 1)>;
+  using offset_type = std::array<index_t, std::max<int>(NARGS, 1)>;
 
   C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
     offset_type offsets;

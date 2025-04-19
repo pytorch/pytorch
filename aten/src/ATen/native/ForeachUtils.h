@@ -98,6 +98,19 @@ inline void check_foreach_api_restrictions(
       scalars.size());
 }
 
+inline void check_foreach_api_restrictions(
+    TensorList tensors1,
+    TensorList tensors2,
+    ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2);
+  TORCH_CHECK(
+      tensors1.size() == scalars.size(),
+      "Tensor list must have same number of elements as scalar list, got ",
+      tensors1.size(),
+      " and ",
+      scalars.size());
+}
+
 // Helper function called in check_fast_path_restrictions to check whether all
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
@@ -128,10 +141,26 @@ inline bool _check_tensors_share_device_and_dtype(
 // corresponding tensors in tensor lists have the same sizes and strides.
 inline bool _check_tensors_share_sizes_and_strides(
     ArrayRef<TensorList> tensorLists) {
+  auto is_diff_stride = [](const IntArrayRef& size,
+                           const IntArrayRef& left_stride,
+                           const IntArrayRef& right_stride) -> bool {
+    const size_t size_size = size.size();
+    for (const auto dim : c10::irange(size_size)) {
+      if (size[dim] == 1)
+        continue;
+      if (left_stride[dim] != right_stride[dim]) {
+        return true;
+      }
+    }
+    return false;
+  };
   for (const auto i : c10::irange(1, tensorLists.size())) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
       if (tensorLists[0][j].sizes() != tensorLists[i][j].sizes() ||
-          tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
+          is_diff_stride(
+              tensorLists[0][j].sizes(),
+              tensorLists[0][j].strides(),
+              tensorLists[i][j].strides())) {
         return false;
       }
     }

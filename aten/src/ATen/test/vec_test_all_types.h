@@ -53,6 +53,9 @@ CACHE_ALIGN #define
   defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
+#elif defined(CPU_CAPABILITY_SVE)
+#define CHECK_DEQUANT_WITH_LOW_PRECISION 1
+#define CHECK_WITH_FMA 1
 #elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #undef CHECK_WITH_FMA
@@ -268,8 +271,8 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 }
 
 template <typename T>
-bool check_both_nan(T x, T y) {
-    if constexpr (std::is_floating_point_v<T>) {
+bool check_both_nan([[maybe_unused]] T x, [[maybe_unused]] T y) {
+    if constexpr (std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>) {
         return std::isnan(x) && std::isnan(y);
     }
     return false;
@@ -419,7 +422,7 @@ std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
+std::enable_if_t<std::is_floating_point_v<T> || at::vec::is_reduced_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
     // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
     T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
     T min = ((T)0 - max);
@@ -565,7 +568,7 @@ private:
     uint64_t seed;
 };
 
-template <typename T, bool is_floating_point = std::is_floating_point_v<T>, bool is_complex = is_complex<T>::value>
+template <typename T, bool is_floating_point = std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>, bool is_complex = is_complex<T>::value>
 struct ValueGen
 {
     std::uniform_int_distribution<int64_t> dis;
@@ -588,10 +591,13 @@ struct ValueGen
 };
 
 template <typename T>
+using reduced_fp_to_float_t = std::conditional_t<c10::is_reduced_floating_point_v<T>, float, T>;
+
+template <typename T>
 struct ValueGen<T, true, false>
 {
     std::mt19937 gen;
-    std::normal_distribution<T> normal;
+    std::normal_distribution<reduced_fp_to_float_t<T>> normal;
     std::uniform_int_distribution<int> roundChance;
     T _start;
     T _stop;
@@ -610,7 +616,7 @@ struct ValueGen<T, true, false>
         //make it  normal +-3sigma
         T divRange = static_cast<T>(6.0);
         T stdev = std::abs(stop / divRange - start / divRange);
-        normal = std::normal_distribution<T>{ mean, stdev };
+        normal = std::normal_distribution<reduced_fp_to_float_t<T>>{ mean, stdev };
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
         roundChance = std::uniform_int_distribution<int>(0, 5);
@@ -777,13 +783,13 @@ public:
 };
 
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned<T>::value, T>
+typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned_v<T>, T>
 correctEpsilon(const T& eps)
 {
     return eps;
 }
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned<T>::value, T>
+typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned_v<T>, T>
 correctEpsilon(const T& eps)
 {
     return std::abs(eps);
@@ -940,22 +946,25 @@ void test_unary(
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         ValueGen<VT> generator(start, end, seed.add(changeSeedBy));
-        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
-            for (const auto k : c10::irange(el_count)) {
-                vals[k] = generator.get();
-                call_filter(filter, vals[k]);
-                //map operator
-                expected[k] = expectedFunction(vals[k]);
-            }
-            // test
-            auto input = vec_type::loadu(vals);
-            auto actual = actualFunction(input);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals[k] = generator.get();
+            call_filter(filter, vals[k]);
+            // map operator
+            expected[k] = expectedFunction(vals[k]);
+          }
+          // test
+          auto input = vec_type::loadu(vals);
+          auto actual = actualFunction(input);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
 
-        }// trial
-        //inrease Seed
+        } // trial
+        // inrease Seed
         changeSeedBy += 1;
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -999,22 +1008,25 @@ void test_binary(
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         ValueGen<VT> generator0(start0, end0, seed.add(changeSeedBy));
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
-        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
-            for (const auto k : c10::irange(el_count)) {
-                vals0[k] = generator0.get();
-                vals1[k] = generator1.get();
-                call_filter(filter, vals0[k], vals1[k]);
-                //map operator
-                expected[k] = expectedFunction(vals0[k], vals1[k]);
-            }
-            // test
-            auto input0 = vec_type::loadu(vals0);
-            auto input1 = vec_type::loadu(vals1);
-            auto actual = actualFunction(input0, input1);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
-        }// trial
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals0[k] = generator0.get();
+            vals1[k] = generator1.get();
+            call_filter(filter, vals0[k], vals1[k]);
+            // map operator
+            expected[k] = expectedFunction(vals0[k], vals1[k]);
+          }
+          // test
+          auto input0 = vec_type::loadu(vals0);
+          auto input1 = vec_type::loadu(vals1);
+          auto actual = actualFunction(input0, input1);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input0, input1);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
+        } // trial
         changeSeedBy += 1;
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -1064,24 +1076,27 @@ void test_ternary(
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
         ValueGen<VT> generator2(start2, end2, seed.add(changeSeedBy + 2));
 
-        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
-            for (const auto k : c10::irange(el_count)) {
-                vals0[k] = generator0.get();
-                vals1[k] = generator1.get();
-                vals2[k] = generator2.get();
-                call_filter(filter, vals0[k], vals1[k], vals2[k]);
-                //map operator
-                expected[k] = expectedFunction(vals0[k], vals1[k], vals2[k]);
-            }
-            // test
-            auto input0 = vec_type::loadu(vals0);
-            auto input1 = vec_type::loadu(vals1);
-            auto input2 = vec_type::loadu(vals2);
-            auto actual = actualFunction(input0, input1, input2);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
-        }// trial
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals0[k] = generator0.get();
+            vals1[k] = generator1.get();
+            vals2[k] = generator2.get();
+            call_filter(filter, vals0[k], vals1[k], vals2[k]);
+            // map operator
+            expected[k] = expectedFunction(vals0[k], vals1[k], vals2[k]);
+          }
+          // test
+          auto input0 = vec_type::loadu(vals0);
+          auto input1 = vec_type::loadu(vals1);
+          auto input2 = vec_type::loadu(vals2);
+          auto actual = actualFunction(input0, input1, input2);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input0, input1, input2);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
+        } // trial
         changeSeedBy += 1;
     }
 }
@@ -1269,6 +1284,13 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
 }
 
 template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
+    PreventFma noFma;
+    T ab = a * b;
+    return noFma.sub(ab, c);
+}
+
+template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_sqrt(T x) {
     return std::sqrt(x);
 }
@@ -1434,22 +1456,24 @@ double getDefaultTolerance() {
     return 1.e-9;
 }
 
-template<typename T>
-at::vec::VecMask<T, 1> create_vec_mask(uint64_t bitmask) {
-  constexpr auto N = at::vec::Vectorized<T>::size();
-  std::array<int, N> mask;
-  for (int i = 0; i < N; i++) {
-    mask[i] = (bitmask >> i) & 1;
+template<typename T, int N = 1>
+at::vec::VecMask<T, N> create_vec_mask(uint64_t bitmask) {
+  constexpr auto size = at::vec::Vectorized<T>::size();
+  std::array<int, N * size> mask;
+  for (int n = 0; n < N; n++) {
+      for (int i = 0; i < size; i++) {
+        mask[n * size + i] = (bitmask >> i) & 1;
+      }
   }
-  return at::vec::VecMask<T, 1>::from(mask.data());
+  return at::vec::VecMask<T, N>::from(mask.data());
 }
 
-template<typename T>
-at::vec::VecMask<T, 1> generate_vec_mask(int seed) {
-  constexpr auto N = at::vec::Vectorized<T>::size();
-  ValueGen<uint64_t> generator(0, (1ULL << N) - 1, seed);
+template<typename T, int N = 1>
+at::vec::VecMask<T, N> generate_vec_mask(int seed) {
+  constexpr auto size = at::vec::Vectorized<T>::size();
+  ValueGen<uint64_t> generator(0, (1ULL << size) - 1, seed);
   auto bitmask = generator.get();
-  return create_vec_mask<T>(bitmask);
+  return create_vec_mask<T, N>(bitmask);
 }
 
 template<typename T>

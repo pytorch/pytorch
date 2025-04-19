@@ -191,7 +191,7 @@ _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
     // lack of hashtable implementation in thrust
     auto [output, inverse, _] = internal::unique_cuda_template<scalar_t>(self, false, return_inverse, false);
     return std::make_tuple(output, inverse);
-  }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  }), AT_EXPAND(AT_ALL_TYPES), kBool, kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
@@ -200,21 +200,21 @@ _unique2_cuda(const Tensor& self, const bool sorted, const bool return_inverse, 
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
     return internal::unique_cuda_template<scalar_t>(self, false, return_inverse, return_counts);
-  }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  }), AT_EXPAND(AT_ALL_TYPES), kBool, kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_V2(self.scalar_type(), "unique_dim", AT_WRAP([&] {
     return unique_dim_cuda_template<scalar_t>(self, dim, false, return_inverse, return_counts);
-  }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  }), AT_EXPAND(AT_ALL_TYPES), kBool, kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_dim_consecutive_cuda(const Tensor& self, const int64_t dim, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_V2(self.scalar_type(), "unique_dim", AT_WRAP([&] {
     return unique_dim_cuda_template<scalar_t>(self, dim, true, return_inverse, return_counts);
-  }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  }), AT_EXPAND(AT_ALL_TYPES), kBool, kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
@@ -224,7 +224,7 @@ unique_consecutive_cuda(const Tensor& self, const bool return_inverse, const boo
       // The current CUDA implementation of unique always sort due to the
       // lack of hashtable implementation in thrust
       return internal::unique_cuda_template<scalar_t>(self, true, return_inverse, return_counts);
-    }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+    }), AT_EXPAND(AT_ALL_TYPES), kBool, kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   }
   return unique_dim_consecutive_cuda(self, dim.value(), return_inverse, return_counts);
 }

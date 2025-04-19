@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -13,6 +14,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -31,7 +33,7 @@ class C10_API DataPtr {
  public:
   // Choice of CPU here is arbitrary; if there's an "undefined" device
   // we could use that too
-  DataPtr() : ptr_(), device_(DeviceType::CPU) {}
+  DataPtr() : device_(DeviceType::CPU) {}
   DataPtr(void* data, Device device) : ptr_(data), device_(device) {}
   DataPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter, Device device)
       : ptr_(data, ctx, ctx_deleter), device_(device) {}
@@ -103,7 +105,7 @@ class C10_API DataPtr {
    * be; be sure to read the source code of the Allocator
    * in question to confirm this.
    */
-  C10_NODISCARD bool compare_exchange_deleter(
+  [[nodiscard]] bool compare_exchange_deleter(
       DeleterFnPtr expected_deleter,
       DeleterFnPtr new_deleter) {
     return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);
@@ -157,6 +159,7 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 // possible, or the raw interface will incorrectly reported as unsupported,
 // when it is actually possible.
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct C10_API Allocator {
   virtual ~Allocator() = default;
 
@@ -223,10 +226,24 @@ struct C10_API Allocator {
 // allocation InefficientStdFunctionContext, on top of the dynamic
 // allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
-  void* ptr_;
+  void* ptr_{nullptr};
   std::function<void(void*)> deleter_;
   InefficientStdFunctionContext(void* ptr, std::function<void(void*)> deleter)
       : ptr_(ptr), deleter_(std::move(deleter)) {}
+  InefficientStdFunctionContext(const InefficientStdFunctionContext&) = delete;
+  InefficientStdFunctionContext(InefficientStdFunctionContext&& rhs) noexcept
+      : ptr_(std::exchange(rhs.ptr_, nullptr)),
+        deleter_(std::move(rhs.deleter_)) {}
+  InefficientStdFunctionContext& operator=(
+      const InefficientStdFunctionContext&) = delete;
+  // NOLINTNEXTLINE(*-noexcept-move-*)
+  InefficientStdFunctionContext& operator=(
+      InefficientStdFunctionContext&& rhs) {
+    this->~InefficientStdFunctionContext();
+    ptr_ = std::exchange(rhs.ptr_, nullptr);
+    deleter_ = std::move(rhs.deleter_);
+    return *this;
+  }
   ~InefficientStdFunctionContext() {
     if (deleter_) {
       deleter_(ptr_);
@@ -270,9 +287,6 @@ struct AllocatorRegisterer {
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
-  MemoryReportingInfoBase();
-  ~MemoryReportingInfoBase() override = default;
-
   /**
    * alloc_size corresponds to the size of the ptr.
    *
@@ -312,8 +326,88 @@ C10_API void reportOutOfMemoryToProfiler(
     Device device);
 
 // used to hold traceback information in allocators
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct GatheredContext {
   virtual ~GatheredContext() = default;
 };
 
+namespace CachingAllocator {
+struct Stat {
+  void increase(size_t amount) {
+    current += static_cast<int64_t>(amount);
+    peak = std::max(current, peak);
+    allocated += static_cast<int64_t>(amount);
+  }
+
+  void decrease(size_t amount) {
+    current -= static_cast<int64_t>(amount);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        current >= 0,
+        "Negative tracked stat in device allocator (likely logic error).");
+    freed += static_cast<int64_t>(amount);
+  }
+
+  void reset_accumulated() {
+    allocated = 0;
+    freed = 0;
+  }
+
+  void reset_peak() {
+    peak = current;
+  }
+
+  int64_t current = 0;
+  int64_t peak = 0;
+  int64_t allocated = 0;
+  int64_t freed = 0;
+};
+
+enum struct StatType : uint64_t {
+  AGGREGATE = 0,
+  SMALL_POOL = 1,
+  LARGE_POOL = 2,
+  NUM_TYPES = 3 // remember to update this whenever a new stat type is added
+};
+
+using StatArray = std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)>;
+using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
+
+template <typename Func>
+void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
+  for (const auto stat_type : c10::irange(stat_types.size())) {
+    if (stat_types[stat_type]) {
+      f(stat_type);
+    }
+  }
+}
+
+// Structure for keeping timing information
+struct DurationStat {
+  void increase(int64_t amount) {
+    total += amount;
+    count += 1;
+    max = std::max(amount, max);
+    if (min == 0) {
+      min = amount;
+    } else {
+      min = std::min(amount, min);
+    }
+  }
+
+  void reset_accumulated() {
+    total = 0;
+    count = 0;
+  }
+
+  void reset_peak() {
+    min = 0;
+    max = 0;
+  }
+
+  int64_t total = 0;
+  int64_t max = 0;
+  int64_t min = 0;
+  int64_t count = 0;
+};
+} // namespace CachingAllocator
 } // namespace c10

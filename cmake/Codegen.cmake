@@ -35,6 +35,13 @@ endfunction()
 
 ################################################################################
 
+# -- [ Deterine commit hash
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "from tools.generate_torch_version import get_sha;print(get_sha('.'), end='')"
+    OUTPUT_VARIABLE COMMIT_SHA
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+)
+
 # ---[ Write the macros file
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/../caffe2/core/macros.h.in
@@ -69,7 +76,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
-  # RowwiseScaled.cu requires sm90a flags
+  # RowwiseScaled.cu requires sm89/sm90a flags
   if(USE_CUDA)
     set(ROWWISE_SCALED_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu")
 
@@ -77,11 +84,40 @@ if(INTERN_BUILD_ATEN_OPS)
     torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
 
     # Check NVCC version and existing arch flags
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND
-      EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
-      set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
-        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+    set(ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_86.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_89,code=sm_89")
+      endif()
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_90a,code=sm_90a")
+      endif()
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_100.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_100a,code=sm_100a")
+      endif()
     endif()
+    list(JOIN ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS " " ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS)
+    set_source_files_properties(${ROWWISE_SCALED_MM_FILE} PROPERTIES COMPILE_FLAGS "${ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS}")
+
+    set(ROWWISE_SCALED_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu")
+
+    # Get existing arch flags
+    torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
+
+    # Check NVCC version and existing arch flags
+    set(ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_86.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_89,code=sm_89")
+      endif()
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_90a,code=sm_90a")
+      endif()
+    endif()
+    list(JOIN ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS " " ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS)
+    set_source_files_properties(${ROWWISE_SCALED_MM_FILE} PROPERTIES COMPILE_FLAGS "${ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS}")
+
+
   endif()
 
   set(GEN_ROCM_FLAG)
@@ -92,6 +128,11 @@ if(INTERN_BUILD_ATEN_OPS)
   set(GEN_MPS_FLAG)
   if(USE_MPS)
     set(GEN_MPS_FLAG --mps)
+  endif()
+
+  set(GEN_XPU_FLAG)
+  if(USE_XPU)
+    set(GEN_XPU_FLAG --xpu)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
@@ -179,6 +220,7 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${GEN_MPS_FLAG}
+      ${GEN_XPU_FLAG}
       ${CUSTOM_BUILD_FLAGS}
   )
 
@@ -217,22 +259,31 @@ if(INTERN_BUILD_ATEN_OPS)
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake")
-
+    if(USE_XPU)
+        include("${CMAKE_BINARY_DIR}/aten/src/ATen/xpu_generated_${gen_type}.cmake")
+    endif()
     message(STATUS "${gen_type} outputs: ${gen_outputs}")
+    set(OUTPUT_LIST
+      ${generated_${gen_type}}
+      ${cuda_generated_${gen_type}}
+      ${core_generated_${gen_type}}
+      ${cpu_vec_generated_${gen_type}}
+      ${ops_generated_${gen_type}}
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
+      ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake)
+    if(USE_XPU)
+      list(APPEND OUTPUT_LIST
+        ${xpu_generated_${gen_type}}
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/xpu_generated_${gen_type}.cmake
+      )
+    endif()
 
     add_custom_command(
       COMMENT "Generating ATen ${gen_type}"
-      OUTPUT
-        ${generated_${gen_type}}
-        ${cuda_generated_${gen_type}}
-        ${core_generated_${gen_type}}
-        ${cpu_vec_generated_${gen_type}}
-        ${ops_generated_${gen_type}}
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
-        ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
+      OUTPUT ${OUTPUT_LIST}
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
@@ -260,6 +311,16 @@ if(INTERN_BUILD_ATEN_OPS)
     target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
   endif()
 
+  if(USE_XPU)
+    add_custom_target(ATEN_XPU_FILES_GEN_TARGET DEPENDS
+        ${xpu_generated_headers} ${xpu_generated_sources})
+    add_library(ATEN_XPU_FILES_GEN_LIB INTERFACE)
+    add_dependencies(ATEN_XPU_FILES_GEN_LIB ATEN_XPU_FILES_GEN_TARGET)
+
+    if(USE_PER_OPERATOR_HEADERS)
+      target_compile_definitions(ATEN_XPU_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+    endif()
+  endif()
   # Handle source files that need to be compiled multiple times for
   # different vectorization options
   file(GLOB cpu_kernel_cpp_in "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cpu/*.cpp" "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
@@ -322,6 +383,18 @@ if(INTERN_BUILD_ATEN_OPS)
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
   endif(CXX_ZVECTOR_FOUND)
 
+  if(CXX_SVE_FOUND)
+    if(CXX_SVE256_FOUND)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION")
+      list(APPEND CPU_CAPABILITY_NAMES "SVE256")
+      if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+      else()
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+      endif()
+    endif(CXX_SVE256_FOUND)
+  endif(CXX_SVE_FOUND)
+
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
@@ -339,6 +412,12 @@ if(INTERN_BUILD_ATEN_OPS)
       else(MSVC)
         set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
+
+      # Only parallelize the SortingKernel for now to avoid side effects
+      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OMP)
+        string(APPEND EXTRA_FLAGS " -D_GLIBCXX_PARALLEL")
+      endif()
+
       # Disable certain warnings for GCC-9.X
       if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))

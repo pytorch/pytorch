@@ -2,7 +2,7 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/GridSamplerUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;
@@ -318,4 +318,4 @@ void get_cubic_coefficients_grad(
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

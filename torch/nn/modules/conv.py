@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -70,14 +70,14 @@ class _ConvNd(Module):
         ...
 
     in_channels: int
-    _reversed_padding_repeated_twice: List[int]
+    _reversed_padding_repeated_twice: list[int]
     out_channels: int
-    kernel_size: Tuple[int, ...]
-    stride: Tuple[int, ...]
-    padding: Union[str, Tuple[int, ...]]
-    dilation: Tuple[int, ...]
+    kernel_size: tuple[int, ...]
+    stride: tuple[int, ...]
+    padding: Union[str, tuple[int, ...]]
+    dilation: tuple[int, ...]
     transposed: bool
-    output_padding: Tuple[int, ...]
+    output_padding: tuple[int, ...]
     groups: int
     padding_mode: str
     weight: Tensor
@@ -87,12 +87,12 @@ class _ConvNd(Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Tuple[int, ...],
-        stride: Tuple[int, ...],
-        padding: Tuple[int, ...],
-        dilation: Tuple[int, ...],
+        kernel_size: tuple[int, ...],
+        stride: tuple[int, ...],
+        padding: Union[str, tuple[int, ...]],
+        dilation: tuple[int, ...],
         transposed: bool,
-        output_padding: Tuple[int, ...],
+        output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
         padding_mode: str,
@@ -241,11 +241,13 @@ class Conv1d(_ConvNd):
     * :attr:`padding` controls the amount of padding applied to the input. It
       can be either a string {{'valid', 'same'}} or a tuple of ints giving the
       amount of implicit padding applied on both sides.
-
+"""
+        """
     * :attr:`dilation` controls the spacing between the kernel points; also
-      known as the \uue0 trous algorithm. It is harder to describe, but this `link`_
+      known as the \u00e0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
-
+"""
+        r"""
     {groups_note}
 
     Note:
@@ -268,14 +270,14 @@ class Conv1d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to both sides of
             the input. Default: 0
-        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
-            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
 
     """.format(
             **reproducibility_notes, **convolution_notes
@@ -404,10 +406,13 @@ class Conv2d(_ConvNd):
     * :attr:`padding` controls the amount of padding applied to the input. It
       can be either a string {{'valid', 'same'}} or an int / a tuple of ints giving the
       amount of implicit padding applied on both sides.
-
+"""
+        """
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the \u00e0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
+"""
+        r"""
 
     {groups_note}
 
@@ -438,13 +443,13 @@ class Conv2d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to all four sides of
             the input. Default: 0
-        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
-            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
     """.format(
             **reproducibility_notes, **convolution_notes
         )
@@ -574,9 +579,12 @@ class Conv3d(_ConvNd):
     * :attr:`padding` controls the amount of padding applied to the input. It
       can be either a string {{'valid', 'same'}} or a tuple of ints giving the
       amount of implicit padding applied on both sides.
-
+"""
+        """
     * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+"""
+        r"""
 
     {groups_note}
 
@@ -607,10 +615,10 @@ class Conv3d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to all six sides of
             the input. Default: 0
-        padding_mode (str, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
     """.format(
             **reproducibility_notes, **convolution_notes
         )
@@ -760,13 +768,13 @@ class _ConvTransposeNd(_ConvNd):
     def _output_padding(
         self,
         input: Tensor,
-        output_size: Optional[List[int]],
-        stride: List[int],
-        padding: List[int],
-        kernel_size: List[int],
+        output_size: Optional[list[int]],
+        stride: list[int],
+        padding: list[int],
+        kernel_size: list[int],
         num_spatial_dims: int,
-        dilation: Optional[List[int]] = None,
-    ) -> List[int]:
+        dilation: Optional[list[int]] = None,
+    ) -> list[int]:
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
         else:
@@ -780,8 +788,8 @@ class _ConvTransposeNd(_ConvNd):
                     f"or {num_non_spatial_dims + num_spatial_dims} elements (got {len(output_size)})"
                 )
 
-            min_sizes = torch.jit.annotate(List[int], [])
-            max_sizes = torch.jit.annotate(List[int], [])
+            min_sizes = torch.jit.annotate(list[int], [])
+            max_sizes = torch.jit.annotate(list[int], [])
             for d in range(num_spatial_dims):
                 dim_size = (
                     (input.size(d + num_non_spatial_dims) - 1) * stride[d]
@@ -803,7 +811,7 @@ class _ConvTransposeNd(_ConvNd):
                         f"from {min_sizes} to {max_sizes} (for an input of {input.size()[2:]})"
                     )
 
-            res = torch.jit.annotate(List[int], [])
+            res = torch.jit.annotate(list[int], [])
             for d in range(num_spatial_dims):
                 res.append(output_size[d] - min_sizes[d])
 
@@ -834,10 +842,12 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
-
+"""
+        """
     * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
-
+"""
+        r"""
     {groups_note}
 
     Note:
@@ -942,7 +952,7 @@ class ConvTranspose1d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose1d"
@@ -996,10 +1006,12 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
-
+"""
+        """
     * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
-
+"""
+        r"""
     {groups_note}
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
@@ -1127,7 +1139,7 @@ class ConvTranspose2d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose2d"
@@ -1184,10 +1196,12 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
-
+"""
+        """
     * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
-
+"""
+        r"""
     {groups_note}
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
@@ -1310,7 +1324,7 @@ class ConvTranspose3d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose3d"
@@ -1377,7 +1391,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     transposed: bool
     in_channels: int
     out_channels: int
-    kernel_size: Tuple[int, ...]
+    kernel_size: tuple[int, ...]
     weight: UninitializedParameter
     bias: UninitializedParameter
 
@@ -1453,14 +1467,14 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
-            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
 
     .. seealso:: :class:`torch.nn.Conv1d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
@@ -1522,14 +1536,14 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
-            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
 
     .. seealso:: :class:`torch.nn.Conv2d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
@@ -1592,14 +1606,14 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
-            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
 
     .. seealso:: :class:`torch.nn.Conv3d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """

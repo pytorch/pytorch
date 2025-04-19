@@ -10,7 +10,7 @@
 
 namespace at::native {
         namespace {
-            CONSTEXPR_EXCEPT_WIN_CUDA char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
+            constexpr char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
 
             void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
@@ -27,5 +27,5 @@ namespace at::native {
             } // laguerre_polynomial_l_kernel_cuda
         } // namespace (anonymous)
 
-        REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda);
+        REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda)
 } // namespace at::native

@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/core/TensorBase.h>
-#include <ATen/core/Array.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -12,14 +11,13 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <limits>
-#include <c10/core/DeviceArray.h>
 
 namespace at::native {
 
 template <typename T>
 static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
   int minGridSize = 0;
-  int blockSize;
+  int blockSize = 0;
   C10_CUDA_CHECK(cudaOccupancyMaxPotentialBlockSize(
       &minGridSize,
       &blockSize,
@@ -205,17 +203,22 @@ struct MediumRadixSort {
 
     int64_t ceilPowerOf2 = nextHighestPowerOf2(keySliceSize);
     TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 4096);
+#ifdef USE_ROCM
+    constexpr int default_ipt = 8;
+#else
+    constexpr int default_ipt = 32;
+#endif
     switch (ceilPowerOf2) {
       case 4096:
-        HANDLE_CASE(4096, 32);
+        HANDLE_CASE(4096, default_ipt);
         break;
       case 2048:
-        HANDLE_CASE(2048, 32);
+        HANDLE_CASE(2048, default_ipt);
         break;
       case 1024:
       case 512:
       case 256:
-        HANDLE_CASE(1024, 32);
+        HANDLE_CASE(1024, default_ipt);
         break;
       case 128:
       case 64:
@@ -361,7 +364,7 @@ void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
 void sortKeyValueInplace(
     const TensorBase& key,
     const TensorBase& value,
-    int dim,
+    int64_t dim,
     bool descending,
     bool stable) {
   const auto sort_size = key.size(dim);

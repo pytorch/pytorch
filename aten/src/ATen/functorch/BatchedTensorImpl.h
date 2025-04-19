@@ -144,10 +144,10 @@ inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(int64_t level) {
 }
 
 // Use this to construct a BatchedTensor from a regular Tensor
-TORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
+TORCH_API Tensor makeBatched(Tensor tensor, int64_t dim, int64_t level);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
+TORCH_API Tensor addBatchDim(Tensor tensor, int64_t dim, int64_t level);
 
 // Certain dispatch keys must be propagated to the BatchedTensor (or, in general,
 // any wrapper Tensor subclasses). This is because there are methods on Tensor

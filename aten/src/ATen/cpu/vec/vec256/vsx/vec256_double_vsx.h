@@ -219,8 +219,14 @@ class Vectorized<double> {
   Vectorized<double> C10_ALWAYS_INLINE acos() const {
      return {Sleef_acosd2_u10(_vec0), Sleef_acosd2_u10(_vec1)};
   }
+  Vectorized<double> C10_ALWAYS_INLINE acosh() const {
+  return {Sleef_acoshd2_u10(_vec0), Sleef_acoshd2_u10(_vec1)};
+  }
   Vectorized<double> C10_ALWAYS_INLINE asin() const {
      return {Sleef_asind2_u10(_vec0), Sleef_asind2_u10(_vec1)};
+  }
+  Vectorized<double> C10_ALWAYS_INLINE asinh() const {
+     return {Sleef_asinhd2_u10(_vec0), Sleef_asinhd2_u10(_vec1)};
   }
   Vectorized<double> atan() const {
      return {Sleef_atand2_u10(_vec0), Sleef_atand2_u10(_vec1)};

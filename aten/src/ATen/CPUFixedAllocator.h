@@ -11,15 +11,15 @@
 
 namespace at {
 
-static cpu_fixed_malloc(void*, ptrdiff_t) {
-  AT_ERROR("attempting to resize a tensor view of an external blob");
+static void* cpu_fixed_malloc(void*, ptrdiff_t) {
+  TORCH_CHECK(false, "attempting to resize a tensor view of an external blob");
 }
 
-static cpu_fixed_realloc(void*, void*, ptrdiff_t) {
-  AT_ERROR("attempting to resize a tensor view of an external blob");
+static void* cpu_fixed_realloc(void*, void*, ptrdiff_t) {
+  TORCH_CHECK(false, "attempting to resize a tensor view of an external blob");
 }
 
-static cpu_fixed_free(void* state, void* allocation) {
+static void cpu_fixed_free(void* state, void* allocation) {
   auto on_release = static_cast<std::function<void(void*)>*>(state);
   (*on_release)(allocation);
   delete on_release;

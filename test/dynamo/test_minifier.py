@@ -13,7 +13,7 @@ class MinifierTests(MinifierTestBase):
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA)
     def _test_after_dynamo(self, device, backend, expected_error):
         run_code = f"""\
-@torch._dynamo.optimize({backend!r})
+@torch.compile(backend={backend!r})
 def inner(x):
     for _ in range(10):
         x = torch.sin(x)
@@ -61,7 +61,7 @@ inner(torch.randn(20, 20).to("{device}"))
 
     def test_after_dynamo_non_leaf_compile_error(self):
         run_code = """\
-@torch._dynamo.optimize("non_leaf_compile_error_TESTING_ONLY")
+@torch.compile(backend="non_leaf_compile_error_TESTING_ONLY")
 def inner(x):
     return x + 1
 
@@ -73,7 +73,7 @@ inner(torch.randn(20, 20, requires_grad=True) + 1)
 
     # Ensure that the testing backends pass when relu is not present.
     def _test_after_dynamo_backend_passes(self, device, backend):
-        @torch._dynamo.optimize(backend)
+        @torch.compile(backend=backend)
         def inner(x):
             for _ in range(10):
                 x = torch.sin(x)
@@ -133,7 +133,7 @@ class CpuCudaModule(torch.nn.Module):
 
 mod = CpuCudaModule()
 
-@torch._dynamo.optimize({backend_name!r})
+@torch.compile(backend={backend_name!r})
 def inner(x1, y1):
     x2 = torch.randn(20, 20).cuda()
     y2 = torch.randn(20, 20)
@@ -186,7 +186,7 @@ class Repro(torch.nn.Module):
     def test_if_graph_minified(self):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\
-@torch._dynamo.optimize({backend_name!r})
+@torch.compile(backend={backend_name!r})
 def inner(x):
     for _ in range(20):
         x = torch.sin(x)

@@ -97,7 +97,7 @@ Unfortunately many of the functions we use in practice do not have this property
 To try and reduce the impact of functions that are non-differentiable, we define the gradients of the elementary operations by applying the following rules in order:
 
 #. If the function is differentiable and thus a gradient exists at the current point, use it.
-#. If the function is convex (at least locally), use the sub-gradient of minimum norm (it is the steepest descent direction).
+#. If the function is convex (at least locally), use the sub-gradient of minimum norm.
 #. If the function is concave (at least locally), use the super-gradient of minimum norm (consider `-f(x)` and apply the previous point).
 #. If the function is defined, define the gradient at the current point by continuity (note that ``inf`` is possible here, for example for ``sqrt(0)``). If multiple values are possible, pick one arbitrarily.
 #. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
@@ -240,9 +240,9 @@ This better runtime comes with a drawback: tensors created in inference mode
 will not be able to be used in computations to be recorded by autograd after
 exiting inference mode.
 
-Enable inference mode when you are performing computations that don’t need
-to be recorded in the backward graph, AND you don’t plan on using the tensors
-created in inference mode in any computation that is to be recorded by autograd later.
+Enable inference mode when you are performing computations that do not have
+interactions with autograd, AND you don’t plan on using the tensors created
+in inference mode in any computation that is to be recorded by autograd later.
 
 It is recommended that you try out inference mode in the parts of your code
 that do not require autograd tracking (e.g., data processing and model evaluation).

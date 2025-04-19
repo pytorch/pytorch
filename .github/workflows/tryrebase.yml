@@ -6,7 +6,7 @@ on:
 
 jobs:
   do_rebase:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     environment: mergebot
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -21,7 +21,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           check-latest: false
           cache: pip

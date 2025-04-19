@@ -174,7 +174,9 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
             _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET + 1,
         )
     ],
-    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
 )
 class TestUtilityFuns(_BaseTestCase):
     opset_version = None
@@ -1871,7 +1873,7 @@ class TestUtilityFuns(_BaseTestCase):
                 out2 = self.fc1(input1)
                 return out1, out1, out2, out1, out2
 
-        N, D_in, H, D_out = 64, 784, 500, 10
+        N, D_in, D_out = 64, 784, 10
         pt_model = DuplicatedOutputNet(D_in, D_out)
 
         f = io.BytesIO()

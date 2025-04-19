@@ -56,7 +56,7 @@ inline void col2im_shape_check(
   int64_t n_input_plane = input.size(batch_dim + 1);
 
   if (n_input_plane % (kernel_width * kernel_height) != 0) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Expected size of input's dimension 1 to be divisible by the "
         "product of kernel_size, but got input.size(1)=",
         n_input_plane,
@@ -81,7 +81,7 @@ inline void col2im_shape_check(
       1;
 
   if (input_length != (n_blocks_height * n_blocks_width)) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Given output_size=(",
         output_height,
         ", ",
@@ -126,7 +126,7 @@ inline void col2im_shape_check(
     "which is too small (non-positive)");
 
   if (output_width < 1 || output_height < 1) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Expected output spatial size to be positive, but got: output_size=(",
         output_height,
         ", ",
@@ -204,7 +204,7 @@ inline void im2col_shape_check(
       1;
 
   if (output_height < 1 || output_width < 1) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Given input with spatial size (",
         input_height,
         ", ",

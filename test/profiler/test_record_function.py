@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: profiler"]
+# ruff: noqa: F841
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
 # This causes an issue in the multithreading test because we check all events
@@ -13,7 +14,7 @@ try:
 except ImportError:
     None
 
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.optim
@@ -28,7 +29,7 @@ from torch.profiler import kineto_available, record_function
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-Json = Dict[str, Any]
+Json = dict[str, Any]
 
 
 class TestRecordFunction(TestCase):

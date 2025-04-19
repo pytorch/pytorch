@@ -12,8 +12,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import _Partial
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
@@ -22,6 +21,7 @@ from torch.distributed.tensor.parallel.style import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.distributed.tensor.placement_types import _Partial
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -223,7 +223,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             AssertionError,
             "input_layouts and desired_input_layouts should have same length!",
         ):
-            prepare_inps_dimension_mismatch = PrepareModuleInput(
+            PrepareModuleInput(
                 input_layouts=Shard(0), desired_input_layouts=(Replicate(), None)
             )
         # Raise assertion error if module inputs and input_layouts do not have same length.
@@ -346,6 +346,8 @@ class TensorParallelStyleTest(DTensorTestBase):
     @with_comms
     def test_sequence_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # early init RNG tracker
+        torch.distributed.tensor._random.manual_seed(0, mesh)
 
         comm_mode = CommDebugMode()
         batch, N, embedding_dim = 20, 8, 12

@@ -8,20 +8,20 @@ namespace at::native {
 using padding_fn = void (*)(const Tensor&, const Tensor&, IntArrayRef);
 
 // reflection padding
-DECLARE_DISPATCH(padding_fn, reflection_pad1d_kernel);
-DECLARE_DISPATCH(padding_fn, reflection_pad1d_backward_kernel);
-DECLARE_DISPATCH(padding_fn, reflection_pad2d_kernel);
-DECLARE_DISPATCH(padding_fn, reflection_pad2d_backward_kernel);
-DECLARE_DISPATCH(padding_fn, reflection_pad3d_kernel);
-DECLARE_DISPATCH(padding_fn, reflection_pad3d_backward_kernel);
+DECLARE_DISPATCH(padding_fn, reflection_pad1d_kernel)
+DECLARE_DISPATCH(padding_fn, reflection_pad1d_backward_kernel)
+DECLARE_DISPATCH(padding_fn, reflection_pad2d_kernel)
+DECLARE_DISPATCH(padding_fn, reflection_pad2d_backward_kernel)
+DECLARE_DISPATCH(padding_fn, reflection_pad3d_kernel)
+DECLARE_DISPATCH(padding_fn, reflection_pad3d_backward_kernel)
 
 // replication padding
-DECLARE_DISPATCH(padding_fn, replication_pad1d_kernel);
-DECLARE_DISPATCH(padding_fn, replication_pad1d_backward_kernel);
-DECLARE_DISPATCH(padding_fn, replication_pad2d_kernel);
-DECLARE_DISPATCH(padding_fn, replication_pad2d_backward_kernel);
-DECLARE_DISPATCH(padding_fn, replication_pad3d_kernel);
-DECLARE_DISPATCH(padding_fn, replication_pad3d_backward_kernel);
+DECLARE_DISPATCH(padding_fn, replication_pad1d_kernel)
+DECLARE_DISPATCH(padding_fn, replication_pad1d_backward_kernel)
+DECLARE_DISPATCH(padding_fn, replication_pad2d_kernel)
+DECLARE_DISPATCH(padding_fn, replication_pad2d_backward_kernel)
+DECLARE_DISPATCH(padding_fn, replication_pad3d_kernel)
+DECLARE_DISPATCH(padding_fn, replication_pad3d_backward_kernel)
 
 namespace padding {
 
@@ -35,9 +35,10 @@ inline void check_valid_input(const Tensor& input, IntArrayRef padding) {
   int input_dim = input.dim();
 
   bool is_batch_mode = input_dim == (dim + 2);
+  bool is_non_batch_mode = input_dim == (dim + 1);
 
   bool valid_batch_mode = is_batch_mode;
-  bool valid_non_batch_mode = !is_batch_mode;
+  bool valid_non_batch_mode = is_non_batch_mode;
 
   if (is_batch_mode) {
     // allow batch size of 0-dim.

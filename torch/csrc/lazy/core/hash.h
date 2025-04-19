@@ -14,8 +14,7 @@
 #include <string_view>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 using size_t = std::size_t;
 
@@ -30,7 +29,7 @@ class TORCH_API hash_t : public c10::uint128 {
   hash_t(uint64_t val) : uint128(val) {}
   hash_t(uint128 val) : uint128(val) {}
   hash_t(uint64_t top, uint64_t bottom) : uint128(top, bottom) {}
-  hash_t() : uint128() {}
+  hash_t() = default;
 };
 
 // Std* functions use 64-bit hash
@@ -61,9 +60,7 @@ static inline hash_t StringHash(const char* data) {
 }
 
 // Automatic templated implementation for 'arithmetic' types
-template <
-    typename T,
-    typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
+template <typename T, std::enable_if_t<std::is_arithmetic_v<T>>* = nullptr>
 hash_t Hash(const T& value) {
   return DataHash(&value, sizeof(value));
 }
@@ -152,10 +149,6 @@ static inline hash_t Hash(const std::string& value) {
   return DataHash(value.data(), value.size());
 }
 
-static inline hash_t Hash(const c10::string_view& value) {
-  return DataHash(value.data(), value.size());
-}
-
 static inline hash_t Hash(const std::string_view& value) {
   return DataHash(value.data(), value.size());
 }
@@ -172,6 +165,7 @@ static inline hash_t Hash(const at::Generator& value) {
 // Use an arbitrary randomly-selected 64-bit integer rather than a
 // small constant that we then hash at runtime so we don't have to
 // repeatedly hash a constant at runtime.
+// NOLINTNEXTLINE(*-narrowing-conversions)
 static const int64_t kNullOpt = 0x8655d738f3678dda;
 
 // Hashing for std::optional types contributes to hash
@@ -245,5 +239,4 @@ hash_t MHash(T value, Targs... Fargs) {
   return HashCombine(Hash(value), MHash(Fargs...));
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

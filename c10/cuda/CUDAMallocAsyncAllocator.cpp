@@ -11,6 +11,9 @@
 
 namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
+using namespace c10::CachingAllocator;
+using namespace c10::CachingDeviceAllocator;
+
 #if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
@@ -36,6 +39,7 @@ struct UsageStream {
   UsageStream(UsageStream&& us) noexcept = default;
   UsageStream& operator=(const UsageStream& other) = default;
   UsageStream& operator=(UsageStream&& other) noexcept = default;
+  ~UsageStream() = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -398,7 +402,7 @@ void mallocAsync(
 
 } // anonymous namespace
 
-void local_raw_delete(void* ptr);
+static void local_raw_delete(void* ptr);
 
 // Same pattern as CUDACachingAllocator.cpp.
 struct CudaMallocAsyncAllocator : public CUDAAllocator {
@@ -448,6 +452,19 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         0 <= device && device < device_count, "Invalid device argument.");
   }
 
+  double getMemoryFraction(c10::DeviceIndex device) override {
+    std::lock_guard<std::mutex> lk(general_mutex);
+    assertValidDevice(device);
+    CUDAGuard g(device);
+    lazy_init_device(device);
+
+    size_t device_free = 0;
+    size_t device_total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    return static_cast<double>(pytorch_memory_limits[device]) /
+        static_cast<double>(device_total);
+  }
+
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override {
     TORCH_INTERNAL_ASSERT(
         0 <= fraction && fraction <= 1,
@@ -492,6 +509,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolTrimTo(mempool, 0);
       }
     }
+  }
+
+  void enable(bool) override {
+    // cannot disable
+  }
+
+  bool isEnabled() const override {
+    return true;
   }
 
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {
@@ -890,18 +915,20 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 };
 
-CudaMallocAsyncAllocator device_allocator;
+static CudaMallocAsyncAllocator device_allocator;
 
 void local_raw_delete(void* ptr) {
   freeAsync(ptr);
 }
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator() {
   return &device_allocator;
 }
 
 #else
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator() {
-  TORCH_CHECK(false, "Cannot use cudaMallocAsyncAllocator with cuda < 11.4.");
+  TORCH_CHECK(false, "Cannot use CudaMallocAsyncAllocator with cuda < 11.4.");
   return nullptr;
 }
 
