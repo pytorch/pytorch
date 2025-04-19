@@ -143,29 +143,29 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
 #define MAXc 1
       // Prefetch if conditions met...
       if (kernel_h/dilation_h<=MAXh &&
-	  kernel_w/dilation_w<=MAXw &&
-	  channels/(blockDim.x*kernel_stride_C<=MAXc)) {
+          kernel_w/dilation_w<=MAXw &&
+          channels/(blockDim.x*kernel_stride_C<=MAXc)) {
         scalar_t val [MAXh][MAXw][MAXc] = {0};
         for (int ih = 0; ih < MAXh; ih++) {
-	  int ih_ = ih*dilation_h+hstart;
+          int ih_ = ih*dilation_h+hstart;
           for (int iw = 0; iw < MAXw; iw++) {
-	    int iw_ = iw*dilation_w+wstart;
+            int iw_ = iw*dilation_w+wstart;
             const scalar_t *ptr_input = bottom_data + ih_ * in_stride_h + iw_ * in_stride_w;
-	    for(int c = 0; c < MAXc; c++) {
-	      int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
-	      if (ih_>=hend || iw_>=wend || c_>=channels) continue;
-	      val[ih][iw][c] = ptr_input[c_*in_stride_c];
-	    }
-	  }
+            for(int c = 0; c < MAXc; c++) {
+              int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
+              if (ih_>=hend || iw_>=wend || c_>=channels) continue;
+              val[ih][iw][c] = ptr_input[c_*in_stride_c];
+            }
+          }
         }
         for (int ih = 0; ih < MAXh; ih++) {
-	  int ih_ = ih*dilation_h+hstart;
+          int ih_ = ih*dilation_h+hstart;
           for (int iw = 0; iw < MAXw; iw++) {
             int iw_ = iw*dilation_w+wstart;
             int cached_index = threadIdx.x;
-	    for(int c = 0; c < MAXc; c++) {
-	      int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
-	      if (ih_>=hend || iw_>=wend || c_>=channels) continue;
+            for(int c = 0; c < MAXc; c++) {
+              int c_ = c*blockDim.x*kernel_stride_C+channel_offset;
+              if (ih_>=hend || iw_>=wend || c_>=channels) continue;
               if ((val[ih][iw][c] > out_cached[cached_index]) || at::_isnan(val[ih][iw][c])) {
                 out_cached[cached_index] = val[ih][iw][c];
                 out_mask_cached[cached_index] = ih_ * width + iw_;
@@ -176,7 +176,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
         }
       }
       // Else do it Non-Prefetch...
-      else 
+      else
       {
         for (int ih = hstart; ih < hend; ih += dilation_h) {
           for (int iw = wstart; iw < wend; iw += dilation_w) {
