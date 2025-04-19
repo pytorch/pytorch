@@ -137,6 +137,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
       while(wstart < 0)
         wstart += dilation_w;
 
+#if defined (USE_ROCM)
 // Max h,w and c for using prefetch path
 #define MAXh 3
 #define MAXw 3
@@ -177,19 +178,18 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
       }
       // Else do it Non-Prefetch...
       else
-      {
-        for (int ih = hstart; ih < hend; ih += dilation_h) {
-          for (int iw = wstart; iw < wend; iw += dilation_w) {
-            int cached_index = threadIdx.x;
-            const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
-            for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
-              scalar_t val = ptr_input[c*in_stride_c];
-              if ((val > out_cached[cached_index]) || at::_isnan(val)) {
-                out_cached[cached_index] = val;
-                out_mask_cached[cached_index] = ih * width + iw;
-              }
-              cached_index += blockDim.x;
+#endif
+      for (int ih = hstart; ih < hend; ih += dilation_h) {
+        for (int iw = wstart; iw < wend; iw += dilation_w) {
+          int cached_index = threadIdx.x;
+          const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
+          for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
+            scalar_t val = ptr_input[c*in_stride_c];
+            if ((val > out_cached[cached_index]) || at::_isnan(val)) {
+              out_cached[cached_index] = val;
+              out_mask_cached[cached_index] = ih * width + iw;
             }
+            cached_index += blockDim.x;
           }
         }
       }
