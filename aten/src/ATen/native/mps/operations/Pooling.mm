@@ -740,7 +740,7 @@ static void avg_pool3d_template(const Tensor& input,
   mpsStream->synchronize(SyncType::COMMIT);
 }
 
-Tensor avg_pool3d_out_mps(const Tensor& input,
+static Tensor avg_pool3d_out_mps(const Tensor& input,
                        IntArrayRef kernel_size,
                        IntArrayRef stride,
                        IntArrayRef padding,
@@ -762,7 +762,7 @@ Tensor avg_pool3d_out_mps(const Tensor& input,
   return output;
 }
 
-Tensor avg_pool3d_backward_out_mps(const Tensor& grad_output,
+static Tensor avg_pool3d_backward_out_mps(const Tensor& grad_output,
                                 const Tensor& input,
                                 IntArrayRef kernel_size,
                                 IntArrayRef stride,
