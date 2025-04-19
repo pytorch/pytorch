@@ -187,12 +187,12 @@ struct C10_API Allocator {
   virtual DeleterFnPtr raw_deleter() const {
     return nullptr;
   }
-  void* raw_allocate(size_t n) {
+  virtual void* raw_allocate(size_t n) {
     auto dptr = allocate(n);
     AT_ASSERT(dptr.get() == dptr.get_context());
     return dptr.release_context();
   }
-  void raw_deallocate(void* ptr) {
+  virtual void raw_deallocate(void* ptr) {
     auto d = raw_deleter();
     AT_ASSERT(d);
     d(ptr);
