@@ -1575,8 +1575,6 @@ void index_select_out_cuda_impl(
   if (self.dim() > 0) {
     tmpSize[dim] = numIndices;
   }
-  at::gather_out(out, self, dim, index.view(tmpSize).expand(newSize));
-  return;
 
   bool indContig = index.is_contiguous();
 
