@@ -43,29 +43,24 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
-from torch._utils import _get_device_module
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
-    PG_BACKEND = "nccl"
-    DEVICE_COUNT = _get_device_module("cuda").device_count()
 elif TEST_HPU:
     DEVICE_TYPE = "hpu"
-    PG_BACKEND = "hccl"
-    DEVICE_COUNT = _get_device_module("hpu").device_count()
 elif TEST_XPU:
     DEVICE_TYPE = "xpu"
-    PG_BACKEND = "xccl"
-    DEVICE_COUNT = _get_device_module("xpu").device_count()
 else:
     DEVICE_TYPE = "cpu"
-    PG_BACKEND = "gloo"
 
+DEVICE_MODULE = torch.get_device_module(DEVICE_TYPE)
+DEVICE_COUNT = DEVICE_MODULE.device_count()
+BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 NUM_DEVICES = 4
 
-# We use this as a proxy for "multiple GPUs exist"
-if (TEST_CUDA or TEST_XPU) and DEVICE_COUNT > 1:
-    # when we actually have multiple GPUs, relax the requirement to smaller counts.
+# We use this as a proxy for "multiple GPUs/XPUs/HPUs exist"
+if any((TEST_CUDA, TEST_XPU, TEST_HPU)) and DEVICE_COUNT > 1:
+    # when we actually have multiple GPUs/XPUs/HPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
 T = TypeVar("T")
@@ -340,7 +335,7 @@ class DTensorTestBase(MultiProcessTestCase):
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
-        if "nccl" in self.backend or "xccl" in self.backend:
+        if self.backend in ("nccl", "xccl", "hccl"):
             # set device for nccl pg for collectives
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
@@ -396,7 +391,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
             # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
+            if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < self.world_size:
                 self.device_type = "cpu"
             else:
                 self.device_type = DEVICE_TYPE
