@@ -16,6 +16,7 @@ import subprocess
 import traceback
 from collections.abc import Iterator
 from typing import Any, Callable, IO, Optional, Union
+from typing_extensions import TypeVarTuple, Unpack
 from unittest.mock import patch
 
 import torch
@@ -49,6 +50,8 @@ ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+
+Ts = TypeVarTuple("Ts")
 
 
 @functools.lru_cache(None)
@@ -366,7 +369,7 @@ class DebugContext:
         self,
         filename: str,
         write_mode: str = "w",
-        *args: Any,
+        *args: Unpack[Ts],
         **kwargs: Any,
     ) -> IO[Any]:
         assert self._path
@@ -377,7 +380,7 @@ class DebugContext:
         self,
         filename: str,
         write_mode: str = "w",
-        *args: Any,
+        *args: Unpack[Ts],
         **kwargs: Any,
     ) -> Iterator[IO[Any]]:
         assert self._path
@@ -811,7 +814,7 @@ def create_node_mapping(
         return empty_return
 
 
-def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
+def save_args_for_compile_fx_inner(*args: Unpack[Ts], **kwargs: Any) -> None:
     """
     This function is used to save arguments for a compile_fx_inner function call
     to the file system.  Later on one can replay the compile_fx_inner call
