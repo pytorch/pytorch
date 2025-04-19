@@ -54,7 +54,7 @@ jobs:
     uses: ./.github/workflows/_mac-test.yml
     needs: macos-perf-py3-arm64-build
     with:
-      build-environment: macos-py3-arm64
+      build-environment: macos-py3-arm64-distributed
       # Same as the build job
       python-version: 3.9.12
       test-matrix: ${{ needs.macos-perf-py3-arm64-build.outputs.test-matrix }}
