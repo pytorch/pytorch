@@ -104,8 +104,6 @@ Package not found in win-32 channel.
     - pytorch
 
     Current channels:
-    - https://conda.anaconda.org/pytorch/win-32
-    - https://conda.anaconda.org/pytorch/noarch
     - https://repo.continuum.io/pkgs/main/win-32
     - https://repo.continuum.io/pkgs/main/noarch
     - https://repo.continuum.io/pkgs/free/win-32
@@ -161,6 +159,9 @@ graphics cards. Please replace your GPU package with the CPU one.
 
     ImportError: DLL load failed: The operating system cannot run %1.
 
+
+..
+    TODO update this
 
 This is actually an upstream issue of Anaconda. When you initialize your
 environment with conda-forge channel, this issue will emerge. You may fix

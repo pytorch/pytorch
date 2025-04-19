@@ -111,7 +111,9 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   you can always `uninstall` with `timeout` or in a loop if you're feeling
   lazy.)
 
-  ```bash
+<!---
+ TODO: update this
+-->  ```bash
   conda uninstall pytorch -y
   yes | pip uninstall torch
   ```
@@ -178,14 +180,6 @@ You can use this script to check out a new nightly branch with the following:
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
-```
-
-Or if you would like to re-use an existing conda environment, you can pass in
-the prefix argument (`--prefix`):
-
-```bash
-./tools/nightly.py checkout -b my-nightly-branch -p my-env
-source my-env/bin/activate  # or `& .\my-env\Scripts\Activate.ps1` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
@@ -665,11 +659,14 @@ tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
 details.
 
 ## Managing multiple build trees
-
+<!---
+TODO: update this section. should it all be deleted?
+-->
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used).
+
 
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
@@ -754,6 +751,7 @@ situations where files get rebuilt when a previous compilation was exactly the
 same. Using ccache in a situation like this is a real time-saver.
 
 Before building pytorch, install ccache from your package manager of choice:
+
 
 ```bash
 conda install ccache -c conda-forge
@@ -1048,7 +1046,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
    you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
-   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh` (this will avoid
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh`. (this will avoid
    blowing away your Conda environment.)
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on

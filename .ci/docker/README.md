@@ -23,7 +23,6 @@ See `build.sh` for valid build environments (it's the giant switch).
 
 ### Docker CD builds
 
-* `conda` - Dockerfile and build.sh to build Docker images used in nightly conda builds
 * `manywheel` - Dockerfile and build.sh to build Docker images used in nightly manywheel builds
 * `libtorch` - Dockerfile and build.sh to build Docker images used in nightly libtorch builds
 
