@@ -321,8 +321,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
             # ROCm workaround for roctracer dlopens
             if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
                 patchedpath=$(fname_without_so_number $destpath)
-            # Keep the so number for XPU dependencies
-            elif [[ "$DESIRED_CUDA" == *"xpu"* ]]; then
+            # Keep the so number for XPU dependencies and libgomp.so.1 to avoid twice load
+            elif [[ "$DESIRED_CUDA" == *"xpu"* || "$filename" == "libgomp.so.1" ]]; then
                 patchedpath=$destpath
             else
                 patchedpath=$(fname_with_sha256 $destpath)
