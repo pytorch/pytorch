@@ -48,6 +48,9 @@ jobs:
     name: cuda12.6-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_6-py3_10-gcc9-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.docker-image }}
@@ -74,6 +77,9 @@ jobs:
     name: cuda12.6-py3.12-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_6-py3_12-gcc9-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda12.6-py3.12-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_12-gcc9-inductor-build.outputs.docker-image }}
@@ -98,6 +104,9 @@ jobs:
     name: linux-jammy-cpu-py3.12-gcc11-inductor-halide
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_12-inductor-halide-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.docker-image }}
@@ -122,6 +131,9 @@ jobs:
     name: linux-jammy-cpu-py3.12-gcc11-inductor-triton-cpu
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_12-inductor-triton-cpu-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.docker-image }}
@@ -149,6 +161,9 @@ jobs:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
@@ -174,6 +189,9 @@ jobs:
     name: cuda12.6-py3.13-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda12_6-py3_13-gcc9-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda12.6-py3.13-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_13-gcc9-inductor-build.outputs.docker-image }}

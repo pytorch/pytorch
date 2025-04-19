@@ -74,6 +74,9 @@ jobs:
     needs:
       - linux-focal-cuda12_6-py3_10-gcc11-build
       - target-determination
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda12.6-py3.10-gcc11
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.docker-image }}
@@ -101,6 +104,9 @@ jobs:
     name: linux-focal-cuda11.8-py3.9-gcc9
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-focal-cuda11_8-py3_9-gcc9-build
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-build.outputs.docker-image }}
@@ -134,6 +140,9 @@ jobs:
     needs:
       - linux-focal-cuda11_8-py3_10-gcc9-debug-build
       - target-determination
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.docker-image }}
@@ -199,6 +208,9 @@ jobs:
     needs:
       - linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build
       - target-determination
+    permissions:
+      id-token: write
+      contents: read
     with:
       build-environment: linux-focal-cuda12.6-py3-gcc11-slow-gradcheck
       docker-image: ${{ needs.linux-focal-cuda12_6-py3-gcc11-slow-gradcheck-build.outputs.docker-image }}

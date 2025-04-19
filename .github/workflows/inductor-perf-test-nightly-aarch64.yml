@@ -117,6 +117,9 @@ jobs:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-aarch64-py3_10-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     if: github.event.schedule == '0 7 * * *'
     with:
       build-environment: linux-jammy-aarch64-py3.10
@@ -133,6 +136,9 @@ jobs:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-aarch64-py3_10-inductor-build
+    permissions:
+      id-token: write
+      contents: read
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-aarch64-py3.10
