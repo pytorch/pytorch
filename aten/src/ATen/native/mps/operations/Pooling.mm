@@ -740,14 +740,15 @@ static void avg_pool3d_template(const Tensor& input,
   mpsStream->synchronize(SyncType::COMMIT);
 }
 
-static Tensor avg_pool3d_out_mps(const Tensor& input,
-                       IntArrayRef kernel_size,
-                       IntArrayRef stride,
-                       IntArrayRef padding,
-                       bool ceil_mode,
-                       bool count_include_pad,
-                       std::optional<int64_t> divisor_override,
-                       const Tensor& output) {
+TORCH_IMPL_FUNC(avg_pool3d_out_mps)
+(const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ std::optional<int64_t> divisor_override,
+ const Tensor& output) {
   avg_pool3d_template(input,
                      output,
                      std::nullopt,
@@ -759,18 +760,18 @@ static Tensor avg_pool3d_out_mps(const Tensor& input,
                      count_include_pad,
                      divisor_override,
                      "avg_pool3d");
-  return output;
 }
 
-static Tensor avg_pool3d_backward_out_mps(const Tensor& grad_output,
-                                const Tensor& input,
-                                IntArrayRef kernel_size,
-                                IntArrayRef stride,
-                                IntArrayRef padding,
-                                bool ceil_mode,
-                                bool count_include_pad,
-                                std::optional<int64_t> divisor_override,
-                                const Tensor& grad_input) {
+TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
+(const Tensor& grad_output,
+ const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ std::optional<int64_t> divisor_override,
+ const Tensor& grad_input) {
   avg_pool3d_template(input,
                      grad_input,
                      grad_output,
@@ -782,7 +783,6 @@ static Tensor avg_pool3d_backward_out_mps(const Tensor& grad_output,
                      count_include_pad,
                      divisor_override,
                      "avg_pool3d_backward");
-  return grad_input;
 }
 
 } // namespace at::native
