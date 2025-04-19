@@ -313,7 +313,7 @@ class TestDynamoTimed(TestCase):
  'cuda_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
- 'duration_us': 0,
+ 'duration_us': None,
  'dynamo_compile_time_before_restart_us': 0,
  'dynamo_config': None,
  'dynamo_cumulative_compile_time_us': 0,
