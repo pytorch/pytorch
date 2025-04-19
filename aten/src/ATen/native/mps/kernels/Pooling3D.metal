@@ -45,18 +45,18 @@ kernel void avg_pool3d(
     int iw_start = ow * stride_width - padding_width;
 
     // Calculate input position (bottom-right corner of pooling window)
-    int id_end = min(id_start + kernel_depth, input_depth + padding_depth);
-    int ih_end = min(ih_start + kernel_height, input_height + padding_height);
-    int iw_end = min(iw_start + kernel_width, input_width + padding_width);
+    int id_end = id_start + kernel_depth;
+    int ih_end = ih_start + kernel_height;
+    int iw_end = iw_start + kernel_width;
 
-    // Adjust to valid input range
-    id_start = max(0, id_start);
-    ih_start = max(0, ih_start);
-    iw_start = max(0, iw_start);
+    // Adjust to valid input range for actual computation
+    int valid_id_start = max(0, id_start);
+    int valid_ih_start = max(0, ih_start);
+    int valid_iw_start = max(0, iw_start);
 
-    id_end = min(id_end, input_depth);
-    ih_end = min(ih_end, input_height);
-    iw_end = min(iw_end, input_width);
+    int valid_id_end = min(id_end, input_depth);
+    int valid_ih_end = min(ih_end, input_height);
+    int valid_iw_end = min(iw_end, input_width);
 
     // Calculate pool size
     int pool_size;
@@ -73,9 +73,9 @@ kernel void avg_pool3d(
 
     // Compute average
     T sum = 0;
-    for (int id = id_start; id < id_end; id++) {
-        for (int ih = ih_start; ih < ih_end; ih++) {
-            for (int iw = iw_start; iw < iw_end; iw++) {
+    for (int id = valid_id_start; id < valid_id_end; id++) {
+        for (int ih = valid_ih_start; ih < valid_ih_end; ih++) {
+            for (int iw = valid_iw_start; iw < valid_iw_end; iw++) {
                 int input_idx = ((n * channels + c) * input_depth + id) * input_height * input_width +
                                 ih * input_width + iw;
                 sum += input[input_idx];
