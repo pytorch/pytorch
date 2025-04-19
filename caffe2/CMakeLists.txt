@@ -519,6 +519,11 @@ if(${USE_ITT})
   )
 endif()
 
+# This one needs to be unconditionally added for unpickler.cpp
+list(APPEND TORCH_SRCS
+  ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
+)
+
 if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
@@ -531,7 +536,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
   if(USE_DISTRIBUTED)
