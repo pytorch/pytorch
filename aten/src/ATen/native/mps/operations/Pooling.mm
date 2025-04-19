@@ -751,7 +751,9 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& output) {
-  avg_pool3d_template(input,
+  // Ensure input is contiguous for consistent results
+  Tensor contiguous_input = input.is_contiguous() ? input : input.contiguous();
+  avg_pool3d_template(contiguous_input,
                      output,
                      std::nullopt,
                      kernel_size,
@@ -774,9 +776,12 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
  bool count_include_pad,
  std::optional<int64_t> divisor_override,
  const Tensor& grad_input) {
-  avg_pool3d_template(input,
+  // Ensure input and grad_output are contiguous for consistent results
+  Tensor contiguous_input = input.is_contiguous() ? input : input.contiguous();
+  Tensor contiguous_grad_output = grad_output.is_contiguous() ? grad_output : grad_output.contiguous();
+  avg_pool3d_template(contiguous_input,
                      grad_input,
-                     grad_output,
+                     contiguous_grad_output,
                      kernel_size,
                      stride,
                      padding,
