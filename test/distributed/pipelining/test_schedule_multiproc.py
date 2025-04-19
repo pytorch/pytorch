@@ -28,10 +28,8 @@ from torch.distributed.pipelining import (
     ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
-    requires_nccl,
 )
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
@@ -46,14 +44,16 @@ logger = logging.getLogger(__name__)
 d_hid = 512
 batch_size = 256
 
+device = torch.accelerator.current_accelerator()
+backend = dist.get_default_backend_for_device(device) if device is not None else "None"
+
 torch.manual_seed(0)
 
 
 class ScheduleTest(MultiProcContinousTest):
     @classmethod
     def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return "nccl"
+        return backend
 
     @classmethod
     def setUpClass(cls):
@@ -62,11 +62,11 @@ class ScheduleTest(MultiProcContinousTest):
         Set up the device.
         """
         super().setUpClass()
-        dev_id = cls.rank % torch.cuda.device_count()
-        cls.device = torch.device(f"cuda:{dev_id}")
+        dev_id = cls.rank % torch.accelerator.device_count()
+        cls.device = torch.device(dev_id)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize("ScheduleClass", [_ScheduleForwardOnly])
     def test_forward_only(self, ScheduleClass):
         mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -115,8 +115,8 @@ class ScheduleTest(MultiProcContinousTest):
 
             torch.testing.assert_close(x_clone, out)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_multi_iter(self, ScheduleClass):
         mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -155,8 +155,8 @@ class ScheduleTest(MultiProcContinousTest):
             else:
                 schedule.step()
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_kwargs_with_tracer(self, ScheduleClass):
         mod = ModelWithKwargs(d_hid)
@@ -204,8 +204,8 @@ class ScheduleTest(MultiProcContinousTest):
             torch.testing.assert_close(out, ref_out, rtol=1e-2, atol=5e-3)
             torch.testing.assert_close(pipe_loss, ref_loss)
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("ModelClass", [MultiMLP])
     def test_grad_with_tracer(self, ScheduleClass, ModelClass):
@@ -280,8 +280,8 @@ class ScheduleTest(MultiProcContinousTest):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("shape_inference", [True, False])
     def test_grad_with_manual(self, ScheduleClass, shape_inference):
@@ -364,8 +364,8 @@ class ScheduleTest(MultiProcContinousTest):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize(
         "ScheduleClass",
         [
@@ -517,8 +517,8 @@ class ScheduleTest(MultiProcContinousTest):
                     print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                     raise
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize("ScheduleClass", [ScheduleWithW, ScheduleInterleavedZeroBubble])
     def test_schedule_with_native_zero_bubble(self, ScheduleClass):
         print(ScheduleClass)
@@ -611,8 +611,8 @@ class ScheduleTest(MultiProcContinousTest):
                     )
                     raise
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize(
         "ScheduleClass",
         [
@@ -716,8 +716,8 @@ class ScheduleTest(MultiProcContinousTest):
                     print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                     raise
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize(
         "schedule_class", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBVZeroBubble]
     )
@@ -821,8 +821,8 @@ class ScheduleTest(MultiProcContinousTest):
                     print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                     raise
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if((not dist.is_backend_available(backend) or torch.accelerator.device_count() < 2),
+                                    f"c10d was not compiled with the {backend} or device count < 2")
     @parametrize("ScheduleClass", [ScheduleInterleavedZeroBubble])
     def test_schedule_with_weight_update_mlp_e2e(self, ScheduleClass):
         stages_per_rank = 2
@@ -945,11 +945,11 @@ if __name__ == "__main__":
     # Check if GPU and NCCL are available
     if not (
         dist.is_available()
-        and dist.is_nccl_available()
-        and torch.cuda.device_count() > 1
+        and dist.is_backend_available(backend)
+        and torch.accelerator.device_count() > 1
     ):
         print(
-            "c10d NCCL not available or not enough GPUs, skipping tests",
+            "c10d backend not available or not enough GPUs, skipping tests",
             file=sys.stderr,
         )
         sys.exit(0)

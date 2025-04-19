@@ -396,7 +396,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
             # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
+            if not torch.accelerator.is_available() or torch.accelerator.device_count() < self.world_size:
                 self.device_type = "cpu"
             else:
                 self.device_type = DEVICE_TYPE

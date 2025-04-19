@@ -8,6 +8,7 @@ import torch._dynamo.logging
 import torch._dynamo.test_case
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
+import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.utils import same
@@ -26,9 +27,8 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
-    requires_nccl,
 )
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, skip_but_pass_in_sandcastle_if
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -74,11 +74,15 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
     return new_snode_order
 
 
-@requires_nccl()
+@skip_but_pass_in_sandcastle_if(
+    not c10d.is_nccl_available() and not c10d.is_xccl_available(),
+    "c10d was not compiled with the NCCL or XCCL backend",
+)
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
+    device_type = torch.accelerator.current_accelerator().type
 
     def get_world_trs(self):
         return {
@@ -115,7 +119,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
             # Verify that the wait_tensor is sinked below the 1st matmul but
@@ -156,7 +160,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
             # Verify that the all_reduce_ has been raised above the 2nd matmul
@@ -204,7 +208,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # Things to verify:
@@ -257,7 +261,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # NOTE: after scheduling the first all_reduce:
@@ -314,7 +318,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # NOTE: after scheduling the first all_reduce:
@@ -364,7 +368,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # Expectations:

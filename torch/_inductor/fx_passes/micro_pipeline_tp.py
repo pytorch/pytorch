@@ -850,8 +850,10 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
     Returns boolean indicating if fusion was successful or not.
     """
-    assert torch.distributed.is_available() and torch.distributed.is_nccl_available(), (
-        "torch.distributed and NCCL must be available to use async tensor parallelism"
+    backend = torch.distributed.get_default_backend_for_device(torch.accelerator.current_accelerator()) \
+        if torch.accelerator.is_available() else "None"
+    assert torch.distributed.is_available() and torch.distributed.is_backend_available(backend), (
+        f"torch.distributed and {backend} must be available to use async tensor parallelism"
     )
 
     from torch.distributed._symmetric_memory import (
