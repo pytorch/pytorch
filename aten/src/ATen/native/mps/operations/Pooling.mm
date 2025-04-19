@@ -740,14 +740,14 @@ static void avg_pool3d_template(const Tensor& input,
   mpsStream->synchronize(SyncType::COMMIT);
 }
 
-Tensor mps_avg_pool3d(const Tensor& input,
-                    IntArrayRef kernel_size,
-                    IntArrayRef stride,
-                    IntArrayRef padding,
-                    bool ceil_mode,
-                    bool count_include_pad,
-                    std::optional<int64_t> divisor_override) {
-  Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
+Tensor avg_pool3d_out_mps(const Tensor& input,
+                       IntArrayRef kernel_size,
+                       IntArrayRef stride,
+                       IntArrayRef padding,
+                       bool ceil_mode,
+                       bool count_include_pad,
+                       std::optional<int64_t> divisor_override,
+                       const Tensor& output) {
   avg_pool3d_template(input,
                      output,
                      std::nullopt,
@@ -762,15 +762,15 @@ Tensor mps_avg_pool3d(const Tensor& input,
   return output;
 }
 
-Tensor mps_avg_pool3d_backward(const Tensor& grad_output,
-                             const Tensor& input,
-                             IntArrayRef kernel_size,
-                             IntArrayRef stride,
-                             IntArrayRef padding,
-                             bool ceil_mode,
-                             bool count_include_pad,
-                             std::optional<int64_t> divisor_override) {
-  Tensor grad_input = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
+Tensor avg_pool3d_backward_out_mps(const Tensor& grad_output,
+                                const Tensor& input,
+                                IntArrayRef kernel_size,
+                                IntArrayRef stride,
+                                IntArrayRef padding,
+                                bool ceil_mode,
+                                bool count_include_pad,
+                                std::optional<int64_t> divisor_override,
+                                const Tensor& grad_input) {
   avg_pool3d_template(input,
                      grad_input,
                      grad_output,

@@ -12334,6 +12334,7 @@
     CPU: avg_pool3d_out_cpu
     CUDA: avg_pool3d_out_cuda
     MkldnnCPU: mkldnn_avg_pool3d_out
+    MPS: avg_pool3d_out_mps
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   python_module: nn
@@ -12350,6 +12351,7 @@
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
     MkldnnCPU: mkldnn_avg_pool3d_backward_out
+    MPS: avg_pool3d_backward_out_mps
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
