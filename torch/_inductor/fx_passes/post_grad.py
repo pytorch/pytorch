@@ -137,8 +137,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 patterns.apply
             )
         for pass_name in config.post_grad_fusion_options:
-            # skip all patterns for group batch fusions
-            if pass_name in POST_GRAD_FUSIONS:
+            # skip all patterns for group batch fusions or quantization patterns
+            if (
+                pass_name in POST_GRAD_FUSIONS
+                or pass_name == "activation_quantization_aten_pass"
+            ):
                 continue
             pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
             inductor_before_change = save_inductor_dict(

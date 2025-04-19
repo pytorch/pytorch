@@ -3,7 +3,7 @@ import logging
 
 import torch
 from torch import Tensor
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, is_node_meta_valid
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 from .. import config
@@ -81,10 +81,6 @@ def should_decompose_mm(mat1, mat2) -> bool:
         and statically_known_true(mat2.shape[0] <= 64)
         and statically_known_true(mat2.shape[1] <= 512)
     )
-
-
-def is_node_meta_valid(node: torch.fx.Node):
-    return "val" in node.meta
 
 
 def print_decompose_pattern(match: Match, inputs: list[torch.fx.Node]):
