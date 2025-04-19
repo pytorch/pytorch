@@ -1,0 +1,177 @@
+[2025-03-27T17:24:34.072-07:00] Buck UI: https://www.internalfb.com/buck2/fcb98329-fb31-48dc-b1b9-3b9c0c0f9030
+[2025-03-27T17:24:34.126-07:00] File changed: fbcode//caffe2/output
+[2025-03-27T17:24:34.153-07:00] File changed: fbcode//caffe2/test/export/test_schema.py
+[2025-03-27T17:24:34.168-07:00] File changed: fbcode//caffe2/torch/_export/serde/schema_upgrader.py
+[2025-03-27T17:24:34.170-07:00] File changed: fbcode//caffe2/output
+[2025-03-27T17:24:34.281-07:00] RE Session: reSessionID-7fe8e946-f050-4670-b959-cab446e04e48
+[2025-03-27T17:24:41.380-07:00] Waiting on fbcode//caffe2:_torch (cfg:linux-x86_64-fbcode-platform010-clang17-asan-ubsan-dev#2e4db80986bcb708) -- action (py_compile CHECKED_HASH) [local_execute]
+[2025-03-27T17:24:42.224-07:00] Cache hits: 0%
+[2025-03-27T17:24:42.225-07:00] Commands: 3 (cached: 0, remote: 1, local: 2)
+[2025-03-27T17:24:42.225-07:00] Network: Up: 17KiB  Down: 6.5MiB  (reSessionID-7fe8e946-f050-4670-b959-cab446e04e48)
+BUILD SUCCEEDED - starting your binary
+/data/users/yidi/fbsource/buck-out/v2/gen/fbcode/2e4db80986bcb708/caffe2/test/__test_export__/test_export#link-tree/torch/_utils_internal.py:282: NCCL_DEBUG env var is set to None
+/data/users/yidi/fbsource/buck-out/v2/gen/fbcode/2e4db80986bcb708/caffe2/test/__test_export__/test_export#link-tree/torch/_utils_internal.py:291: NCCL_DEBUG is WARN from /etc/nccl.conf
+/data/users/yidi/fbsource/buck-out/v2/gen/fbcode/2e4db80986bcb708/caffe2/test/__test_export__/test_export#link-tree/torch/cuda/__init__.py:174: UserWarning: CUDA initialization: Got 'out of memory' error while trying to initialize CUDA. CUDA with nvcc does not work well with ASAN and it's probably the reason. We will simply shut down CUDA support. If you would like to use GPUs, turn off ASAN. (Triggered internally at fbcode/caffe2/c10/cuda/CUDAFunctions.cpp:109.)
+  return torch._C._cuda_getDeviceCount() > 0
+No CUDA runtime is found, using CUDA_HOME='/mnt/gvfs/third-party2/cuda/d5b5304892fcb9e672cba522b3ad7be55e82ff29/12.4/platform010/76ebdda'
+WARNING: Logging before InitGoogleLogging() is written to STDERR
+I0327 17:25:37.113307 915848 MetricsServer.cpp:17] MetricsServer::Handler has been initialized.
+I0327 17:25:38.058236 915848 LoadMonitor.cpp:256] Can't read network interface speed from /sys/class/net/eth0/speed, network load monitoring disabled
+/data/users/yidi/fbsource/buck-out/v2/gen/fbcode/2e4db80986bcb708/caffe2/test/__test_export__/test_export#link-tree/caffe2/test/export/test_export.py:145: FutureWarning: `torch.library.impl_abstract` was renamed to `torch.library.register_fake`. Please use that instead; we will remove `torch.library.impl_abstract` in a future version of PyTorch.
+  @torch.library.impl_abstract("testlib::returns_tensor_symint")
+/data/users/yidi/fbsource/buck-out/v2/gen/fbcode/2e4db80986bcb708/caffe2/test/__test_export__/test_export#link-tree/caffe2/test/export/test_export.py:158: FutureWarning: `torch.library.impl_abstract` was renamed to `torch.library.register_fake`. Please use that instead; we will remove `torch.library.impl_abstract` in a future version of PyTorch.
+  @torch.library.impl_abstract("testlib::foo")
+I0327 17:25:40.263846 915848 ServiceFrameworkLight.cpp:760] Status server running on service port 0
+W0327 17:25:40.269078 915848 TLSCredProcessor.cpp:143] Failed to read /var/facebook/x509_identities/server.pem.seeds; Ticket seeds are unavailable.
+I0327 17:25:40.298808 915848 Installer.cpp:358] [SAP] Service Authorization Platform is not enabled
+I0327 17:25:40.726392 915848 Logger.h:290] [WARNING] WhenceScribeLogged is overwritten to UNITTEST. https://fburl.com/cpp-logger-whence-logged
+I0327 17:25:40.743795 915848 Logger.cpp:378] Dropping logs in unit tests.
+I0327 17:25:40.746064 915848 PayloadRecordingConfig.cpp:163] Added source type facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:40.746367 915848 PayloadRecordingConfig.cpp:173] setReloadCallback for Config
+I0327 17:25:40.746505 915848 PayloadRecordingConfig.h:141] setReloadCallback for source facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:40.747046 915848 PayloadRecordingSampler.cpp:224] Recording is disabled:  recordingRate=0 responseRecordingRate=0 samplingMode=1 numRequests=0 saveInterval=36000
+I0327 17:25:40.747282 915848 BuildModule.cpp:23] Build Information
+  Built by: 
+  Built on:  (0)
+  Built at: 
+  Build path: 
+  Package Name: 
+  Package Version: 
+  Package Release: 
+  Build Revision: 
+  Build Upstream Revision: 
+  Build Platform: platform010
+  Build Rule: fbcode:caffe2/test:test_export (python_unittest, buck2, dev)
+  Build Library Versions: 
+I0327 17:25:40.750690 915848 ClientModule.cpp:63] ContextProp Thrift Client Module installed
+I0327 17:25:40.751928 915848 ServerModule.cpp:51] ContextProp Thrift Server Module installed
+I0327 17:25:40.752349 915848 ServiceTraceModule.cpp:59] ServiceTrace Module installed
+I0327 17:25:40.817417 915848 BackTraceModule.cpp:61] Backtrace Module installed
+I0327 17:25:40.822330 915848 ContextPropThriftHandlers.cpp:72] installing Artillery ContextProp ContextHandlers via ServiceFramework
+I0327 17:25:40.823094 915848 ThriftFrameworkMetadataHandler.cpp:98] Registered ThriftFrameworkMetadata handler
+I0327 17:25:41.315888 915848 ArtilleryTraceStartHandler.cpp:173] Registered adaptive trace start ctx prop handler
+test_schema_upgrade_module_signature (caffe2.test.export.test_schema.TestSchema) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+OK
+registering <class 'torch._export.serde.schema.V8.ModuleCallSignature'>
+I0327 17:25:41.637431 915848 ContextPropHandler.cpp:80] Registered Policy Zone handler
+I0327 17:25:41.844271 915848 ContextPropHandler.cpp:86] Initialized Scribe singleton client
+I0327 17:25:42.312466 915848 ServiceFrameworkLight.cpp:1182] Calling serve() on MetricsServerHandler port 0
+I0327 17:25:42.320572 918340 ServiceHasUnimplementedExtraInterfaces.cpp:295] Check for unimplemented extra interfaces resulted in: UNIMPLEMENTED - Your service is partially migrated off FacebookBase2. More details in the wiki linked above. You *may* see an error above - if you see this line, then you can safely ignore it.
+I0327 17:25:42.372921 918340 ThriftServer.cpp:963] Using resource pools on address/port 0: thrift flag: true, enable gflag: false, disable gflag: false, runtime actions: 
+I0327 17:25:42.383890 918340 ThriftServer.cpp:1462] Resource pools configured: 9
+W0327 17:25:42.400295 918340 api.cpp:831 req:00005070002ce0f0] config data_security_systems/certificate_service/prod/mrl_simple_predicates possesses a signature but this api instance has not been initialized with a ConfigSignatureVerifier object to verify it. Please initialize this api instance with an appropriate ConfigSignatureVerifier
+I0327 17:25:42.444960 918340 SharedSSLContextManager.h:91] Initialized SSL context configs
+I0327 17:25:42.458539 915848 MetricsServer.cpp:50] MetricsServer running on port: 48165
+I0327 17:25:42.458926 915848 MetricsServer.cpp:62] MetricsServer running with ODS entity: aiplatform.pytorch.target_port.test_export.48165 and SMC tier: aiplatform.monitoring.pytorch.metrics_server
+I0327 17:25:42.459132 915848 MetricsServer.cpp:124] MetricsServer live dashboard (only valid while the process is running): https://www.internalfb.com/intern/fb303/?host=devvm2169.cco0.facebook.com&port=48165&transport=header&timeout=30000&filter=pytorch
+I0327 17:25:42.459604 915848 MetricsServer.cpp:17] MetricsServer::Handler has been initialized.
+I0327 17:25:42.472533 918340 SharedSSLContextManager.h:134] Updated Fizz and SSL context configs
+I0327 17:25:42.487021 915848 LoadMonitor.cpp:256] Can't read network interface speed from /sys/class/net/eth0/speed, network load monitoring disabled
+I0327 17:25:42.773252 915848 ServiceFrameworkLight.cpp:760] Status server running on service port 0
+W0327 17:25:42.775177 915848 TLSCredProcessor.cpp:143] Failed to read /var/facebook/x509_identities/server.pem.seeds; Ticket seeds are unavailable.
+I0327 17:25:42.786628 915848 Installer.cpp:358] [SAP] Service Authorization Platform is not enabled
+I0327 17:25:42.788846 915848 PayloadRecordingConfig.cpp:163] Added source type facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:42.789070 915848 PayloadRecordingConfig.cpp:173] setReloadCallback for Config
+I0327 17:25:42.789201 915848 PayloadRecordingConfig.h:141] setReloadCallback for source facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:42.789634 915848 PayloadRecordingSampler.cpp:224] Recording is disabled:  recordingRate=0 responseRecordingRate=0 samplingMode=1 numRequests=0 saveInterval=36000
+I0327 17:25:42.789827 915848 BuildModule.cpp:23] Build Information
+  Built by: 
+  Built on:  (0)
+  Built at: 
+  Build path: 
+  Package Name: 
+  Package Version: 
+  Package Release: 
+  Build Revision: 
+  Build Upstream Revision: 
+  Build Platform: platform010
+  Build Rule: fbcode:caffe2/test:test_export (python_unittest, buck2, dev)
+  Build Library Versions: 
+I0327 17:25:42.809046 915848 ServiceFrameworkLight.cpp:1182] Calling serve() on MetricsServerHandler port 0
+I0327 17:25:42.813774 918460 ServiceHasUnimplementedExtraInterfaces.cpp:295] Check for unimplemented extra interfaces resulted in: UNIMPLEMENTED - Your service is partially migrated off FacebookBase2. More details in the wiki linked above. You *may* see an error above - if you see this line, then you can safely ignore it.
+I0327 17:25:42.826292 918460 ThriftServer.cpp:963] Using resource pools on address/port 0: thrift flag: true, enable gflag: false, disable gflag: false, runtime actions: 
+I0327 17:25:42.832854 918460 ThriftServer.cpp:1462] Resource pools configured: 9
+I0327 17:25:42.846668 918460 SharedSSLContextManager.h:91] Initialized SSL context configs
+I0327 17:25:42.857882 915848 MetricsServer.cpp:50] MetricsServer running on port: 42633
+I0327 17:25:42.858341 915848 MetricsServer.cpp:62] MetricsServer running with ODS entity: aiplatform.pytorch.target_port.test_export.42633 and SMC tier: aiplatform.monitoring.metrics_server.ai_trainer_system.job
+I0327 17:25:42.858558 915848 MetricsServer.cpp:172] MetricsServer live dashboard (only valid while the process is running): https://www.internalfb.com/intern/fb303/?host=devvm2169.cco0.facebook.com&port=42633&transport=header&timeout=30000
+I0327 17:25:42.859004 915848 MetricsServer.cpp:17] MetricsServer::Handler has been initialized.
+I0327 17:25:42.868103 918460 SharedSSLContextManager.h:134] Updated Fizz and SSL context configs
+I0327 17:25:42.881666 915848 LoadMonitor.cpp:256] Can't read network interface speed from /sys/class/net/eth0/speed, network load monitoring disabled
+I0327 17:25:43.190495 915848 ServiceFrameworkLight.cpp:760] Status server running on service port 0
+W0327 17:25:43.192301 915848 TLSCredProcessor.cpp:143] Failed to read /var/facebook/x509_identities/server.pem.seeds; Ticket seeds are unavailable.
+I0327 17:25:43.197117 915848 Installer.cpp:358] [SAP] Service Authorization Platform is not enabled
+I0327 17:25:43.199070 915848 PayloadRecordingConfig.cpp:163] Added source type facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:43.199294 915848 PayloadRecordingConfig.cpp:173] setReloadCallback for Config
+I0327 17:25:43.199468 915848 PayloadRecordingConfig.h:141] setReloadCallback for source facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:43.199865 915848 PayloadRecordingSampler.cpp:224] Recording is disabled:  recordingRate=0 responseRecordingRate=0 samplingMode=1 numRequests=0 saveInterval=36000
+I0327 17:25:43.200054 915848 BuildModule.cpp:23] Build Information
+  Built by: 
+  Built on:  (0)
+  Built at: 
+  Build path: 
+  Package Name: 
+  Package Version: 
+  Package Release: 
+  Build Revision: 
+  Build Upstream Revision: 
+  Build Platform: platform010
+  Build Rule: fbcode:caffe2/test:test_export (python_unittest, buck2, dev)
+  Build Library Versions: 
+I0327 17:25:43.219306 915848 ServiceFrameworkLight.cpp:1182] Calling serve() on MetricsServerHandler port 0
+I0327 17:25:43.223789 918585 ServiceHasUnimplementedExtraInterfaces.cpp:295] Check for unimplemented extra interfaces resulted in: UNIMPLEMENTED - Your service is partially migrated off FacebookBase2. More details in the wiki linked above. You *may* see an error above - if you see this line, then you can safely ignore it.
+I0327 17:25:43.236350 918585 ThriftServer.cpp:963] Using resource pools on address/port 0: thrift flag: true, enable gflag: false, disable gflag: false, runtime actions: 
+I0327 17:25:43.246174 918585 ThriftServer.cpp:1462] Resource pools configured: 9
+I0327 17:25:43.260591 918585 SharedSSLContextManager.h:91] Initialized SSL context configs
+I0327 17:25:43.272964 915848 MetricsServer.cpp:50] MetricsServer running on port: 40513
+I0327 17:25:43.273353 915848 MetricsServer.cpp:62] MetricsServer running with ODS entity: aiplatform.pytorch.target_port.test_export.40513 and SMC tier: aiplatform.monitoring.metrics_server.pytorch.task
+I0327 17:25:43.273563 915848 MetricsServer.cpp:172] MetricsServer live dashboard (only valid while the process is running): https://www.internalfb.com/intern/fb303/?host=devvm2169.cco0.facebook.com&port=40513&transport=header&timeout=30000
+I0327 17:25:43.274015 915848 MetricsServer.cpp:17] MetricsServer::Handler has been initialized.
+I0327 17:25:43.282893 918585 SharedSSLContextManager.h:134] Updated Fizz and SSL context configs
+I0327 17:25:43.296047 915848 LoadMonitor.cpp:256] Can't read network interface speed from /sys/class/net/eth0/speed, network load monitoring disabled
+W0327 17:25:43.402251 914663 api.cpp:831 req:00005070001547f0] config data_security_systems/certificate_service/prod/mrl_simple_predicates possesses a signature but this api instance has not been initialized with a ConfigSignatureVerifier object to verify it. Please initialize this api instance with an appropriate ConfigSignatureVerifier
+I0327 17:25:43.562837 915848 ServiceFrameworkLight.cpp:760] Status server running on service port 0
+W0327 17:25:43.564587 915848 TLSCredProcessor.cpp:143] Failed to read /var/facebook/x509_identities/server.pem.seeds; Ticket seeds are unavailable.
+I0327 17:25:43.569677 915848 Installer.cpp:358] [SAP] Service Authorization Platform is not enabled
+I0327 17:25:43.571746 915848 PayloadRecordingConfig.cpp:163] Added source type facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:43.571990 915848 PayloadRecordingConfig.cpp:173] setReloadCallback for Config
+I0327 17:25:43.572167 915848 PayloadRecordingConfig.h:141] setReloadCallback for source facebook::services::PayloadRecordingConfig::CliArgsSource
+I0327 17:25:43.572636 915848 PayloadRecordingSampler.cpp:224] Recording is disabled:  recordingRate=0 responseRecordingRate=0 samplingMode=1 numRequests=0 saveInterval=36000
+I0327 17:25:43.572863 915848 BuildModule.cpp:23] Build Information
+  Built by: 
+  Built on:  (0)
+  Built at: 
+  Build path: 
+  Package Name: 
+  Package Version: 
+  Package Release: 
+  Build Revision: 
+  Build Upstream Revision: 
+  Build Platform: platform010
+  Build Rule: fbcode:caffe2/test:test_export (python_unittest, buck2, dev)
+  Build Library Versions: 
+I0327 17:25:43.592013 915848 ServiceFrameworkLight.cpp:1182] Calling serve() on MetricsServerHandler port 0
+I0327 17:25:43.596454 918729 ServiceHasUnimplementedExtraInterfaces.cpp:295] Check for unimplemented extra interfaces resulted in: UNIMPLEMENTED - Your service is partially migrated off FacebookBase2. More details in the wiki linked above. You *may* see an error above - if you see this line, then you can safely ignore it.
+I0327 17:25:43.608229 918729 ThriftServer.cpp:963] Using resource pools on address/port 0: thrift flag: true, enable gflag: false, disable gflag: false, runtime actions: 
+I0327 17:25:43.615069 918729 ThriftServer.cpp:1462] Resource pools configured: 9
+I0327 17:25:43.628059 918729 SharedSSLContextManager.h:91] Initialized SSL context configs
+I0327 17:25:43.639344 915848 MetricsServer.cpp:50] MetricsServer running on port: 49039
+I0327 17:25:43.639688 915848 MetricsServer.cpp:62] MetricsServer running with ODS entity: aiplatform.pytorch.target_port.test_export.49039 and SMC tier: aiplatform.monitoring.metrics_server.pytorch.rank
+I0327 17:25:43.639817 915848 MetricsServer.cpp:172] MetricsServer live dashboard (only valid while the process is running): https://www.internalfb.com/intern/fb303/?host=devvm2169.cco0.facebook.com&port=49039&transport=header&timeout=30000
+I0327 17:25:43.640837 915848 MetricsLogger.cpp:195] Scheduled METRIC_LOGGING, logging interval: 60000ms
+W0327 17:25:43.641275 918739 MetricsLogger.cpp:184] Couldn't find a MAST job name or a Chronos job instance id; will *NOT* log any metrics to Scuba
+I0327 17:25:43.648823 918729 SharedSSLContextManager.h:134] Updated Fizz and SSL context configs
+I0327 17:25:44.520303 902263 MetricsLogger.cpp:46] Stopping MetricsLogger
+I0327 17:25:44.521303 902263 MetricsServer.cpp:67] Stopping MetricsServer
+I0327 17:25:44.554749 902263 MetricsServer.cpp:21] MetricsServer::Handler has been destroyed.
+I0327 17:25:44.555264 902263 MetricsServer.cpp:67] Stopping MetricsServer
+I0327 17:25:44.576509 902263 MetricsServer.cpp:21] MetricsServer::Handler has been destroyed.
+I0327 17:25:44.576897 902263 MetricsServer.cpp:67] Stopping MetricsServer
+I0327 17:25:44.600529 902263 MetricsServer.cpp:21] MetricsServer::Handler has been destroyed.
+I0327 17:25:44.601514 902263 MetricsServer.cpp:67] Stopping MetricsServer
+I0327 17:25:44.639906 902263 MetricsServer.cpp:21] MetricsServer::Handler has been destroyed.
+W0327 17:25:48.134894 902263 HazptrDomain.h:148] Tagged objects remain. This may indicate a higher-level leak of object(s) that use hazptr_obj_cohort.

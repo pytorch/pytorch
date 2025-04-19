@@ -404,6 +404,21 @@ Example(s):
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
 
+    def test_schema_upgrade_module_signature(self):
+        from torch._export.serde.schema.V8 import ModuleCallSignature as ModuleCallSignature8, Argument as Argument8, SymIntArgument as SymIntArgument8
+        from torch._export.serde.schema_upgrader import upgrade_to_latest_recursive
+
+        sig_v8 = ModuleCallSignature8(
+            inputs=[Argument8.create(as_none=True), Argument8.create(as_sym_int=SymIntArgument8.create(as_name="s0"))],
+            outputs=[Argument8.create(as_sym_int=SymIntArgument8.create(as_name="s1"))],
+            in_spec="foo",
+            out_spec="bar",
+            forward_arg_names=["None", "symint"],
+        )
+        sig_v9 = upgrade_to_latest_recursive(sig_v8)
+        self.assertTrue(isinstance(sig_v8.forward_arg_names, list))
+        self.assertTrue(isinstance(sig_v9.forward_arg_names, tuple))
+
 
 if __name__ == "__main__":
     run_tests()
