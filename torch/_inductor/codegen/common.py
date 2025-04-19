@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import re
+import tempfile
 import typing
 from enum import auto, Enum
 from itertools import chain
@@ -88,16 +89,22 @@ def data_type_logger(msg: str) -> None:
 @dataclasses.dataclass
 class WrapperGraphModule:
     """
-    Output of FX wrapper codegen. Exposes the same methods as a ModuleType, but these
+    Output of FX wrapper codegen. Exposes the same methods as ModuleType, but these
     map back to a GraphModule instead of Python source.
     """
 
     gm: GraphModule
     compiled_fn: Callable[..., Any]
 
+    def __post_init__(self):
+        # Write the code to a file for debugging.
+        self.tempfile = tempfile.NamedTemporaryFile(mode="w+", delete=False)
+        with self.tempfile as f:
+            f.write(self.value)
+
     @property
     def __file__(self) -> str:
-        return ""  # TODO return the output code path
+        return self.tempfile.name
 
     def call(self, args: list[Any]) -> Any:
         return self.compiled_fn(*args)

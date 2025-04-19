@@ -4,6 +4,7 @@ Test the FX IR backend.
 """
 
 import operator
+import tempfile
 import unittest
 from typing import Callable, Optional
 
@@ -94,10 +95,8 @@ class FxirTestCase(InductorTestCase):
         register_backend_for_device(cls.device, TritonScheduling, WrapperFxCodegen)
 
     def test_basic(self):
-        func = torch.add
         args = [torch.randn(8, device=self.device) for _ in range(2)]
-
-        self._compile_and_check(func, args)
+        self._compile_and_check(torch.add, args)
 
     def test_multiple_kernels(self):
         def foo(x, y):
@@ -336,6 +335,21 @@ class FxirTestCase(InductorTestCase):
 
         # Check the size hint of the placeholder.
         self.assertEqual(placeholder.meta["val"], static_numel)
+
+    @config.patch({"trace.enabled": True})
+    @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
+    def test_debug(self, mock_output_code):
+        # Dump debug output to a predetermined directory, so we can find it.
+        debug_dir = tempfile.TemporaryDirectory()
+        args = [torch.randn(11, device=self.device) for _ in range(2)]
+        self._compile_and_check(torch.sub, args)
+
+        # Check the output code for a Triton kernel call.
+        mock_output_code.assert_called_once()
+        (output_filename,) = mock_output_code.call_args.args
+        with open(output_filename) as f:
+            output_code = f.read()
+        self.assertIn("triton_kernel_wrapper_mutation", output_code)
 
 
 if __name__ == "__main__":
