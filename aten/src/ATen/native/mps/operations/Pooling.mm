@@ -2,6 +2,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/ops/avg_pool3d_native.h>
+#include <ATen/ops/avg_pool3d_backward_native.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -734,52 +737,65 @@ static void avg_pool3d_template(const Tensor& input,
   // End encoding and commit
   [computeEncoder endEncoding];
   // Synchronize the MPS stream
-  mpsStream->synchronize();
+  mpsStream->synchronize(SyncType::COMMIT);
 }
 
-TORCH_IMPL_FUNC(avg_pool3d_out_mps)
-(const Tensor& input,
- IntArrayRef kernel_size,
- IntArrayRef stride,
- IntArrayRef padding,
- bool ceil_mode,
- bool count_include_pad,
- std::optional<int64_t> divisor_override,
- const Tensor& output) {
-  avg_pool3d_template(input,
-                           output,
-                           std::nullopt,
-                           kernel_size,
-                           stride,
-                           padding,
-                           {1, 1, 1},
-                           ceil_mode,
-                           count_include_pad,
-                           divisor_override,
-                           "avg_pool3d");
-}
+namespace {
+// Define structured kernels for avg_pool3d_out_mps
+struct structured_avg_pool3d_out_mps : public at::meta::structured_avg_pool3d {
+  void impl(const at::Tensor& input,
+            at::IntArrayRef kernel_size,
+            at::IntArrayRef stride,
+            at::IntArrayRef padding,
+            bool ceil_mode,
+            bool count_include_pad,
+            std::optional<int64_t> divisor_override,
+            const at::Tensor& output) {
+    avg_pool3d_template(input,
+                       output,
+                       std::nullopt,
+                       kernel_size,
+                       stride,
+                       padding,
+                       {1, 1, 1},
+                       ceil_mode,
+                       count_include_pad,
+                       divisor_override,
+                       "avg_pool3d");
+  }
+};
 
-TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
-(const Tensor& gradOutput,
- const Tensor& input,
- IntArrayRef kernel_size,
- IntArrayRef stride,
- IntArrayRef padding,
- bool ceil_mode,
- bool count_include_pad,
- std::optional<int64_t> divisor_override,
- const Tensor& gradInput) {
-  avg_pool3d_template(input,
-                           gradInput,
-                           gradOutput,
-                           kernel_size,
-                           stride,
-                           padding,
-                           {1, 1, 1},
-                           ceil_mode,
-                           count_include_pad,
-                           divisor_override,
-                           "avg_pool3d_backward");
-}
+// Register the structured kernel for avg_pool3d_out_mps
+REGISTER_DISPATCH(avg_pool3d_stub, &structured_avg_pool3d_out_mps::impl);
+
+
+// Define structured kernels for avg_pool3d_backward_out_mps
+struct structured_avg_pool3d_backward_out_mps : public at::meta::structured_avg_pool3d_backward {
+  void impl(const at::Tensor& gradOutput,
+            const at::Tensor& input,
+            at::IntArrayRef kernel_size,
+            at::IntArrayRef stride,
+            at::IntArrayRef padding,
+            bool ceil_mode,
+            bool count_include_pad,
+            std::optional<int64_t> divisor_override,
+            const at::Tensor& gradInput) {
+    avg_pool3d_template(input,
+                       gradInput,
+                       gradOutput,
+                       kernel_size,
+                       stride,
+                       padding,
+                       {1, 1, 1},
+                       ceil_mode,
+                       count_include_pad,
+                       divisor_override,
+                       "avg_pool3d_backward");
+  }
+};
+
+// Register the structured kernel for avg_pool3d_backward_out_mps
+REGISTER_DISPATCH(avg_pool3d_backward_stub, &structured_avg_pool3d_backward_out_mps::impl);
+} // anonymous namespace
 
 } // namespace at::native
