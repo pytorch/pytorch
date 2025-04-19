@@ -67,7 +67,15 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
+    from .ir import (
+        Buffer,
+        ExternKernel,
+        ExternKernelOut,
+        IRNode,
+        Layout,
+        Operation,
+        ReinterpretView,
+    )
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -373,9 +381,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(denom, int), (
-        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
-    )
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return runtime_ceildiv(numer, denom)
 
 
@@ -1520,9 +1528,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache(None)
-def try_import_ck_lib() -> tuple[
-    Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
-]:
+def try_import_ck_lib() -> (
+    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
+):
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -1794,9 +1802,9 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
 def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -1805,9 +1813,9 @@ def run_and_get_triton_code(
 ) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert 1 <= len(source_codes) <= 2, (
-        f"expected one or two code outputs got {len(source_codes)}"
-    )
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 
@@ -1933,9 +1941,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(val, sympy.Expr), (
-        "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    )
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
@@ -2830,24 +2838,39 @@ def get_donated_idxs() -> Optional[list[int]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Sequence[BaseSchedulerNode], kernel_name: str
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
+    kernel_name: str,
+    is_extern: bool = False,
 ) -> None:
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+    from .ir import ExternKernelOut
     from .virtualized import V
 
-    for snode in node_schedule:
-        if snode not in (EnableReduction, DisableReduction):
-            if snode.node is not None:
-                curr_node_info = (
-                    V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+    if is_extern:
+        assert isinstance(node_schedule, ExternKernelOut)
+        curr_node_info = (
+            V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                kernel_name, []
+            )
+        )
+        curr_node_info.extend(
+            origin.name
+            for origin in node_schedule.origins
+            if origin.name not in curr_node_info
+        )
+    else:
+        assert isinstance(node_schedule, list)
+        for snode in node_schedule:
+            if snode not in (EnableReduction, DisableReduction):
+                if snode.node is not None:
+                    curr_node_info = V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
                         kernel_name, []
                     )
-                )
-                curr_node_info.extend(
-                    origin.name
-                    for origin in snode.node.origins  # type: ignore[attr-defined]
-                    if origin.name not in curr_node_info
-                )
+                    curr_node_info.extend(
+                        origin.name
+                        for origin in snode.node.origins
+                        if origin.name not in curr_node_info
+                    )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):
