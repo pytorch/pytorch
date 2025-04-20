@@ -480,4 +480,67 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
   mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d_aa");
 }
 
+// 3D nearest neighbor upsampling implementation for MPS backend
+TORCH_IMPL_FUNC(upsample_nearest3d_vec_out_mps)
+(const Tensor& input,
+ at::OptionalSymIntArrayRef output_size,
+ std::optional<at::ArrayRef<double>> scale_factors,
+ const Tensor& output) {
+  // Check macOS version
+  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS),
+              "upsample_nearest3d_vec is only supported on MPS for MacOS_13.0 or newer");
+
+  // Early return if input is empty
+  if (output.numel() == 0) {
+    return;
+  }
+
+  // Convert output_size to IntArrayRef
+  auto osize = output_size.has_value() ?
+    at::native::symint_array_to_sizes(output_size.value()) :
+    at::native::infer_size_dimvec(input.sizes(), scale_factors);
+
+  // Validate input and output dimensions
+  TORCH_CHECK(input.dim() == 5, "upsample_nearest3d_vec: Expected 5D tensor as input, got ", input.dim(), "D tensor");
+  TORCH_CHECK(output.dim() == 5, "upsample_nearest3d_vec: Expected 5D tensor as output, got ", output.dim(), "D tensor");
+
+  // Calculate scales
+  std::array<float, 3> scales = {
+    scale_factors.has_value() && scale_factors.value().size() > 0 ?
+      static_cast<float>(scale_factors.value()[0]) :
+      static_cast<float>(input.size(2)) / osize[0],
+    scale_factors.has_value() && scale_factors.value().size() > 1 ?
+      static_cast<float>(scale_factors.value()[1]) :
+      static_cast<float>(input.size(3)) / osize[1],
+    scale_factors.has_value() && scale_factors.value().size() > 2 ?
+      static_cast<float>(scale_factors.value()[2]) :
+      static_cast<float>(input.size(4)) / osize[2]
+  };
+
+  // Get the pipeline state for the nearest3d kernel
+  auto upsamplePSO = mps::lib.getPipelineStateForFunc(fmt::format("upsample_nearest3d_{}", mps::scalarToMetalTypeString(input)));
+  auto stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:upsamplePSO];
+
+      // Set arguments for the kernel
+      mtl_setArgs(computeEncoder,
+                  input,
+                  output,
+                  input.strides(),
+                  output.strides(),
+                  input.sizes(),
+                  output.sizes(),
+                  scales,
+                  false); // align_corners is false for nearest neighbor
+
+      // Dispatch the job
+      mtl_dispatch1DJob(computeEncoder, upsamplePSO, osize[0] * osize[1] * osize[2]);
+    }
+  });
+}
+
 } // namespace at::native

@@ -12709,6 +12709,8 @@
 - func: upsample_nearest3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
   python_module: nn
   autogen: upsample_nearest3d.vec_out
+  dispatch:
+    MPS: upsample_nearest3d_vec_out_mps
 
 - func: _upsample_nearest_exact3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
   python_module: nn

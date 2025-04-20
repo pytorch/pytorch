@@ -93,7 +93,7 @@ TORCH_LIBRARY_IMPL(aten, MPS, m) {
   m.impl("linalg_svd.U", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("col2im", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("_slow_conv2d_forward", slow_conv2d_forward_mps);
-  m.impl("upsample_nearest3d.vec", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
+  // upsample_nearest3d.vec is now implemented in MPS backend
 }
 
 } // namespace at

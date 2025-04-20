@@ -130,6 +130,24 @@ scalar_t upsample_get_value_bounded(
 template <typename scalar_t>
 scalar_t upsample_get_value_bounded(
     constant scalar_t* data,
+    long3 dim,
+    ulong5 strides,
+    long n,
+    long c,
+    long d,
+    long y,
+    long x) {
+  int access_d = max(min(d, dim.x - 1), 0L);
+  int access_y = max(min(y, dim.y - 1), 0L);
+  int access_x = max(min(x, dim.z - 1), 0L);
+  return data
+      [n * strides.x + c * strides.y + access_d * strides.z +
+       access_y * strides.w + access_x * strides.v];
+}
+
+template <typename scalar_t>
+scalar_t upsample_get_value_bounded(
+    constant scalar_t* data,
     long dim,
     ulong3 strides,
     long n,
@@ -525,13 +543,78 @@ kernel void upsample_bicubic2d_backward(
       constant bool& align_corners [[buffer(7)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
+// 3D nearest neighbor upsampling kernel
+template <typename T>
+kernel void upsample_nearest3d(
+    constant T* inputData [[buffer(0)]],
+    device T* outputData [[buffer(1)]],
+    constant ulong5& input_strides [[buffer(2)]],
+    constant ulong5& output_strides [[buffer(3)]],
+    constant long5& input_sizes [[buffer(4)]],
+    constant long5& output_sizes [[buffer(5)]],
+    constant float3& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  // Calculate output coordinates
+  auto output_x = thread_index % static_cast<uint>(output_sizes.w);
+  auto output_y = (thread_index / static_cast<uint>(output_sizes.w)) % static_cast<uint>(output_sizes.z);
+  auto output_d = thread_index / (static_cast<uint>(output_sizes.w) * static_cast<uint>(output_sizes.z));
+
+  // Check if output_d is within bounds
+  if (output_d >= static_cast<uint>(output_sizes.y)) {
+    return;
+  }
+
+  // Calculate input coordinates
+  auto input_d = static_cast<long>(align_corners ?
+    output_d * (input_sizes.y - 1) / static_cast<float>(output_sizes.y - 1) :
+    output_d / scales.x);
+  auto input_y = static_cast<long>(align_corners ?
+    output_y * (input_sizes.z - 1) / static_cast<float>(output_sizes.z - 1) :
+    output_y / scales.y);
+  auto input_x = static_cast<long>(align_corners ?
+    output_x * (input_sizes.w - 1) / static_cast<float>(output_sizes.w - 1) :
+    output_x / scales.z);
+
+  // Process all batches and channels
+  for (int n = 0; n < output_sizes.x; n++) {
+    for (int c = 0; c < output_sizes.v; c++) {
+      // Get input value
+      auto input_value = upsample_get_value_bounded<T>(
+          inputData,
+          input_sizes.yzw,
+          input_strides,
+          n, c, input_d, input_y, input_x);
+
+      // Set output value
+      outputData[n * output_strides.x + c * output_strides.y +
+                output_d * output_strides.z + output_y * output_strides.w +
+                output_x * output_strides.v] = input_value;
+    }
+  }
+}
+
+#define INSTANTIATE_UPSAMPLE_3D(DTYPE)                        \
+  template [[host_name("upsample_nearest3d_" #DTYPE)]] kernel void \
+  upsample_nearest3d<DTYPE>(                                 \
+      constant DTYPE * inputData [[buffer(0)]],              \
+      device DTYPE * outputData [[buffer(1)]],               \
+      constant ulong5 & input_strides [[buffer(2)]],          \
+      constant ulong5 & output_strides [[buffer(3)]],         \
+      constant long5 & input_sizes [[buffer(4)]],             \
+      constant long5 & output_sizes [[buffer(5)]],            \
+      constant float3 & scales [[buffer(6)]],                 \
+      constant bool& align_corners [[buffer(7)]],             \
+      uint thread_index [[thread_position_in_grid]])
+
 #define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                              \
   INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                         \
   INSTANTIATE_UPSAMPLE_2D_AA(bicubic2d_aa, BicubicFunctor, DTYPE);   \
   INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE);                \
   INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                        \
   INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE); \
-  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);
+  INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                \
+  INSTANTIATE_UPSAMPLE_3D(DTYPE);
 
 INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);
 INSTANTIATE_UPSAMPLE_ALL(float);
