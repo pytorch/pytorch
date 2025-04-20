@@ -896,12 +896,11 @@ def _check_dynamic_shapes(
     if isinstance(dynamic_shapes, dict):
         got_keys = list(dynamic_shapes.keys())
         expected_arg_names = list(combined_args.keys())
-        extra_keys = set(got_keys).difference(expected_arg_names)
-        if extra_keys:
+        if sorted(got_keys) != sorted(expected_arg_names):
             msg = (
-                f"`dynamic_shapes` was specified as a dict, but found top-level keys "
-                f"{list(extra_keys)} that weren't present in the arg names of `inputs`: "
-                f"{expected_arg_names}. "
+                f"When `dynamic_shapes` is specified as a dict, its top-level keys "
+                f"must be the arg names {expected_arg_names} of `inputs`, but "
+                f"here they are {got_keys}. "
             )
             if (
                 len(combined_args) == 1
@@ -920,9 +919,6 @@ def _check_dynamic_shapes(
             raise UserError(
                 UserErrorType.INVALID_INPUT, msg, case_name="dynamic_shapes_validation"
             )
-        # populate unspecified keys with None
-        for unspec_key in set(combined_args.keys()).difference(dynamic_shapes.keys()):
-            dynamic_shapes[unspec_key] = None
 
     def check_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):

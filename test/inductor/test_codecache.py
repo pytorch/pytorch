@@ -1568,7 +1568,7 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_modify_unpacked_file(self) -> None:
-        x = torch.ones(4).cuda()
+        x = torch.ones(4).to(GPU_TYPE)
 
         def f(x):
             with torch.no_grad():
