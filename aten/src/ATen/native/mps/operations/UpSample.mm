@@ -480,29 +480,52 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
   mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d_aa");
 }
 
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+// Function prototype declaration
+Tensor upsample_nearest3d_vec_out_mps(
+const Tensor& input,
+at::OptionalIntArrayRef output_size,
+std::optional<at::ArrayRef<double>> scale_factors);
+
 // 3D nearest neighbor upsampling implementation for MPS backend
-TORCH_IMPL_FUNC(upsample_nearest3d_vec_out_mps)
-(const Tensor& input,
- at::OptionalSymIntArrayRef output_size,
- std::optional<at::ArrayRef<double>> scale_factors,
- const Tensor& output) {
+Tensor upsample_nearest3d_vec_out_mps(
+const Tensor& input,
+at::OptionalIntArrayRef output_size,
+std::optional<at::ArrayRef<double>> scale_factors) {
+  // Create output tensor
+  auto output = at::empty({0}, input.options());
   // Check macOS version
-  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS),
-              "upsample_nearest3d_vec is only supported on MPS for MacOS_13.0 or newer");
+  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_1_PLUS),
+              "upsample_nearest3d_vec is only supported on MPS for MacOS_13.1 or newer");
 
   // Early return if input is empty
-  if (output.numel() == 0) {
-    return;
+  if (input.numel() == 0) {
+    // Resize output tensor to match expected shape
+    auto shape = input.sizes().vec();
+    if (shape.size() >= 3) {
+      auto osize = at::native::upsample::compute_output_size(input.sizes(), output_size, scale_factors);
+      shape[2] = osize[0];
+      shape[3] = osize[1];
+      shape[4] = osize[2];
+      output.resize_(shape);
+    }
+    return output;
   }
 
-  // Convert output_size to IntArrayRef
-  auto osize = output_size.has_value() ?
-    at::native::symint_array_to_sizes(output_size.value()) :
-    at::native::infer_size_dimvec(input.sizes(), scale_factors);
+  // Compute output size
+  auto osize = at::native::upsample::compute_output_size(input.sizes(), output_size, scale_factors);
 
-  // Validate input and output dimensions
+  // Validate input dimensions
   TORCH_CHECK(input.dim() == 5, "upsample_nearest3d_vec: Expected 5D tensor as input, got ", input.dim(), "D tensor");
-  TORCH_CHECK(output.dim() == 5, "upsample_nearest3d_vec: Expected 5D tensor as output, got ", output.dim(), "D tensor");
+
+  // Resize output tensor
+  auto shape = input.sizes().vec();
+  shape[2] = osize[0];
+  shape[3] = osize[1];
+  shape[4] = osize[2];
+  output.resize_(shape);
 
   // Calculate scales
   std::array<float, 3> scales = {
@@ -521,26 +544,59 @@ TORCH_IMPL_FUNC(upsample_nearest3d_vec_out_mps)
   auto upsamplePSO = mps::lib.getPipelineStateForFunc(fmt::format("upsample_nearest3d_{}", mps::scalarToMetalTypeString(input)));
   auto stream = getCurrentMPSStream();
 
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
+  mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
 
       // Set arguments for the kernel
-      mtl_setArgs(computeEncoder,
+      // Split strides and sizes into separate components for Metal shader
+      // Input strides: [N, C, D, H, W]
+      auto input_strides = input.strides();
+      auto input_strides_nc = std::array<uint64_t, 4>{static_cast<uint64_t>(input_strides[0]), static_cast<uint64_t>(input_strides[1]), 0, 0};
+      auto input_strides_dyx = std::array<uint64_t, 3>{static_cast<uint64_t>(input_strides[2]), static_cast<uint64_t>(input_strides[3]), static_cast<uint64_t>(input_strides[4])};
+
+      // Output strides: [N, C, D, H, W]
+      auto output_strides = output.strides();
+      auto output_strides_nc = std::array<uint64_t, 4>{static_cast<uint64_t>(output_strides[0]), static_cast<uint64_t>(output_strides[1]), 0, 0};
+      auto output_strides_dyx = std::array<uint64_t, 3>{static_cast<uint64_t>(output_strides[2]), static_cast<uint64_t>(output_strides[3]), static_cast<uint64_t>(output_strides[4])};
+
+      // Input sizes: [N, C, D, H, W]
+      auto input_sizes = input.sizes();
+      auto input_sizes_nchw = std::array<int32_t, 4>{static_cast<int32_t>(input_sizes[0]),
+                                                   static_cast<int32_t>(input_sizes[1]),
+                                                   static_cast<int32_t>(input_sizes[3]),
+                                                   static_cast<int32_t>(input_sizes[4])};
+      auto input_sizes_d = static_cast<int32_t>(input_sizes[2]);
+
+      // Output sizes: [N, C, D, H, W]
+      auto output_sizes = output.sizes();
+      auto output_sizes_nchw = std::array<int32_t, 4>{static_cast<int32_t>(output_sizes[0]),
+                                                    static_cast<int32_t>(output_sizes[1]),
+                                                    static_cast<int32_t>(output_sizes[3]),
+                                                    static_cast<int32_t>(output_sizes[4])};
+      auto output_sizes_d = static_cast<int32_t>(output_sizes[2]);
+
+      // Set arguments for the kernel
+      mps::mtl_setArgs(computeEncoder,
                   input,
                   output,
-                  input.strides(),
-                  output.strides(),
-                  input.sizes(),
-                  output.sizes(),
+                  input_strides_nc,
+                  input_strides_dyx,
+                  output_strides_nc,
+                  output_strides_dyx,
+                  input_sizes_nchw,
+                  input_sizes_d,
+                  output_sizes_nchw,
+                  output_sizes_d,
                   scales,
                   false); // align_corners is false for nearest neighbor
 
       // Dispatch the job
-      mtl_dispatch1DJob(computeEncoder, upsamplePSO, osize[0] * osize[1] * osize[2]);
+      mps::mtl_dispatch1DJob(computeEncoder, upsamplePSO, osize[0] * osize[1] * osize[2]);
     }
   });
+  return output;
 }
 
 } // namespace at::native
