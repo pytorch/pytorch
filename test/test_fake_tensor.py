@@ -2346,7 +2346,35 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
+    @skipIfTorchDynamo("cache hit/miss changes with dynamo")
+    def test_sdpa(self):
+        with FakeTensorMode():
+            x = torch.randn(1, 48, 32, 32, dtype=torch.float16, device="cuda")
+            y = torch.randn(1, 48, 32, 32, dtype=torch.float16, device="cuda")
+            z = torch.randn(1, 48, 32, 32, dtype=torch.float16, device="cuda")
 
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = aten._scaled_dot_product_flash_attention.default(x, y, z, scale=0.1)
+            self.assertHitsMisses(0, 1)
+
+            res = aten._scaled_dot_product_flash_attention.default(x, y, z, scale=0.1)
+            self.assertHitsMisses(1, 1)
+            self.assertEqual(len(ref), len(res))
+            for a, b in zip(ref, res):
+                if isinstance(a, torch.Tensor):
+                    self.assertEqual(
+                        extract_tensor_metadata(a),
+                        extract_tensor_metadata(b),
+                    )
+                else:
+                    self.assertEqual(a, b)
 
 
 if __name__ == "__main__":
