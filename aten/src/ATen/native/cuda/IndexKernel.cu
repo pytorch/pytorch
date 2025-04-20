@@ -75,19 +75,9 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
   char* const in_ptr = static_cast<char*>(iter.data_ptr(1));
 
   if (is_gather_like && num_indices==1) {
-      constexpr int64_t alignment = 16;
-      //TensorIterator strides and sizes are ordered fastest moving to slowest moving,
-      //in consrast to regular sizes
-      using at::native::memory::get_alignment;
       const size_t element_size = iter.element_size(0);
-      const auto index_element_size = iter.element_size(2);
-      // we need contiguous source and dst slices and aligned pointers and strides and slice size to do vectorized loads
-      // also we need idx to be expanded in the last dimension so we can copy entire slices
-      if (iter.ndim() == 2 && iter.strides(2)[0]==0 && iter.strides(2)[1]==index_element_size && static_cast<size_t>(iter.strides(0)[0])==element_size &&
-          static_cast<size_t>(iter.strides(1)[0])==element_size && get_alignment(out_ptr) == 16 && get_alignment(in_ptr) == 16 &&
-          get_alignment(static_cast<size_t>(iter.shape()[0] * element_size)) == 16 &&
-          get_alignment(static_cast<size_t>(index_stride[0] * element_size)) == 16 &&
-          get_alignment(static_cast<size_t>(iter.strides(0)[1])) == 16) {
+      constexpr size_t alignment = 16;
+      if (at::native::fast_gather_kernel_eligible<alignment>(iter, out_ptr, in_ptr, index_stride[0], element_size)) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
         auto ind_dim_size = index_size[0];

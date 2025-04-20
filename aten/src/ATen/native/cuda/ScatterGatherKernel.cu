@@ -7,7 +7,6 @@
 
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/IndexKernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
@@ -140,18 +139,8 @@ struct _cuda_scatter_gather_internal_kernel {
       // we can go to faster path if we are indexing on the first dim
       // the dst and src are contiguous and all the dims and pts are multiple of 16
       constexpr size_t element_size = sizeof(scalar_t);
-      const auto index_element_size = iter.element_size(2);
-      constexpr int64_t alignment = 16;
-      //TensorIterator strides and sizes are ordered fastest moving to slowest moving,
-      //in consrast to regular sizes
-      using at::native::memory::get_alignment;
-      // we need contiguous source and dst slices and aligned pointers and strides and slice size to do vectorized loads
-      // also we need idx to be expanded in the last dimension so we can copy entire slices
-      if (iter.ndim() == 2 && iter.strides(2)[0]==0 && iter.strides(2)[1]==index_element_size && static_cast<size_t>(iter.strides(0)[0])==element_size &&
-          static_cast<size_t>(iter.strides(1)[0])==element_size && get_alignment(self_ptr) == 16 && get_alignment(src_ptr) == 16 &&
-          get_alignment(static_cast<size_t>(iter.shape()[0] * element_size)) == 16 &&
-          get_alignment(static_cast<size_t>(index_stride * element_size)) == 16 &&
-          get_alignment(static_cast<size_t>(iter.strides(0)[1])) == 16) {
+      constexpr size_t alignment = 16;
+      if (at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride, element_size)) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
         auto ind_dim_size = index_size;
