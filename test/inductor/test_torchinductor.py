@@ -121,6 +121,7 @@ from torch._inductor.compile_fx import (
     complex_memory_overlap,
 )
 from torch._inductor.utils import has_torchvision_roi_align
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     clone_preserve_strides_offset,
@@ -129,7 +130,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
-    IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
@@ -1369,7 +1369,11 @@ class CommonTemplate:
             b = torch.add(args[0], args[0])
             return (a, b)
 
-        x = torch.randn(41, dtype=torch.complex64)
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("No complex on MacOS13")
+
+        x = torch.randn(41, dtype=torch.complex64, device=self.device)
         y = x.clone()
         # should not inplace write to the input
         fn(x)
@@ -3839,7 +3843,8 @@ class CommonTemplate:
             torch.compile(fn)(t)
 
     @unittest.skipIf(
-        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+        IS_SM89,
+        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
     )
     @config.patch(
         {
@@ -3848,6 +3853,9 @@ class CommonTemplate:
         }
     )
     def test_linear_dynamic_maxautotune(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("using triton backend only is not supported on CPU")
+
         @torch.compile(dynamic=True)
         class Model(torch.nn.Module):
             def __init__(self) -> None:
