@@ -809,7 +809,7 @@ class ParameterDict(Module):
         return iter(self._keys)
 
     def __reversed__(self) -> Iterator[str]:
-        return reversed(list(self._keys))
+        return reversed(self._keys)
 
     def copy(self) -> ParameterDict:
         """Return a copy of this :class:`~torch.nn.ParameterDict` instance."""
