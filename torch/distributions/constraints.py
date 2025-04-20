@@ -18,6 +18,7 @@ The following constraints are implemented:
 - ``constraints.less_than(upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
+- ``constraints.mixture_same_family(constraint)``
 - ``constraints.multinomial``
 - ``constraints.nonnegative``
 - ``constraints.nonnegative_integer``
@@ -28,7 +29,6 @@ The following constraints are implemented:
 - ``constraints.positive_definite``
 - ``constraints.real_vector``
 - ``constraints.real``
-- ``constraints.removed_event_dim(constraint, base_event_dim)``
 - ``constraints.simplex``
 - ``constraints.symmetric``
 - ``constraints.stack``
@@ -57,6 +57,7 @@ __all__ = [
     "less_than",
     "lower_cholesky",
     "lower_triangular",
+    "mixture_same_family",
     "multinomial",
     "nonnegative",
     "nonnegative_integer",
@@ -67,7 +68,6 @@ __all__ = [
     "positive_integer",
     "real",
     "real_vector",
-    "removed_event_dim",
     "simplex",
     "square",
     "stack",
@@ -267,19 +267,17 @@ class _IndependentConstraint(Constraint):
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
 
 
-class _RemovedEventDimConstraint(Constraint):
+class _MixtureSameFamilyConstraint(Constraint):
     """
-    Eliminate the first event dimension from a constraint, so that a
-    sample is valid in :meth:`check` if by adding back the first event
-    dimension it is valid in the base constraint.
+    Constraint for the :class:`torch.distribution.MixtureSameFamily`
+    distribution that adds back the rightmost batch dimension before
+    performing the validity check with the component distribution
+    constraint.
     """
 
-    def __init__(self, base_constraint, base_event_dim):
+    def __init__(self, base_constraint):
         assert isinstance(base_constraint, Constraint)
-        assert isinstance(base_event_dim, int)
-        assert base_event_dim >= 0
         self.base_constraint = base_constraint
-        self.base_event_dim = base_event_dim
         super().__init__()
 
     @property
@@ -288,10 +286,10 @@ class _RemovedEventDimConstraint(Constraint):
 
     @property
     def event_dim(self) -> int:  # type: ignore[override]
-        return self.base_event_dim
+        return self.base_constraint.event_dim
 
     def check(self, value):
-        unsqueezed_value = value.unsqueeze(-1 - self.base_event_dim)
+        unsqueezed_value = value.unsqueeze(-1 - self.event_dim)
         result = self.base_constraint.check(unsqueezed_value)
         if value.dim() < self.event_dim:
             raise ValueError(
@@ -303,7 +301,7 @@ class _RemovedEventDimConstraint(Constraint):
         return result
 
     def __repr__(self):
-        return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.base_event_dim})"
+        return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)})"
 
 
 class _Boolean(Constraint):
@@ -702,7 +700,7 @@ class _Stack(Constraint):
 dependent = _Dependent()
 dependent_property = _DependentProperty
 independent = _IndependentConstraint
-removed_event_dim = _RemovedEventDimConstraint
+mixture_same_family = _MixtureSameFamilyConstraint
 boolean = _Boolean()
 one_hot = _OneHot()
 nonnegative_integer = _IntegerGreaterThan(0)
