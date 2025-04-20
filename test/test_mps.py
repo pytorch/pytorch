@@ -1999,7 +1999,8 @@ class TestMPS(TestCaseMPS):
 
     def test_avg_pool3d(self):
         # Test case for avg_pool3d
-        def helper(input_shape, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+        def helper(input_shape, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True, divisor_override=None):
             if stride is None:
                 stride = kernel_size
 
