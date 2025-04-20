@@ -3,6 +3,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import triton
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.virtualized import V
@@ -17,12 +19,7 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import (
-    get_gpu_shared_memory,
-    get_num_sms,
-    get_tma_workspace_arg,
-    use_aten_gemm_kernels,
-)
+from ..utils import get_gpu_shared_memory, get_num_sms, use_aten_gemm_kernels
 from .mm_common import (
     _is_static_problem,
     check_supported_striding,
@@ -98,12 +95,18 @@ def early_config_prune(configs, named_args):
             config.num_warps,
             getattr(config, "num_consumer_groups", 0),
         )
-        G, M_PER_GROUP, N_PER_GROUP, K_PER_GROUP = (
+        G, M, N, K, M_IS_DYNAMIC, N_IS_DYNAMIC, K_IS_DYNAMIC = (
             named_args["G"],
-            named_args["M_PER_GROUP"],
-            named_args["N_PER_GROUP"],
-            named_args["K_PER_GROUP"],
+            named_args["M"],
+            named_args["N"],
+            named_args["K"],
+            named_args["M_IS_DYNAMIC"],
+            named_args["N_IS_DYNAMIC"],
+            named_args["K_IS_DYNAMIC"],
         )
+        M_PER_GROUP = next_power_of_2(M) // G if M_IS_DYNAMIC else M
+        N_PER_GROUP = next_power_of_2(N) // G if N_IS_DYNAMIC else N
+        K_PER_GROUP = next_power_of_2(K) // G if K_IS_DYNAMIC else K
 
         # 1. make sure we have enough smem
         max_shared_memory = get_gpu_shared_memory()
@@ -173,30 +176,30 @@ triton_scaled_grouped_mm_source = r"""
 {% endif %}
     tidx = tl.program_id(0)
 
-    TMA_SIZE: tl.constexpr = tl.constexpr(128)
-
-    workspace_base = ws_ptr + tidx * 2 * TMA_SIZE
-    c_desc_ptr = None
-
-    a_desc_ptr = workspace_base
-    b_desc_ptr = workspace_base + TMA_SIZE
-
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=a_desc_ptr,
-        global_address=a_ptr,
-        load_size=[BLOCK_M, BLOCK_K],
-        global_size=[A_GLOBAL_SIZE_M, A_GLOBAL_SIZE_K],
-        element_ty=a_ptr.dtype.element_ty,
+    a_desc = tl._experimental_make_tensor_descriptor(
+        a_ptr,
+{% if A_IS_2D %}
+        shape=[A_SIZE_0, A_SIZE_1],
+        strides=[A_STRIDE_0, A_STRIDE_1],
+        block_shape=[BLOCK_M, BLOCK_K],
+{% else %}
+        shape=[A_SIZE_0, A_SIZE_1, A_SIZE_2],
+        strides=[A_STRIDE_0, A_STRIDE_1, A_STRIDE_2],
+        block_shape=[1, BLOCK_M, BLOCK_K],
+{% endif %}
     )
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=b_desc_ptr,
-        global_address=b_ptr,
-        load_size=[BLOCK_N, BLOCK_K],
-        global_size=[B_GLOBAL_SIZE_N, B_GLOBAL_SIZE_K],
-        element_ty=b_ptr.dtype.element_ty,
+    b_desc = tl._experimental_make_tensor_descriptor(
+        b_ptr,
+{% if B_IS_2D %}
+        shape=[B_SIZE_0, B_SIZE_1],
+        strides=[B_STRIDE_0, B_STRIDE_1],
+        block_shape=[BLOCK_N, BLOCK_K],
+{% else %}
+        shape=[B_SIZE_0, B_SIZE_1, B_SIZE_2],
+        strides=[B_STRIDE_0, B_STRIDE_1, B_STRIDE_2],
+        block_shape=[1, BLOCK_N, BLOCK_K],
+{% endif %}
     )
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
 {% if M_IS_DYNAMIC %}
     m_end_offset = 0
@@ -216,7 +219,7 @@ triton_scaled_grouped_mm_source = r"""
         m_size = m_end_offset - m_start_offset
         m_scale_start_offset = m_start_offset
 {% else %}
-        m_start_offset = g.to(tl.int64) * A_GLOBAL_OFF_M
+        m_start_offset = 0
         m_size = M
         m_scale_start_offset = g.to(tl.int64) * M
 {% endif %}
@@ -229,7 +232,7 @@ triton_scaled_grouped_mm_source = r"""
             n_size = n_end_offset - n_start_offset
             n_scale_start_offset = n_start_offset
 {% else %}
-            n_start_offset = g.to(tl.int64) * B_GLOBAL_OFF_N
+            n_start_offset = 0
             n_size = N
             n_scale_start_offset = g.to(tl.int64) * N
 {% endif %}
@@ -264,18 +267,17 @@ triton_scaled_grouped_mm_source = r"""
                 n_offset = (n_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
 
                 for k_offset in range(0, k_size, BLOCK_K):
-                    a = tl._experimental_descriptor_load(
-                        a_desc_ptr,
-                        [m_offset, k_start_offset + k_offset],
-                        [BLOCK_M, BLOCK_K],
-                        a_ptr.dtype.element_ty,
-                    )
-                    b = tl._experimental_descriptor_load(
-                        b_desc_ptr,
-                        [n_offset, k_start_offset + k_offset],
-                        [BLOCK_N, BLOCK_K],
-                        a_ptr.dtype.element_ty,
-                    )
+{% if A_IS_2D %}
+                    a = a_desc.load([m_offset, k_start_offset + k_offset])
+{% else %}
+                    a = a_desc.load([g, m_offset, k_start_offset + k_offset]).reshape(BLOCK_M, BLOCK_K)
+{% endif %}
+{% if B_IS_2D %}
+                    b = b_desc.load([n_offset, k_start_offset + k_offset])
+{% else %}
+                    b = b_desc.load([g, n_offset, k_start_offset + k_offset]).reshape(BLOCK_N, BLOCK_K)
+{% endif %}
+
 {% if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
 {% else %}
@@ -509,51 +511,59 @@ def tuned_scaled_grouped_mm(
                 g = V.graph.sizevars.guard_equals(g1, g2)
                 k = V.graph.sizevars.guard_equals(k1, k2)
                 m_is_dynamic, n_is_dynamic, k_is_dynamic = False, False, False
+
         kwargs = {
             "G": g,
             "M": m,
             "N": n,
             "K": k,
+            "A_IS_2D": len(m1_size) == 2,
+            "B_IS_2D": len(m2_size) == 2,
             "M_IS_DYNAMIC": m_is_dynamic,
             "N_IS_DYNAMIC": n_is_dynamic,
             "K_IS_DYNAMIC": k_is_dynamic,
             "NUM_SMS": get_num_sms(),
             "USE_TMA_LOAD": True,
             "USE_FAST_ACCUM": use_fast_accum,
-            "M_PER_GROUP": next_power_of_2(m) // g if m_is_dynamic else m,
-            "N_PER_GROUP": next_power_of_2(n) // g if n_is_dynamic else n,
-            "K_PER_GROUP": next_power_of_2(k) // g if k_is_dynamic else k,
         }
-        if m_is_dynamic or k_is_dynamic:
-            kwargs["A_GLOBAL_SIZE_M"] = m
-            kwargs["A_GLOBAL_SIZE_K"] = mat_a.layout.stride[0]
-            kwargs["A_GLOBAL_OFF_M"] = 0  # if stepping along M mode, offs are used here
-        else:
-            kwargs["A_GLOBAL_SIZE_M"] = mat_a.layout.stride[0]
-            kwargs["A_GLOBAL_SIZE_K"] = mat_a.layout.stride[1]
-            kwargs["A_GLOBAL_OFF_M"] = mat_a.layout.stride[0] // mat_a.layout.stride[1]
-        if n_is_dynamic or k_is_dynamic:
-            kwargs["B_GLOBAL_SIZE_N"] = n
-            kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[1]
-            kwargs["B_GLOBAL_OFF_N"] = 0  # if stepping along N mode, offs are used here
-        else:
-            kwargs["B_GLOBAL_SIZE_N"] = mat_b.layout.stride[0]
-            kwargs["B_GLOBAL_SIZE_K"] = mat_b.layout.stride[2]
-            kwargs["B_GLOBAL_OFF_N"] = mat_b.layout.stride[0] // mat_b.layout.stride[2]
+
+        a_size = mat_a.get_size()
+        a_stride = mat_a.get_stride()
+        b_size = mat_b.get_size()
+        b_stride = mat_b.get_stride()
+        # the b_mat is given with its last two dims transposed, revert here
+        b_size[-2], b_size[-1] = b_size[-1], b_size[-2]
+        b_stride[-2], b_stride[-1] = b_stride[-1], b_stride[-2]
+        kwargs["A_SIZE_0"] = a_size[0]
+        kwargs["A_SIZE_1"] = a_size[1]
+        kwargs["A_STRIDE_0"] = a_stride[0]
+        kwargs["A_STRIDE_1"] = a_stride[1]
+        if not len(a_size) == 2:
+            kwargs["A_SIZE_2"] = a_size[2]
+            kwargs["A_STRIDE_2"] = a_stride[2]
+        kwargs["B_SIZE_0"] = b_size[0]
+        kwargs["B_SIZE_1"] = b_size[1]
+        kwargs["B_STRIDE_0"] = b_stride[0]
+        kwargs["B_STRIDE_1"] = b_stride[1]
+        if not len(b_size) == 2:
+            kwargs["B_SIZE_2"] = b_size[2]
+            kwargs["B_STRIDE_2"] = b_stride[2]
 
         for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
             triton_scaled_grouped_mm_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
                 layout=layout,
-                workspace_arg=get_tma_workspace_arg(
-                    num_tma_descriptors=2,
-                    device=mat_a.get_device(),
-                ),
                 num_stages=config.num_stages,
                 num_warps=config.num_warps,
                 **kwargs,
                 **config.kwargs,
             )
+
+    # TMA descriptors require a global memory allocation
+    def alloc_fn(size: int, alignment: int, stream: Optional[int]):
+        return torch.empty(size, device=mat_a.get_device(), dtype=torch.int8)
+
+    triton.set_allocator(alloc_fn)
 
     return autotune_select_algorithm("scaled_grouped_mm", choices, input_nodes, layout)

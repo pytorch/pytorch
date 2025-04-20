@@ -1369,6 +1369,10 @@ class CommonTemplate:
             b = torch.add(args[0], args[0])
             return (a, b)
 
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("No complex on MacOS13")
+
         x = torch.randn(41, dtype=torch.complex64, device=self.device)
         y = x.clone()
         # should not inplace write to the input
