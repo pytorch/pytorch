@@ -2233,15 +2233,17 @@ class FakeTensorDispatchCache(TestCase):
                 self.assertHitsMisses(0, 0)
 
                 ref = invoke_subgraph(mod, "subgraph", (x, y))
-                self.assertHitsMisses(0, 3)
-
-                res = invoke_subgraph(mod, "subgraph", (x, y))
-                # The hits are from re-running the subgraph
-                self.assertHitsMisses(1, 3)
-
-                res = invoke_subgraph(mod, "subgraph", (x, y))
-                # The hits are from re-running the subgraph
+                # Miss - hop miss, subgraph op misses
+                # Hits - hits from subgraph op caching in validate cache key
                 self.assertHitsMisses(2, 3)
+
+                res = invoke_subgraph(mod, "subgraph", (x, y))
+                # The hits are from re-running the subgraph
+                self.assertHitsMisses(3, 3)
+
+                res = invoke_subgraph(mod, "subgraph", (x, y))
+                # The hits are from re-running the subgraph
+                self.assertHitsMisses(4, 3)
 
                 self.assertEqual(len(ref), len(res))
                 self.assertEqual(len(ref), len(res))
@@ -2321,17 +2323,19 @@ class FakeTensorDispatchCache(TestCase):
             self.assertHitsMisses(0, 0)
 
             ref = invoke_subgraph(mod, "subgraph", (x, y))
-            self.assertHitsMisses(0, 2)
+            # Miss - hop miss, subgraph op misses
+            # Hits - hits from subgraph op caching in validate cache key
+            self.assertHitsMisses(1, 2)
             self.assertBypasses("hop invoke_subgraph failed because of inplace view", 1)
 
             res = invoke_subgraph(mod, "subgraph", (x, y))
             # The hits are from the ops inside fn and not the subgraph
-            self.assertHitsMisses(2, 2)
+            self.assertHitsMisses(3, 2)
             self.assertBypasses("hop invoke_subgraph failed because of inplace view", 2)
 
             res = invoke_subgraph(mod, "subgraph", (x, y))
             # The hits are from the ops inside fn and not the subgraph
-            self.assertHitsMisses(4, 2)
+            self.assertHitsMisses(5, 2)
             self.assertBypasses("hop invoke_subgraph failed because of inplace view", 3)
 
             self.assertEqual(len(ref), len(res))
