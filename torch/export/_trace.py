@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import copy
 import dataclasses
 import functools
 import inspect
@@ -1166,7 +1165,6 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
         if isinstance(dynamic_shapes, torch.export.ShapesCollection):
             dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    dynamic_shapes = copy.deepcopy(dynamic_shapes)
     return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
 
 

@@ -314,18 +314,37 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
-    def test_unsafe_mark_cacheable(self):
-        from torch.utils.checkpoint import checkpoint
+    @parametrize("fn_select", ("tag_activation_checkpoint", "allow_in_graph"))
+    def test_unsafe_mark_cacheable(self, fn_select):
+        if fn_select == "tag_activation_checkpoint":
+            from torch.utils.checkpoint import checkpoint
 
-        def gn(x, y, z=None):
-            a = torch.matmul(x, y)
-            if z is not None:
-                return torch.matmul(a, z)
-            return a
+            def gn(x, y, z=None):
+                a = torch.matmul(x, y)
+                if z is not None:
+                    return torch.matmul(a, z)
+                return a
 
-        @torch.compile
-        def fn(x, y, z):
-            return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
+            @torch.compile
+            def fn(x, y, z):
+                return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
+
+            fn_name = "torch.ops.higher_order.tag_activation_checkpoint"
+        else:
+            assert fn_select == "allow_in_graph"
+
+            @torch._dynamo.allow_in_graph
+            class AllowInGraphFunc(torch.autograd.Function):
+                @staticmethod
+                def forward(_, x):
+                    torch._dynamo.graph_break()
+                    return x.sin()
+
+            @torch.compile
+            def fn(x, y, z):
+                return AllowInGraphFunc.apply(x)
+
+            fn_name = "torch._dynamo.variables.misc.trampoline_autograd_apply"
 
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
@@ -334,7 +353,7 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
-            r".*BypassAOTAutogradCache: Unsupported call_function target tag_activation_checkpoint.*",
+            r".*BypassAOTAutogradCache: Unsupported call_function target .*",
         ):
             fn(*args)
 
@@ -344,10 +363,13 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         self._clear_dynamo_and_codecache()
 
-        with inductor_config.patch(
-            "unsafe_marked_cacheable_functions",
-            ["torch.ops.higher_order.tag_activation_checkpoint"],
-        ):
+        if fn_select == "allow_in_graph":
+            # TODO: Fix allow in graph
+            raise unittest.SkipTest(
+                "Allow in graph produces an unserializable cache artifact"
+            )
+
+        with inductor_config.patch("unsafe_marked_cacheable_functions", [fn_name]):
             fn(*args)
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
