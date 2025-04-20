@@ -161,7 +161,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_cpu) (
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
-Tensor upsample_nearest3d(
+static Tensor upsample_nearest3d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     std::optional<ArrayRef<double>> scale_factors) {
