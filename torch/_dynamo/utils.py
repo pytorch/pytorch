@@ -689,30 +689,34 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
-    cx_managers: list[typing.Any] = [
+    cx_mgrs: list[typing.Any] = [
         torch.profiler.record_function(f"{key} (dynamo_timed)")
     ]
-    wait_counter_name = key
-    if waitcounter_name_override:
-        wait_counter_name = waitcounter_name_override
-
     if log_waitcounter:
-        cx_managers.append(
-            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
-        )
+        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
 
+    is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
     if dynamo_compile_column_us:
         # We're standardizing on microseconds for dynamo_compile timings.
         assert dynamo_compile_column_us.endswith("_us")
+
         # Track nested dynamo_timed calls that update CompilationMetrics so we can
         # bump a total duration only for the outermost metric.
         if not hasattr(_dynamo_timed_tls, "depth"):
             _dynamo_timed_tls.depth = 0
         _dynamo_timed_tls.depth += 1
 
+        # The corresponding WaitCounters that we bump for all overheads
+        if _dynamo_timed_tls.depth == 1:
+            cx_mgrs.append(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+            if not is_compile_time:
+                runtime_wc = "pytorch.wait_counter.compile_runtime_overheads"
+                cx_mgrs.append(_WaitCounter(runtime_wc).guard())
+
     try:
         with contextlib.ExitStack() as stack:
-            for cx in cx_managers:
+            for cx in cx_mgrs:
                 stack.enter_context(cx)
             yield
     finally:
@@ -730,16 +734,12 @@ def dynamo_timed(
             # this way?
             cumulative_time_spent_ns[event_name] += time_spent_ns
 
-            duration_us = time_spent_ns // 1000
-            is_compile_time_event = (
-                torch._guards.CompileContext.current_compile_id() is not None
-            )
-
             # Bump the total duration for every outer event.
             _dynamo_timed_tls.depth -= 1
             is_outer_event = _dynamo_timed_tls.depth == 0
 
-            if is_compile_time_event:
+            duration_us = time_spent_ns // 1000
+            if is_compile_time:
                 metrics_context = get_metrics_context()
                 if metrics_context.in_progress():
                     metrics_context.increment(dynamo_compile_column_us, duration_us)
