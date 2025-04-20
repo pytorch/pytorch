@@ -378,19 +378,20 @@ class TritonTemplateKernel(TritonKernel):
         # In order to cache the code generation and avoid redoing it for similar inputs that varies only by
         # input names or symbol names, we do a record and replay method.
         # During template expansions we record all function calls that change input_dependent_preserved_state
-        # and replay them on a cache hit to regenerate them.  Namely we want to be able to regenerate:
-        # 1) self.args.input_buffers
-        # 2) self.args.sizevars
-        # 3) self.prologue_supported_inputs
+        # and replay them on a cache hit to regenerate them.
+        self.cached_replay_events: Optional[RecordedEventsType] = None
 
-        self.cached_replay_events: RecordedEventsType = []
+        # Update each time an input is marked frozen.
+        self.frozen_layouts_cnt = 0
 
     def input_dependent_preserved_state(self) -> str:
         return repr(
             [
                 self.args.input_buffers,
                 self.args.sizevars,
+                self.args.workspace_args,
                 self.prologue_supported_inputs,
+                self.frozen_layouts_cnt,
             ]
         )
 
@@ -793,10 +794,11 @@ class TritonTemplateKernel(TritonKernel):
                 indices, self.range_trees[0].construct_entries(lengths)
             ):
                 range_tree_entry.set_name(name)
-
-            strided_index = sympy_dot(input_node.get_stride(), index_symbols)
-            strided_index = self.rename_indexing(strided_index)
-            self.body.writeline("xindex = " + texpr(strided_index))
+            contiguous_index = sympy_dot(
+                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
+            )
+            contiguous_index = self.rename_indexing(contiguous_index)
+            self.body.writeline("xindex = " + texpr(contiguous_index))
 
             xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
@@ -869,7 +871,7 @@ class TritonTemplateKernel(TritonKernel):
 
             output_index = self.rename_indexing(output_index)
 
-            if output_index == strided_index:
+            if output_index == contiguous_index:
                 output_index_str = "xindex"
             else:
                 out_indexing = self.indexing(
@@ -972,6 +974,7 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 input_node.freeze_layout()
                 epilogue_args.append(input_node.make_loader()(index_symbols))
+                self.frozen_layouts_cnt += 1
 
             V.ops.store(
                 self.output_node.get_name(),
@@ -991,9 +994,33 @@ class TritonTemplateKernel(TritonKernel):
         self.render_hooks["<STORE_OUTPUT>"] = hook
         return "<STORE_OUTPUT>"
 
-    def render(self, template, kwargs):
+    def render(self, template, kwargs, record_input_dependent_tracked_event=False):
+        if record_input_dependent_tracked_event:
+            self.cached_replay_events = []
+
+        def make_template_env():
+            """
+            Generate the namespace visible in the template.
+            """
+            return {
+                fn.__name__: self.record_input_dependent_tracked_event()(fn)
+                if record_input_dependent_tracked_event
+                else fn
+                for fn in [
+                    self.def_kernel,
+                    self.size,
+                    self.stride,
+                    self.store_output,
+                    self.load_input,
+                    self.make_load,
+                    self.modification,
+                    self.gen_argdefs,
+                    self.gen_defines,
+                ]
+            }
+
         return PartialRender(
-            template.render(**self.template_env(), **kwargs),
+            template.render(**make_template_env(), **kwargs),
             self.render_hooks,
         )
 
@@ -1012,25 +1039,6 @@ class TritonTemplateKernel(TritonKernel):
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
         return f"tl.load({name} + ({index}), {mask}, other=0.0)"
-
-    def template_env(self):
-        """
-        Generate the namespace visible in the template.
-        """
-        return {
-            fn.__name__: self.record_input_dependent_tracked_event()(fn)
-            for fn in [
-                self.def_kernel,
-                self.size,
-                self.stride,
-                self.store_output,
-                self.load_input,
-                self.make_load,
-                self.modification,
-                self.gen_argdefs,
-                self.gen_defines,
-            ]
-        }
 
     def indexing(
         self,
@@ -1224,11 +1232,7 @@ class TritonTemplate(KernelTemplate):
     all_templates: dict[str, "TritonTemplate"] = {}
 
     def __init__(
-        self,
-        name: str,
-        grid: Any,
-        source: str,
-        debug=False,
+        self, name: str, grid: Any, source: str, debug=False, cache_codegen=False
     ) -> None:
         super().__init__(name)
         self.grid = grid
@@ -1236,15 +1240,14 @@ class TritonTemplate(KernelTemplate):
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
-        self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
-        clear_on_fresh_inductor_cache(self._generated_code_cache)
+        self._cache_codegen = cache_codegen
+        if cache_codegen:
+            self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
+            clear_on_fresh_inductor_cache(self._generated_code_cache)
 
-    # These class fields are used for testing _generated_code_cache.
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
     test_cache = False
-    generated_module_cache_hit = 0
-    generated_module_cache_miss = 0
 
     def generate_and_load(
         self,
@@ -1264,6 +1267,7 @@ class TritonTemplate(KernelTemplate):
     ) -> Optional[
         tuple[ModuleType, str, tuple[str, ...], OrderedSet[str], Any, dict[str, Any]]
     ]:
+        # breakpoint()
         """Generate the python code and load it into the current process"""
         cache_key = self._generated_code_cache.make_key(
             input_nodes,
@@ -1351,7 +1355,7 @@ class TritonTemplate(KernelTemplate):
 
         def generate_code(kernel) -> Optional[tuple[str, str]]:
             try:
-                template = kernel.render(self.template, kwargs)
+                template = kernel.render(self.template, kwargs, self._cache_codegen)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                     code = template.finalize_all()
             except ZeroDivisionError:
@@ -1375,13 +1379,17 @@ class TritonTemplate(KernelTemplate):
             cache_entry = self._generated_code_cache.get_entry(cache_key)
 
             if cache_entry is not None:
-                TritonTemplate.generated_module_cache_hit += 1
+                torch._dynamo.utils.counters["inductor"][
+                    "generated_module_cache_hit"
+                ] += 1
                 code, extra, events = cache_entry
                 kernel.replay_cached_events(events)
                 cache_hit = True
 
             else:
-                TritonTemplate.generated_module_cache_miss += 1
+                torch._dynamo.utils.counters["inductor"][
+                    "generated_module_cache_miss"
+                ] += 1
                 result = generate_code(kernel)
                 if not result:  # happens at ZeroDivisionError:
                     return None
@@ -1573,6 +1581,7 @@ class TritonTemplate(KernelTemplate):
                 ),
                 "num_stages": num_stages,
                 "num_warps": num_warps,
+                "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },

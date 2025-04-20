@@ -222,6 +222,7 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
     ),
+    cache_codegen=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(

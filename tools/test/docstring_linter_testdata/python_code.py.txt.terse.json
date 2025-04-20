@@ -1,0 +1,140 @@
+{
+  "class ImpossibleCombo": {
+    "docstring_len": 44,
+    "line": 69,
+    "lines": 15,
+    "status": "good"
+  },
+  "class ImpossibleCombo.needs_docs.not_short.Long": {
+    "docstring_len": 0,
+    "line": 74,
+    "lines": 6,
+    "status": "good"
+  },
+  "class ImpossibleCombo.needs_docs.not_short.Short": {
+    "docstring_len": 0,
+    "line": 81,
+    "lines": 3,
+    "status": "good"
+  },
+  "class LongWithDocstring": {
+    "docstring_len": 44,
+    "line": 11,
+    "lines": 6,
+    "status": "good"
+  },
+  "class LongWithShortDocstring": {
+    "docstring_len": 10,
+    "line": 25,
+    "lines": 6,
+    "status": "good"
+  },
+  "class LongWithoutDocstring": {
+    "docstring_len": 0,
+    "line": 20,
+    "lines": 4,
+    "status": "good"
+  },
+  "class NotDocstring": {
+    "docstring_len": 0,
+    "line": 85,
+    "lines": 12,
+    "status": "good"
+  },
+  "class Short": {
+    "docstring_len": 0,
+    "line": 7,
+    "lines": 3,
+    "status": "good"
+  },
+  "class ShortWithDocstring": {
+    "docstring_len": 44,
+    "line": 2,
+    "lines": 4,
+    "status": "good"
+  },
+  "class _Protected": {
+    "docstring_len": 10,
+    "line": 32,
+    "lines": 6,
+    "status": "good"
+  },
+  "def ImpossibleCombo.needs_docs": {
+    "docstring_len": 0,
+    "line": 72,
+    "lines": 12,
+    "status": "good"
+  },
+  "def ImpossibleCombo.needs_docs.not_short": {
+    "docstring_len": 0,
+    "line": 73,
+    "lines": 11,
+    "status": "good"
+  },
+  "def LongWithDocstring.short1": {
+    "docstring_len": 0,
+    "line": 14,
+    "lines": 3,
+    "status": "good"
+  },
+  "def LongWithShortDocstring.short1": {
+    "docstring_len": 0,
+    "line": 28,
+    "lines": 3,
+    "status": "good"
+  },
+  "def LongWithoutDocstring.short1": {
+    "docstring_len": 0,
+    "line": 21,
+    "lines": 3,
+    "status": "good"
+  },
+  "def NotDocstring.short1": {
+    "docstring_len": 0,
+    "line": 86,
+    "lines": 2,
+    "status": "good"
+  },
+  "def NotDocstring.short2": {
+    "docstring_len": 0,
+    "line": 91,
+    "lines": 2,
+    "status": "good"
+  },
+  "def NotDocstring.short3": {
+    "docstring_len": 0,
+    "line": 94,
+    "lines": 3,
+    "status": "good"
+  },
+  "def _Protected.short1": {
+    "docstring_len": 0,
+    "line": 35,
+    "lines": 3,
+    "status": "good"
+  },
+  "def long": {
+    "docstring_len": 44,
+    "line": 46,
+    "lines": 8,
+    "status": "good"
+  },
+  "def long_with_omit": {
+    "docstring_len": 0,
+    "line": 102,
+    "lines": 1,
+    "status": "good"
+  },
+  "def long_without_docstring": {
+    "docstring_len": 0,
+    "line": 59,
+    "lines": 3,
+    "status": "good"
+  },
+  "def short": {
+    "docstring_len": 0,
+    "line": 42,
+    "lines": 3,
+    "status": "good"
+  }
+}
