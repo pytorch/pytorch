@@ -630,6 +630,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         attr_is_overriden = _is_attr_overidden(tx, self, name)
         if tx.output.torch_function_enabled and not attr_is_overriden:
             attr = getattr(torch.Tensor, name, None)
+            getter_fn = None
             if attr:
                 getter_fn = getattr(attr, "__get__", None)
             if getter_fn is not None and torch.overrides.is_tensor_method_or_property(
