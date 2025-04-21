@@ -284,7 +284,7 @@ struct TORCH_API Source {
       CopiesString copies_str,
       std::string_view text_view) {
     if (copies_str == COPIES_STRING) {
-      std::shared_ptr<std::string> allocated_str =
+      auto allocated_str =
           std::make_shared<std::string>(text_view.data(), text_view.size());
       return StringCordView({*allocated_str}, {allocated_str});
     } else {
