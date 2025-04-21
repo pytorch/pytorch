@@ -30,7 +30,7 @@ from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
-    make_int,
+    to_int,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
@@ -323,15 +323,20 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        proxies = self.bind_objects_to_proxies(sizes, self.sizes_proxy, sizes_origins)
+
+        # We want to mark every size as dynamic, but since there's no way to
+        # mark a primitive `int` as dynamic, we need to wrap it in a tensor.
+        # In the graph, we unwrap it with `to_int` back into a primitive.
+        proxies = [self.sizes_proxy[i] for i in range(len(sizes))]  # type: ignore[index]
         for i, symint in enumerate(sizes):
             proxies[i] = self.fx_tracer.create_proxy(
                 "call_function",
-                make_int,
+                to_int,
                 (proxies[i],),
                 {},
             )
             self.symnode_proxy_lookup[symint.node] = proxies[i]
+        proxies = self.bind_objects_to_proxies(sizes, proxies, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -940,14 +945,17 @@ class AutogradCompilerInstance:
         if self.nan_checker:
             self.nan_checker.prep_with_graph(self.fx_tracer.graph)
 
-        # dynamic_ints_idx = []
-        # for node in self.fx_tracer.graph.find_nodes(op="placeholder"):
-        #     if node.name != "sizes":
-        #         continue
+        # record sizes that are actually used in the graph
+        used_sizes_idx = []
+        for node in self.fx_tracer.graph.find_nodes(op="placeholder"):
+            if node.name != "sizes":
+                continue
 
-        #     for getitem_node in node.users.keys():
-        #         if getitem_node.users:
-        #             dynamic_ints_idx.append(getitem_node.args[1])
+            for getitem_node in node.users.keys():
+                if getitem_node.users:
+                    used_sizes_idx.append(getitem_node.args[1])
+
+            break
 
         graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
@@ -966,13 +974,15 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks, packed_inputs):
-            # for idx in dynamic_ints_idx:
-            for i in range(len(sizes)):
-                sizes[i] = torch.empty(0, sizes[i])
-                torch._dynamo.maybe_mark_dynamic(sizes[i], 1)
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
+
+                for idx in used_sizes_idx:
+                    # can't create negative size
+                    if sizes[idx] > 0:
+                        sizes[idx] = torch.empty(0, sizes[idx])
+                        torch._dynamo.maybe_mark_dynamic(sizes[idx], 1)
                 if self.nan_checker:
                     self.nan_checker.prep_with_inputs(inputs)
 
