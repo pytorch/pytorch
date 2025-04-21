@@ -2,7 +2,9 @@ import functools
 from typing import Any, Optional
 from typing_extensions import Unpack
 
-from .triton_compat import ASTSource, CompiledKernel
+import torch
+
+from .triton_compat import ASTSource, CompiledKernel, OutOfResources
 
 
 class StaticallyLaunchedCudaKernel:
@@ -204,15 +206,19 @@ class StaticallyLaunchedCudaKernel:
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
-
-        _StaticCudaLauncher._launch_kernel(
-            self.function,
-            grid_x,
-            grid_y,
-            grid_z,
-            self.num_warps,
-            self.shared,
-            arg_tys,
-            args,
-            stream,
-        )
+        try:
+            _StaticCudaLauncher._launch_kernel(
+                self.function,
+                grid_x,
+                grid_y,
+                grid_z,
+                self.num_warps,
+                self.shared,
+                arg_tys,
+                args,
+                stream,
+            )
+        except torch.cuda.OutOfMemoryError as e:
+            # Triton has its own OutofResources exception
+            # so we convert to that instead
+            raise OutOfResources(e) from e
