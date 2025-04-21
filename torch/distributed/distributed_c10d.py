@@ -15,7 +15,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -1820,6 +1820,7 @@ def _new_process_group_helper(
     pg_tag=None,
     device_id=None,
     group_desc=None,
+    profiling_ranks_in_group=[],
 ):
     """
     Create a new distributed process group.
@@ -4938,6 +4939,7 @@ def split_group(
     timeout: Optional[timedelta] = None,
     pg_options: Optional[Any] = None,
     group_desc: Optional[str] = None,
+    profiling_ranks_in_group: List[int] = [],
 ) -> Optional[ProcessGroup]:
     """
     Create a new process group splitted from the given parent process group.
@@ -5085,6 +5087,7 @@ def split_group(
     pg_options.split_from = parent_backend
     pg_options.split_color = _process_group_color(my_group)
     pg_options.global_ranks_in_group = global_ranks_in_my_group
+    pg_options.profiling_ranks_in_group = profiling_ranks_in_group
     pg_options.group_name = group_name
     backend_class = ProcessGroupNCCL(
         prefix_store, group_rank, len(my_group), pg_options

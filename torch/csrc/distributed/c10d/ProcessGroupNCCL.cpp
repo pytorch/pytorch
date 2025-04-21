@@ -2108,6 +2108,16 @@ const int& ProcessGroupNCCL::globalRank() const {
   return globalRank;
 }
 
+int ProcessGroupNCCL::profilingRank(int rank) const {
+  if (options_->profiling_ranks_in_group.empty()) {
+    // return communicator rank if profiling ranks not specified
+    return rank;
+  }
+  TORCH_CHECK(rank >= 0);
+  TORCH_CHECK(rank < options_->profiling_ranks_in_group.size());
+  return options_->profiling_ranks_in_group.at(rank);
+}
+
 const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
   if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
     static std::vector<uint64_t> globalRanks(size_);
@@ -5214,6 +5224,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       globalRankStride_, // globalRankStride_
       this->getSize()); // worldSize
 
+  const auto profilingMyRank = profilingRank(rank_);
+  const auto profilingDstRank = profilingRank(dstRank);
+
   auto ret = pointToPoint(
       tensor,
       [&](at::Tensor& input,
@@ -5231,7 +5244,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       },
       dstRank,
       OpType::SEND,
-      c10::str("nccl:send ", rank_, "->", dstRank).c_str());
+      c10::str("nccl:send ", profilingMyRank, "->", profilingDstRank).c_str());
   return ret;
 }
 
@@ -5262,6 +5275,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       globalRankStride_, // globalRankStride_
       this->getSize()); // worldSize
 
+  const auto profilingMyRank = profilingRank(rank_);
+  const auto profilingSrcRank = profilingRank(srcRank);
+
   auto ret = pointToPoint(
       tensor,
       [&](at::Tensor& output,
@@ -5279,7 +5295,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       },
       srcRank,
       OpType::RECV,
-      c10::str("nccl:recv ", rank_, "<-", srcRank).c_str());
+      c10::str("nccl:recv ", profilingMyRank, "<-", profilingSrcRank).c_str());
   return ret;
 }
 
