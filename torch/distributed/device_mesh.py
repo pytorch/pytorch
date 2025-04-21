@@ -758,6 +758,7 @@ else:
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
+                assert isinstance(mesh_dim, int)
                 return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
