@@ -245,7 +245,7 @@ Tensor two_four_sgemm(
                         ElementC(0),
                         {cute::_1{}, cute::_0{}, problem_size.m()}};
             } else {
-                return {ElementC(0)};
+                return {{ElementC(0)}};
             }
         }()
     };
