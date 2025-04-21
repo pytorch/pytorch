@@ -662,37 +662,12 @@ def build_code_hash(
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
 
 
-def torch_key_cache(func: Callable[[], bytes]) -> Callable[[], bytes]:
-    """
-    This function is a reimplementation of functools.lru_cache with a
-    set function that allows prepopulating the cache.
-    """
-    # Use list for reference semantics
-    _cache: list[bytes] = []
-
-    def wrapper() -> bytes:
-        if len(_cache) == 0:
-            _cache.append(func())
-        return _cache[0]
-
-    def set_val(val: bytes) -> None:
-        assert len(_cache) == 0
-        _cache.append(val)
-
-    def clear() -> None:
-        _cache.clear()
-
-    wrapper.set = set_val  # type: ignore[attr-defined]
-    wrapper.clear = clear  # type: ignore[attr-defined]
-    return wrapper
-
-
-@torch_key_cache
+@functools.lru_cache(None)
 def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=False):
+    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=True):
         if not config.is_fbcode():
 
             def get_code_hash(root: str) -> bytes:
@@ -1124,6 +1099,18 @@ class FxGraphCache:
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.debug("Output code written to: %s", artifact_path)
         # On cache hit, use artifact path as filename
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_runnable",
+                "encoding": "string",
+            },
+            payload_fn=lambda: graph.runnable_graph_str,
+        )
+        trace_structured(
+            "inductor_post_grad_graph",
+            payload_fn=lambda: graph.inductor_post_grad_graph_str,
+        )
         trace_structured(
             "inductor_output_code",
             lambda: {"filename": artifact_path},
