@@ -1374,6 +1374,11 @@ class InstructionTranslatorBase(
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
 
+                    # Note that this call maybe redundant if compile_subgraph is
+                    # called. This is ok, because calling exit stack close()
+                    # twice is not an issue (second stop is a no op).
+                    self.output.mark_bytecode_tracing_stop()
+
     def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
@@ -1639,6 +1644,9 @@ class InstructionTranslatorBase(
                 explanation="Import result is not a Python module.",
                 hints=[],
             )
+
+    # fb internal 3.12 opcode
+    EAGER_IMPORT_NAME = IMPORT_NAME
 
     def IMPORT_FROM(self, inst):
         self.DUP_TOP(inst)
