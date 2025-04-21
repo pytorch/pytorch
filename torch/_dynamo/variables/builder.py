@@ -2096,7 +2096,7 @@ class VariableBuilder:
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
 
-            if self.source.name() in get_dynamic_sources():
+            if is_dynamic_source(self.source.name()):
                 log.debug("%s marked dynamic via source whitelist", self.source.name())
                 dynamic_dim = DimDynamic.DYNAMIC
             elif (
@@ -2833,18 +2833,32 @@ def get_automatic_dynamic_shapes_mark_as():
 
 
 _DYNAMIC_SOURCES: Optional[set[str]] = None
+_DYNAMIC_SOURCES_CONFIG_HASH: Optional[int] = None
 
 
 def get_dynamic_sources() -> set[str]:
-    global _DYNAMIC_SOURCES
-    if _DYNAMIC_SOURCES is not None:
+    global _DYNAMIC_SOURCES, _DYNAMIC_SOURCES_CONFIG_HASH
+
+    current_hash = hash(torch.compiler.config.dynamic_sources)
+
+    # If we have already calculated the sources and the config hasn't changed, return cached result
+    if _DYNAMIC_SOURCES is not None and _DYNAMIC_SOURCES_CONFIG_HASH == current_hash:
         return _DYNAMIC_SOURCES
 
+    # Config has changed or first time, (re)calculate the sources
     _DYNAMIC_SOURCES = set(
         torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
     )
+    _DYNAMIC_SOURCES_CONFIG_HASH = current_hash
 
     return _DYNAMIC_SOURCES
+
+def is_dynamic_source(source_name: str) -> bool:
+    dynamic_sources = get_dynamic_sources()
+    for pattern in dynamic_sources:
+        if pattern == source_name or re.match(pattern, source_name):
+            return True
+    return False
 
 
 # Tracks the sources of all fake tensors we wrap in Dynamo.
@@ -2881,7 +2895,6 @@ def _automatic_dynamic(
         )
 
     name = source.name()
-    dynamic_sources = get_dynamic_sources()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -2920,7 +2933,7 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes and name not in dynamic_sources:
+    if static_shapes and not is_dynamic_source(name):
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3051,7 +3064,7 @@ def _automatic_dynamic(
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
-        if name in dynamic_sources:
+        if is_dynamic_source(name):
             log.debug("%s marked dynamic via source whitelist", name)
             automatic_dynamic_size = True
             automatic_dynamic_stride = True
