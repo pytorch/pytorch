@@ -529,6 +529,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int bid = blockIdx.x;
+  int tid = threadIdx.x;
 
   // Calculate the output offsets
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
@@ -548,6 +549,10 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
       size,
       peer);
   }
+  // Write out the output offsets (to the scratchpad line)
+  if (bid == 0 && tid < npes) {
+    source_offsets[tid] = peer_offsets[tid];
+  }
 }
 
 at::Tensor nvshmem_all_to_all_vdev(
@@ -562,7 +567,7 @@ at::Tensor nvshmem_all_to_all_vdev(
    *  - `in_out_splits` is a 2D tensor of size (3, npes). The rows are (in order):
         input splits (IN)
         output splits (OUT) and
-        necessary scratchpad space.
+        output offsets (OUT).
   */
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
