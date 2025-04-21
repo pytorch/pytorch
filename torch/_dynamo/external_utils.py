@@ -199,5 +199,6 @@ def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     return nonrecursive_disable_wrapper
 
+
 def make_int(x: torch.Tensor) -> int:
     return x.size(1)
