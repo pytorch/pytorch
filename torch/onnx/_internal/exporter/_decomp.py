@@ -27,7 +27,7 @@ def get_onnx_implemented_overloads(
     registered_ops: list[_registration.TorchOp] = []
     for onnx_decomp_meta in registry.functions.values():
         assert len(onnx_decomp_meta) > 0
-        # Different OnnxDecompMeta for the same TorOp should
+        # Different OnnxDecompMeta for the same TorchOp should
         # have the same fx_target.
         fx_target = onnx_decomp_meta[0].fx_target
         registered_ops.append(fx_target)
@@ -35,8 +35,8 @@ def get_onnx_implemented_overloads(
 
 
 def create_onnx_friendly_decomposition_table(
-    onnx_registered_ops: set[torch._ops.OperatorBase],
-) -> dict[torch._ops.OperatorBase, Callable]:
+    onnx_registered_ops: set[_registration.TorchOp],
+) -> dict[_registration.TorchOp, Callable]:
     """
     This function creates a dictionary of op overloads and their decomposition functions
     for ops that do not have ONNX symbolic functions. If an op already has an ONNX symbolic function,
@@ -50,7 +50,7 @@ def create_onnx_friendly_decomposition_table(
         Dict[torch._ops.OperatorBase, Callable]: A dictionary that maps op overloads to their corresponding
         decomposition functions.
     """
-    decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
+    decomposition_table: dict[_registration.TorchOp, Callable] = {}
 
     for op_overload, decomp_fn in itertools.chain(
         torch.export.default_decompositions().items(),  # type: ignore[attr-defined]
