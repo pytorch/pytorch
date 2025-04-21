@@ -17,7 +17,7 @@ import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -284,6 +284,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         return self.kernel.kexpr(self.kernel.rename_indexing(index))
 
 
+# Function name, followed by args and kwargs.
+RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
+
+
 class TritonTemplateKernel(TritonKernel):
     def __init__(
         self,
@@ -366,6 +370,49 @@ class TritonTemplateKernel(TritonKernel):
         self.template_mask: Optional[str] = None
         self.template_out: Optional[str] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
+
+        # Whe caching is enabled, the generated code is not dependent on the input nodes names, or
+        # symbolic sizes names.
+        # However, some of the variables returned by generate_and_load that are computed during the
+        # triton template expansions (code generation) are dependent on those.
+        # In order to cache the code generation and avoid redoing it for similar inputs that varies only by
+        # input names or symbol names, we do a record and replay method.
+        # During template expansions we record all function calls that change input_dependent_preserved_state
+        # and replay them on a cache hit to regenerate them.
+        self.cached_replay_events: Optional[RecordedEventsType] = None
+
+        # Update each time an input is marked frozen.
+        self.frozen_layouts_cnt = 0
+
+    def input_dependent_preserved_state(self) -> str:
+        return repr(
+            [
+                self.args.input_buffers,
+                self.args.sizevars,
+                self.args.workspace_args,
+                self.prologue_supported_inputs,
+                self.frozen_layouts_cnt,
+            ]
+        )
+
+    def record_input_dependent_tracked_event(self) -> Callable[..., Any]:
+        def decorator(fn) -> Callable[..., Any]:
+            def wrapper(*args, **kwargs) -> Any:
+                pre_state = self.input_dependent_preserved_state()
+                result = fn(*args, **kwargs)
+                post_state = self.input_dependent_preserved_state()
+                if pre_state != post_state:
+                    assert self.cached_replay_events is not None
+                    self.cached_replay_events.append((fn.__name__, [*args], {**kwargs}))
+                return result
+
+            return wrapper
+
+        return decorator
+
+    def replay_cached_events(self, events: RecordedEventsType) -> None:
+        for f, args, kwargs in events:
+            getattr(self, f)(*args, **kwargs)
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -927,6 +974,7 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 input_node.freeze_layout()
                 epilogue_args.append(input_node.make_loader()(index_symbols))
+                self.frozen_layouts_cnt += 1
 
             V.ops.store(
                 self.output_node.get_name(),
@@ -946,13 +994,18 @@ class TritonTemplateKernel(TritonKernel):
         self.render_hooks["<STORE_OUTPUT>"] = hook
         return "<STORE_OUTPUT>"
 
-    def render(self, template, kwargs):
+    def render(self, template, kwargs, record_input_dependent_tracked_event=False):
+        if record_input_dependent_tracked_event:
+            self.cached_replay_events = []
+
         def make_template_env():
             """
             Generate the namespace visible in the template.
             """
             return {
-                fn.__name__: fn
+                fn.__name__: self.record_input_dependent_tracked_event()(fn)
+                if record_input_dependent_tracked_event
+                else fn
                 for fn in [
                     self.def_kernel,
                     self.size,
@@ -1068,19 +1121,138 @@ def _jinja2_env():
         return None
 
 
+class GeneratedCodeCacheEntry(NamedTuple):
+    code: str
+    extra: str
+    events: list[Any]
+
+
+class GeneratedCodeCache:
+    """
+    Cache for generated code. The cache key is a string representation of the input nodes,
+    number of stages, number of warps, and call sizes. The cache value is a tuple of the
+    generated code, extra code, and events.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._cache: dict[str, GeneratedCodeCacheEntry] = {}
+
+    def cache_clear(self) -> None:
+        self._cache.clear()
+
+    def __repr__(self):
+        return repr(self._cache)
+
+    def make_key(
+        self,
+        input_nodes: tuple[ir.IRNode],
+        num_stages: int,
+        num_warps: int,
+        call_sizes: list[sympy.core.symbol.Symbol],
+        prefix_args: int,
+        suffix_args: int,
+        epilogue_fn: Optional[Callable[..., Any]],
+        subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
+        workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
+        layout: ir.Layout,
+        num_consumer_groups: int,
+        num_buffers_warp_spec: int,
+        kwargs: dict[str, Any],
+    ) -> Optional[str]:
+        def layout_key(layout: ir.Layout) -> str:
+            assert not isinstance(layout, ir.FlexibleLayout)
+            return repr(
+                [
+                    layout.size,
+                    layout.stride,
+                    layout.dtype,
+                    layout.device,
+                    layout.offset,
+                ]
+            )
+
+        def has_flexiable_layout() -> bool:
+            if isinstance(layout, ir.FlexibleLayout):
+                return True
+
+            for input in input_nodes:
+                if isinstance(input.get_layout(), ir.FlexibleLayout):
+                    return True
+            return False
+
+        # we do not cache under those conditions right now.
+        if (
+            has_flexiable_layout()
+            or subgraphs is not None
+            or workspace_arg is not None
+            or epilogue_fn is not identity
+        ):
+            return None
+
+        return repr(
+            {
+                "input_nodes": [
+                    layout_key(input.get_layout()) for input in input_nodes
+                ],
+                "num_stages": num_stages,
+                "num_warps": num_warps,
+                "prefix_args": prefix_args,
+                "suffix_args": suffix_args,
+                "call_sizes": call_sizes,
+                "layout": layout_key(layout),
+                "num_consumer_groups": num_consumer_groups,
+                "num_buffers_warp_spec": num_buffers_warp_spec,
+                "kwargs": kwargs,
+            }
+        )
+
+    def get_entry(self, cache_key: Optional[str]) -> Optional[GeneratedCodeCacheEntry]:
+        if cache_key is None:
+            return None
+
+        entry = self._cache.get(cache_key, None)
+        if entry is None:
+            torch._dynamo.utils.counters["inductor"]["generated_module_cache_miss"] += 1
+        else:
+            torch._dynamo.utils.counters["inductor"]["generated_module_cache_hit"] += 1
+        return entry
+
+    def put_entry(
+        self,
+        cache_key: Optional[str],
+        code: str,
+        extra: str,
+        events: list[Any],
+    ) -> None:
+        if cache_key is None:
+            return
+        entry = GeneratedCodeCacheEntry(code, extra, events)
+        self._cache.update({cache_key: entry})
+
+
 class TritonTemplate(KernelTemplate):
     # Allow subclasses to override the kernel type
     kernel_type: type[Any] = TritonTemplateKernel
     index_counter = itertools.count()
     all_templates: dict[str, "TritonTemplate"] = {}
 
-    def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
+    def __init__(
+        self, name: str, grid: Any, source: str, debug=False, cache_codegen=False
+    ) -> None:
         super().__init__(name)
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
+        self._cache_codegen = cache_codegen
+
+        self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
+        clear_on_fresh_inductor_cache(self._generated_code_cache)
+
+    # When this flag is on, we ensure that the cached results and the generated result if cache
+    # was not used are the same.
+    test_cache = False
 
     def generate_and_load(
         self,
@@ -1107,8 +1279,24 @@ class TritonTemplate(KernelTemplate):
             dict[str, Any],
         ]
     ]:
-        # breakpoint()
         """Generate the python code and load it into the current process"""
+        cache_key = None
+        if self._cache_codegen:
+            cache_key = self._generated_code_cache.make_key(
+                input_nodes,
+                num_stages,
+                num_warps,
+                call_sizes,
+                prefix_args,
+                suffix_args,
+                epilogue_fn,
+                subgraphs,
+                workspace_arg,
+                layout,
+                num_consumer_groups,
+                num_buffers_warp_spec,
+                kwargs,
+            )
 
         assert self.template, "requires jinja2"
         defines = StringIO()
@@ -1181,7 +1369,7 @@ class TritonTemplate(KernelTemplate):
                 return extra
 
             try:
-                template = kernel.render(self.template, kwargs)
+                template = kernel.render(self.template, kwargs, self._cache_codegen)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                     code = template.finalize_all()
             except ZeroDivisionError:
@@ -1201,12 +1389,42 @@ class TritonTemplate(KernelTemplate):
             V.graph.set_current_device(layout.device),
             make_kernel() as kernel,
         ):
-            result = generate_code(kernel)
-            if not result:  # happens at ZeroDivisionError:
-                return None
-            code, extra = result
+            cache_entry = self._generated_code_cache.get_entry(cache_key)
+            cache_hit = False
+
+            if cache_entry is not None:
+                code, extra, events = cache_entry
+                kernel.replay_cached_events(events)
+                cache_hit = True
+
+            else:
+                result = generate_code(kernel)
+                if result is None:  # happens at ZeroDivisionError:
+                    return None
+                code, extra = result
+                self._generated_code_cache.put_entry(
+                    cache_key, code, extra, kernel.cached_replay_events
+                )
 
         assert code is not None and extra is not None
+
+        if cache_hit and self.test_cache:
+            with (
+                patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
+                V.graph.set_current_device(layout.device),
+                make_kernel() as kernel_test,
+            ):
+                result2 = generate_code(kernel_test)
+                assert result2 is not None
+                code_test, extra_test = result2
+                assert (
+                    code == code_test
+                    and extra == extra_test
+                    and kernel.args.input_buffers == kernel_test.args.input_buffers
+                    and kernel.prologue_supported_inputs
+                    == kernel_test.prologue_supported_inputs
+                    and kernel.args.sizevars == kernel_test.args.sizevars
+                ), "Generated code cache results in wrong output"
 
         mod = PyCodeCache.load(code, extra)
 

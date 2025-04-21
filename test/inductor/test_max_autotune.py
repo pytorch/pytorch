@@ -4,6 +4,7 @@ import json
 import math
 import os
 import random
+import re
 import tempfile
 import unittest
 from typing import Callable, Optional
@@ -26,6 +27,7 @@ from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
+    TritonTemplate,
     TritonTemplateCaller,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -75,6 +77,9 @@ class FailChoiceCaller(ChoiceCaller):
 
 
 @instantiate_parametrized_tests
+@unittest.mock.patch(
+    "torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True
+)
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(
@@ -1127,6 +1132,196 @@ class TestMaxAutotune(TestCase):
             expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.max_mm_configs": 4,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_triton_template_generated_code_cache(self):
+        def reset_counters():
+            torch._dynamo.utils.counters.clear()
+
+        def hits():
+            return torch._dynamo.utils.counters["inductor"][
+                "generated_module_cache_hit"
+            ]
+
+        def misses():
+            return torch._dynamo.utils.counters["inductor"][
+                "generated_module_cache_miss"
+            ]
+
+        def func_test1(x, y, z, m):
+            a = torch.matmul(x, y)
+            b = torch.matmul(z, m)
+            return a, b
+
+        a = torch.rand(10, 22, device=GPU_TYPE)
+        b = torch.rand(22, 30, device=GPU_TYPE)
+        # Test that the testing strategy works by overriding input_dependent_preserved_state and simulate a cache hit.
+        with unittest.mock.patch(
+            "torch._inductor.select_algorithm.TritonTemplateKernel.input_dependent_preserved_state",
+            new=(lambda self: "same always"),
+        ), fresh_inductor_cache():
+            with self.assertRaisesRegex(
+                torch._inductor.exc.InductorError,
+                ".*Generated code cache results in wrong output.*",
+            ):
+                torch.compile(func_test1, dynamic=False)(a, b, a, b)
+
+        # remove white space from x.
+        def remove_white_space(x: str) -> str:
+            return re.sub(r"\s+", "", x)
+
+        def get_cache_key_and_events() -> tuple[str, str]:
+            cache = TritonTemplate.all_templates["mm"]._generated_code_cache._cache
+            cache_key = next(iter(cache))
+            events = str(cache[cache_key].events)
+            return cache_key, events
+
+        # Valid cache hit.
+        with fresh_inductor_cache():
+            reset_counters()
+            compile_results = torch.compile(func_test1, dynamic=False)(a, b, a, b)
+            eager_results = func_test1(a, b, a, b)
+            self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
+            self.assertEqual(hits(), 4)
+            self.assertEqual(misses(), 4)
+
+            cache_key, events = get_cache_key_and_events()
+
+            self.assertEqual(
+                remove_white_space(cache_key),
+                remove_white_space(
+                    """
+                {'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='cuda', index=0), 0]",
+                                "[[22, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]"],
+                  'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
+                  'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]",
+                  'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
+                  'kwargs': {'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
+                  'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                ),
+            )
+
+            self.assertEqual(
+                remove_white_space(events),
+                remove_white_space(
+                    """[
+                    ('def_kernel', ['A', 'B'], {}),
+                    ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
+                    ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
+                  """
+                ),
+            )
+
+        # Test symbolic shapes with different symbols. Will cache miss due to different symbols in inputs.
+        with fresh_inductor_cache():
+            a = torch.rand(10, 22, device=GPU_TYPE)
+            b = torch.rand(22, 30, device=GPU_TYPE)
+
+            c = torch.rand(9, 21, device=GPU_TYPE)
+            d = torch.rand(21, 30, device=GPU_TYPE)
+            reset_counters()
+            compiled_results = torch.compile(func_test1, dynamic=True)(a, b, c, d)
+            eager_results = func_test1(a, b, c, d)
+
+            self.assertEqual(compiled_results, eager_results, atol=0.05, rtol=0.05)
+
+            self.assertEqual(hits(), 0)
+            self.assertEqual(misses(), 8)
+
+            cache_key, events = get_cache_key_and_events()
+
+            self.assertEqual(
+                remove_white_space(cache_key),
+                remove_white_space(
+                    """{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='cuda', index=0), 0]",
+                                        "[[s17, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]"],
+                        'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': [s77, s94],
+                        'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]",
+                        'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {'EVEN_K': False,
+                        'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
+                        'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                ),
+            )
+
+            self.assertEqual(
+                remove_white_space(events),
+                remove_white_space(
+                    """[
+                    ('def_kernel', ['A', 'B'], {}),
+                    ('size', ['A', 0], {}), ('size', ['B', 1], {}),
+                    ('size', ['A', 1], {}),
+                    ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
+                    ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
+                  """
+                ),
+            )
+
+        # Test duck typing.
+        with fresh_inductor_cache():
+            reset_counters()
+
+            compile_results = torch.compile(func_test1, dynamic=True)(a, b, a, b)
+            eager_results = func_test1(a, b, a, b)
+            self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
+
+            self.assertEqual(hits(), 4)
+            self.assertEqual(misses(), 4)
+
+        # Test loop.
+        def test_func2(x):
+            for i in range(0, 10):
+                x = torch.matmul(x, x)
+            return x
+
+        with fresh_inductor_cache():
+            reset_counters()
+            input = torch.rand(10, 10, device=GPU_TYPE)
+
+            compile_results = torch.compile(test_func2, dynamic=False)(input)
+            eager_results = test_func2(input)
+            self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
+
+            self.assertEqual(hits(), 36)
+            self.assertEqual(misses(), 4)
+
+        with fresh_inductor_cache():
+            reset_counters()
+            input = torch.rand(10, 10, device=GPU_TYPE)
+
+            compile_results = torch.compile(test_func2, dynamic=True)(input)
+            eager_results = test_func2(input)
+            self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
+
+            self.assertEqual(hits(), 36)
+            self.assertEqual(misses(), 4)
+
+        # No cache hit due to symbolic expressions passed i.e mm(s0 + s1, 2) vs mm(s3, 2).
+        reset_counters()
+
+        def test_func3(x, y, z, m, l):
+            a = torch.matmul(x, y)
+            b = torch.matmul(torch.cat([x, z], 1), torch.cat([y, m, l], 0))
+            return a, b
+
+        with fresh_inductor_cache():
+            a = torch.rand(10, 22, device=GPU_TYPE)
+            b = torch.rand(22, 30, device=GPU_TYPE)
+            c = torch.rand(10, 11, device=GPU_TYPE)
+            d = torch.rand(8, 30, device=GPU_TYPE)
+            e = torch.rand(3, 30, device=GPU_TYPE)
+
+            compile_results = torch.compile(test_func3, dynamic=True)(a, b, c, d, e)
+            eager_results = test_func3(a, b, c, d, e)
+            self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
+
+            self.assertEqual(hits(), 0)
+            self.assertEqual(misses(), 7)
 
 
 @instantiate_parametrized_tests
