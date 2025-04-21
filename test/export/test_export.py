@@ -10129,6 +10129,47 @@ graph():
                 strict=strict,
             )
 
+    @testing.expectedFailureCppRuntime
+    def test_symint_input_additional_inputs(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        additional_inputs = torch.export.AdditionalInputs()
+        additional_inputs.add((5, 5))
+        additional_inputs.add((3, 5))
+        additional_inputs.add((5, 4))
+        ep = torch.export.export(
+            M(), (6, 7), dynamic_shapes=additional_inputs, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 5), 10)
+        self.assertEqual(ep.module()(3, 5), 8)
+        self.assertEqual(ep.module()(5, 4), 9)
+
+    @testing.expectedFailureCppRuntime
+    def test_symint_input_shapes_collection(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        import torch.utils._pytree as pytree
+        from torch.export.dynamic_shapes import _IntWrapper
+
+        args = (_IntWrapper(5), _IntWrapper(5))
+        shapes_collection = torch.export.ShapesCollection()
+        shapes_collection[args[0]] = Dim.DYNAMIC
+        shapes_collection[args[1]] = Dim.DYNAMIC
+        ep = torch.export.export(
+            M(), args, dynamic_shapes=shapes_collection, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 5), 10)
+        self.assertEqual(ep.module()(3, 5), 8)
+        self.assertEqual(ep.module()(5, 4), 9)
+
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
             def __init__(self):
