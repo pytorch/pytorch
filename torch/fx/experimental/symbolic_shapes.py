@@ -3305,6 +3305,8 @@ class ShapeEnv:
 
     @contextlib.contextmanager
     def dde_suppressed(self) -> Iterator[None]:
+        """Suppressed GuardOnDataDependent error logs"""
+
         # We do not expect this to be called recursively.
         assert not self._dde_suppressed, "not expected value for _dde_suppressed"
         self._dde_suppressed = True
