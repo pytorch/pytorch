@@ -14,7 +14,6 @@ from torch.distributed.distributed_c10d import (
     get_world_size,
     init_process_group,
     is_initialized,
-    is_nccl_available,
     new_group,
     ProcessGroup,
 )
@@ -32,18 +31,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._typing_utils import not_none
-
-
-def _get_device_type(world_size):
-    if (
-        torch.cuda.is_available()
-        and torch.cuda.device_count() >= world_size
-        and is_nccl_available()
-    ):
-        device_type = "cuda"
-    else:
-        device_type = "cpu"
-    return device_type
 
 
 def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_rank=-1):
@@ -82,7 +69,6 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(4)
     def test_manual_set_device(self):
-        device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
 
@@ -90,7 +76,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
         # and device to be different than the default world rank
         torch.cuda.set_device((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
-        DeviceMesh(device_type, mesh_tensor)
+        DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
@@ -100,7 +86,6 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(4)
     def test_auto_set_device_from_local_rank(self):
-        device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
         # set the local rank to be different than the default world rank,
@@ -112,7 +97,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             rank=self.rank,
             local_rank=local_rank,
         )
-        DeviceMesh(device_type, mesh_tensor)
+        DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
@@ -122,7 +107,6 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(4)
     def test_auto_set_device_from_heuristic(self):
-        device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
 
@@ -130,7 +114,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             world_size=self.world_size,
             rank=self.rank,
         )
-        DeviceMesh(device_type, mesh_tensor)
+        DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
@@ -145,11 +129,10 @@ class DeviceMeshTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(4)
     def test_init_process_group(self):
-        device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
         _set_env_var(world_size=self.world_size, rank=self.rank)
-        DeviceMesh(device_type, mesh_tensor)
+        DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
