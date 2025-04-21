@@ -1034,8 +1034,6 @@ std::string uuid_to_string(const char* uuid_bytes) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
-  // until internal build is using a rocm version with uuid attr
-#ifndef FBCODE_CAFFE2
   // CUuuid is defined in either cuda.h or driver_types.h
   // hipified to hipUUID which is defined in hip_runtime_api.h
   py::class_<CUuuid>(m, "_CUuuid")
@@ -1047,7 +1045,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def("__str__", [](const CUuuid& uuid) {
         return uuid_to_string(uuid.bytes);
       });
-#endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
@@ -1085,9 +1082,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::name
 #endif // USE_ROCM
           )
-#ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
-#endif
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
@@ -1098,9 +1093,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-#ifndef FBCODE_CAFFE2
                << ", uuid=" << uuid_to_string(prop.uuid.bytes)
-#endif
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
         return stream.str();
