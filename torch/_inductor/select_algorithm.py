@@ -16,6 +16,7 @@ import textwrap
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
+from types import ModuleType
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
@@ -946,8 +947,27 @@ class TritonTemplateKernel(TritonKernel):
         return "<STORE_OUTPUT>"
 
     def render(self, template, kwargs):
+        def make_template_env():
+            """
+            Generate the namespace visible in the template.
+            """
+            return {
+                fn.__name__: fn
+                for fn in [
+                    self.def_kernel,
+                    self.size,
+                    self.stride,
+                    self.store_output,
+                    self.load_input,
+                    self.make_load,
+                    self.modification,
+                    self.gen_argdefs,
+                    self.gen_defines,
+                ]
+            }
+
         return PartialRender(
-            template.render(**self.template_env(), **kwargs),
+            template.render(**make_template_env(), **kwargs),
             self.render_hooks,
         )
 
@@ -966,25 +986,6 @@ class TritonTemplateKernel(TritonKernel):
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
         return f"tl.load({name} + ({index}), {mask}, other=0.0)"
-
-    def template_env(self):
-        """
-        Generate the namespace visible in the template.
-        """
-        return {
-            fn.__name__: fn
-            for fn in [
-                self.def_kernel,
-                self.size,
-                self.stride,
-                self.store_output,
-                self.load_input,
-                self.make_load,
-                self.modification,
-                self.gen_argdefs,
-                self.gen_defines,
-            ]
-        }
 
     def indexing(
         self,
@@ -1078,51 +1079,39 @@ class TritonTemplate(KernelTemplate):
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
-        self.all_templates[name] = self
+        TritonTemplate.all_templates[name] = self
         self.debug = debug
 
-    def generate(  # type: ignore[override]
+    def generate_and_load(
         self,
-        input_nodes,
-        layout,
-        num_stages,
-        num_warps,
-        num_consumer_groups=0,
-        num_buffers_warp_spec=0,
-        prefix_args=0,
-        suffix_args=0,
-        epilogue_fn=identity,
-        subgraphs=None,
-        mutated_inputs=None,
-        call_sizes=None,
-        workspace_arg: Optional[WorkspaceArg] = None,
-        **kwargs,
-    ):
-        """This function generates a TritonTemplateCaller
+        input_nodes: tuple[ir.IRNode],
+        num_stages: int,
+        num_warps: int,
+        call_sizes: list[sympy.core.symbol.Symbol],
+        prefix_args: int,
+        suffix_args: int,
+        epilogue_fn: Optional[Callable[..., Any]],
+        subgraphs: Optional[list[ir.Buffer]],
+        workspace_arg: Optional[WorkspaceArg],
+        num_consumer_groups: int,
+        num_buffers_warp_spec: int,
+        layout: ir.Layout,
+        kwargs: dict[str, Any],
+    ) -> Optional[
+        tuple[
+            ModuleType,
+            str,
+            tuple[str, ...],
+            OrderedSet[str],
+            tuple[sympy.Expr],
+            dict[str, Any],
+        ]
+    ]:
+        # breakpoint()
+        """Generate the python code and load it into the current process"""
 
-        Args:
-            input_nodes: List of input nodes
-            layout: Output layout
-            num_stages: Number of stages for triton launch
-            num_warps: Number of warps for triton launch
-            prefix_args: Number of input nodes to be passed as arguments
-            suffix_args: Number of input nodes to be passed as arguments
-            epilogue_fn: Optional epilogue function to be called on the output
-            subgraphs: Optional subgraphs to be passed as arguments, these will be inlined
-                into the triton template string
-            mutated_inputs: Optional list of input nodes that are mutated by the kernel, this is helpful
-                if you need to return multiple outputs. You can pass them as inputs and mark them as
-                being mutated by the kernel.
-        """
         assert self.template, "requires jinja2"
         defines = StringIO()
-
-        # HACK: Triton currently breaks if TF32 floats are requested, but the CUDA
-        # capability doesn't support them.  This is a bug in Triton, but for now we'll
-        # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
-        # for one example issue with this problem.
-        if not torch.cuda.is_tf32_supported():
-            kwargs["ALLOW_TF32"] = "False"
 
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
@@ -1137,9 +1126,6 @@ class TritonTemplate(KernelTemplate):
             raise NotImplementedError(
                 "64-bit indexing is not yet implemented for triton templates"
             )
-
-        if call_sizes is None:
-            call_sizes = layout.size
 
         kernel_options = {
             "input_nodes": input_nodes,
@@ -1162,26 +1148,16 @@ class TritonTemplate(KernelTemplate):
                 }
             )
 
-        with (
-            patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
-            V.graph.set_current_device(layout.device),
-            self.kernel_type(
+        def make_kernel():
+            return self.kernel_type(
                 kernel_name=kernel_name,
                 output_node=fake_out,
                 workspace_arg=workspace_arg,
                 use_jit=False,
                 **kernel_options,
-            ) as kernel,
-        ):
-            try:
-                template = kernel.render(self.template, kwargs)
-                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                    code = template.finalize_all()
-            except ZeroDivisionError:
-                # TODO(nmacchioni): fix sympy division by zero
-                return None
-            if self.debug:
-                print("Generated Code:\n", code)
+            )
+
+        def make_extra():
             extra_parts = [
                 f"{kwarg}={repr(kwargs[kwarg])}" for kwarg in sorted(kwargs.keys())
             ]
@@ -1199,11 +1175,122 @@ class TritonTemplate(KernelTemplate):
                         f"num_buffers_warp_spec={num_buffers_warp_spec}",
                     ]
                 )
-
             extra = "-".join(extra_parts) + "-"
-            mod = PyCodeCache.load(code, extra)
+            return extra
+
+        def generate_code(kernel) -> Optional[tuple[str, str]]:
+            try:
+                template = kernel.render(self.template, kwargs)
+                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                    code = template.finalize_all()
+            except ZeroDivisionError:
+                # TODO(nmacchioni): fix sympy division by zero
+                return None
+            if self.debug:
+                print("Generated Code:\n", code)
+
+            extra = make_extra()
+            return code, extra
+
+        # Generate code, extra, and kernel state.
+        code: Optional[str] = None
+        extra: Optional[str] = None
+        with (
+            patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
+            V.graph.set_current_device(layout.device),
+            make_kernel() as kernel,
+        ):
+            result = generate_code(kernel)
+            if not result:  # happens at ZeroDivisionError:
+                return None
+            code, extra = result
+
+        assert code is not None and extra is not None
+
+        mod = PyCodeCache.load(code, extra)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
+        prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
+        kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
+
+        return (
+            mod,
+            extra,
+            input_call_args,
+            prologue_supported_inputs,
+            kernel_args_sizevars_keys,
+            kernel_options,
+        )
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: tuple[ir.IRNode],
+        layout: ir.Layout,
+        num_stages: int,
+        num_warps: int,
+        num_consumer_groups: int = 0,
+        num_buffers_warp_spec: int = 0,
+        prefix_args: int = 0,
+        suffix_args: int = 0,
+        epilogue_fn: Optional[Callable[..., Any]] = identity,
+        subgraphs: Optional[list[ir.Buffer]] = None,
+        mutated_inputs: Optional[list[ir.IRNode]] = None,
+        call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
+        workspace_arg: Optional[WorkspaceArg] = None,
+        **kwargs,
+    ):
+        """This function generates a TritonTemplateCaller
+
+        Args:
+            input_nodes: List of input nodes
+            layout: Output layout
+            num_stages: Number of stages for triton launch
+            num_warps: Number of warps for triton launch
+            prefix_args: Number of input nodes to be passed as arguments
+            suffix_args: Number of input nodes to be passed as arguments
+            epilogue_fn: Optional epilogue function to be called on the output
+            subgraphs: Optional subgraphs to be passed as arguments, these will be inlined
+                into the triton template string
+            mutated_inputs: Optional list of input nodes that are mutated by the kernel, this is helpful
+                if you need to return multiple outputs. You can pass them as inputs and mark them as
+                being mutated by the kernel.
+        """
+        # HACK: Triton currently breaks if TF32 floats are requested, but the CUDA
+        # capability doesn't support them.  This is a bug in Triton, but for now we'll
+        # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
+        # for one example issue with this problem.
+        if not torch.cuda.is_tf32_supported():
+            kwargs["ALLOW_TF32"] = "False"
+
+        if call_sizes is None:
+            call_sizes = layout.size
+
+        result = self.generate_and_load(
+            input_nodes,
+            num_stages,
+            num_warps,
+            call_sizes,
+            prefix_args,
+            suffix_args,
+            epilogue_fn,
+            subgraphs,
+            workspace_arg,
+            num_consumer_groups,
+            num_buffers_warp_spec,
+            layout,
+            kwargs,
+        )
+
+        if result is None:
+            return None
+        (
+            mod,
+            extra,
+            input_call_args,
+            prologue_supported_inputs,
+            args_sizevars_keys,
+            kernel_options,
+        ) = result
 
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
@@ -1214,7 +1301,7 @@ class TritonTemplate(KernelTemplate):
 
         full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, tuple(kernel.args.sizevars.keys())),
+            map(sympy.expand, tuple(args_sizevars_keys)),
             fallback=config.unbacked_symint_fallback,
         )
 
@@ -1252,7 +1339,7 @@ class TritonTemplate(KernelTemplate):
         bmreq = bmreq_cls(
             module_path=mod.__file__,
             module_cache_key=mod.key,
-            kernel_name=kernel_name,
+            kernel_name=f"triton_{self.name}",
             extra_args=[*extra_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
@@ -1289,7 +1376,7 @@ class TritonTemplate(KernelTemplate):
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
-            allowed_prologue_inps=kernel.prologue_supported_inputs.copy(),
+            allowed_prologue_inps=prologue_supported_inputs,
         )
 
 
