@@ -1229,8 +1229,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
-    def test_small_block_mask(self, device, dtype: torch.dtype):
+    def test_small_block_mask(self, device):
         compiled_create_block_mask = torch.compile(create_block_mask)
 
         def create_block_mask_from_seqlens(
@@ -1263,14 +1262,14 @@ class TestFlexAttention(InductorTestCase):
                 H=H,
                 Q_LEN=Q_LEN,
                 KV_LEN=KV_LEN,
+                device=device,
             )
 
-        a = torch.tensor([2, 42, 18, 21, 4, 2, 7, 1, 1]).cuda()
-        b = torch.tensor([57, 21, 16, 8]).cuda()
+        a = torch.tensor([2, 42, 18, 21, 4, 2, 7, 1, 1], device=device)
+        b = torch.tensor([57, 21, 16, 8], device=device)
 
         for seqlen in [a, b]:
             create_block_mask_from_seqlens(seqlen, seqlen)
-            torch.cuda.synchronize()
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
