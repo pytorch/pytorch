@@ -16,6 +16,7 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
+      m_experimental_direct_rdma(false),
       m_release_lock_on_cudamalloc(false),
       m_pinned_use_cuda_host_register(false),
       m_pinned_use_background_threads(false) {
@@ -334,6 +335,17 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
           "Expected a single True/False argument for expandable_segments");
       config_item_view = config[i];
       m_expandable_segments = (config_item_view == "True");
+    } else if (config_item_view == "experimental_direct_rdma") {
+      used_native_specific_option = true;
+      consumeToken(config, ++i, ':');
+      ++i;
+      TORCH_CHECK(
+          i < config.size() &&
+              (std::string_view(config[i]) == "True" ||
+               std::string_view(config[i]) == "False"),
+          "Expected a single True/False argument for experimental_direct_rdma");
+      config_item_view = config[i];
+      m_experimental_direct_rdma = (config_item_view == "True");
     } else if (
         // ROCm build's hipify step will change "cuda" to "hip", but for ease of
         // use, accept both. We must break up the string to prevent hipify here.

@@ -371,7 +371,9 @@ ncclResult_t NCCLComm::registerSegment(
   // single segment with the full size
   // FIXME: set kLargeBuffer to c10::cuda::CUDACachingAllocator::kLargeBuffer
   const auto kLargeBuffer = 20971520;
-  if (isExpandable && !regSnapshot && size >= kLargeBuffer) {
+  bool directRDMA = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+     experimental_direct_rdma();
+  if (!directRDMA && isExpandable && !regSnapshot && size >= kLargeBuffer) {
     segmentSize = kLargeBuffer;
     TORCH_CHECK(
         size % segmentSize == 0,

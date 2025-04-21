@@ -368,12 +368,6 @@ struct ExpandableSegment {
         segment_size_(segment_size),
         max_handles_(numSegments(address_space_size)),
         peers_(std::move(peers)) {
-    cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
-    // we allocate enough address space for 1 1/8 the total memory on the GPU.
-    // This allows for some cases where we have to unmap pages earlier in the
-    // segment to put them at the end.
-    max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
   }
@@ -414,6 +408,10 @@ struct ExpandableSegment {
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       prop.location.id = static_cast<int>(device_);
+
+      // Always set RDMA and POSIX properties for all segments
+      prop.allocFlags.gpuDirectRDMACapable = 1;
+      prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
       auto status =
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
@@ -2339,6 +2337,10 @@ class DeviceCachingAllocator {
     // segment to put them at the end.
     size_t address_space_size = prop.totalGlobalMem + prop.totalGlobalMem / 8;
 
+    if (CUDAAllocatorConfig::experimental_direct_rdma()) {
+      segment_size = get_allocation_size(size);
+      address_space_size = segment_size;
+    }
     expandable_segments_.emplace_back(new ExpandableSegment(
         device,
         stream,

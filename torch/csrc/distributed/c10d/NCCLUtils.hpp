@@ -11,6 +11,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/util/Exception.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
