@@ -1140,13 +1140,10 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(
             32768, 32, dtype=torch.float16, device="cuda", requires_grad=True
         )
-        
+
         compiled_func = torch.compile(lambda a, b: a @ b)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
-        import pdb; pdb.set_trace()
-
-
 
 
 @instantiate_parametrized_tests

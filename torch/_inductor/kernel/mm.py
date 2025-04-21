@@ -3,6 +3,8 @@ import functools
 import logging
 from typing import Any, Optional
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -22,7 +24,7 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import FlexibleLayout, is_triton, ir_node_to_tensor
+from ..ir import FlexibleLayout, ir_node_to_tensor, is_triton
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -60,7 +62,6 @@ from .mm_common import (
     should_fallback_to_aten,
 )
 
-import sympy
 
 try:
     import triton

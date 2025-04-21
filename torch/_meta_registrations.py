@@ -4304,9 +4304,13 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
     if out_dtype:
-        supported_out_dtype = (batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16) and out_dtype == torch.float32
-        torch._check(out_dtype == batch1.dtype or supported_out_dtype,
-        lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes")
+        supported_out_dtype = (
+            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+        ) and out_dtype == torch.float32
+        torch._check(
+            out_dtype == batch1.dtype or supported_out_dtype,
+            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+        )
         output = batch2.new_empty(output_size).to(out_dtype)
     else:
         # TODO: handle out
@@ -4328,7 +4332,7 @@ def meta_bmm(self, mat2):
 
 
 @register_meta(aten.bmm.dtype)
-def meta_bmm(self, mat2, out_dtype):
+def meta_bmm_dtype(self, mat2, out_dtype):
     return common_meta_baddbmm_bmm(self, mat2, True, out_dtype=out_dtype)
 
 
