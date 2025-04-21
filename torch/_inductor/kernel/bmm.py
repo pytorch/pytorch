@@ -119,7 +119,8 @@ bmm_template = TritonTemplate(
 """,
 )
 
-aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.dtype_out)
+aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
+aten_bmm_dtype = ExternKernelChoice(torch.bmm, "at::_bmm_out_dtype_cuda", name="bmm_dtype", op_overload=aten.bmm.dtype_out)
 aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
 )
@@ -179,10 +180,16 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         mat2.get_dtype(),
         layout,
     )
+    
+    if out_dtype:
+        assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
+        aten_func = aten_bmm_dtype.bind((mat1, mat2), layout, out_dtype=out_dtype)
+    else:
+        aten_func = aten_bmm.bind((mat1, mat2), layout)
 
     # options to tune from
     choices = [
-        aten_bmm.bind((mat1, mat2), layout, out_dtype=out_dtype)
+        aten_func
         if use_aten_gemm_kernels()
         else []
     ]
