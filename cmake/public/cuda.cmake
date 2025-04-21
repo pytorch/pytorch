@@ -169,23 +169,6 @@ else()
         CUDA::cudart)
 endif()
 
-# nvToolsExt
-if(USE_SYSTEM_NVTX)
-  find_path(nvtx3_dir NAMES nvtx3 PATHS ${CUDA_INCLUDE_DIRS})
-else()
-  find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
-endif()
-find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
-if(nvtx3_FOUND)
-  add_library(torch::nvtx3 INTERFACE IMPORTED)
-  target_include_directories(torch::nvtx3 INTERFACE "${nvtx3_dir}")
-  target_compile_definitions(torch::nvtx3 INTERFACE TORCH_CUDA_USE_NVTX3)
-else()
-  message(WARNING "Cannot find NVTX3, find old NVTX instead")
-  add_library(torch::nvtoolsext INTERFACE IMPORTED)
-  set_property(TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES CUDA::nvToolsExt)
-endif()
-
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)

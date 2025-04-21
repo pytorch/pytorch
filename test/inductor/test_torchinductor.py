@@ -1369,7 +1369,11 @@ class CommonTemplate:
             b = torch.add(args[0], args[0])
             return (a, b)
 
-        x = torch.randn(41, dtype=torch.complex64)
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("No complex on MacOS13")
+
+        x = torch.randn(41, dtype=torch.complex64, device=self.device)
         y = x.clone()
         # should not inplace write to the input
         fn(x)
@@ -6537,12 +6541,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([64]),),
         )
 
-    @xfail_if_mps  # float64 is not MPS type
     def test_expm1(self):
         def fn(x):
             return torch.expm1(x), torch.expm1(x) * 2
 
         for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            if not self.is_dtype_supported(dtype):
+                continue
+
             self.common(
                 fn,
                 (torch.randn([64]).to(dtype=dtype),),
@@ -6608,12 +6614,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 ):
                     c_op(x, kernel_size=2, stride=2)
 
-    @xfail_if_mps  # float64 is not MPS type
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
 
         for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            if not self.is_dtype_supported(dtype):
+                continue
+
+            if dtype == torch.int64 and self.device == "mps":
+                continue
+
             self.common(
                 fn,
                 (torch.randn([64]).to(dtype=dtype),),
@@ -12521,7 +12532,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "erfcx",
                 "gammainc",
                 "gammaincc",
-                "hermite_polynomial_he",
                 "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",
