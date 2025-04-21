@@ -44,8 +44,6 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
 
     if (
         not torch.xpu.is_available()
-        and IS_WINDOWS
-        and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0"
     ):
         return
 
