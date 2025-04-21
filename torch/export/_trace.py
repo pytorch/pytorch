@@ -822,7 +822,7 @@ def _export_to_aten_ir(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context(), custom_triton_ops_decomposition_ctx():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), custom_triton_ops_decomposition_ctx():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -1706,7 +1706,7 @@ def _export_to_aten_ir_make_fx(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), _ignore_backend_decomps():  # type: ignore[attr-defined]
         gm, graph_signature = transform(_make_fx_helper)(
             mod,
             fake_args,
@@ -1980,17 +1980,18 @@ def _export_for_training(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    export_artifact = export_func(
-        mod=mod,
-        args=args,
-        kwargs=kwargs,
-        dynamic_shapes=dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=False,
-        _is_torch_jit_trace=False,
-        _to_aten_func=_export_to_aten_ir_make_fx,
-    )
+    with _compiling_state_context():
+        export_artifact = export_func(
+            mod=mod,
+            args=args,
+            kwargs=kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+            orig_in_spec=orig_in_spec,
+            allow_complex_guards_as_runtime_asserts=False,
+            _is_torch_jit_trace=False,
+            _to_aten_func=_export_to_aten_ir_make_fx,
+        )
 
     export_graph_signature = export_artifact.aten.sig
 
@@ -2143,21 +2144,22 @@ def _export(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    export_artifact = export_func(  # type: ignore[operator]
-        mod=mod,
-        args=args,
-        kwargs=kwargs,
-        dynamic_shapes=dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        orig_in_spec=original_in_spec,
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-        _is_torch_jit_trace=_is_torch_jit_trace,
-        _to_aten_func=functools.partial(
-            _export_to_aten_ir,
-            pre_dispatch=pre_dispatch,
+    with _compiling_state_context():
+        export_artifact = export_func(  # type: ignore[operator]
+            mod=mod,
+            args=args,
+            kwargs=kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+            orig_in_spec=original_in_spec,
+            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
             _is_torch_jit_trace=_is_torch_jit_trace,
-        ),
-    )
+            _to_aten_func=functools.partial(
+                _export_to_aten_ir,
+                pre_dispatch=pre_dispatch,
+                _is_torch_jit_trace=_is_torch_jit_trace,
+            ),
+        )
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
 
     forward_arg_names = (

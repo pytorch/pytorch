@@ -39,6 +39,7 @@ import traceback
 import types
 import warnings
 import weakref
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -121,6 +122,8 @@ class Unset(Enum):
 cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
+
+_is_dynamo_exporting_flag = False
 
 
 def _maybe_set_eval_frame(callback: DynamoCallback):
@@ -288,6 +291,22 @@ def _debug_get_cache_entry_list(
     if callable(code):
         code = code.__code__
     return torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+
+
+@contextmanager
+def _dynamo_export_state_context():
+    global _is_dynamo_exporting_flag
+    old_flag = _is_dynamo_exporting_flag
+    try:
+        _is_dynamo_exporting_flag = True
+        yield
+    finally:
+        _is_dynamo_exporting_flag = old_flag
+
+
+def _is_dynamo_exporting():
+    global _is_dynamo_exporting_flag
+    return _is_dynamo_exporting_flag
 
 
 class OptimizedModule(torch.nn.Module):
@@ -1694,7 +1713,7 @@ def export(
             capture_scalar_outputs=True,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
             allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-        ):
+        ), _dynamo_export_state_context():
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(

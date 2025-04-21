@@ -42,6 +42,7 @@ from torch._export.utils import (
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
+    _compiling_state_context,
     _detect_fake_mode_from_gm,
     _fakify_params_buffers,
     _get_decomp_for_cia,
@@ -1384,13 +1385,14 @@ class ExportedProgram:
             python_decomp_table,
         ) = _split_decomp_table_to_cia_and_python_decomp(_decomp_table)
 
-        return _decompose_exported_program(
-            self,
-            cia_to_decomp=cia_to_decomp,
-            python_decomp_table=python_decomp_table,
-            joint_loss_index=None,
-            decompose_custom_triton_ops=decompose_custom_triton_ops,
-        )
+        with _compiling_state_context():
+            return _decompose_exported_program(
+                self,
+                cia_to_decomp=cia_to_decomp,
+                python_decomp_table=python_decomp_table,
+                joint_loss_index=None,
+                decompose_custom_triton_ops=decompose_custom_triton_ops,
+            )
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
