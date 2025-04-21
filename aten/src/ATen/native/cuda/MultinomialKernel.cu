@@ -43,7 +43,11 @@ inline __device__ bool _isinf(T x) {
   }
 }
 
+#ifdef USE_ROCM
+#define MAX_NUM_BLOCKS 64
+#else
 #define MAX_NUM_BLOCKS 200
+#endif
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename scalar_t>
