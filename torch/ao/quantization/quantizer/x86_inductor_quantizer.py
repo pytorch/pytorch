@@ -84,6 +84,7 @@ propagation_quantizable_ops = int8_in_int8_out_ops
 # Operators support the int8 data type
 # and recipe is configured by default in X86InductorQuantizer.
 default_quantizable_ops = propagation_quantizable_ops | {
+    torch.ops.aten.conv1d.default,
     torch.ops.aten.conv2d.default,
     torch.ops.aten.linear.default,
 }
@@ -185,6 +186,7 @@ def _global_config_filter(nodes: list[Node]) -> bool:
 def _map_module_function_to_aten_operator_type():
     module_function_to_aten_operator: dict[Callable, torch._ops.OpOverloadPacket] = {}
     map_list = (
+        ([torch.nn.Conv2d, F.conv1d], torch.ops.aten.conv1d.default),
         ([torch.nn.Conv2d, F.conv2d], torch.ops.aten.conv2d.default),
         ([torch.nn.Linear, F.linear], torch.ops.aten.linear.default),
         ([torch.nn.MaxPool2d, F.max_pool2d], torch.ops.aten.max_pool2d.default),
@@ -1156,6 +1158,7 @@ class X86InductorQuantizer(Quantizer):
             [torch.nn.Conv2d, torch.nn.Hardswish],
             [torch.nn.Conv2d, torch.nn.ReLU6],
             [torch.nn.Conv2d, torch.nn.SiLU],
+            [torch.nn.Conv1d, torch.nn.ReLU],
         ]
         for unary_pattern in unary_patterns:
             partitions = find_sequential_partitions(gm, unary_pattern)
@@ -1168,9 +1171,9 @@ class X86InductorQuantizer(Quantizer):
             conv_node, unary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, unary_partition]
             )
-            if (
-                conv_node.op != "call_function"
-                or conv_node.target != torch.ops.aten.conv2d.default
+            if conv_node.op != "call_function" or conv_node.target not in (
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.conv1d.default,
             ):
                 continue
             if _skip_annotate([unary_node, conv_node], filter_fn):
