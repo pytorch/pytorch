@@ -1101,11 +1101,15 @@ def _process_dynamic_shapes(
             symbols[dim.__name__].append(constraint)
         elif isinstance(dim, _DimHint):
             if dim.type == _DimHintType.AUTO:
-                if tensor.size(idx) in [0, 1] and not torch.fx.experimental._config.backed_size_oblivious:
-                    log.warning(
-                        f"dimension inputs{keystr(path)}.shape[{idx}] is likely to 0/1 specialize; Dim.AUTO "
+                if (
+                    tensor.size(idx) in [0, 1]
+                    and not torch.fx.experimental._config.backed_size_oblivious
+                ):
+                    msg = (
+                        f"dimension inputs{keystr(path)}.shape[{idx}] is likely to 0/1 specialize; Dim.AUTO " + \
                         f"was specified along with a sample input with shape = {tensor.size(idx)}."
                     )
+                    log.warning(msg)
                 torch._dynamo.maybe_mark_dynamic(tensor, idx)
             elif dim.type == _DimHintType.STATIC:
                 torch._dynamo.mark_static(tensor, idx)
