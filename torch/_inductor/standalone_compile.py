@@ -105,12 +105,12 @@ class CompiledArtifact:
                     # they can be inspected and modified
                     for key in loaded_cache_info.inductor_artifacts:
                         subdir = FxGraphCache._get_tmp_dir_for_key(key)
-                        if os.path.exists(subdir):
-                            for path in sorted(os.listdir(subdir)):
-                                with open(os.path.join(subdir, path), "rb") as f:
-                                    graph = pickle.load(f)
-                                output_file = graph.write_to_disk()
-                                log.info("Output code written to: %s", output_file)
+                        assert os.path.exists(subdir)
+                        for path in sorted(os.listdir(subdir)):
+                            with open(os.path.join(subdir, path), "rb") as f:
+                                graph = pickle.load(f)
+                            output_file = graph.write_to_disk()
+                            log.info("Output code written to: %s", output_file)
 
     @staticmethod
     def load(
