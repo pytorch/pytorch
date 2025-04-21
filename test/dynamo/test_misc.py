@@ -1241,11 +1241,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch._check(idx < x.size(0))
             return x[idx]
 
-        A = torch.tensor([
-            [1, 2, 3],
-            [4, 5, 6],
-            [7, 8, 9]
-        ])
+        A = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
         index = torch.tensor(1, dtype=torch.int64)
         fn2 = torch.compile(f2, fullgraph=True, backend="eager")
         fn2(A, index)
