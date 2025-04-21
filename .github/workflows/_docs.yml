@@ -53,6 +53,30 @@ on:
         description: Permissions for pushing to the docs site.
 
 jobs:
+  check-urls:
+    name: Check URLs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: -1
+      - name: Run URL linter
+        run: bash ./scripts/check_urls.sh
+
+  check-links:
+    name: Check Links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: -1
+      - name: Run link linter
+        run: bash ./scripts/check_links.sh
+
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
