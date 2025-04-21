@@ -39,7 +39,7 @@ struct TORCH_API PyCompilerInterface {
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<at::TypePtr> packed_args_schema,
       bool is_custom_function = false,
-      bool is_traceable = true) {
+      bool is_traceable = true) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
@@ -51,14 +51,14 @@ struct TORCH_API PyCompilerInterface {
       const std::string& fn_name,
       const variable_list& inputs,
       const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) {
+      const c10::IValue& output_metadata) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(
       PyObject* py_compiler,
       const variable_list& inputs,
       const at::TensorGeometry& base,
-      const at::TensorGeometry& view) {
+      const at::TensorGeometry& view) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_epilogue(
@@ -66,13 +66,19 @@ struct TORCH_API PyCompilerInterface {
       const std::vector<bool>& needs_input_grad,
       const at::Tensor& result,
       const variable_list& res,
-      const at::Tensor& grad_slice) {
+      const at::Tensor& grad_slice) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_unpack(
       PyObject* py_compiler,
       std::optional<size_t> hook_id,
-      size_t hook_input_id) {
+      size_t hook_input_id) const {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
+  virtual void call_accumulate_grad(
+      PyObject* py_compiler,
+      const at::Tensor& variable,
+      const at::Tensor& grad) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };
@@ -158,6 +164,7 @@ struct NodeCall {
   uint32_t id;
   std::shared_ptr<Node> node;
   std::vector<std::pair<int, int>> tensor_pre_hooks;
+  std::vector<std::pair<int, int>> cpp_tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
   std::vector<int> post_acc_grad_hooks;
@@ -327,6 +334,12 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
+  size_t emplace_cpp_tensor_pre_hook(
+      std::function<at::TensorBase(const at::TensorBase&)>&& fn) {
+    cpp_tensor_pre_hooks.emplace_back(std::move(fn));
+    return cpp_tensor_pre_hooks.size() - 1;
+  }
+
   size_t emplace_packed_input(c10::SafePyObject&& input) {
     packed_inputs.emplace_back(std::move(input));
     return packed_inputs.size() - 1;
@@ -342,6 +355,8 @@ struct AutogradCompilerCall {
   LiftedIValueArgs lifted_ivalue_args;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
+  std::vector<std::function<at::TensorBase(const at::TensorBase&)>>
+      cpp_tensor_pre_hooks;
   std::vector<c10::SafePyObject> packed_inputs;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type;
@@ -349,6 +364,9 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
+  // pynode -> backward and backward state idx
+  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
+      pynode_objs;
 };
 
 class CompiledNodeArgs {
@@ -535,7 +553,7 @@ class CompiledNodeArgs {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
-    // a seperate call to `node->compiled_args()`.
+    // a separate call to `node->compiled_args()`.
     if (cond((bool)t)) {
       collect(_compiler.node_calls.lookup(t));
     }
@@ -593,10 +611,10 @@ class CompiledNodeArgs {
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
-    TORCH_CHECK(
-        fn->retains_grad_hooks().empty(),
-        "retains_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
+      i->compiled_args(*this);
+    }
+    for (auto& [_, i] : fn->retains_grad_hooks()) {
       i->compiled_args(*this);
     }
     for (auto& i : fn->pre_hooks()) {
@@ -619,18 +637,40 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  size_t add_backward(c10::SafePyObject&& obj) {
-    return _compiler.emplace_hook(std::move(obj));
-  }
-
-  size_t add_backward_state(c10::SafePyObject&& obj) {
-    return _compiler.emplace_hook(std::move(obj));
+  void collect_pynode_objs(
+      const Node* pynode,
+      c10::SafePyObject&& bwd,
+      std::optional<c10::SafePyObject>&& bwd_state) {
+    size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
+    std::optional<size_t> bwd_state_idx;
+    if (auto state = std::move(bwd_state); state.has_value()) {
+      bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
+    }
+    _compiler.pynode_objs.emplace(
+        pynode, std::make_pair(bwd_idx, bwd_state_idx));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
+  }
+
+  void add_cpp_single_tensor_pre_hook(
+      const std::function<at::TensorBase(const at::TensorBase&)>& hook,
+      size_t idx) {
+    auto wrapper = [hook](const at::TensorBase& grad) {
+      // handle when hook returns nothing
+      auto out = hook(grad);
+      if (!out.defined()) {
+        return grad;
+      }
+      return out;
+    };
+
+    auto hook_id = _compiler.emplace_cpp_tensor_pre_hook(std::move(wrapper));
+    collect_size(hook_id);
+    _node_call.cpp_tensor_pre_hooks.emplace_back(hook_id, idx);
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
@@ -743,6 +783,13 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
+  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
+      Node* pynode) const {
+    auto it = compiler.pynode_objs.find(pynode);
+    TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
+    return it->second;
+  }
+
   void before(at::Tensor& t) {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_tensors.save(&t, std::move(t));
@@ -948,7 +995,7 @@ class SwapSavedVariables {
       const NodeCall& n)
       : compiler(c), state(s), py_compiler(p), curr_node_call(n) {}
 
-  PyObject* get_py_compiler() {
+  PyObject* get_py_compiler() const {
     return py_compiler;
   }
 

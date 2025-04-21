@@ -7,9 +7,6 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 
-// TODO: These don't really belong here but torchvision builds in CI need them
-// Remove once the torchvision version being compiled in CI is updated
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
 
 namespace torch {

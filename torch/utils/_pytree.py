@@ -173,21 +173,20 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
+    # No optree package found
     _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
 else:
-    _cxx_pytree_exists = True
     from torch._vendor.packaging.version import Version
 
-    _cxx_pytree_dynamo_traceable = Version(_optree_version) >= Version("0.13.0")
-    if not _cxx_pytree_dynamo_traceable:
-        warnings.warn(
-            "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
-            "C++ pytree support is disabled. "
-            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`.",
-            FutureWarning,
-        )
-
-    del Version
+    # Keep this in sync with torch.utils._cxx_pytree!
+    if Version(_optree_version) < Version("0.13.0"):
+        # optree package less than our required minimum version.
+        # Pretend the optree package doesn't exist.
+        # NB: We will raise ImportError if the user directly tries to
+        # `import torch.utils._cxx_pytree` (look in that file for the check).
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    else:
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = True
 
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
@@ -204,6 +203,10 @@ def register_pytree_node(
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
+
+    Note:
+        :func:`register_dataclass` is a simpler way of registering a container-like
+        type as a pytree node.
 
     Args:
         cls: the type to register
@@ -265,14 +268,34 @@ def register_pytree_node(
         _cxx_pytree_pending_imports.append((args, kwargs))
 
 
-def register_dataclass(cls: type[Any]) -> None:
-    """Registers a ``dataclasses.dataclass`` type as a pytree node.
+def register_dataclass(
+    cls: type[Any],
+    *,
+    field_names: Optional[list[str]] = None,
+    drop_field_names: Optional[list[str]] = None,
+    serialized_type_name: Optional[str] = None,
+) -> None:
+    """
+    Registers a type that has the semantics of a ``dataclasses.dataclass`` type
+    as a pytree node.
 
     This is a simpler API than :func:`register_pytree_node` for registering
-    a dataclass.
+    a dataclass or a custom class with the semantics of a dataclass.
 
     Args:
-        cls: the dataclass type to register
+        cls: The python type to register. The class must have the semantics of a
+        dataclass; in particular, it must be constructed by passing the fields
+        in.
+        field_names (Optional[List[str]]): A list of field names that correspond
+            to the **non-constant data** in this class. This list must contain
+            all the fields that are used to initialize the class. This argument
+            is optional if ``cls`` is a dataclass, in which case the fields will
+            be taken from ``dataclasses.fields()``.
+        drop_field_names (Optional[List[str]]): A list of field names that
+            should not be included in the pytree.
+        serialized_type_name: A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec. This is only
+            needed for serializing the treespec in torch.export.
 
     Example:
 
@@ -293,11 +316,67 @@ def register_dataclass(cls: type[Any]) -> None:
         >>> assert torch.allclose(point.y, torch.tensor(2))
 
     """
-    import torch.export
+    drop_field_names = drop_field_names or []
 
-    # Eventually we should move the export code here. It is not specific to export,
-    # aside from the serialization pieces.
-    torch.export.register_dataclass(cls)
+    if not dataclasses.is_dataclass(cls):
+        if field_names is None:
+            raise ValueError(
+                "field_names must be specified with a list of all fields used to "
+                f"initialize {cls}, as it is not a dataclass."
+            )
+    elif field_names is None:
+        field_names = [f.name for f in dataclasses.fields(cls) if f.init]
+    else:
+        dataclass_init_fields = {f.name for f in dataclasses.fields(cls) if f.init}
+        dataclass_init_fields.difference_update(drop_field_names)
+
+        if dataclass_init_fields != set(field_names):
+            error_msg = "field_names does not include all dataclass fields.\n"
+
+            if missing := dataclass_init_fields - set(field_names):
+                error_msg += (
+                    f"Missing fields in `field_names`: {missing}. If you want "
+                    "to include these fields in the pytree, please add them "
+                    "to `field_names`, otherwise please add them to "
+                    "`drop_field_names`.\n"
+                )
+
+            if unexpected := set(field_names) - dataclass_init_fields:
+                error_msg += (
+                    f"Unexpected fields in `field_names`: {unexpected}. "
+                    "Please remove these fields, or add them to `drop_field_names`.\n"
+                )
+
+            raise ValueError(error_msg)
+
+    def _flatten_fn(obj: Any) -> tuple[list[Any], Context]:
+        flattened = []
+        flat_names = []
+        none_names = []
+        for name in field_names:
+            val = getattr(obj, name)
+            if val is not None:
+                flattened.append(val)
+                flat_names.append(name)
+            else:
+                none_names.append(name)
+        return flattened, [flat_names, none_names]
+
+    def _unflatten_fn(values: Iterable[Any], context: Context) -> Any:
+        flat_names, none_names = context
+        return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
+
+    def _flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
+        flattened, (flat_names, _none_names) = _flatten_fn(obj)  # type: ignore[misc]
+        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
+
+    _private_register_pytree_node(
+        cls,
+        _flatten_fn,
+        _unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        flatten_with_keys_fn=_flatten_fn_with_keys,
+    )
 
 
 CONSTANT_NODES: set[type] = set()
@@ -926,9 +1005,11 @@ def _is_namedtuple_instance(tree: Any) -> bool:
 
 def _get_node_type(tree: Any) -> Any:
     node_type = type(tree)
-    # Only namedtuple types that are not explicitly registered should return `namedtuple`.
-    # If a namedtuple type is explicitly registered, then the actual type will be returned.
-    if node_type not in SUPPORTED_NODES and is_namedtuple_class(node_type):
+    # All namedtuple types are implicitly registered as pytree nodes.
+    # XXX: Other parts of the codebase expect namedtuple types always return
+    #      `namedtuple` instead of the actual namedtuple type. Even if the type
+    #      is explicitly registered.
+    if is_namedtuple_class(node_type):
         return namedtuple
     return node_type
 

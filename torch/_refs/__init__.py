@@ -3187,27 +3187,46 @@ def native_group_norm(
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
     )
 
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    input_acc = _maybe_convert_to_dtype(input, computation_dtype)
     # num_channels / num_groups and flattened inner dimension are the reduction axes
     reduction_dims = [2, 3]
     input_reshaped = torch.reshape(
-        input,
+        input_acc,
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
-    out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
-    out = out.view(input.shape)
-
-    broadcast_dims = [0] + list(range(2, input.ndim))
-    unsqueeze_bias = None
-    if bias is not None:
-        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
-    unsqueeze_weight = None
-    if weight is not None:
-        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
-
-    if unsqueeze_weight is not None:
-        out = out * unsqueeze_weight
-    if unsqueeze_bias is not None:
-        out = out + unsqueeze_bias
+    reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims)
+    biased_var, mean = torch.var_mean(
+        input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
+    )
+    rstd = torch.rsqrt(biased_var + eps)
+    if input.device.type == "cpu" and weight is not None:
+        weight_reshaped = torch.reshape(
+            weight, [1, num_groups, num_channels // num_groups, 1]
+        )
+        w = rstd * weight_reshaped
+        b = -mean * w
+        if bias is not None:
+            bias_reshaped = torch.reshape(
+                bias, [1, num_groups, num_channels // num_groups, 1]
+            )
+            b = b + bias_reshaped
+        w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
+        b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
+        broadcast_dims = list(range(2, input.ndim))
+        unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
+        unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
+        out = input_acc * unsqueeze_w + unsqueeze_b
+    else:
+        out = (input_reshaped - mean) * rstd
+        out = out.view(input.shape)
+        broadcast_dims = [0] + list(range(2, input.ndim))
+        if weight is not None:
+            unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+            out = out * unsqueeze_weight
+        if bias is not None:
+            unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+            out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
@@ -3432,10 +3451,12 @@ def stft(
         left = (n_fft - win_length_) // 2
         window = aten.constant_pad_nd(window, [left, n_fft - win_length_ - left])
 
-    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
     if not center and align_to_window:
         input_pad_amount = (n_fft - win_length_) // 2
         input = aten.pad(input, [input_pad_amount, input_pad_amount], pad_mode)
+
+    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
+
     if window is not None:
         input = input * window
 
@@ -3696,11 +3717,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_size_oblivious,
-        statically_known_true,
-        sym_eq,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3735,15 +3752,14 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             return _a
 
     if a.is_contiguous():
-        if len(shape) >= 1 and a.ndim >= 1:
-            if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
-                return prims.view_of(a)
-
-            strides = [1]
-            for x in reversed(shape[1:]):
-                strides.append(strides[-1] * x)
-            strides.reverse()
-            return torch.as_strided(a, shape, strides)
+        # Special-cases for nd_to_1d
+        if len(shape) == 1 and a.ndim > 1:
+            return torch.as_strided(a, [a.numel()], [1])
+        # Special-cases for 1d_to_2d
+        if len(shape) == 2 and a.ndim == 1:
+            dim0 = shape[0]
+            dim1 = shape[1]
+            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
@@ -3778,7 +3794,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        # can use guard_or_false for sure.
         if guard_size_oblivious(length == a_.shape[idx]):
             idx = idx + 1
             continue
@@ -3994,15 +4009,14 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
 
 @register_decomposition(aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
     dim = utils.canonicalize_dim(t.ndim, dim)
     torch._check_index(
         len(t.shape) > 0,
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
-
-    if guard_or_false(t.shape[dim] == 0):
+    if guard_size_oblivious(t.shape[dim] == 0):
         return ()
     else:
         return tuple(
@@ -4969,6 +4983,15 @@ def new_full(
         device=device,
         pin_memory=pin_memory,
     )
+
+
+@aten.empty.out.py_impl(DispatchKey.CompositeImplicitAutograd)
+def empty_out(
+    size: TensorLikeType,
+    out: TensorLikeType,
+    memory_format: Optional[torch.memory_format] = None,
+) -> TensorLikeType:
+    return out
 
 
 @register_decomposition(aten.empty_like)
@@ -6278,7 +6301,7 @@ def _dot_check_wrapper(fn):
 
 
 @register_decomposition(aten.dot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
@@ -6298,7 +6321,7 @@ def dot(self, other):
 
 
 @register_decomposition(aten.vdot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),

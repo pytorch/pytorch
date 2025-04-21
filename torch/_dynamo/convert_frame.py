@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, graph_break_hints, trace_rules
+from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -118,6 +118,7 @@ from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
     DistributedState,
+    ExceptionStack,
     InstructionTranslator,
     LocalState,
     SpeculationLog,
@@ -137,6 +138,8 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
+    maybe_disable_inference_mode,
+    maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
@@ -226,11 +229,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+
         # Just in case we get left in a bad dispatch state we want to restore
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._PreserveDispatchKeyGuard():
+        with (
+            torch._C._PreserveDispatchKeyGuard(),
+            maybe_disable_inference_mode(),
+            maybe_disable_inference_mode_for_fake_prop(),
+        ):
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
@@ -414,7 +422,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         ps = pstats.Stats(prof)
         try:
             prof.dump_stats(profile_path)
-        except PermissionError:
+        except OSError:
             log.exception("Cannot write to %s", profile_path)
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
@@ -551,6 +559,20 @@ class ConvertFrameAssert:
 
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
+
+        # skip tracing non-recursive disabled functions
+        # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
+        prev_frame = sys._getframe()
+        while (
+            prev_frame
+            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
+        ):
+            prev_frame = prev_frame.f_back  # type: ignore[assignment]
+        if (
+            prev_frame
+            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
+        ):
+            return ConvertFrameReturn(apply_to_code=False)
 
         global initial_global_state
         initial_global_state = GlobalStateGuard()
@@ -689,6 +711,7 @@ def _compile(
         nonlocal output
         nonlocal tracer
         speculation_log.restart()
+        exn_vt_stack = ExceptionStack()
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -704,10 +727,12 @@ def _compile(
             export_constraints,
             frame_state=frame_state,
             speculation_log=speculation_log,
+            exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
         )
 
         try:
+            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -750,9 +775,6 @@ def _compile(
                     dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
                 )
             )
-            stack.enter_context(
-                _WaitCounter("pytorch.wait_counter.dynamo_compile").guard()
-            )
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
@@ -791,7 +813,10 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                out_code = transform_code_object(code, transform)
+                with dynamo_timed(
+                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
+                ):
+                    out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
@@ -900,12 +925,14 @@ def _compile(
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
-        check_fn = CheckFunctionManager(
-            code,
-            output,
-            cache_entry,
-            hooks.guard_fail_fn if hooks else None,
-        )
+        with dynamo_timed("build_guards", log_pt2_compile_event=True):
+            check_fn = CheckFunctionManager(
+                code,
+                output,
+                cache_entry,
+                hooks.guard_fail_fn if hooks else None,
+                hooks.guard_filter_fn if hooks else None,
+            )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -933,7 +960,9 @@ def _compile(
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
+        _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,
+        _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts

@@ -94,7 +94,14 @@ from torch.utils.hooks import RemovableHandle
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Iterator, KeysView, ValuesView
+    from collections.abc import (
+        Generator,
+        ItemsView,
+        Iterable,
+        Iterator,
+        KeysView,
+        ValuesView,
+    )
 
 
 try:
@@ -579,11 +586,26 @@ class CompileEventLogger:
     @staticmethod
     def try_add_pt2_compile(event_name: str, **metadata: object):
         """
-        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist
+        or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
+        if CHROMIUM_EVENT_LOG is None:
+            return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
+
+    @staticmethod
+    def try_(method_fn, *args, **kwargs):
+        """
+        Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
+        """
+        if CHROMIUM_EVENT_LOG is None:
+            return
+        metrics_context = get_metrics_context()
+        if not metrics_context.in_progress():
+            return
+        method_fn(*args, **kwargs)
 
 
 @contextmanager
@@ -596,8 +618,9 @@ def dynamo_timed(
     dynamo_compile_column_us: Optional[str] = None,
     dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
-    is_forward: Optional[bool] = None,
+    is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
+    waitcounter_name_override: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -638,7 +661,8 @@ def dynamo_timed(
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
-    - is_forward: Optionally set an is_forward field for those logging destinations
+    - is_backward: Specify forward/backward directly when not available in a
+      CompileContext, e.g., during runtime autotuning.
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
@@ -664,8 +688,8 @@ def dynamo_timed(
         event_metadata.update(metadata)
     if fn_name:
         event_metadata.update({"fn_name": fn_name})
-    if is_forward is not None:
-        event_metadata.update({"is_backward": not is_forward})
+    if is_backward is not None:
+        event_metadata.update({"is_backward": is_backward})
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
@@ -673,13 +697,23 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
+    cx_managers: list[typing.Any] = [
+        torch.profiler.record_function(f"{key} (dynamo_timed)")
+    ]
+    wait_counter_name = key
+    if waitcounter_name_override:
+        wait_counter_name = waitcounter_name_override
+
+    if log_waitcounter:
+        cx_managers.append(
+            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
+        )
+
     try:
-        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-            if log_waitcounter:
-                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
-                    yield
-            else:
-                yield
+        with contextlib.ExitStack() as stack:
+            for cx in cx_managers:
+                stack.enter_context(cx)
+            yield
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
@@ -707,7 +741,7 @@ def dynamo_timed(
                 extra={
                     "compile_id": compile_id,
                     "is_runtime": True,
-                    "is_forward": is_forward,
+                    "is_forward": not is_backward,
                 },
             )
             cumulative_time_spent_ns[event_name] += time_spent_ns
@@ -1196,7 +1230,7 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
     cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
@@ -1230,6 +1264,20 @@ class CompilationMetrics:
     recompile_reason: Optional[str] = None
     num_graph_breaks: Optional[int] = None
     triton_kernel_compile_times_us: Optional[str] = None
+    ir_count: Optional[int] = None
+    cudagraph_skip_reason: Optional[str] = None
+    python_version: Optional[str] = None
+    pgo_put_remote_code_state_time_us: Optional[int] = None
+    pgo_get_remote_code_state_time_us: Optional[int] = None
+    # The number of elements within parameters. This is classically what people
+    # think of when they think of parameters in a ML model.
+    param_numel: Optional[int] = None
+    # The number of elements counted by bytes - i.e. a float32 is 4 bytes
+    # per element.
+    param_bytes: Optional[int] = None
+    # The number of parameters counted by fields. This is mostly a proxy for
+    # the number of distinct type of params.
+    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1393,6 +1441,7 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
             "reorderable_logging_functions",
             "ignore_logger_methods",
             "traceable_tensor_subclasses",
+            "nontraceable_tensor_subclasses",
             "_custom_ops_profile",
         }
 
@@ -1491,6 +1540,7 @@ def record_compilation_metrics(
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
+        "python_version": sys.version,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -2384,6 +2434,7 @@ def check_numpy_ndarray_args(args, kwargs):
 
 dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
+dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
@@ -2858,7 +2909,7 @@ def same(
                     elif use_larger_multiplier_for_smaller_tensor and (
                         fp64_ref.numel() <= 500
                     ):
-                        multiplier = 5.0
+                        multiplier = 8.0
                     elif (
                         fp64_ref.numel() < 1000
                         or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
@@ -3746,10 +3797,11 @@ def build_checkpoint_variable(**options):
 def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4067,11 +4119,21 @@ def is_tensor_base_attr_getter(value):
     )
 
 
+def is_tensor_getset_descriptor(name):
+    try:
+        attr = inspect.getattr_static(torch.Tensor, name)
+        return type(attr) is types.GetSetDescriptorType
+    except AttributeError:
+        return False
+
+
 def is_torch_function_object(value):
     return hasattr(value, "__torch_function__")
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
+    # This emulates
+    # https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/disable_torch_function.cpp#L315-L323
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -4086,12 +4148,14 @@ def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool
     if vt.is_realized() or (
         hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
     ):
+        func = None
         if isinstance(vt, TensorWithTFOverrideVariable):
-            return True
+            func = getattr(vt.class_type, "__torch_function__", None)
 
-        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-            vt.value, "__torch_function__"
-        )
+        elif isinstance(vt, UserDefinedObjectVariable):
+            func = getattr(vt.value, "__torch_function__", None)
+
+        return func not in (None, torch._C._disabled_torch_function_impl)
 
     return False
 
@@ -4346,7 +4410,9 @@ def does_not_override_dict_iter_methods(user_cls):
 # compiled bytecode
 # They will be skipped which is the desired result
 def call_size(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.size(i)
 
@@ -4354,7 +4420,9 @@ def call_size(x, i):
 
 
 def call_stride(x, i):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x, i):
         return x.stride(i)
 
@@ -4362,7 +4430,9 @@ def call_stride(x, i):
 
 
 def call_storage_offset(x):
-    @torch._dynamo.disable(recursive=True)
+    @torch._dynamo.disable(
+        recursive=True, reason="__torch_function__ tracing helper function"
+    )
     def fn(x):
         return x.storage_offset()
 
@@ -4471,3 +4541,41 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
+
+
+@contextmanager
+def maybe_disable_inference_mode() -> Generator[None, None, None]:
+    """
+    Disables torch.inference_mode for the compilation (still on at runtime).
+    This simplifies the compile stack where we can assume that inference_mode
+    will always be off.
+
+    Since inference_mode is equivalent to no_grad + some optimizations (version
+    counts etc), we turn on no_grad here. The other optimizations are not
+    relevant to torch.compile.
+    """
+    is_inference_mode_on = (
+        config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
+    )
+    if is_inference_mode_on:
+        with (
+            torch.inference_mode(False),
+            torch.no_grad(),
+        ):
+            yield
+    else:
+        yield
+
+
+@contextmanager
+def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    """
+    Turns off tracking of inference_mode for fake tensor propagation. With this
+    context manager, when a real tensor is converted to fake tensor, the fake
+    tensor looses its inference-ness.
+    """
+    if config.fake_tensor_disable_inference_mode:
+        with torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop():
+            yield
+    else:
+        yield

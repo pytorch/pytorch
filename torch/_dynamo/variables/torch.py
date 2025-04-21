@@ -34,7 +34,7 @@ import logging
 import math
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._refs
@@ -44,7 +44,7 @@ from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
-from .. import config, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
@@ -52,7 +52,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import unimplemented
+from ..exc import unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import CallFunctionNoArgsSource, SyntheticLocalSource
 from ..utils import (
@@ -64,7 +64,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import VariableTracker
+from .base import typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -76,6 +76,7 @@ from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
+    TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
 
@@ -105,6 +106,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.profiler.profile,
         torch.autograd.profiler.record_function,
         torch._C.DisableTorchFunctionSubclass,
+        torch._C.DisableTorchFunction,
         torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
         torch._functorch.eager_transforms.jvp_increment_nesting,
@@ -167,19 +169,23 @@ constant_fold_functions_need_guards = dict.fromkeys(constant_fold_functions_need
 constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
-tracing_state_functions = {
-    torch.jit.is_scripting: False,
-    torch.jit.is_tracing: False,
-    torch._C._get_tracing_state: None,
-    torch.fx._symbolic_trace.is_fx_tracing: False,
-    torch.onnx.is_in_onnx_export: False,
-    torch._dynamo.external_utils.is_compiling: True,
-    torch._utils.is_compiling: True,
-    torch.compiler.is_compiling: True,
-    torch.compiler.is_dynamo_compiling: True,
-    torch.compiler.is_exporting: True,
-    torch.nn.modules.activation._is_make_fx_tracing: False,
-}
+@functools.lru_cache(None)
+def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
+    # Defined as a function to avoid circular import like torch.onnx
+    return {
+        torch.jit.is_scripting: False,
+        torch.jit.is_tracing: False,
+        torch._C._get_tracing_state: None,
+        torch.fx._symbolic_trace.is_fx_tracing: False,
+        torch.onnx.is_in_onnx_export: False,
+        torch._dynamo.external_utils.is_compiling: True,
+        torch._utils.is_compiling: True,
+        torch.compiler.is_compiling: True,
+        torch.compiler.is_dynamo_compiling: True,
+        torch.compiler.is_exporting: True,
+        torch.nn.modules.activation._is_make_fx_tracing: False,
+    }
+
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 
@@ -197,7 +203,7 @@ def get_overridable_functions():
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    more = {
+    more: set[Callable[..., Any]] = {
         torch.ones,
         torch.ones_like,
         torch.zeros,
@@ -221,7 +227,7 @@ class BaseTorchVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         try:
             name = f"{self.value.__module__}.{self.value.__name__}"
         except Exception:
@@ -342,9 +348,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
-        elif self.value is torch._C.DisableTorchFunctionSubclass:
+        elif (
+            self.value is torch._C.DisableTorchFunctionSubclass
+            or self.value is torch._C.DisableTorchFunction
+        ):
             assert not (args or kwargs)
-            return TorchFunctionDisableVariable.create(tx)
+            return TorchFunctionDisableVariable.create(
+                tx, only_subclass=self.value is torch._C.DisableTorchFunctionSubclass
+            )
         elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
@@ -390,7 +401,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch.nn.attention.sdpa_kernel:
             assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
             backends = args[0] if len(args) == 1 else kwargs["backends"]
-            return SDPAKernelVariable.create(tx, backends.as_python_constant())
+            set_priority = kwargs["set_priority"] if "set_priority" in kwargs else False
+            return SDPAKernelVariable.create(
+                tx, backends.as_python_constant(), set_priority
+            )
         elif self.value is torch.nn.attention._sdpa_kernel_variadic:
             return SDPAKernelVariable.create(
                 tx, [arg.as_python_constant() for arg in args]
@@ -446,7 +460,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
-        @register(*tracing_state_functions)
+        @register(*tracing_state_functions())
         def handle_tracing_state_functions(
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
@@ -460,7 +474,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch.compiler.is_exporting,
             ):
                 tx.mark_inconsistent_side_effects()
-            return ConstantVariable.create(tracing_state_functions[self.value])
+            return ConstantVariable.create(tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
         def handle_dispatch_key_set_functions(
@@ -515,6 +529,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.radians), args, kwargs
                 )
+
+        @register(torch.is_inference_mode_enabled)
+        def handle_is_inference_mode_enabled(self, tx: "InstructionTranslator"):
+            unimplemented_v2(
+                gb_type="Encountered torch.is_inference_mode_enabled during tracing",
+                context="",
+                explanation="torch.is_inference_mode_enabled() is not supported",
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
 
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
         def handle_is_tensor(self, tx: "InstructionTranslator", arg):
@@ -593,7 +619,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch._C._is_torch_function_enabled)
         def handle_is_torch_function_enabled(self, tx):
             install_guard(TorchFunctionDisableVariable._guards_singleton)
-            return ConstantVariable.create(tx.output.torch_function_enabled)
+            # see comment on SymbolicTorchFunctionState class as to why
+            # this is not a bug
+            return ConstantVariable.create(
+                tx.symbolic_torch_function_state.torch_function_subclass_enabled
+            )
+
+        @register(torch._C._is_torch_function_all_disabled)
+        def handle_is_torch_function_all_disabled(self, tx):
+            install_guard(TorchFunctionDisableVariable._guards_singleton)
+            return ConstantVariable.create(
+                not tx.symbolic_torch_function_state.torch_function_mode_enabled
+            )
 
         @register(
             torch.overrides.has_torch_function,
@@ -864,6 +901,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(expr, ConstantVariable):
                 return expr
 
+        @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
+        def handle_guard_or_true(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                # TODO: this probably should be folded somewhere else but I'm not sure where
+                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.guard_or_true(expr.sym_num)
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
+        @register(torch.fx.experimental.symbolic_shapes.guard_or_false)
+        def handle_guard_or_false(self, tx: "InstructionTranslator", expr):
+            if isinstance(expr, SymNodeVariable):
+                # TODO: this probably should be folded somewhere else but I'm not sure where
+                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.guard_or_false(expr.sym_num)
+                )
+            elif isinstance(expr, ConstantVariable):
+                return expr
+
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(
             self, tx: "InstructionTranslator", *args, **kwargs
@@ -1125,6 +1184,28 @@ If the above doesn't work, please subtmit an issue to GitHub.
             )
 
         if self.is_tensor_method():
+            name = self.value.__name__
+            # Guard against inplace view op on input tensor (not supported)
+            if args and isinstance(args[0], variables.TensorVariable):
+                tensor_var = args[0]
+                # Check if input tensor and inplace_view op specifcally
+                if tensor_var.source is not None and hasattr(torch.ops.aten, name):
+                    fn = getattr(torch.ops.aten, name)
+                    if (
+                        hasattr(fn, "overloads")
+                        and hasattr(fn, fn.overloads()[0])
+                        and torch.Tag.inplace_view
+                        in getattr(fn, fn.overloads()[0]).tags
+                    ):
+                        unimplemented_v2(
+                            gb_type="Inplace op on input tensor",
+                            context="",
+                            explanation=f"Attempted to trace an inplace view op on input tensor {typestr(self.value)}.",
+                            hints=[
+                                *graph_break_hints.SUPPORTABLE,
+                                "Ensure you do not modify input tensor in place.",
+                            ],
+                        )
             return self.call_tensor_method(tx, args, kwargs)
 
         special_handler = self._get_handlers().get(self.value)
@@ -1318,7 +1399,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
-        if is_traceable_wrapper_subclass_type(data.class_type):
+        if isinstance(
+            data, TensorWithTFOverrideVariable
+        ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented("Parameter constructor with tensor subclass NYI")
 
         if not can_convert_to_tracable_parameter():

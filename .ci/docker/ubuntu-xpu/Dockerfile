@@ -77,13 +77,6 @@ COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
 
-# (optional) Install database packages like LMDB and LevelDB
-ARG DB
-COPY ./common/install_db.sh install_db.sh
-RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
-RUN rm install_db.sh
-ENV INSTALLED_DB ${DB}
-
 # (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./

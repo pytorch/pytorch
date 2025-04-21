@@ -354,10 +354,11 @@ class TestSelectAlgorithm(TestCase):
             module_path=module_path,
             module_cache_key=None,
             kernel_name=None,
-            grid=None,
             extra_args=None,
             num_stages=None,
             num_warps=None,
+            num_consumer_groups=None,
+            num_buffers_warp_spec=None,
             input_tensor_meta=None,
             output_tensor_meta=None,
         )

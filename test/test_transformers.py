@@ -86,6 +86,7 @@ isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability()
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
+TEST_WITH_CK = TEST_WITH_ROCM and torch.backends.cuda.preferred_rocm_fa_library() == torch.backends.cuda._ROCmFABackends['ck']
 
 def _check_equal(
     golden: torch.Tensor,
@@ -1655,7 +1656,7 @@ class TestSDPAFailureModes(NNTestCase):
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 3, 9) if kernel == SDPBackend.EFFICIENT_ATTENTION else SdpaShape(2, 2, 3, 257)
             if TEST_WITH_ROCM:  # On ROCM, FA and EA share the backend GPU kernels
-                size = SdpaShape(2, 2, 3, 257)
+                size = SdpaShape(2, 2, 3, 513)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
@@ -2468,6 +2469,30 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_gqa(self, device):
+        batch = 4
+        seq_len_q = 512
+        seq_len_kv = 1024
+        D = 128
+        # Sample call to SDPA - GQ
+        query = torch.rand(batch, 32, seq_len_q, D, device='cuda', dtype=torch.bfloat16)
+        key = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
+        # cuDNN supports h_k != h_v
+        value = torch.rand(batch, 4, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
+        with sdpa_kernel([SDPBackend.MATH]):
+            output_math = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
+
+        with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+            with sdpa_kernel([SDPBackend.CUDNN_ATTENTION]):
+                output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=False)
+
+        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION]):
+            output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
+
+        self.assertEqual(output_math, output_cudnn)
+
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
@@ -2504,9 +2529,16 @@ class TestSDPACudaOnly(NNTestCase):
         k = torch.randn(b, h, s_kv, d_qk, device=device, dtype=torch.bfloat16)
         v = torch.randn(b, h, s_kv, d_v, device=device, dtype=torch.bfloat16)
 
+        device_cap = torch.cuda.get_device_capability()
+        ISSM90 = device_cap == (9, 0)
+        ISSM100 = device_cap == (10, 0)
         with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+            # SM90/100 support d <= 256 as of cuDNN 9.5.1+
+            if (ISSM90 or ISSM100) and torch.backends.cudnn.version() >= 90501:
                 torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                    torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
@@ -2981,7 +3013,14 @@ class TestSDPACudaOnly(NNTestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
-    def test_fused_sdp_priority_order(self, device):
+    @parametrize("use_compile", [True, False])
+    def test_fused_sdp_priority_order(self, device, use_compile):
+        @torch.compile
+        def compiled_func(order):
+            with sdpa_kernel(order, set_priority=True):
+                out = scaled_dot_product_attention(q, q, q)
+            return out
+
         q = torch.randn(64, 8, 1024, 64, dtype=torch.half, device='cuda')
         default_order = torch._C._get_sdp_priority_order()
         orders = [[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION],
@@ -2991,18 +3030,25 @@ class TestSDPACudaOnly(NNTestCase):
         import time
         times = list()
         for order in orders:
-            with sdpa_kernel(order, set_priority=True):
-                scaled_dot_product_attention(q, q, q)
+            if use_compile:
+                compiled_func(order)
+            else:
+                with sdpa_kernel(order, set_priority=True):
+                    scaled_dot_product_attention(q, q, q)
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            with sdpa_kernel(order, set_priority=True):
-                scaled_dot_product_attention(q, q, q)
+            if use_compile:
+                compiled_func(order)
+            else:
+                with sdpa_kernel(order, set_priority=True):
+                    scaled_dot_product_attention(q, q, q)
             torch.cuda.synchronize()
             t1 = time.perf_counter()
             times.append(t1 - t0)
         self.assertTrue(times[0] < times[1], "expected cuDNN SDPA to be faster than Math backend.")
         self.assertTrue(times[1] > times[2], "expected Eff Attn backend to faster than Math backend.")
         self.assertTrue(times[3] < times[2], "expected Flash Attn backend to faster than Math backend.")
+        self.assertTrue(times[0] < times[2], "expected cuDNN Attn backend to faster than Eff Attn backend.")
         reset_order = torch._C._get_sdp_priority_order()
         self.assertEqual(default_order, reset_order, "expected SDPA context manager to reset priority order.")
 
@@ -3121,7 +3167,9 @@ class TestSDPACudaOnly(NNTestCase):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
-            mask = (rand_uniform > p).to(torch.float32)
+            # On ROCM _fill_mem_eff_dropout_mask fills 0.5 if (prng > p) otherwise -0.5 to the tensor
+            tester_p = p if not TEST_WITH_ROCM else 0.0
+            mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
@@ -3232,7 +3280,9 @@ class TestSDPACudaOnly(NNTestCase):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
-            mask = (rand_uniform > p).to(torch.float32)
+            # On ROCM _fill_mem_eff_dropout_mask fills 0.5 if (prng > p) otherwise -0.5 to the tensor
+            tester_p = p if not TEST_WITH_ROCM else 0.0
+            mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
@@ -3345,9 +3395,9 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
-        if TEST_WITH_ROCM and dropout_p != 0:
+        if TEST_WITH_CK and dropout_p != 0:
             self.skipTest("CK does not support tensor format dropout masks")
-        if TEST_WITH_ROCM and head_dim > 128:
+        if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
 
         scale = scale if scale is None else (1 / head_dim)
@@ -3473,7 +3523,9 @@ class TestSDPACudaOnly(NNTestCase):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, dropout_p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, dropout_p, seed, offset)
-            mask = (rand_uniform > dropout_p).to(torch.float32)
+            # On ROCM _fill_mem_eff_dropout_mask fills 0.5 if (prng > p) otherwise -0.5 to the tensor
+            tester_p = dropout_p if not TEST_WITH_ROCM else 0.0
+            mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
 
         def get_dropout_mask(output, fused_kernel, batch_size, n_heads, q_len, kv_len, dropout_p, device=device):
