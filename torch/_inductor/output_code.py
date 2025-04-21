@@ -396,6 +396,10 @@ class CompiledFxGraph(OutputCode):
     recursively_apply_fns: Optional[Callable[..., Any]]
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
+    runnable_graph_str: str = dataclasses.field(repr=False)  # Do not display graph
+    inductor_post_grad_graph_str: str = dataclasses.field(
+        repr=False
+    )  # Do not display graph
     cache_linemap: Optional[list[tuple[int, str]]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
@@ -437,6 +441,8 @@ class CompiledFxGraph(OutputCode):
         static_input_idxs: Sequence[int],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
+        runnable_graph_str: str,
+        inductor_post_grad_graph_str: str,
         recursively_apply_fns: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.current_callable = current_callable
@@ -445,6 +451,8 @@ class CompiledFxGraph(OutputCode):
         if graph.cache_path:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
+        self.runnable_graph_str = runnable_graph_str
+        self.inductor_post_grad_graph_str = inductor_post_grad_graph_str
         self.cache_linemap = graph.cache_linemap
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
