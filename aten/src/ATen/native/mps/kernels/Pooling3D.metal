@@ -3,10 +3,7 @@ using namespace metal;
 
 // 3D Average Pooling Kernel
 // This kernel computes the average pooling operation for 3D tensors
-// Define packed int4 struct for more efficient parameter passing
-struct packed_int4 {
-    int values[4];
-};
+// Using Metal's built-in packed_int4 type for more efficient parameter passing
 
 template <typename T>
 kernel void avg_pool3d(
@@ -21,26 +18,26 @@ kernel void avg_pool3d(
     constant int& divisor_override [[buffer(8)]],
     uint index [[thread_position_in_grid]])
 {
-    // Extract dimensions from packed structs
-    int input_depth = input_dims.values[0];
-    int input_height = input_dims.values[1];
-    int input_width = input_dims.values[2];
-    int output_depth = input_dims.values[3];
+    // Extract dimensions from packed vectors
+    int input_depth = input_dims.x;
+    int input_height = input_dims.y;
+    int input_width = input_dims.z;
+    int output_depth = input_dims.w;
 
-    int output_height = output_dims.values[0];
-    int output_width = output_dims.values[1];
-    int kernel_depth = output_dims.values[2];
-    int kernel_height = output_dims.values[3];
+    int output_height = output_dims.x;
+    int output_width = output_dims.y;
+    int kernel_depth = output_dims.z;
+    int kernel_height = output_dims.w;
 
-    int kernel_width = kernel_dims.values[0];
-    int stride_depth = kernel_dims.values[1];
-    int stride_height = kernel_dims.values[2];
-    int stride_width = kernel_dims.values[3];
+    int kernel_width = kernel_dims.x;
+    int stride_depth = kernel_dims.y;
+    int stride_height = kernel_dims.z;
+    int stride_width = kernel_dims.w;
 
-    int padding_depth = padding_dims.values[0];
-    int padding_height = padding_dims.values[1];
-    int padding_width = padding_dims.values[2];
-    int count_include_pad = padding_dims.values[3];
+    int padding_depth = padding_dims.x;
+    int padding_height = padding_dims.y;
+    int padding_width = padding_dims.z;
+    int count_include_pad = padding_dims.w;
 
     // Calculate output indices
     const int output_size = batch_size * channels * output_depth * output_height * output_width;
@@ -120,26 +117,26 @@ kernel void avg_pool3d_backward(
     constant int& divisor_override [[buffer(8)]],
     uint index [[thread_position_in_grid]])
 {
-    // Extract dimensions from packed structs
-    int input_depth = input_dims.values[0];
-    int input_height = input_dims.values[1];
-    int input_width = input_dims.values[2];
-    int output_depth = input_dims.values[3];
+    // Extract dimensions from packed vectors
+    int input_depth = input_dims.x;
+    int input_height = input_dims.y;
+    int input_width = input_dims.z;
+    int output_depth = input_dims.w;
 
-    int output_height = output_dims.values[0];
-    int output_width = output_dims.values[1];
-    int kernel_depth = output_dims.values[2];
-    int kernel_height = output_dims.values[3];
+    int output_height = output_dims.x;
+    int output_width = output_dims.y;
+    int kernel_depth = output_dims.z;
+    int kernel_height = output_dims.w;
 
-    int kernel_width = kernel_dims.values[0];
-    int stride_depth = kernel_dims.values[1];
-    int stride_height = kernel_dims.values[2];
-    int stride_width = kernel_dims.values[3];
+    int kernel_width = kernel_dims.x;
+    int stride_depth = kernel_dims.y;
+    int stride_height = kernel_dims.z;
+    int stride_width = kernel_dims.w;
 
-    int padding_depth = padding_dims.values[0];
-    int padding_height = padding_dims.values[1];
-    int padding_width = padding_dims.values[2];
-    int count_include_pad = padding_dims.values[3];
+    int padding_depth = padding_dims.x;
+    int padding_height = padding_dims.y;
+    int padding_width = padding_dims.z;
+    int count_include_pad = padding_dims.w;
 
     // Calculate input indices
     const int input_size = batch_size * channels * input_depth * input_height * input_width;

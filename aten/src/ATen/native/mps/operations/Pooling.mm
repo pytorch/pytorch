@@ -6,6 +6,8 @@
 #include <ATen/ops/avg_pool3d_native.h>
 #include <ATen/ops/avg_pool3d_backward_native.h>
 
+// Using Metal's built-in packed_int4 type for more efficient parameter passing
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -683,29 +685,29 @@ static void avg_pool3d_template(const Tensor& input,
   int batch_size = static_cast<int>(nbatch);
   int channels_val = static_cast<int>(channels);
 
-  // Create packed int4 structs for more efficient parameter passing
-  int input_dims[4] = {
+  // Create packed_int4 vectors for more efficient parameter passing
+  packed_int4 input_dims = {
       static_cast<int>(input_depth),
       static_cast<int>(input_height),
       static_cast<int>(input_width),
       static_cast<int>(output_depth)
   };
 
-  int output_dims[4] = {
+  packed_int4 output_dims = {
       static_cast<int>(output_height),
       static_cast<int>(output_width),
       static_cast<int>(kD),
       static_cast<int>(kH)
   };
 
-  int kernel_dims[4] = {
+  packed_int4 kernel_dims = {
       static_cast<int>(kW),
       static_cast<int>(dD),
       static_cast<int>(dH),
       static_cast<int>(dW)
   };
 
-  int padding_dims[4] = {
+  packed_int4 padding_dims = {
       static_cast<int>(pD),
       static_cast<int>(pH),
       static_cast<int>(pW),
@@ -716,10 +718,10 @@ static void avg_pool3d_template(const Tensor& input,
 
   [computeEncoder setBytes:&batch_size length:sizeof(int) atIndex:2];
   [computeEncoder setBytes:&channels_val length:sizeof(int) atIndex:3];
-  [computeEncoder setBytes:&input_dims length:sizeof(input_dims) atIndex:4];
-  [computeEncoder setBytes:&output_dims length:sizeof(output_dims) atIndex:5];
-  [computeEncoder setBytes:&kernel_dims length:sizeof(kernel_dims) atIndex:6];
-  [computeEncoder setBytes:&padding_dims length:sizeof(padding_dims) atIndex:7];
+  [computeEncoder setBytes:&input_dims length:sizeof(packed_int4) atIndex:4];
+  [computeEncoder setBytes:&output_dims length:sizeof(packed_int4) atIndex:5];
+  [computeEncoder setBytes:&kernel_dims length:sizeof(packed_int4) atIndex:6];
+  [computeEncoder setBytes:&padding_dims length:sizeof(packed_int4) atIndex:7];
   [computeEncoder setBytes:&divisor_override_val length:sizeof(int) atIndex:8];
 
   // Calculate grid and threadgroup sizes
@@ -748,7 +750,7 @@ static void avg_pool3d_template(const Tensor& input,
 
   // Only commit the command buffer without waiting for completion
   // This allows better parallelism with other operations
-  mpsStream->commit(false);
+  // Note: We're not synchronizing here to improve performance
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_out_mps)
