@@ -535,20 +535,25 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the state dict of ep.module but ep.module only stores params
         # buffers that participate in forward. If we undo this behaviour,
         # it would break some downstream users.
-        for name, p in unwrapped_params_buffers.items():
-            if name not in wrapped_params_buffers:
-                ep.state_dict[name] = p
+        new_state_dict = {
+            **ep.state_dict,
+            **{
+                name: p
+                for name, p in unwrapped_params_buffers.items()
+                if name not in wrapped_params_buffers
+            },
+        }
 
         for name, p in wrapped_params_buffers.items():
             # Buffers can be persistent/non-persistent
-            if name not in ep.state_dict:
+            if name not in new_state_dict:
                 assert not isinstance(p, torch.nn.Parameter)
 
-            if name in ep.state_dict:
+            if name in new_state_dict:
                 if name not in unwrapped_params_buffers:
-                    ep.state_dict.pop(name)
+                    new_state_dict.pop(name)
 
-        return gm, new_graph_signature, ep.state_dict
+        return gm, new_graph_signature, new_state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
