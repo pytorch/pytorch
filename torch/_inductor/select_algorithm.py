@@ -372,25 +372,27 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out: Optional[str] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
-        # The generated code is not dependent on the input nodes names, or symbolic sizes names.
+        # Whe caching is enabled, the generated code is not dependent on the input nodes names, or
+        # symbolic sizes names.
         # However, some of the variables returned by generate_and_load that are computed during the
         # triton template expansions (code generation) are dependent on those.
         # In order to cache the code generation and avoid redoing it for similar inputs that varies only by
         # input names or symbol names, we do a record and replay method.
         # During template expansions we record all function calls that change input_dependent_preserved_state
-        # and replay them on a cache hit to regenerate them.  Namely we want to be able to regenerate:
-        # 1) self.args.input_buffers
-        # 2) self.args.sizevars
-        # 3) self.prologue_supported_inputs
+        # and replay them on a cache hit to regenerate them.
+        self.cached_replay_events: Optional[RecordedEventsType] = None
 
-        self.cached_replay_events: RecordedEventsType = []
+        # Update each time an input is marked frozen.
+        self.frozen_layouts_cnt = 0
 
     def input_dependent_preserved_state(self) -> str:
         return repr(
             [
                 self.args.input_buffers,
                 self.args.sizevars,
+                self.args.workspace_args,
                 self.prologue_supported_inputs,
+                self.frozen_layouts_cnt,
             ]
         )
 
@@ -401,6 +403,7 @@ class TritonTemplateKernel(TritonKernel):
                 result = fn(*args, **kwargs)
                 post_state = self.input_dependent_preserved_state()
                 if pre_state != post_state:
+                    assert self.cached_replay_events is not None
                     self.cached_replay_events.append((fn.__name__, [*args], {**kwargs}))
                 return result
 
@@ -547,7 +550,6 @@ class TritonTemplateKernel(TritonKernel):
         Hook called from template code to generate function def and
         needed args.
         """
-
         assert all(isinstance(x, str) for x in argnames)
         renames = IndentedBuffer(initial_indent=1)
 
@@ -793,10 +795,11 @@ class TritonTemplateKernel(TritonKernel):
                 indices, self.range_trees[0].construct_entries(lengths)
             ):
                 range_tree_entry.set_name(name)
-
-            strided_index = sympy_dot(input_node.get_stride(), index_symbols)
-            strided_index = self.rename_indexing(strided_index)
-            self.body.writeline("xindex = " + texpr(strided_index))
+            contiguous_index = sympy_dot(
+                ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
+            )
+            contiguous_index = self.rename_indexing(contiguous_index)
+            self.body.writeline("xindex = " + texpr(contiguous_index))
 
             xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
@@ -869,7 +872,7 @@ class TritonTemplateKernel(TritonKernel):
 
             output_index = self.rename_indexing(output_index)
 
-            if output_index == strided_index:
+            if output_index == contiguous_index:
                 output_index_str = "xindex"
             else:
                 out_indexing = self.indexing(
@@ -972,6 +975,7 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 input_node.freeze_layout()
                 epilogue_args.append(input_node.make_loader()(index_symbols))
+                self.frozen_layouts_cnt += 1
 
             V.ops.store(
                 self.output_node.get_name(),
@@ -991,9 +995,33 @@ class TritonTemplateKernel(TritonKernel):
         self.render_hooks["<STORE_OUTPUT>"] = hook
         return "<STORE_OUTPUT>"
 
-    def render(self, template, kwargs):
+    def render(self, template, kwargs, record_input_dependent_tracked_event=False):
+        if record_input_dependent_tracked_event:
+            self.cached_replay_events = []
+
+        def make_template_env():
+            """
+            Generate the namespace visible in the template.
+            """
+            return {
+                fn.__name__: self.record_input_dependent_tracked_event()(fn)
+                if record_input_dependent_tracked_event
+                else fn
+                for fn in [
+                    self.def_kernel,
+                    self.size,
+                    self.stride,
+                    self.store_output,
+                    self.load_input,
+                    self.make_load,
+                    self.modification,
+                    self.gen_argdefs,
+                    self.gen_defines,
+                ]
+            }
+
         return PartialRender(
-            template.render(**self.template_env(), **kwargs),
+            template.render(**make_template_env(), **kwargs),
             self.render_hooks,
         )
 
@@ -1012,25 +1040,6 @@ class TritonTemplateKernel(TritonKernel):
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
         return f"tl.load({name} + ({index}), {mask}, other=0.0)"
-
-    def template_env(self):
-        """
-        Generate the namespace visible in the template.
-        """
-        return {
-            fn.__name__: self.record_input_dependent_tracked_event()(fn)
-            for fn in [
-                self.def_kernel,
-                self.size,
-                self.stride,
-                self.store_output,
-                self.load_input,
-                self.make_load,
-                self.modification,
-                self.gen_argdefs,
-                self.gen_defines,
-            ]
-        }
 
     def indexing(
         self,
@@ -1120,6 +1129,12 @@ class GeneratedCodeCacheEntry(NamedTuple):
 
 
 class GeneratedCodeCache:
+    """
+    Cache for generated code. The cache key is a string representation of the input nodes,
+    number of stages, number of warps, and call sizes. The cache value is a tuple of the
+    generated code, extra code, and events.
+    """
+
     def __init__(self, *args, **kwargs):
         self._cache: dict[str, GeneratedCodeCacheEntry] = {}
 
@@ -1131,7 +1146,7 @@ class GeneratedCodeCache:
 
     def make_key(
         self,
-        input_nodes: tuple[ir.StorageBox],
+        input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
         call_sizes: list[sympy.core.symbol.Symbol],
@@ -1166,6 +1181,7 @@ class GeneratedCodeCache:
             return [normalize_symbols(x) for x in ls]
 
         def layout_key(layout: ir.Layout) -> str:
+            assert not isinstance(layout, ir.FlexibleLayout)
             return repr(
                 [
                     normalize_list(layout.size),
@@ -1176,32 +1192,50 @@ class GeneratedCodeCache:
                 ]
             )
 
-        if subgraphs is None and workspace_arg is None:
-            return repr(
-                {
-                    "input_nodes": [
-                        layout_key(input.get_layout()) for input in input_nodes
-                    ],
-                    "num_stages": num_stages,
-                    "num_warps": num_warps,
-                    "prefix_args": prefix_args,
-                    "suffix_args": suffix_args,
-                    "call_sizes": normalize_list(call_sizes),
-                    "layout": layout_key(layout),
-                    "num_consumer_groups": num_consumer_groups,
-                    "num_buffers_warp_spec": num_buffers_warp_spec,
-                    "kwargs": kwargs,
-                    "epilogue_fn": id(epilogue_fn),
-                }
-            )
+        def has_flexiable_layout() -> bool:
+            if isinstance(layout, ir.FlexibleLayout):
+                return True
 
-        return None
+            for input in input_nodes:
+                if isinstance(input.get_layout(), ir.FlexibleLayout):
+                    return True
+            return False
+
+        # we do not cache under those conditions right now.
+        if (
+            has_flexiable_layout()
+            or subgraphs is not None
+            or workspace_arg is not None
+            or epilogue_fn is not identity
+        ):
+            return None
+
+        return repr(
+            {
+                "input_nodes": [
+                    layout_key(input.get_layout()) for input in input_nodes
+                ],
+                "num_stages": num_stages,
+                "num_warps": num_warps,
+                "prefix_args": prefix_args,
+                "suffix_args": suffix_args,
+                "call_sizes": normalize_list(call_sizes),
+                "layout": layout_key(layout),
+                "num_consumer_groups": num_consumer_groups,
+                "num_buffers_warp_spec": num_buffers_warp_spec,
+                "kwargs": kwargs,
+            }
+        )
 
     def get_entry(self, cache_key: Optional[str]) -> Optional[GeneratedCodeCacheEntry]:
         if cache_key is None:
             return None
 
         entry = self._cache.get(cache_key, None)
+        if entry is None:
+            torch._dynamo.utils.counters["inductor"]["generated_module_cache_miss"] += 1
+        else:
+            torch._dynamo.utils.counters["inductor"]["generated_module_cache_hit"] += 1
         return entry
 
     def put_entry(
@@ -1224,11 +1258,7 @@ class TritonTemplate(KernelTemplate):
     all_templates: dict[str, "TritonTemplate"] = {}
 
     def __init__(
-        self,
-        name: str,
-        grid: Any,
-        source: str,
-        debug=False,
+        self, name: str, grid: Any, source: str, debug=False, cache_codegen=False
     ) -> None:
         super().__init__(name)
         self.grid = grid
@@ -1236,19 +1266,18 @@ class TritonTemplate(KernelTemplate):
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
+        self._cache_codegen = cache_codegen
+
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_inductor_cache(self._generated_code_cache)
 
-    # These class fields are used for testing _generated_code_cache.
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
     test_cache = False
-    generated_module_cache_hit = 0
-    generated_module_cache_miss = 0
 
     def generate_and_load(
         self,
-        input_nodes: tuple[ir.StorageBox],
+        input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
         call_sizes: list[sympy.core.symbol.Symbol],
@@ -1262,24 +1291,33 @@ class TritonTemplate(KernelTemplate):
         layout: ir.Layout,
         kwargs: dict[str, Any],
     ) -> Optional[
-        tuple[ModuleType, str, tuple[str, ...], OrderedSet[str], Any, dict[str, Any]]
+        tuple[
+            ModuleType,
+            str,
+            tuple[str, ...],
+            OrderedSet[str],
+            tuple[sympy.Expr],
+            dict[str, Any],
+        ]
     ]:
         """Generate the python code and load it into the current process"""
-        cache_key = self._generated_code_cache.make_key(
-            input_nodes,
-            num_stages,
-            num_warps,
-            call_sizes,
-            prefix_args,
-            suffix_args,
-            epilogue_fn,
-            subgraphs,
-            workspace_arg,
-            layout,
-            num_consumer_groups,
-            num_buffers_warp_spec,
-            kwargs,
-        )
+        cache_key = None
+        if self._cache_codegen:
+            cache_key = self._generated_code_cache.make_key(
+                input_nodes,
+                num_stages,
+                num_warps,
+                call_sizes,
+                prefix_args,
+                suffix_args,
+                epilogue_fn,
+                subgraphs,
+                workspace_arg,
+                layout,
+                num_consumer_groups,
+                num_buffers_warp_spec,
+                kwargs,
+            )
 
         assert self.template, "requires jinja2"
         defines = StringIO()
@@ -1311,6 +1349,7 @@ class TritonTemplate(KernelTemplate):
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
         }
+
         if HAS_WARP_SPEC:
             kernel_options.update(
                 {
@@ -1328,30 +1367,30 @@ class TritonTemplate(KernelTemplate):
                 **kernel_options,
             )
 
-        def make_extra():
-            extra_parts = [
-                f"{kwarg}={repr(kwargs[kwarg])}" for kwarg in sorted(kwargs.keys())
-            ]
-
-            extra_parts.extend(
-                [
-                    f"num_stages={num_stages}",
-                    f"num_warps={num_warps}",
+        def generate_code(kernel) -> Optional[tuple[str, str]]:
+            def make_extra() -> str:
+                extra_parts = [
+                    f"{kwarg}={repr(kwargs[kwarg])}" for kwarg in sorted(kwargs.keys())
                 ]
-            )
-            if HAS_WARP_SPEC:
+
                 extra_parts.extend(
                     [
-                        f"num_consumer_groups={num_consumer_groups}",
-                        f"num_buffers_warp_spec={num_buffers_warp_spec}",
+                        f"num_stages={num_stages}",
+                        f"num_warps={num_warps}",
                     ]
                 )
-            extra = "-".join(extra_parts) + "-"
-            return extra
+                if HAS_WARP_SPEC:
+                    extra_parts.extend(
+                        [
+                            f"num_consumer_groups={num_consumer_groups}",
+                            f"num_buffers_warp_spec={num_buffers_warp_spec}",
+                        ]
+                    )
+                extra = "-".join(extra_parts) + "-"
+                return extra
 
-        def generate_code(kernel) -> Optional[tuple[str, str]]:
             try:
-                template = kernel.render(self.template, kwargs)
+                template = kernel.render(self.template, kwargs, self._cache_codegen)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                     code = template.finalize_all()
             except ZeroDivisionError:
@@ -1363,27 +1402,25 @@ class TritonTemplate(KernelTemplate):
             extra = make_extra()
             return code, extra
 
-        # Generate code, extra, and kernel state.
+        # Generate code, extra.
         code: Optional[str] = None
         extra: Optional[str] = None
-        cache_hit = False
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
             V.graph.set_current_device(layout.device),
             make_kernel() as kernel,
         ):
             cache_entry = self._generated_code_cache.get_entry(cache_key)
+            cache_hit = False
 
             if cache_entry is not None:
-                TritonTemplate.generated_module_cache_hit += 1
                 code, extra, events = cache_entry
                 kernel.replay_cached_events(events)
                 cache_hit = True
 
             else:
-                TritonTemplate.generated_module_cache_miss += 1
                 result = generate_code(kernel)
-                if not result:  # happens at ZeroDivisionError:
+                if result is None:  # happens at ZeroDivisionError:
                     return None
                 code, extra = result
                 self._generated_code_cache.put_entry(
@@ -1412,11 +1449,12 @@ class TritonTemplate(KernelTemplate):
 
         mod = PyCodeCache.load(code, extra)
 
-        # note to add new outputs to this function you need to make sure that current caching mechanism does not break.
         input_call_args = tuple(kernel.args.input_buffers.keys())
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
+        # NOTE TO ADD NEW OUTPUTS TO THIS FUNCTION YOU NEED TO MAKE SURE THAT CURRENT CACHING MECHANISM DOES NOT BREAK.
+        # FOR ALL TEMPLATES THAT HAVE cache_codegen = True
         return (
             mod,
             extra,
@@ -1428,18 +1466,18 @@ class TritonTemplate(KernelTemplate):
 
     def generate(  # type: ignore[override]
         self,
-        input_nodes,
-        layout,
-        num_stages,
-        num_warps,
-        num_consumer_groups=0,
-        num_buffers_warp_spec=0,
-        prefix_args=0,
-        suffix_args=0,
-        epilogue_fn=identity,
-        subgraphs=None,
-        mutated_inputs=None,
-        call_sizes=None,
+        input_nodes: tuple[ir.IRNode],
+        layout: ir.Layout,
+        num_stages: int,
+        num_warps: int,
+        num_consumer_groups: int = 0,
+        num_buffers_warp_spec: int = 0,
+        prefix_args: int = 0,
+        suffix_args: int = 0,
+        epilogue_fn: Optional[Callable[..., Any]] = identity,
+        subgraphs: Optional[list[ir.Buffer]] = None,
+        mutated_inputs: Optional[list[ir.IRNode]] = None,
+        call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         **kwargs,
     ):
@@ -1496,8 +1534,8 @@ class TritonTemplate(KernelTemplate):
             kernel_options,
         ) = result
 
-        expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
+        expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
         assert input_call_args[: len(expected_input_args)] == expected_input_args, (
             input_call_args,
             expected_input_args,
@@ -1556,6 +1594,7 @@ class TritonTemplate(KernelTemplate):
             output_tensor_meta=TensorMeta.from_irnodes(layout),
             workspace_arg=workspace_arg,
         )
+
         return TritonTemplateCaller(
             kernel_hash_name,
             full_input_nodes,
@@ -1573,6 +1612,7 @@ class TritonTemplate(KernelTemplate):
                 ),
                 "num_stages": num_stages,
                 "num_warps": num_warps,
+                "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
@@ -1601,6 +1641,7 @@ class ExternKernelChoice:
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
+
         setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
