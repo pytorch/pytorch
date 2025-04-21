@@ -20,7 +20,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel import (
@@ -326,6 +325,14 @@ class DTensorTestBase(MultiProcessTestCase):
         return NUM_DEVICES
 
     @property
+    def device_type(self) -> str:
+        # if enough GPU we can use GPU, otherwise we fallback to CPU
+        if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
+            return "cpu"
+        else:
+            return DEVICE_TYPE
+
+    @property
     def backend(self) -> str:
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
@@ -398,11 +405,6 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
         def wrapper(
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
-            # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
-                self.device_type = "cpu"
-            else:
-                self.device_type = DEVICE_TYPE
 
             self.init_pg(eager_init)
 

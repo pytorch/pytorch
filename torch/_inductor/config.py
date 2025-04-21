@@ -115,7 +115,14 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
 # Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches: bool = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+    default=False,
+)
+
+# Unsafe way to skip dynamic shape guards to get faster cache load
+unsafe_skip_cache_dynamic_shape_guards: bool = False
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
@@ -126,7 +133,7 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # If the custom op does not have a layout constraint tag already
 # then we assume the following applies.
 custom_op_default_layout_constraint: Literal[
-    "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
+    "needs_fixed_stride_order", "flexible_layout"
 ] = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
@@ -157,6 +164,12 @@ size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
+# Disable by default in fbcode
+alignment_asserts = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")
+    == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -171,6 +184,9 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+
+# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
+bfloat16_atomic_adds_enabled = True
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
@@ -931,7 +947,7 @@ class cpp:
 
     # similar to config.triton.descriptive_names
     descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
+        Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
@@ -1102,12 +1118,11 @@ class triton:
     )
 
     # should we put op names in kernel names
-    # False: No special names (just triton__1, triton__2, etc.)
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
     descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
+        Literal["torch", "original_aten", "inductor_node"]
     ] = "original_aten"
 
     # use alternate codegen for smaller reductions
@@ -1361,6 +1376,11 @@ class cuda:
     cutlass_instantiation_level: str = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
     )
+
+    # Experimental. Only for H100 for now. Flag to control whether to use presets.
+    # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
+    # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
+    cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
 
 
 class rocm:
