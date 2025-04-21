@@ -1631,7 +1631,14 @@ def _check_with(
 
     msg = None
     if message:
-        msg = message() if callable(message) else message
+        if callable(message):
+            try:
+                msg = message()
+            except:
+                pass
+        else:
+            msg = message
+
     if expect_true(cond, msg=msg):
         return
 
