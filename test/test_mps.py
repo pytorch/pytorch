@@ -704,8 +704,6 @@ def mps_ops_modifier(ops):
         'dot': [torch.int64] if MACOS_VERSION < 14.0 else [],
         'histc': [torch.float16, torch.bfloat16],
         'index_add': [torch.int64],
-        #'log1p': [torch.int64],
-        #'sigmoid': [torch.int64],
 
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
