@@ -401,7 +401,7 @@ def associative_scan_op_dense(combine_fn, xs, additional_inputs):
     return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
 
 
-associative_scan_op.py_impl(DispatchKey.Autograd)(
+associative_scan_op.py_autograd_impl(
     autograd_not_implemented(associative_scan_op, deferred_error=True)
 )
 

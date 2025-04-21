@@ -647,7 +647,13 @@ struct ThreadLocalResults {
   ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
   ~ThreadLocalResults() {
+    // Currently, there is a bug in Profiler when using Python 3.12 that causes
+    // a segfault when decrementing the refcount of a TraceContext during
+    // on-demand. We are purposefully allowing for a small leak in this
+    // situation to avoid the segfault. This should be fixed in the future.
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 12)
     Py_DECREF((PyObject*)ctx_);
+#endif
   }
 
   template <CallType C, EventType E, typename Ephemeral, typename... Args>
@@ -1152,15 +1158,12 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
 // Assuming python_tracer::PythonMemoryTracerBase is defined elsewhere
 class PythonMemoryTracer final : public python_tracer::PythonMemoryTracerBase {
  public:
-  explicit PythonMemoryTracer();
-  ~PythonMemoryTracer() override;
+  explicit PythonMemoryTracer() = default;
+  ~PythonMemoryTracer() override = default;
   void start() override;
   void stop() override;
   void export_memory_history(const std::string path) override;
 };
-
-PythonMemoryTracer::PythonMemoryTracer() {}
-PythonMemoryTracer::~PythonMemoryTracer() {}
 
 static void toggle_memory_tracing(bool enable) {
   PyGILState_STATE gil_state = PyGILState_Ensure();
@@ -1182,9 +1185,9 @@ static void toggle_memory_tracing(bool enable) {
   PyTuple_SetItem(args, 3, THPUtils_packInt64(100000)); // max_entries
   PyTuple_SetItem(args, 4, Py_None); // device (None)
   PyTuple_SetItem(args, 5, PyBool_FromLong(0)); // clear_history (False)
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, NULL);
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
   Py_DECREF(args);
-  if (result == NULL) {
+  if (result == nullptr) {
     return;
   }
   PyGILState_Release(gil_state);
@@ -1209,9 +1212,9 @@ void PythonMemoryTracer::export_memory_history(const std::string path) {
   PyObject* py_filename = PyUnicode_FromString(path.c_str());
   // Call the function with arguments (e.g., a file path)
   PyObject* args = PyTuple_Pack(1, py_filename);
-  PyObject* result = PyObject_Call(snapshot_func.get(), args, NULL);
+  PyObject* result = PyObject_Call(snapshot_func.get(), args, nullptr);
   Py_DECREF(args);
-  if (result == NULL) {
+  if (result == nullptr) {
     return;
   }
   PyGILState_Release(gil_state);

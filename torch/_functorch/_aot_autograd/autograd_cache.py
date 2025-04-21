@@ -13,6 +13,7 @@ import os
 import pickle
 import shutil
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
@@ -156,6 +157,7 @@ def check_node_safe(node: Node):
         return (
             function_name in torch_non_c_binding_in_graph_functions
             or function_name in SAFE_TORCH_FUNCTIONS
+            or function_name in torch._inductor.config.unsafe_marked_cacheable_functions
         )
 
     def is_torch_function(target):
@@ -359,7 +361,7 @@ def autograd_cache_key(
 
 @dataclass
 class FXGraphCacheLoadable:
-    fx_graph_cache_key: str
+    fx_graph_cache_info: tuple[str, list[str]]
 
     def is_backward(self) -> bool:
         return False
@@ -384,10 +386,10 @@ class FXGraphCacheLoadable:
         constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
             remote_cache = FxGraphCache.get_remote_cache()
-
+        (cache_key, debug_lines) = self.fx_graph_cache_info
         result, cache_info = FxGraphCache.load_with_key(
-            self.fx_graph_cache_key,
-            [],
+            cache_key,
+            debug_lines,
             example_inputs,
             local=True,
             remote_cache=remote_cache,
@@ -395,7 +397,7 @@ class FXGraphCacheLoadable:
             constants=constants,
         )
         if result is None:
-            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
+            log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_info)
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
@@ -486,6 +488,9 @@ class AOTAutogradCacheEntry:
     # backward_time_taken is essentially just the time inductor took to compile
     forward_time_taken_ns: int
     backward_time_taken_ns: int
+
+    # Used by standalone_compile
+    sanitized_aot_config: AOTConfig
 
     # Turn cache entry into the original callable
     def wrap_post_compile(
@@ -820,9 +825,14 @@ class AOTAutogradCache:
             except Exception as e:
                 cache_key = None
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1
+                log.info("Bypassing autograd cache due to: %s", e)
                 cache_state = "bypass"
                 cache_event_time = time.time_ns()
                 cache_info["cache_bypass_reason"] = str(e)
+                cache_info["cache_bypass_exception_type"] = type(e).__name__
+                cache_info["cache_bypass_traceback"] = traceback.format_exc().split(
+                    "\n"
+                )
                 # TODO: this gets logged implicitly by cache_bypass_reason,
                 # and here we explicitly log it into tlparse.
                 # We may want to log this as an extra column in Scuba, though.
