@@ -494,33 +494,35 @@ __device__ void scan(int64_t *odata, int64_t *idata, int n) {
   odata[thid] = temp[pout * N + thid]; // write output
 }
 
-__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, int mype, int npes) {
+__global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + npes;
-  auto source_offsets = in_out_splits;
+  auto source_offsets = in_out_splits + npes * 2;
   int tid = threadIdx.x;
-  int bid = blockIdx.x;
 
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
 
   // Scan input splits to get the source offsets
   scan(peer_offsets, input_splits, npes);
-  __syncthreads();
-  // Now prefix sum is in peer_offsets
-
-  // Ensure all PE's have loaded their input splits
-  int64_t input_split_peer = (tid < npes) ? input_splits[tid] : 0;
-  nvshmemx_sync_all_block();
+  __syncthreads();;
 
   // Use 1 block to do the exchange
-  if (bid == 0 && tid < npes) {
+  if (tid < npes) {
     int peer = tid;
     nvshmem_int64_p(source_offsets + mype, peer_offsets[peer], peer);
-    nvshmem_int64_p(output_splits + mype, input_split_peer, peer);
+    nvshmem_int64_p(output_splits + mype, input_splits[peer], peer);
   }
+  // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
+}
 
-  // Reuse peer_offsets to calculate the output offsets
+__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, int mype, int npes) {
+  auto output_splits = in_out_splits + npes;
+  auto source_offsets = in_out_splits + npes * 2;
+  int bid = blockIdx.x;
+
+  // Calculate the output offsets
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
   scan(peer_offsets, output_splits, npes);
   __syncthreads();
 
@@ -531,12 +533,6 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
     auto source_offset = source_offsets[peer] * sizeof(float);
     auto write_offset = peer_offsets[peer] * sizeof(float);
     nvshmemx_getmem_block(recv_data + write_offset, send_data + source_offset, size, peer);
-  }
-
-  // We used input_splits as scratchpad, now we need to write back the original
-  // values
-  if (bid == 0 && tid < npes) {
-    in_out_splits[tid] = input_split_peer;
   }
 }
 
@@ -555,21 +551,36 @@ at::Tensor nvshmem_all_to_all_vdev(
   void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
   int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
 
+  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+
+  // Exchange output splits and source offsets
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &splits_ptr,
+      &rank,
+      &world_size};
+  nvshmemx_collective_launch(
+      (const void*)exchangeSplitAndOffset,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+
+  // All to all data exchange
+  // Limit the number of blocks to 16
   int num_blocks = std::min(world_size, 16);
-  void* args[] = {
+  void* args1[] = {
       &input_ptr,
       &output_ptr,
       &splits_ptr,
       &rank,
       &world_size};
-  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
-
-  // Use collective launch because kernel involves nvshmem collectives
   nvshmemx_collective_launch(
       (const void*)allToAllV,
       dim3(num_blocks),
       dim3(THREADS_PER_BLOCK),
-      args,
+      args1,
       0,
       stream);
   return out;
