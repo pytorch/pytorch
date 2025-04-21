@@ -49,9 +49,8 @@ def has_triton_tma_device():
             and not torch.version.hip
         ):
             try:
-                from triton.language.extra.cuda import (  # noqa: F401
-                    experimental_device_tensormap_create1d,
-                    experimental_device_tensormap_create2d,
+                from triton.language import (  # noqa: F401
+                    _experimental_make_tensor_descriptor,
                 )
 
                 return True

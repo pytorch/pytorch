@@ -3,8 +3,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
-import triton
-
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.virtualized import V
@@ -179,24 +177,24 @@ triton_scaled_grouped_mm_source = r"""
     a_desc = tl._experimental_make_tensor_descriptor(
         a_ptr,
 {% if A_IS_2D %}
-        shape=[A_SIZE_0, A_SIZE_1],
-        strides=[A_STRIDE_0, A_STRIDE_1],
+        shape=[A_SIZE_M, A_SIZE_K],
+        strides=[A_STRIDE_M, A_STRIDE_K],
         block_shape=[BLOCK_M, BLOCK_K],
 {% else %}
-        shape=[A_SIZE_0, A_SIZE_1, A_SIZE_2],
-        strides=[A_STRIDE_0, A_STRIDE_1, A_STRIDE_2],
+        shape=[A_SIZE_G, A_SIZE_M, A_SIZE_K],
+        strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
         block_shape=[1, BLOCK_M, BLOCK_K],
 {% endif %}
     )
     b_desc = tl._experimental_make_tensor_descriptor(
         b_ptr,
 {% if B_IS_2D %}
-        shape=[B_SIZE_0, B_SIZE_1],
-        strides=[B_STRIDE_0, B_STRIDE_1],
+        shape=[B_SIZE_N, B_SIZE_K],
+        strides=[B_STRIDE_N, B_STRIDE_K],
         block_shape=[BLOCK_N, BLOCK_K],
 {% else %}
-        shape=[B_SIZE_0, B_SIZE_1, B_SIZE_2],
-        strides=[B_STRIDE_0, B_STRIDE_1, B_STRIDE_2],
+        shape=[B_SIZE_G, B_SIZE_N, B_SIZE_K],
+        strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
         block_shape=[1, BLOCK_N, BLOCK_K],
 {% endif %}
     )
@@ -289,13 +287,19 @@ triton_scaled_grouped_mm_source = r"""
                 offs_k = k_start_offset + tl.arange(0, BLOCK_K)
                 a_ptrs = (
                     a_ptr
-                    + (m_start_offset + offs_am[:, None]) * A_GLOBAL_SIZE_K
-                    + offs_k[None, :]
+{% if not A_IS_2D %}
+                    + g * A_STRIDE_G
+{% endif %}
+                    + (m_start_offset + offs_am[:, None]) * A_STRIDE_M
+                    + offs_k[None, :] * A_STRIDE_K
                 )
                 b_ptrs = (
                     b_ptr
-                    + (n_start_offset + offs_bn[:, None]) * B_GLOBAL_SIZE_K
-                    + offs_k[None, :]
+{% if not B_IS_2D %}
+                    + g * B_STRIDE_G
+{% endif %}
+                    + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
+                    + offs_k[None, :] * B_STRIDE_K
                 )
                 for k_offset in range(0, k_size, BLOCK_K):
                     a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
@@ -528,26 +532,20 @@ def tuned_scaled_grouped_mm(
         }
 
         a_size = mat_a.get_size()
-        a_stride = mat_a.get_stride()
         b_size = mat_b.get_size()
+        a_stride = mat_a.get_stride()
         b_stride = mat_b.get_stride()
+        kwargs["A_SIZE_M"], kwargs["A_SIZE_K"] = a_size[-2], a_size[-1]
+        kwargs["A_STRIDE_M"], kwargs["A_STRIDE_K"] = a_stride[-2], a_stride[-1]
+        if len(a_size) == 3:
+            kwargs["A_SIZE_G"] = a_size[0]
+            kwargs["A_STRIDE_G"] = a_stride[0]
         # the b_mat is given with its last two dims transposed, revert here
-        b_size[-2], b_size[-1] = b_size[-1], b_size[-2]
-        b_stride[-2], b_stride[-1] = b_stride[-1], b_stride[-2]
-        kwargs["A_SIZE_0"] = a_size[0]
-        kwargs["A_SIZE_1"] = a_size[1]
-        kwargs["A_STRIDE_0"] = a_stride[0]
-        kwargs["A_STRIDE_1"] = a_stride[1]
-        if not len(a_size) == 2:
-            kwargs["A_SIZE_2"] = a_size[2]
-            kwargs["A_STRIDE_2"] = a_stride[2]
-        kwargs["B_SIZE_0"] = b_size[0]
-        kwargs["B_SIZE_1"] = b_size[1]
-        kwargs["B_STRIDE_0"] = b_stride[0]
-        kwargs["B_STRIDE_1"] = b_stride[1]
-        if not len(b_size) == 2:
-            kwargs["B_SIZE_2"] = b_size[2]
-            kwargs["B_STRIDE_2"] = b_stride[2]
+        kwargs["B_SIZE_N"], kwargs["B_SIZE_K"] = b_size[-1], b_size[-2]
+        kwargs["B_STRIDE_N"], kwargs["B_STRIDE_K"] = b_stride[-1], b_stride[-2]
+        if len(b_size) == 3:
+            kwargs["B_SIZE_G"] = b_size[0]
+            kwargs["B_STRIDE_G"] = b_stride[0]
 
         for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
             triton_scaled_grouped_mm_template.maybe_append_choice(
@@ -560,10 +558,13 @@ def tuned_scaled_grouped_mm(
                 **config.kwargs,
             )
 
-    # TMA descriptors require a global memory allocation
-    def alloc_fn(size: int, alignment: int, stream: Optional[int]):
-        return torch.empty(size, device=mat_a.get_device(), dtype=torch.int8)
+    if has_triton_tma_device():
+        # TMA descriptors require a global memory allocation
+        def alloc_fn(size: int, alignment: int, stream: Optional[int]):
+            return torch.empty(size, device=mat_a.get_device(), dtype=torch.int8)
 
-    triton.set_allocator(alloc_fn)
+        import triton
+
+        triton.set_allocator(alloc_fn)
 
     return autotune_select_algorithm("scaled_grouped_mm", choices, input_nodes, layout)
