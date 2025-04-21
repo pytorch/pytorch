@@ -35,7 +35,7 @@ C10_ALWAYS_INLINE void _check_rms_norm_inputs_symint(
     std::stringstream ss;
     ss << "Given normalized_shape=" << normalized_shape
        << ", expected input with shape [*";
-    for (auto size : normalized_shape) {
+    for (const auto& size : normalized_shape) {
       ss << ", " << size;
     }
     ss << "], but got input of size" << input_shape;

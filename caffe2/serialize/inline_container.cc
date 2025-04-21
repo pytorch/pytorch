@@ -393,7 +393,8 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
   size_t perThreadSize = (n + nthread - 1) / nthread;
   std::vector<size_t> readSizes(nthread, 0);
   std::lock_guard<std::mutex> guard(reader_lock_);
-  for (size_t i = 0; i < nthread; i++) {
+  loaderThreads.reserve(nthread);
+for (size_t i = 0; i < nthread; i++) {
     loaderThreads.emplace_back([this,
                                 name,
                                 i,
@@ -412,7 +413,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
           size =
               read(recordOff + startPos, (char*)dst + startPos, threadReadSize);
         } else {
-          auto reader = additionalReaders[i - 1];
+          const auto& reader = additionalReaders[i - 1];
           size = reader->read(
               recordOff + startPos, (char*)dst + startPos, threadReadSize);
         }
@@ -638,7 +639,7 @@ size_t PyTorchStreamReader::getRecordSize(const std::string& name) {
 
 size_t PyTorchStreamReader::getRecordOffsetNoRead(
     size_t cursor,
-    std::string filename,
+    const std::string& filename,
     size_t size,
     uint64_t alignment) {
   std::string full_name = archive_name_plus_slash_ + filename;
@@ -694,7 +695,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func,
+    const std::function<size_t(const void*, size_t)>& writer_func,
     bool compute_crc32,
     uint64_t alignment)
     : archive_name_("archive"),
@@ -709,7 +710,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
   archive_name_plus_slash_ = archive_name_ + "/"; // for writeRecord().
 
-  if (archive_name_.size() == 0) {
+  if (archive_name_.empty()) {
     CAFFE_THROW("invalid file name: ", file_name);
   }
   if (!writer_func_) {
