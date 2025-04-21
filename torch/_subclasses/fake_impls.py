@@ -15,7 +15,6 @@ from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
-    is_float_dtype,
     is_integer_dtype,
 )
 from torch._subclasses.fake_tensor import (

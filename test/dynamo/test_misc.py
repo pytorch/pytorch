@@ -1234,8 +1234,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         f_opt = torch.compile(f)
 
         self.assertEqual(
-            f(torch.tensor(3.0, device='cuda')),
-            f_opt(torch.tensor(3.0, device='cuda'))
+            f(torch.tensor(3.0, device="cuda")), f_opt(torch.tensor(3.0, device="cuda"))
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
