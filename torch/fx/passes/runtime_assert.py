@@ -258,14 +258,17 @@ def insert_deferred_runtime_asserts(
                 # nodes
                 with _set_node_metadata_hook(gm, _node_metadata_hook):
                     res = _sympy_interp(expr_to_proxy, ra.expr).node
+                    expr_msg = f"Runtime assertion failed for expression {ra.expr} on node '{res}'"
+                    assert_msg = (
+                        f"{expr_msg}\n\nThe original traceback points to the following location and error message:\n{ra.loc}\n{ra.msg}"
+                        if ra.msg
+                        else expr_msg
+                    )
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
                         # TODO: use ra.msg here, but it's pretty
                         # useless right now
-                        (
-                            res,
-                            f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
-                        ),
+                        (res, assert_msg),
                     )
                 added_asserts.add(ra.expr)
 
