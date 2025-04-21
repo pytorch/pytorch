@@ -1432,6 +1432,8 @@ class TritonTemplate(KernelTemplate):
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
+        # NOTE TO ADD NEW OUTPUTS TO THIS FUNCTION YOU NEED TO MAKE SURE THAT CURRENT CACHING MECHANISM DOES NOT BREAK.
+        # FOR ALL TEMPLATES THAT HAVE cache_codegen = True
         return (
             mod,
             extra,
