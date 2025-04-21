@@ -384,7 +384,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<FutureType>(std::move(subtype));
+    fake_value = real_value =
+        c10::TypeFactory::create<FutureType>(std::move(subtype));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Await") {
     L.next(); // Await
     L.expect('(');
@@ -392,7 +393,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<AwaitType>(std::move(subtype));
+    fake_value = real_value =
+        c10::TypeFactory::create<AwaitType>(std::move(subtype));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "RRef") {
     L.next(); // RRef
     L.expect('(');
@@ -400,7 +402,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<RRefType>(std::move(subtype));
+    fake_value = real_value =
+        c10::TypeFactory::create<RRefType>(std::move(subtype));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Tensor") {
     L.next();
     fake_value = real_value = c10::TypeFactory::get<TensorType>();
@@ -413,8 +416,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto value_type = parseType().first;
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    fake_value = real_value =
-      c10::TypeFactory::create<DictType>(std::move(key_type), std::move(value_type));
+    fake_value = real_value = c10::TypeFactory::create<DictType>(
+        std::move(key_type), std::move(value_type));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Union") {
     L.next();
     L.expect('(');
