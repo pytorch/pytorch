@@ -19,7 +19,7 @@ while IFS=: read -r filepath link; do
   fi
 done < <(
   git --no-pager grep --no-color -I -o -E \
-    '\[[^]]+\]\([^)]*/[^)]*\)|href="[^"]*/[^"]*"|src="[^"]*/[^"]*"' \
+    '\[[^]]+\]\([^[:space:])]*/[^[:space:])]*\)|href="[^"]*/[^"]*"|src="[^"]*/[^"]*"' \
     -- '*' \
     ':(exclude).*' \
     ':(exclude)**/.*' \
