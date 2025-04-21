@@ -309,6 +309,7 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[list[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
+        all_inputs_loaded=False,
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
@@ -385,6 +386,8 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen.
         self.frozen_layouts_cnt = 0
 
+        self.all_inputs_loaded = all_inputs_loaded
+
     def input_dependent_preserved_state(self) -> str:
         return repr(
             [
@@ -424,6 +427,7 @@ class TritonTemplateKernel(TritonKernel):
             key.name: getattr(self, key.name)
             for key in dataclasses.fields(SubgraphInfo)
         }
+
         assert body_name in self.subgraph_bodies, body_name
 
         subgraph = self.subgraph_bodies[body_name]
@@ -581,10 +585,13 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
+            if self.all_inputs_loaded:
+                self.prologue_supported_inputs.add(input_node.get_name())
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
                 continue
+
             arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
@@ -752,7 +759,9 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        self.prologue_supported_inputs.add(input_node.get_name())
+        if not self.all_inputs_loaded:
+            self.prologue_supported_inputs.add(input_node.get_name())
+
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
             "x": tilings[0],
@@ -1258,7 +1267,13 @@ class TritonTemplate(KernelTemplate):
     all_templates: dict[str, "TritonTemplate"] = {}
 
     def __init__(
-        self, name: str, grid: Any, source: str, debug=False, cache_codegen=False
+        self,
+        name: str,
+        grid: Any,
+        source: str,
+        debug=False,
+        cache_codegen=False,
+        all_inputs_loaded=False,
     ) -> None:
         super().__init__(name)
         self.grid = grid
@@ -1270,6 +1285,8 @@ class TritonTemplate(KernelTemplate):
 
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_inductor_cache(self._generated_code_cache)
+        # When true, we know that each argument to def_kernal will be passed to a load_input.
+        self.all_inputs_loaded = all_inputs_loaded
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -1348,6 +1365,7 @@ class TritonTemplate(KernelTemplate):
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
+            "all_inputs_loaded": self.all_inputs_loaded,
         }
 
         if HAS_WARP_SPEC:

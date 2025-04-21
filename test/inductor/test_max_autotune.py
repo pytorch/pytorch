@@ -1210,13 +1210,7 @@ class TestMaxAutotune(TestCase):
 
             self.assertEqual(
                 remove_white_space(events),
-                remove_white_space(
-                    """[
-                    ('def_kernel', ['A', 'B'], {}),
-                    ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-                    ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
-                  """
-                ),
+                remove_white_space("""[('def_kernel', ['A', 'B'], {})]"""),
             )
 
         # Test symbolic shapes with different symbols. Will cache miss due to different symbols in inputs.
@@ -1259,12 +1253,11 @@ class TestMaxAutotune(TestCase):
                 remove_white_space(events),
                 remove_white_space(
                     """[
-                    ('def_kernel', ['A', 'B'], {}),
-                    ('size', ['A', 0], {}), ('size', ['B', 1], {}),
-                    ('size', ['A', 1], {}),
-                    ('load_input', ['A', 'a', ('idx_m', 'idx_n')], {'mask': 'a_mask', 'indent_width': 8}),
-                    ('load_input', ['B', 'b', ('idx_m', 'idx_n')], {'mask': 'b_mask', 'indent_width': 8})]
-                  """
+                        ('def_kernel', ['A', 'B'], {}),
+                        ('size', ['A', 0], {}),
+                        ('size', ['B', 1], {}),
+                        ('size', ['A', 1], {})]
+                    """
                 ),
             )
 

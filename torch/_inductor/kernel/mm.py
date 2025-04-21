@@ -223,6 +223,7 @@ mm_template = TritonTemplate(
 """
     ),
     cache_codegen=True,
+    all_inputs_loaded=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
