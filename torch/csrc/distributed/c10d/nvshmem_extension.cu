@@ -469,4 +469,110 @@ at::Tensor nvshmem_all_to_all(
   return out;
 }
 
+__device__ void scan(int64_t *odata, int64_t *idata, int n) {
+  constexpr int N = THREADS_PER_BLOCK;
+  assert (n <= N);
+  __shared__ int64_t temp[N * 2];
+  int thid = threadIdx.x;
+  int pout = 1, pin = 0;
+  // Load input into shared memory scratchpad.
+  // This is exclusive scan, so shift right by one
+  // and set first element to 0
+  if (thid < n) {
+    temp[pout * N + thid] = temp[pin * N + thid] = (thid > 0) ? idata[thid - 1] : 0;
+  }
+  __syncthreads();
+  for (int offset = 1; offset < n; offset *= 2) {
+    pout = 1 - pout; // swap double buffer indices
+    pin = 1 - pout;
+    if (thid >= offset && thid < n)
+      temp[pout * N + thid] = temp[pin * N + thid] + temp[pin * N + thid - offset];
+    else if (thid < offset)
+      temp[pout * N + thid] = temp[pin * N + thid];
+    __syncthreads();
+  }
+  odata[thid] = temp[pout * N + thid]; // write output
+}
+
+__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, int mype, int npes) {
+  auto input_splits = in_out_splits;
+  auto output_splits = in_out_splits + npes;
+  auto source_offsets = in_out_splits;
+  int tid = threadIdx.x;
+  int bid = blockIdx.x;
+
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+
+  // Scan input splits to get the source offsets
+  scan(peer_offsets, input_splits, npes);
+  __syncthreads();
+  // Now prefix sum is in peer_offsets
+
+  // Ensure all PE's have loaded their input splits
+  int64_t input_split_peer = (tid < npes) ? input_splits[tid] : 0;
+  nvshmemx_sync_all_block();
+
+  // Use 1 block to do the exchange
+  if (bid == 0 && tid < npes) {
+    int peer = tid;
+    nvshmem_int64_p(source_offsets + mype, peer_offsets[peer], peer);
+    nvshmem_int64_p(output_splits + mype, input_split_peer, peer);
+  }
+  nvshmemx_barrier_all_block();
+
+  // Reuse peer_offsets to calculate the output offsets
+  scan(peer_offsets, output_splits, npes);
+  __syncthreads();
+
+  // Each block targets a different peer
+  for (int i = bid; i < npes; i += gridDim.x) {
+    int peer = (mype + i) % npes;
+    auto size = output_splits[peer] * sizeof(float);
+    auto source_offset = source_offsets[peer] * sizeof(float);
+    auto write_offset = peer_offsets[peer] * sizeof(float);
+    nvshmemx_getmem_block(recv_data + write_offset, send_data + source_offset, size, peer);
+  }
+
+  // We used input_splits as scratchpad, now we need to write back the original
+  // values
+  if (bid == 0 && tid < npes) {
+    in_out_splits[tid] = input_split_peer;
+  }
+}
+
+at::Tensor nvshmem_all_to_all_vdev(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& in_out_splits,
+    std::string group_name) {
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  auto splits_hdl = c10d::symmetric_memory::rendezvous(in_out_splits, group_name);
+  int rank = input_hdl->get_rank();
+  int world_size = input_hdl->get_world_size();
+
+  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
+  int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
+
+  int num_blocks = std::min(world_size, 16);
+  void* args[] = {
+      &input_ptr,
+      &output_ptr,
+      &splits_ptr,
+      &rank,
+      &world_size};
+  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+
+  // Use collective launch because kernel involves nvshmem collectives
+  nvshmemx_collective_launch(
+      (const void*)allToAllV,
+      dim3(num_blocks),
+      dim3(THREADS_PER_BLOCK),
+      args,
+      0,
+      stream);
+  return out;
+}
+
 } // namespace c10d::nvshmem_extension

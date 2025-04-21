@@ -33,4 +33,10 @@ at::Tensor nvshmem_all_to_all(
     at::Tensor& out,
     std::string group_name);
 
+at::Tensor nvshmem_all_to_all_vdev(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& in_out_splits,
+    std::string group_name);
+
 } // namespace c10d::nvshmem_extension
