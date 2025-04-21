@@ -164,7 +164,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             meta_mat2 = V.graph.current_node.args[1]
             mat2 = may_require_contiguous(mat2, meta_mat2)
 
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout, out_dtype=out_dtype)
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=out_dtype
+    )
 
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.bmm_{m}_{n}_{k}"] += 1
@@ -179,7 +181,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     )
 
     # options to tune from
-    choices = [aten_bmm.bind((mat1, mat2), layout, out_dtype=out_dtype) if use_aten_gemm_kernels() else []]
+    choices = [
+        aten_bmm.bind((mat1, mat2), layout, out_dtype=out_dtype)
+        if use_aten_gemm_kernels()
+        else []
+    ]
 
     device_type = ir.get_device_type(mat1)
     bmm_configs = V.choices.get_base_mm_configs(device_type)

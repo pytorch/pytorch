@@ -14,14 +14,15 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.wrapper import PythonWrapperCodegen
 from ..codegen.subgraph import SubgraphTemplate
-from ..ir import FlexibleLayout, is_triton
+from ..codegen.wrapper import PythonWrapperCodegen
+from ..ir import FlexibleLayout, is_triton, ir_node_to_tensor
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -40,6 +41,7 @@ from ..utils import (
     use_ck_gemm_template,
     use_cpp_gemm_template,
     use_cutlass_template,
+    use_decompose_k_choice,
     use_max_autotune,
     use_triton_template,
     use_triton_tma_template,
@@ -57,7 +59,8 @@ from .mm_common import (
     scaled_mm_options,
     should_fallback_to_aten,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
+
+import sympy
 
 try:
     import triton
@@ -585,6 +588,7 @@ scaled_mm_device_tma_template = TritonTemplate(
 # """,
 # )
 
+
 # prevent duplication registration of extern functions
 @functools.lru_cache(None)
 def lazy_register_extern_choice(fn):
@@ -668,6 +672,7 @@ def check_supported_striding(mat_a, mat_b) -> None:
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
+
 def decomposeK(a, b, kPartitions):
     m = a.shape[0]
     n = b.shape[1]
@@ -678,7 +683,7 @@ def decomposeK(a, b, kPartitions):
     b_reshaped = b.reshape(B, kPartitions, n)
     result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
     reduced_buf = torch.sum(result, 0)
-    return (reduced_buf.to(a.dtype), )
+    return (reduced_buf.to(a.dtype),)
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
@@ -711,10 +716,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
+    extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu)):
+        for config in mm_configs(
+            m,
+            n,
+            k,
+            **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu),
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -724,7 +735,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu)
+                m,
+                n,
+                k,
+                **mm_config_kwargs(ir.get_device_type(mat1), _is_large_block_for_cpu),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -738,37 +752,43 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **persistent_mm_options(mat1, mat2),
                 )
 
-    decompose_k_threshold = 16
+        # Only do split-k optimization if K is much larger than m, n and m, n are small
+        if use_decompose_k_choice(m, n, k):
+            from torch._dispatch.python import enable_python_dispatcher
 
-    # Only do split-k optimization if K is much larger than m, n and m, n are small
-    if V.graph.sizevars.statically_known_geq(k, decompose_k_threshold * m) and V.graph.sizevars.statically_known_geq(k, decompose_k_threshold * n):
-        from ..decomposition import select_decomp_table
-        from torch._dispatch.python import enable_python_dispatcher
-        from torch._inductor.select_algorithm import AlgorithmSelectorCache
-        
-        kPartitions = [64, 256,]
+            from ..decomposition import select_decomp_table
 
-        for kPart in kPartitions:
-            if k % kPart != 0:
-                continue
+            kPartitions = [
+                64,
+                256,
+            ]
 
-            with enable_python_dispatcher():
-                decompositions = (
-                    select_decomp_table()
+            for kPart in kPartitions:
+                if not V.graph.sizevars.evaluate_expr(sympy.Eq(sympy.Mod(k, kPart), 0)):
+                    continue
+
+                with enable_python_dispatcher():
+                    decompositions = select_decomp_table()
+
+                    decompose_k_subgraph_template = SubgraphTemplate(
+                        name=f"decompose_k_mm_{kPart}",
+                        make_fx_graph=make_fx(
+                            functools.partial(decomposeK, kPartitions=kPart),
+                            decompositions,
+                            tracing_mode="real",
+                        ),
+                    )
+
+                with V.fake_mode:
+                    mat1_tensor = ir_node_to_tensor(mat1)
+                    mat2_tensor = ir_node_to_tensor(mat2)
+
+                decompose_k_subgraph_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    example_inputs=[mat1_tensor, mat2_tensor],
                 )
-
-                decompose_k_subgraph_template = SubgraphTemplate(
-                    name=f"decompose_k_mm_{kPart}",
-                    make_fx_graph=make_fx(functools.partial(decomposeK, kPartitions=kPart), decompositions, tracing_mode="real"),
-                )
-            
-            mat1_tensor, mat2_tensor = AlgorithmSelectorCache.benchmark_example_value(mat1), AlgorithmSelectorCache.benchmark_example_value(mat2)
-            decompose_k_subgraph_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-                example_inputs=[mat1_tensor, mat2_tensor],
-            )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])

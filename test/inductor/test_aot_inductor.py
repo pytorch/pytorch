@@ -215,6 +215,79 @@ class AOTInductorTestsTemplate:
             actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
             self.assertTrue(same(model(*example_inputs), actual))
 
+    def test_constant_folding_with_update(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with torch.no_grad(), config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(4, 4, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Update with new weights on active buffer
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(4, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, False, False)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Update with new weights on inactive buffer
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(4, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, True, False)
+        new_output = runner_call(test_inputs)
+        # We have not yet swapped the buffer, new_output should be the same as the old one.
+        self.assertEqual(output, new_output)
+        # Swap the buffer, should get the correct result now.
+        runner.swap_constant_buffer()
+        new_output = runner_call(test_inputs)
+        self.assertEqual(expected, new_output)
+
     @requires_gpu
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
@@ -1199,6 +1272,48 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.ones(4, 4, device=self.device),)
         self.check_model(Foo(self.device), example_inputs)
+
+    def test_aoti_constant_tensor_name_collision(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant1",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Foo(torch.nn.Module):
+            def __init__(self, user_float_feature_idx, device):
+                super().__init__()
+                self.user_float_feature_idx = user_float_feature_idx
+                self.register_buffer(
+                    "_tensor_constant0",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+                self.sub_mod = SubModule(device)
+
+            def forward(self, x):
+                return (
+                    torch.index_select(
+                        x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
+                    ),
+                    self._tensor_constant0,
+                    self.sub_mod._tensor_constant1,
+                )
+
+        example_inputs = (torch.ones(4, 4, device=self.device),)
+        user_float_feature_idx = [1]
+        # we have to have run_decomposition first to trigger the name collision
+        ep = torch.export.export(
+            Foo(user_float_feature_idx, self.device), example_inputs, strict=False
+        ).run_decompositions()
+        gm = ep.module()
+        self.check_model(gm, example_inputs)
 
     def test_large_grid(self):
         if self.device != GPU_TYPE:
@@ -3465,6 +3580,41 @@ class AOTInductorTestsTemplate:
 
             self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
 
+    def test_aoti_data_dependent_extern_kernel_op(self):
+        # Skip GPY because custom op only implemented for cpu
+        if self.device == GPU_TYPE:
+            raise unittest.SkipTest("skips for GPU")
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                assert a[0] != 0
+                return a + b
+
+            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            def foo_fake_impl(a, b):
+                return a + b
+
+            class Model(torch.nn.Module):
+                def forward(self, a, b):
+                    res = torch.ops.mylib.foo(a, b)
+                    return res
+
+            example_inputs = (torch.ones(10), torch.randn(10))
+            from torch._functorch import config as functorch_config
+
+            # use this config to mimic FakeTensors resulting from
+            # draft export
+            with functorch_config.patch({"fake_tensor_propagate_real_tensors": True}):
+                self.check_model(Model(), example_inputs)
+
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -4279,7 +4429,7 @@ class AOTInductorTestsTemplate:
         expected_scalar_args = [
             "buf3, u0",
             "buf4, u0",
-            "buf3, buf4, buf2, u0",
+            "buf4, buf5, buf3, u0",
         ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
@@ -4290,7 +4440,6 @@ class AOTInductorTestsTemplate:
                 scalar_line,
                 1,
             ).run(code)
-
         self.check_model(Model(), example_inputs)
 
     @common_utils.parametrize("mark_unbacked", (True, False))

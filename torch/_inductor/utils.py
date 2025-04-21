@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import shutil
+import statistics
 import sys
 import tempfile
 import textwrap
@@ -50,7 +51,6 @@ import sympy
 
 import torch
 from torch._inductor.runtime.hints import DeviceProperties
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -167,6 +168,77 @@ class GraphPartitionMap:
 
     # name of constants read/written by the graph partition
     constant_names: list[str]
+
+
+def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
+    """
+    Returns benchmark results by examining torch profiler events.
+    This could be more accurate as it doesn't count CPU side overhead.
+    However, this also requires manually excluding irrelevant event, e.g.
+    vectorized_elementwise_kernel which is used to fill L2 cache,
+    various CUDA events, etc, so could also be fragile.
+    """
+
+    fn()
+    torch.cuda.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.float16, device="cuda")
+
+    # Estimate the runtime of the function
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+    for _ in range(5):
+        cache.zero_()
+        fn()
+    end_event.record()
+    torch.cuda.synchronize()
+    estimate_ms = start_event.elapsed_time(end_event) / 5
+
+    # compute number of warmup and repeat
+    n_warmup = max(1, int(warmup / estimate_ms))
+    n_repeat = max(1, int(rep / estimate_ms))
+
+    # Warm-up
+    for _ in range(n_warmup):
+        fn()
+
+    start_event = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
+    end_event = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CUDA,
+        ]
+    ) as p:
+        torch.cuda.synchronize()
+        for i in range(n_repeat):
+            cache.zero_()
+            start_event[i].record()
+            with torch.cuda.nvtx.range("RunCudaModule"):
+                fn()
+            end_event[i].record()
+        torch.cuda.synchronize()
+        times = torch.tensor(
+            [s.elapsed_time(e) for s, e in zip(start_event, end_event)]
+        )
+
+    res = torch.mean(times).item()
+    log.debug("raw events")
+    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
+    filtered_events = EventList(
+        [
+            event
+            for event in p.events()
+            if event.device_type == DeviceType.CUDA and "fused_abs_max_0" in event.name
+        ]
+    )
+    if filtered_events:
+        res -= (
+            statistics.mean(event.device_time_total for event in filtered_events)
+            / 1000.0
+        )
+
+    log.debug("profiling results: %s ms", res)
+    return res
 
 
 def do_bench_using_profiling(
@@ -1442,6 +1514,17 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
+def use_decompose_k_choice(m: int, n: int, k: int):
+    from torch._inductor.virtualized import V
+
+    decompose_k_threshold = 16
+
+    return (
+        V.graph.sizevars.evaluate_expr(sympy.Ge(k, decompose_k_threshold * m))
+        and V.graph.sizevars.evaluate_expr(sympy.Ge(k, decompose_k_threshold * n))
+    )
+
+
 @functools.lru_cache(None)
 def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
@@ -2420,9 +2503,7 @@ def run_and_get_cpp_code(
     return result, s
 
 
-def shape_env_from_inputs(
-    inputs: Sequence[InputType], default: bool = False
-) -> Optional[ShapeEnv]:
+def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
     fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
@@ -2437,9 +2518,6 @@ def shape_env_from_inputs(
     for input in inputs:
         if isinstance(input, torch.SymInt):
             return input.node.shape_env
-
-    if default:
-        return ShapeEnv()
 
     # TODO(voz): Should we always have one anyway?
     return None
@@ -2656,6 +2734,13 @@ def register_op_dtype_propagation_rules(
     op_dtype_propagation_rules[name] = OpDtypeRule(
         type_promotion_kind, override_return_dtype
     )
+
+
+op_requires_libdevice_fp64: OrderedSet[str] = OrderedSet()
+
+
+def register_op_requires_libdevice_fp64(name: str) -> None:
+    op_requires_libdevice_fp64.add(name)
 
 
 def get_current_backend() -> str:
