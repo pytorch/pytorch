@@ -19,7 +19,7 @@ template <
     std::enable_if_t<
         std::is_same_v<decltype(detail::deducer(std::declval<D>())), void>>* =
         nullptr>
-void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
+static void verifyBitwiseOp(NodePtr<D> v, IRVerifier* verifier) {
   if (!v->lhs()->dtype().is_integral()) {
     throw unsupported_dtype();
   }

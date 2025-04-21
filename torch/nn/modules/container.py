@@ -1,10 +1,11 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import operator
 from collections import abc as container_abcs, OrderedDict
-from collections.abc import Iterable, Iterator, Mapping
 from itertools import chain, islice
-from typing import Any, Optional, overload, TypeVar, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, Self
 
 import torch
@@ -12,6 +13,10 @@ from torch._jit_internal import _copy_to_script_wrapper
 from torch.nn.parameter import Parameter
 
 from .module import Module
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Mapping
 
 
 __all__ = [
@@ -104,7 +109,7 @@ class Sequential(Module):
         ...
 
     @overload
-    def __init__(self, arg: "OrderedDict[str, Module]") -> None:
+    def __init__(self, arg: OrderedDict[str, Module]) -> None:
         ...
 
     def __init__(self, *args):
@@ -126,7 +131,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[slice, int]) -> Union["Sequential", T]:
+    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, T]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -151,7 +156,7 @@ class Sequential(Module):
     def __len__(self) -> int:
         return len(self._modules)
 
-    def __add__(self, other) -> "Sequential":
+    def __add__(self, other) -> Sequential:
         if isinstance(other, Sequential):
             ret = Sequential()
             for layer in self:
@@ -182,7 +187,7 @@ class Sequential(Module):
                 f"of Sequential class, but {str(type(other))} is given."
             )
 
-    def __mul__(self, other: int) -> "Sequential":
+    def __mul__(self, other: int) -> Sequential:
         if not isinstance(other, int):
             raise TypeError(
                 f"unsupported operand type(s) for *: {type(self)} and {type(other)}"
@@ -200,7 +205,7 @@ class Sequential(Module):
                     offset += 1
             return combined
 
-    def __rmul__(self, other: int) -> "Sequential":
+    def __rmul__(self, other: int) -> Sequential:
         return self.__mul__(other)
 
     def __imul__(self, other: int) -> Self:
@@ -240,7 +245,7 @@ class Sequential(Module):
             input = module(input)
         return input
 
-    def append(self, module: Module) -> "Sequential":
+    def append(self, module: Module) -> Self:
         r"""Append a given module to the end.
 
         Args:
@@ -249,7 +254,7 @@ class Sequential(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def insert(self, index: int, module: Module) -> "Sequential":
+    def insert(self, index: int, module: Module) -> Self:
         if not isinstance(module, Module):
             raise AssertionError(f"module should be of type: {Module}")
         n = len(self._modules)
@@ -262,7 +267,7 @@ class Sequential(Module):
         self._modules[str(index)] = module
         return self
 
-    def extend(self, sequential) -> "Sequential":
+    def extend(self, sequential) -> Self:
         for layer in sequential:
             self.append(layer)
         return self
@@ -309,7 +314,7 @@ class ModuleList(Module):
         return str(idx)
 
     @overload
-    def __getitem__(self, idx: slice) -> "ModuleList":
+    def __getitem__(self, idx: slice) -> ModuleList:
         ...
 
     @overload
@@ -317,7 +322,7 @@ class ModuleList(Module):
         ...
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, "ModuleList"]:
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, ModuleList]:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -348,7 +353,7 @@ class ModuleList(Module):
     def __iadd__(self, modules: Iterable[Module]) -> Self:
         return self.extend(modules)
 
-    def __add__(self, other: Iterable[Module]) -> "ModuleList":
+    def __add__(self, other: Iterable[Module]) -> ModuleList:
         combined = ModuleList()
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
@@ -403,7 +408,7 @@ class ModuleList(Module):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self, module: Module) -> "ModuleList":
+    def append(self, module: Module) -> Self:
         r"""Append a given module to the end of the list.
 
         Args:
@@ -665,7 +670,7 @@ class ParameterList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def append(self, value: Any) -> "ParameterList":
+    def append(self, value: Any) -> Self:
         """Append a given value at the end of the list.
 
         Args:
@@ -804,9 +809,9 @@ class ParameterDict(Module):
         return iter(self._keys)
 
     def __reversed__(self) -> Iterator[str]:
-        return reversed(list(self._keys))
+        return reversed(self._keys)
 
-    def copy(self) -> "ParameterDict":
+    def copy(self) -> ParameterDict:
         """Return a copy of this :class:`~torch.nn.ParameterDict` instance."""
         # We have to use an OrderedDict because the ParameterDict constructor
         # behaves differently on plain dict vs OrderedDict
@@ -865,7 +870,7 @@ class ParameterDict(Module):
 
     def fromkeys(
         self, keys: Iterable[str], default: Optional[Any] = None
-    ) -> "ParameterDict":
+    ) -> ParameterDict:
         r"""Return a new ParameterDict with the keys provided.
 
         Args:
@@ -886,7 +891,7 @@ class ParameterDict(Module):
         r"""Return an iterable of the ParameterDict values."""
         return (self[k] for k in self._keys)
 
-    def update(self, parameters: Union[Mapping[str, Any], "ParameterDict"]) -> None:
+    def update(self, parameters: Union[Mapping[str, Any], ParameterDict]) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from ``parameters``, overwriting existing keys.
 
         .. note::
@@ -951,16 +956,16 @@ class ParameterDict(Module):
     def __call__(self, input):
         raise RuntimeError("ParameterDict should not be called.")
 
-    def __or__(self, other: "ParameterDict") -> "ParameterDict":
+    def __or__(self, other: ParameterDict) -> ParameterDict:
         copy = self.copy()
         copy.update(other)
         return copy
 
-    def __ror__(self, other: "ParameterDict") -> "ParameterDict":
+    def __ror__(self, other: ParameterDict) -> ParameterDict:
         copy = other.copy()
         copy.update(self)
         return copy
 
-    def __ior__(self, other: "ParameterDict") -> Self:
+    def __ior__(self, other: ParameterDict) -> Self:
         self.update(other)
         return self
