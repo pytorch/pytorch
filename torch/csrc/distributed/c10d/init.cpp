@@ -3148,6 +3148,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "get_error",
               &::c10d::ProcessGroupNCCL::getError,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_enable_nan_check",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 bool enable_nan_check) {
+                self->setEnableNanCheck(enable_nan_check);
+              },
+              py::arg("enable_nan_check"),
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
