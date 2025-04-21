@@ -20,13 +20,13 @@ import operator
 import sys
 from typing import Optional, TYPE_CHECKING, Union
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import (
     handle_observed_exception,
     ObservedUserStopIteration,
     raise_observed_exception,
-    unimplemented,
+    unimplemented_v2,
     UserError,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -76,12 +76,13 @@ class ItertoolsVariable(VariableTracker):
             from .builtin import BuiltinVariable
 
             if any(key not in ["initial", "func"] for key in kwargs.keys()):
-                unimplemented(
-                    "Unsupported kwargs for itertools.accumulate: "
-                    f"{','.join(set(kwargs.keys()) - {'initial', 'func'})}"
+                unimplemented_v2(
+                    gb_type="Unsupported kwargs for itertools.accumulate",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation=f"Expected kwargs: 'initial', 'func', but got "
+                    f"{','.join(set(kwargs.keys()) - {'initial', 'func'})}",
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
-
-            acc = kwargs.get("initial")
 
             if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
@@ -94,13 +95,24 @@ class ItertoolsVariable(VariableTracker):
                     # Default to operator.add
                     func = BuiltinVariable(operator.add).call_function
                 else:
-                    unimplemented(
-                        "itertools.accumulate can only accept one of: `func` kwarg, pos 2 arg"
+                    unimplemented_v2(
+                        gb_type="Unsupported `func` in itertools.accumulate",
+                        context=f"call_function {self} {args} {kwargs}",
+                        explanation="itertools.accumulate can only accept "
+                        "one of: `func` kwarg, pos 2 arg",
+                        hints=[*graph_break_hints.USER_ERROR],
                     )
             else:
-                unimplemented("Unsupported arguments for itertools.accumulate")
+                unimplemented_v2(
+                    gb_type="Unsupported arguments for itertools.accumulate",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation="Dynamo does not know how to trace "
+                    f"itertools.accumulate with args: {args}",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
 
             items = []
+            acc = kwargs.get("initial")
             if acc is not None:
                 items.append(acc)
             for item in seq:
@@ -110,8 +122,12 @@ class ItertoolsVariable(VariableTracker):
                     try:
                         acc = func(tx, [acc, item], {})
                     except Exception as e:
-                        unimplemented(
-                            f"Unexpected failure in invoking function during accumulate. Failed running func {func}({item}{acc})",
+                        unimplemented_v2(
+                            gb_type="Unexpected failure",
+                            context=f"call_function {self} {args} {kwargs}",
+                            explanation="Unexpected failure in invoking function during accumulate. "
+                            f"Failed running func {func}({item}{acc})",
+                            hints=[*graph_break_hints.SUPPORTABLE],
                             from_exc=e,
                         )
                 items.append(acc)
@@ -137,9 +153,12 @@ class ItertoolsVariable(VariableTracker):
             )
         elif self.value is itertools.groupby:
             if any(kw != "key" for kw in kwargs.keys()):
-                unimplemented(
-                    "Unsupported kwargs for itertools.groupby: "
-                    f"{','.join(set(kwargs.keys()) - {'key'})}"
+                unimplemented_v2(
+                    gb_type="Unsupported kwargs for itertools.groupby",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation=f"Expected kwargs: 'key', but got "
+                    f"{','.join(set(kwargs.keys()) - {'key'})}",
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
 
             def retrieve_const_key(key):
@@ -148,14 +167,24 @@ class ItertoolsVariable(VariableTracker):
                 elif isinstance(key, variables.ConstantVariable):
                     return key.as_python_constant()
                 else:
-                    unimplemented(
-                        "Unsupported key type for itertools.groupby: " + str(type(key))
+                    unimplemented_v2(
+                        gb_type="Unsupported key type for itertools.groupby",
+                        context=f"call_function {self} {args} {kwargs}",
+                        explanation="Dynamo does not know how to trace "
+                        f"itertools.groupby with key type: {str(type(key))}",
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
             else:
-                unimplemented("Unsupported arguments for itertools.groupby")
+                unimplemented_v2(
+                    gb_type="Unsupported arguments for itertools.groupby",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation="Dynamo does not know how to trace "
+                    f"itertools.groupby with args: {args}",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
 
             if "key" in kwargs:
 
@@ -186,8 +215,11 @@ class ItertoolsVariable(VariableTracker):
                         )
                     )
             except Exception as e:
-                unimplemented(
-                    "Unexpected failure when calling itertools.groupby",
+                unimplemented_v2(
+                    gb_type="Unexpected failure",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation="Unexpected failure in invoking function during groupby",
+                    hints=[*graph_break_hints.SUPPORTABLE],
                     from_exc=e,
                 )
             return variables.ListIteratorVariable(
@@ -219,7 +251,12 @@ class IteratorVariable(VariableTracker):
         super().__init__(**kwargs)
 
     def next_variable(self, tx):
-        unimplemented("abstract method, must implement")
+        unimplemented_v2(
+            gb_type="Unsupported next() call",
+            context=f"next({self})",
+            explanation="This abstract method must be implemented",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
 
     # NOTE: only call when unpacking this iterator safely done eagerly!
     # Normally, iterators are accessed lazily.
@@ -321,8 +358,11 @@ class CycleIteratorVariable(IteratorVariable):
             try:
                 new_item = self.iterator.next_variable(tx)
                 if len(self.saved) > MAX_ITERATOR_LIMIT:
-                    unimplemented(
-                        "input iterator to itertools.cycle has too many items"
+                    unimplemented_v2(
+                        gb_type="input iterator to itertools.cycle has too many items",
+                        context=f"next({self})",
+                        explanation=f"Has reached max iterator limit: {MAX_ITERATOR_LIMIT}",
+                        hints=[],
                     )
                 tx.output.side_effects.mutation(self)
                 self.saved.append(new_item)
