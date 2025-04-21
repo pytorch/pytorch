@@ -452,7 +452,7 @@ If you get a katex error run `npm install katex`.  If it persists, try
 > [!NOTE]
 > If you installed `nodejs` with a different package manager (e.g.,
 > `conda`) then `npm` will probably install a version of `katex` that is not
-> ccompatible with your version of `nodejs` and doc builds will fail.
+> compatible with your version of `nodejs` and doc builds will fail.
 > A combination of versions that is known to work is `node@6.13.1` and
 > `katex@0.13.18`. To install the latter with `npm` you can run
 > ```npm install -g katex@0.13.18```
