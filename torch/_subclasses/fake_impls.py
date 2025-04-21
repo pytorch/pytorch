@@ -416,7 +416,11 @@ def local_scalar_dense(fake_mode, func, arg):
     ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
-    if is_float_dtype(arg.dtype):
+    # SymFloats don't have a notion of dtype and implicitly
+    # only support float64. Thus if we call item() on a float32
+    # scalar tensor, we necessarily have to graph break otherwise
+    # we will have incorrect numerics.
+    if arg.dtype == torch.float64:
         r = fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
         r = fake_mode.shape_env.create_unbacked_symint()
