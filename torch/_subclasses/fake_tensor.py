@@ -21,10 +21,17 @@ from weakref import ReferenceType
 
 import torch
 import torch._library.utils as library_utils
+from torch._prims_common import (
+    is_float_dtype,
+)
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured
+from torch.fx.experimental.symbolic_shapes import (
+    guard_scalar,
+    ShapeEnv,
+)
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -418,37 +425,7 @@ class FakeTensorConverter:
             not self.export
             and _is_plain_tensor(t)  # mostly, we want to know if item() works
             and t.dim() == 0
-            and t.device.type == "cpu"
-            # All integer types are fair game, because signed overflow is UB
-            # (and even int64 can overflow, since integers in Python are
-            # arbitrary precision). But only float64 is OK for float, because
-            # switching between float32 and float64 changes semantics in an
-            # observable way without hitting UB.
-            and t.dtype
-            in [torch.int64, torch.int32, torch.int16, torch.int8, torch.float64]
             and source is not None
-            # Impede setting up item() on things coming from random.  These
-            # are not "real" item() calls, instead UnspecializedPythonVariable
-            # is unsafely pretending an int is a tensor, which can sometimes
-            # implicitly cause an item call.  The problem is this is pretty
-            # unsound: there's no reason substituting an int with a Tensor is
-            # going to give the same results.  Today, you mostly get around
-            # this by typically not having capture_scalar_outputs on and graph
-            # breaking when someone tries to use the unspec variable in an
-            # int-y context.  But allowing it through here would break that.
-            # So don't.
-            #
-            # Once random values are setup to be represented as
-            # SymNodeVariable, this condition can be removed.  To check if
-            # you've done it right, this is a good test:
-            #
-            #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
-            #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
-            and not isinstance(source, RandomValueSource)
-            # In Dynamo, shape_env is never none (even with static shapes).
-            # However, FakeTensorMode can be used by hand and in some cases
-            # ShapeEnv is not allocated.
-            and shape_env is not None
         ):
             from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
             from torch.fx.experimental.symbolic_shapes import DimDynamic
@@ -467,20 +444,55 @@ class FakeTensorConverter:
                     dynamic_dim=DimDynamic.DYNAMIC,
                     symbolic_context=symbolic_context,
                 )
-                # NB: reusing item_memo here ensures that we invalidate on
-                # mutation
-                if t.dtype == torch.int64:
-                    out.item_memo = shape_env.create_symintnode(
-                        symbol,
-                        hint=value,
-                        source=item_source,
-                    )
-                elif t.dtype == torch.float64:
-                    out.item_memo = shape_env.create_symfloatnode(
-                        symbol,
-                        hint=value,
-                        source=item_source,
-                    )
+            if is_float_dtype(t.dtype):
+                item_memo = shape_env.create_symfloatnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
+            else:
+                item_memo = shape_env.create_symintnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
+
+            if (
+                # Impede setting up item() on things coming from random.  These
+                # are not "real" item() calls, instead UnspecializedPythonVariable
+                # is unsafely pretending an int is a tensor, which can sometimes
+                # implicitly cause an item call.  The problem is this is pretty
+                # unsound: there's no reason substituting an int with a Tensor is
+                # going to give the same results.  Today, you mostly get around
+                # this by typically not having capture_scalar_outputs on and graph
+                # breaking when someone tries to use the unspec variable in an
+                # int-y context.  But allowing it through here would break that.
+                # So don't.
+                #
+                # Once random values are setup to be represented as
+                # SymNodeVariable, this condition can be removed.  To check if
+                # you've done it right, this is a good test:
+                #
+                #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
+                #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
+                not isinstance(source, RandomValueSource)
+                # All integer types are fair game, because signed overflow is UB
+                # (and even int64 can overflow, since integers in Python are
+                # arbitrary precision). But only float64 is OK for float, because
+                # switching between float32 and float64 changes semantics in an
+                # observable way without hitting UB.
+                and t.dtype
+                in [torch.int64, torch.int32, torch.int16, torch.int8, torch.float64]
+                # In Dynamo, shape_env is never none (even with static shapes).
+                # However, FakeTensorMode can be used by hand and in some cases
+                # ShapeEnv is not allocated.
+                and shape_env is not None
+            ):
+                out.item_memo = item_memo
+            else:
+                # Otherwise eagerly specialize the memo
+                guard_scalar(item_memo)
+                out.item_memo = value
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
