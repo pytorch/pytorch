@@ -746,9 +746,9 @@ static void avg_pool3d_template(const Tensor& input,
   // End encoding
   [computeEncoder endEncoding];
 
-  // Synchronize the MPS stream
-  // This will commit the command buffer and wait for it to complete
-  mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
+  // Only commit the command buffer without waiting for completion
+  // This allows better parallelism with other operations
+  mpsStream->commit(false);
 }
 
 TORCH_IMPL_FUNC(avg_pool3d_out_mps)
