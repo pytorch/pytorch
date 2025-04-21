@@ -32,7 +32,11 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_oblivious, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_true,
+    guard_size_oblivious,
+    statically_known_true,
+)
 
 from . import config, inductor_prims
 from .utils import (
@@ -355,8 +359,6 @@ def cat(
     tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     def non_empty_tensor(x: torch.Tensor) -> bool:
         # For better or worse, this is a valid cat:
         #
