@@ -62,6 +62,7 @@ struct TORCH_API ExperimentalConfig {
       bool disable_external_correlation = false,
       bool profile_all_threads = false,
       bool capture_overload_names = false,
+      std::string custom_profiler_config = "",
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -112,6 +113,12 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  /*
+   * A custom_profiler_config option is introduced to allow custom backends
+   * to apply custom configurations as needed.
+   */
+  std::string custom_profiler_config;
 };
 
 struct TORCH_API ProfilerConfig {
