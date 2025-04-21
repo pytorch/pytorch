@@ -3959,6 +3959,11 @@ class TestSDPAXpuOnly(NNTestCase):
     ])
     @parametrize("is_causal", [True, False])
     def test_fused_attention_gqa(self, device, dtype, batch_size, n_head, n_head_kv, q_size, kv_size, head_dim, is_causal):
+        tol = Tolerances(1e-5, 5e-6)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+        if dtype is torch.float16:
+            tol = Tolerances(1e-2, 1e-2)
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
         q_shape = SdpaShape(batch_size, n_head, q_size, head_dim)
         k_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
@@ -3972,7 +3977,7 @@ class TestSDPAXpuOnly(NNTestCase):
         math_ref = torch.ops.aten._scaled_dot_product_attention_math(
             query.float(), key.float(), value.float(), attn_mask=None, dropout_p=0.0, is_causal=is_causal, enable_gqa=True)[0]
 
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=tol.atol, rtol=tol.rtol)
 
     def test_onednn_attention_fail_d256(self, device):
         # Test that onednn graph attention dispatching correctly bails out on d > 256
