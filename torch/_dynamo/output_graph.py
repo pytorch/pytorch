@@ -133,6 +133,7 @@ from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
     TrackedFake,
+    VariableBuilder,
     wrap_fx_proxy,
 )
 from .variables.lists import BaseListVariable
@@ -576,7 +577,9 @@ class OutputGraph:
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        result = VariableTracker.build(self.root_tx, example_value, source)
+        # We delete the guards in the next line, if we use LazyVT, the guards
+        # will be realized later on, and therefore won't be deleted.
+        result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
