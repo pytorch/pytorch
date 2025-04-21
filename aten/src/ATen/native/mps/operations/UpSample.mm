@@ -484,16 +484,14 @@ using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
 // Function prototype declaration
-Tensor upsample_nearest3d_vec_out_mps(
-const Tensor& input,
-at::OptionalIntArrayRef output_size,
-std::optional<at::ArrayRef<double>> scale_factors);
+Tensor upsample_nearest3d_vec_out_mps(const Tensor& input,
+                                      at::OptionalIntArrayRef output_size,
+                                      std::optional<at::ArrayRef<double>> scale_factors);
 
 // 3D nearest neighbor upsampling implementation for MPS backend
-Tensor upsample_nearest3d_vec_out_mps(
-const Tensor& input,
-at::OptionalIntArrayRef output_size,
-std::optional<at::ArrayRef<double>> scale_factors) {
+Tensor upsample_nearest3d_vec_out_mps(const Tensor& input,
+                                      at::OptionalIntArrayRef output_size,
+                                      std::optional<at::ArrayRef<double>> scale_factors) {
   // Create output tensor
   auto output = at::empty({0}, input.options());
   // Check macOS version
@@ -529,19 +527,16 @@ std::optional<at::ArrayRef<double>> scale_factors) {
 
   // Calculate scales
   std::array<float, 3> scales = {
-    scale_factors.has_value() && scale_factors.value().size() > 0 ?
-      static_cast<float>(scale_factors.value()[0]) :
-      static_cast<float>(input.size(2)) / osize[0],
-    scale_factors.has_value() && scale_factors.value().size() > 1 ?
-      static_cast<float>(scale_factors.value()[1]) :
-      static_cast<float>(input.size(3)) / osize[1],
-    scale_factors.has_value() && scale_factors.value().size() > 2 ?
-      static_cast<float>(scale_factors.value()[2]) :
-      static_cast<float>(input.size(4)) / osize[2]
-  };
+      scale_factors.has_value() && scale_factors.value().size() > 0 ? static_cast<float>(scale_factors.value()[0])
+                                                                    : static_cast<float>(input.size(2)) / osize[0],
+      scale_factors.has_value() && scale_factors.value().size() > 1 ? static_cast<float>(scale_factors.value()[1])
+                                                                    : static_cast<float>(input.size(3)) / osize[1],
+      scale_factors.has_value() && scale_factors.value().size() > 2 ? static_cast<float>(scale_factors.value()[2])
+                                                                    : static_cast<float>(input.size(4)) / osize[2]};
 
   // Get the pipeline state for the nearest3d kernel
-  auto upsamplePSO = mps::lib.getPipelineStateForFunc(fmt::format("upsample_nearest3d_{}", mps::scalarToMetalTypeString(input)));
+  auto upsamplePSO =
+      mps::lib.getPipelineStateForFunc(fmt::format("upsample_nearest3d_{}", mps::scalarToMetalTypeString(input)));
   auto stream = getCurrentMPSStream();
 
   mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -553,44 +548,50 @@ std::optional<at::ArrayRef<double>> scale_factors) {
       // Split strides and sizes into separate components for Metal shader
       // Input strides: [N, C, D, H, W]
       auto input_strides = input.strides();
-      auto input_strides_nc = std::array<uint64_t, 4>{static_cast<uint64_t>(input_strides[0]), static_cast<uint64_t>(input_strides[1]), 0, 0};
-      auto input_strides_dyx = std::array<uint64_t, 3>{static_cast<uint64_t>(input_strides[2]), static_cast<uint64_t>(input_strides[3]), static_cast<uint64_t>(input_strides[4])};
+      auto input_strides_nc = std::array<uint64_t, 4>{
+          static_cast<uint64_t>(input_strides[0]), static_cast<uint64_t>(input_strides[1]), 0, 0};
+      auto input_strides_dyx = std::array<uint64_t, 3>{static_cast<uint64_t>(input_strides[2]),
+                                                       static_cast<uint64_t>(input_strides[3]),
+                                                       static_cast<uint64_t>(input_strides[4])};
 
       // Output strides: [N, C, D, H, W]
       auto output_strides = output.strides();
-      auto output_strides_nc = std::array<uint64_t, 4>{static_cast<uint64_t>(output_strides[0]), static_cast<uint64_t>(output_strides[1]), 0, 0};
-      auto output_strides_dyx = std::array<uint64_t, 3>{static_cast<uint64_t>(output_strides[2]), static_cast<uint64_t>(output_strides[3]), static_cast<uint64_t>(output_strides[4])};
+      auto output_strides_nc = std::array<uint64_t, 4>{
+          static_cast<uint64_t>(output_strides[0]), static_cast<uint64_t>(output_strides[1]), 0, 0};
+      auto output_strides_dyx = std::array<uint64_t, 3>{static_cast<uint64_t>(output_strides[2]),
+                                                        static_cast<uint64_t>(output_strides[3]),
+                                                        static_cast<uint64_t>(output_strides[4])};
 
       // Input sizes: [N, C, D, H, W]
       auto input_sizes = input.sizes();
       auto input_sizes_nchw = std::array<int32_t, 4>{static_cast<int32_t>(input_sizes[0]),
-                                                   static_cast<int32_t>(input_sizes[1]),
-                                                   static_cast<int32_t>(input_sizes[3]),
-                                                   static_cast<int32_t>(input_sizes[4])};
+                                                     static_cast<int32_t>(input_sizes[1]),
+                                                     static_cast<int32_t>(input_sizes[3]),
+                                                     static_cast<int32_t>(input_sizes[4])};
       auto input_sizes_d = static_cast<int32_t>(input_sizes[2]);
 
       // Output sizes: [N, C, D, H, W]
       auto output_sizes = output.sizes();
       auto output_sizes_nchw = std::array<int32_t, 4>{static_cast<int32_t>(output_sizes[0]),
-                                                    static_cast<int32_t>(output_sizes[1]),
-                                                    static_cast<int32_t>(output_sizes[3]),
-                                                    static_cast<int32_t>(output_sizes[4])};
+                                                      static_cast<int32_t>(output_sizes[1]),
+                                                      static_cast<int32_t>(output_sizes[3]),
+                                                      static_cast<int32_t>(output_sizes[4])};
       auto output_sizes_d = static_cast<int32_t>(output_sizes[2]);
 
       // Set arguments for the kernel
       mps::mtl_setArgs(computeEncoder,
-                  input,
-                  output,
-                  input_strides_nc,
-                  input_strides_dyx,
-                  output_strides_nc,
-                  output_strides_dyx,
-                  input_sizes_nchw,
-                  input_sizes_d,
-                  output_sizes_nchw,
-                  output_sizes_d,
-                  scales,
-                  false); // align_corners is false for nearest neighbor
+                       input,
+                       output,
+                       input_strides_nc,
+                       input_strides_dyx,
+                       output_strides_nc,
+                       output_strides_dyx,
+                       input_sizes_nchw,
+                       input_sizes_d,
+                       output_sizes_nchw,
+                       output_sizes_d,
+                       scales,
+                       false); // align_corners is false for nearest neighbor
 
       // Dispatch the job
       mps::mtl_dispatch1DJob(computeEncoder, upsamplePSO, osize[0] * osize[1] * osize[2]);
