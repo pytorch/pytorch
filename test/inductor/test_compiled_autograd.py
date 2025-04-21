@@ -836,10 +836,11 @@ main()
             def inner_compiler(gm_, example_inputs_):
                 placeholders = get_placeholders(gm_)
                 if is_bwd:
-                    # should be boxed inputs
-                    assert len(placeholders) == 1
+                    # boxed inputs
+                    assert isinstance(placeholders[0].meta['example_value'], list)
                 else:
-                    assert len(placeholders) > 1
+                    # not boxed inputs
+                    assert not isinstance(placeholders[0].meta['example_value'], list)
 
                 return gm_
 
