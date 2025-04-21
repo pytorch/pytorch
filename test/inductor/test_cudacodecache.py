@@ -11,6 +11,7 @@ from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_inductor_cache
+from torch.testing._internal.common_utils import IS_S390X
 
 
 _SOURCE_CODE = r"""
@@ -37,6 +38,7 @@ int saxpy(int n, float a, float *x, float *y) {
 """
 
 
+@unittest.skipIf(IS_S390X, "No CUDA on S390X")
 @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUDA_HOME setup")
 class TestCUDACodeCache(InductorTestCase):
     def test_cuda_load(self):

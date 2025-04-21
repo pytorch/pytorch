@@ -117,6 +117,31 @@ static uint32_t get_cache_size(int level) {
     return 0;
   }
   return cache->size;
+#elif defined(__s390x__)
+  long result = 0;
+
+  switch (level) {
+    case 1:
+      result = sysconf(_SC_LEVEL1_DCACHE_SIZE);
+      break;
+    case 2:
+      result = sysconf(_SC_LEVEL2_CACHE_SIZE);
+      break;
+    case 3:
+      result = sysconf(_SC_LEVEL3_CACHE_SIZE);
+      break;
+    case 4:
+      result = sysconf(_SC_LEVEL4_CACHE_SIZE);
+      break;
+    default:
+      assert(false && "Unsupported cache level");
+  }
+
+  if (result < 0) {
+    return 0;
+  }
+
+  return result;
 #else
   return 0;
 #endif
