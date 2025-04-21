@@ -282,18 +282,16 @@ class BlockPtrOptions:
         # We need an explicit broadcast for stores, or if the final reshape does more
         # than add singletons.
         sizevars = V.graph.sizevars
-        require_broadcast = any(self.broadcasting_dims) and (
-            len(pre_broadcast_shape) != len(final_shape)
-            or any(
-                not (
-                    sizevars.statically_known_equals(pre_dim, 1)
-                    or sizevars.statically_known_equals(pre_dim, post_dim)
-                )
+        supports_implicit_broadcast = allow_implicit and (
+            len(pre_broadcast_shape) == len(final_shape)
+            and all(
+                sizevars.statically_known_equals(pre_dim, 1)
+                or sizevars.statically_known_equals(pre_dim, post_dim)
                 for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
             )
         )
 
-        if not allow_implicit or require_broadcast:
+        if any(self.broadcasting_dims) and not supports_implicit_broadcast:
             value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
 
         # Reshape to the final shape.
@@ -933,7 +931,11 @@ class TritonOverrides(OpOverrides):
 
         # NOTE: We use a tensor here in order to get the expected type.
         # Otherwise, e.g. float64 constants would be trunctated to float32.
-        return f"tl.full({shape}, {triton_val}, {triton_type})"
+        if value < 0 and not dtype.is_signed:
+            triton_signed_type = f"tl.{triton_type[4:]}"
+            return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
+        else:
+            return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @classmethod
     def constant(cls, value, dtype):
@@ -968,11 +970,6 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_abs(x):
-        return f"libdevice.abs({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def exp(x):
         """
         When use_fast_math, use the ftz (flushing to zero) variant
@@ -988,11 +985,6 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_exp(x):
-        return f"libdevice.exp({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def exp2(x):
         return f"libdevice.exp2({x})"
 
@@ -1004,11 +996,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
-        return f"libdevice.sqrt({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_sqrt(x):
         return f"libdevice.sqrt({x})"
 
     @staticmethod
@@ -1058,18 +1045,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
-    def libdevice_cos(x):
-        return f"libdevice.cos({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
     def sin(x):
         return f"tl_math.sin({x})"
-
-    @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_sin(x):
-        return f"libdevice.sin({x})"
 
     @classmethod
     def index_expr(cls, expr, dtype):
@@ -1276,11 +1253,6 @@ class TritonOverrides(OpOverrides):
         return f"tl_math.log({x})"
 
     @staticmethod
-    @maybe_upcast_float32()
-    def libdevice_log(x):
-        return f"libdevice.log({x})"
-
-    @staticmethod
     @maybe_upcast_float32(convert_output=False)
     def isinf(x):
         return f"libdevice.isinf({x}).to(tl.int1)"
@@ -1344,6 +1316,51 @@ class TritonKernelOverrides(TritonOverrides):
     the body of the main triton kernel and so it may use indexing and mask
     variables which are assumed to already be defined in the current scope.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # happens in __init__ unlike _initialize_pointwise_overrides
+        # because the libdevice registrations are populated during lowerings
+        self._setup_libdevice_routing()
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _setup_libdevice_routing(cls):
+        """Set up routing to libdevice implementations for fp64 inputs."""
+
+        from torch._inductor.codegen.common import OpDecompositions
+
+        for fn_name in torch._inductor.utils.op_requires_libdevice_fp64:
+            assert hasattr(cls, fn_name)
+            original_impl = getattr(cls, fn_name)
+
+            def decomposition_router(x, _original_impl, _fn_name):
+                if x.dtype != torch.float64:
+                    return _original_impl(x)
+                else:
+                    return getattr(OpDecompositions, _fn_name)(x).value
+
+            if fn_name == "sigmoid":
+                assert hasattr(OpDecompositions, "sigmoid")
+                fn = functools.partial(
+                    decomposition_router, _original_impl=original_impl, _fn_name=fn_name
+                )
+                fn.__name__ = fn_name  # type: ignore[attr-defined]
+                setattr(cls, fn_name, staticmethod(fn))
+                continue
+
+            def dtype_router(x, _original_impl, _fn_name):
+                if x.dtype == torch.float64:
+                    return f"libdevice.{_fn_name}({x})"
+                else:
+                    return _original_impl(x)
+
+            fn = functools.partial(
+                dtype_router, _original_impl=original_impl, _fn_name=fn_name
+            )
+            fn.__name__ = fn_name  # type: ignore[attr-defined]
+            setattr(cls, fn_name, staticmethod(fn))
 
     @classmethod
     def constant(cls, value, dtype):
@@ -2099,7 +2116,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # Stores require an explicit broadcast.
+        # Stores require an explicit broadcast. We do this in two phases:
+        #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
+        #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
+        #  2. In case the block pointer has different dimensionality, broadcast/reshape the
+        #     result to the shape of the pointer.
+        value = f"tl.broadcast_to({value}, {indexing.final_shape})"
+
+        # These dims no longer need broadcasting.
+        for idx, (dim, broadcast_dim) in enumerate(
+            zip(indexing.final_shape, indexing.broadcast_shape)
+        ):
+            if V.graph.sizevars.statically_known_equals(dim, broadcast_dim):
+                indexing.broadcasting_dims[idx] = False
+
         value = indexing.codegen_broadcast_and_reshape(
             value, indexing.final_shape, indexing.block_shape, False
         )
@@ -4085,7 +4115,7 @@ class TritonScheduling(SIMDScheduling):
         wrapper = V.graph.wrapper_code
         origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
-            wrapper.writeline(origins)
+            wrapper.make_comment(origins)
 
         if config.debug_fusion:
             from torch._inductor.scheduler import (
@@ -4103,7 +4133,7 @@ class TritonScheduling(SIMDScheduling):
                     for n in node_schedule
                     if isinstance(n, BaseSchedulerNode)
                 ]
-                wrapper.writeline(
+                wrapper.make_comment(
                     f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
                 )
 

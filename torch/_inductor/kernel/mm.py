@@ -222,6 +222,7 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
     ),
+    cache_codegen=True,
     all_inputs_loaded=True,
 )
 
@@ -591,6 +592,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     device_type = ir.get_device_type(mat1)
     name = "mm"
+
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.mm_{m}_{n}_{k}"] += 1
     log.info(
