@@ -876,7 +876,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
     else:
         if with_python:
             if numa_cmd:
-                cmd_args = list(numa_cmd)
+                cmd_args = list(numa_cmd or [])
             cmd = py_executable
             cmd_args.append("-u")
             if args.module:
