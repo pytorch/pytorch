@@ -259,12 +259,12 @@ struct SchemaParser {
           return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
         } else {
           auto text = tok.text();
-          if (
-            isPossiblyOptionalScalarType(real_type) &&
-            str2dtype.count(text) > 0) {
-          return static_cast<int64_t>(str2dtype.at(text));
+          if (isPossiblyOptionalScalarType(real_type) &&
+              str2dtype.count(text) > 0) {
+            return static_cast<int64_t>(str2dtype.at(text));
           } else {
-            throw(ErrorReport(L.cur().range) << "invalid numeric default value");
+            throw(
+                ErrorReport(L.cur().range) << "invalid numeric default value");
           }
         }
       }
