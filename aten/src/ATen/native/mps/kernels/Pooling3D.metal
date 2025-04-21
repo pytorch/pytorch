@@ -3,31 +3,45 @@ using namespace metal;
 
 // 3D Average Pooling Kernel
 // This kernel computes the average pooling operation for 3D tensors
+// Define packed int4 struct for more efficient parameter passing
+struct packed_int4 {
+    int values[4];
+};
+
 template <typename T>
 kernel void avg_pool3d(
     device T* output [[buffer(0)]],
     constant T* input [[buffer(1)]],
     constant int& batch_size [[buffer(2)]],
     constant int& channels [[buffer(3)]],
-    constant int& input_depth [[buffer(4)]],
-    constant int& input_height [[buffer(5)]],
-    constant int& input_width [[buffer(6)]],
-    constant int& output_depth [[buffer(7)]],
-    constant int& output_height [[buffer(8)]],
-    constant int& output_width [[buffer(9)]],
-    constant int& kernel_depth [[buffer(10)]],
-    constant int& kernel_height [[buffer(11)]],
-    constant int& kernel_width [[buffer(12)]],
-    constant int& stride_depth [[buffer(13)]],
-    constant int& stride_height [[buffer(14)]],
-    constant int& stride_width [[buffer(15)]],
-    constant int& padding_depth [[buffer(16)]],
-    constant int& padding_height [[buffer(17)]],
-    constant int& padding_width [[buffer(18)]],
-    constant int& count_include_pad [[buffer(19)]],
-    constant int& divisor_override [[buffer(20)]],
+    constant packed_int4& input_dims [[buffer(4)]],  // [input_depth, input_height, input_width, output_depth]
+    constant packed_int4& output_dims [[buffer(5)]], // [output_height, output_width, kernel_depth, kernel_height]
+    constant packed_int4& kernel_dims [[buffer(6)]], // [kernel_width, stride_depth, stride_height, stride_width]
+    constant packed_int4& padding_dims [[buffer(7)]], // [padding_depth, padding_height, padding_width, count_include_pad]
+    constant int& divisor_override [[buffer(8)]],
     uint index [[thread_position_in_grid]])
 {
+    // Extract dimensions from packed structs
+    int input_depth = input_dims.values[0];
+    int input_height = input_dims.values[1];
+    int input_width = input_dims.values[2];
+    int output_depth = input_dims.values[3];
+
+    int output_height = output_dims.values[0];
+    int output_width = output_dims.values[1];
+    int kernel_depth = output_dims.values[2];
+    int kernel_height = output_dims.values[3];
+
+    int kernel_width = kernel_dims.values[0];
+    int stride_depth = kernel_dims.values[1];
+    int stride_height = kernel_dims.values[2];
+    int stride_width = kernel_dims.values[3];
+
+    int padding_depth = padding_dims.values[0];
+    int padding_height = padding_dims.values[1];
+    int padding_width = padding_dims.values[2];
+    int count_include_pad = padding_dims.values[3];
+
     // Calculate output indices
     const int output_size = batch_size * channels * output_depth * output_height * output_width;
     if (index >= output_size) return;
@@ -99,25 +113,34 @@ kernel void avg_pool3d_backward(
     constant T* grad_output [[buffer(1)]],
     constant int& batch_size [[buffer(2)]],
     constant int& channels [[buffer(3)]],
-    constant int& input_depth [[buffer(4)]],
-    constant int& input_height [[buffer(5)]],
-    constant int& input_width [[buffer(6)]],
-    constant int& output_depth [[buffer(7)]],
-    constant int& output_height [[buffer(8)]],
-    constant int& output_width [[buffer(9)]],
-    constant int& kernel_depth [[buffer(10)]],
-    constant int& kernel_height [[buffer(11)]],
-    constant int& kernel_width [[buffer(12)]],
-    constant int& stride_depth [[buffer(13)]],
-    constant int& stride_height [[buffer(14)]],
-    constant int& stride_width [[buffer(15)]],
-    constant int& padding_depth [[buffer(16)]],
-    constant int& padding_height [[buffer(17)]],
-    constant int& padding_width [[buffer(18)]],
-    constant int& count_include_pad [[buffer(19)]],
-    constant int& divisor_override [[buffer(20)]],
+    constant packed_int4& input_dims [[buffer(4)]],  // [input_depth, input_height, input_width, output_depth]
+    constant packed_int4& output_dims [[buffer(5)]], // [output_height, output_width, kernel_depth, kernel_height]
+    constant packed_int4& kernel_dims [[buffer(6)]], // [kernel_width, stride_depth, stride_height, stride_width]
+    constant packed_int4& padding_dims [[buffer(7)]], // [padding_depth, padding_height, padding_width, count_include_pad]
+    constant int& divisor_override [[buffer(8)]],
     uint index [[thread_position_in_grid]])
 {
+    // Extract dimensions from packed structs
+    int input_depth = input_dims.values[0];
+    int input_height = input_dims.values[1];
+    int input_width = input_dims.values[2];
+    int output_depth = input_dims.values[3];
+
+    int output_height = output_dims.values[0];
+    int output_width = output_dims.values[1];
+    int kernel_depth = output_dims.values[2];
+    int kernel_height = output_dims.values[3];
+
+    int kernel_width = kernel_dims.values[0];
+    int stride_depth = kernel_dims.values[1];
+    int stride_height = kernel_dims.values[2];
+    int stride_width = kernel_dims.values[3];
+
+    int padding_depth = padding_dims.values[0];
+    int padding_height = padding_dims.values[1];
+    int padding_width = padding_dims.values[2];
+    int count_include_pad = padding_dims.values[3];
+
     // Calculate input indices
     const int input_size = batch_size * channels * input_depth * input_height * input_width;
     if (index >= input_size) return;
@@ -204,23 +227,11 @@ kernel void avg_pool3d<DTYPE>(                                              \
     constant DTYPE* input [[buffer(1)]],                                    \
     constant int& batch_size [[buffer(2)]],                                 \
     constant int& channels [[buffer(3)]],                                   \
-    constant int& input_depth [[buffer(4)]],                                \
-    constant int& input_height [[buffer(5)]],                               \
-    constant int& input_width [[buffer(6)]],                                \
-    constant int& output_depth [[buffer(7)]],                               \
-    constant int& output_height [[buffer(8)]],                              \
-    constant int& output_width [[buffer(9)]],                               \
-    constant int& kernel_depth [[buffer(10)]],                              \
-    constant int& kernel_height [[buffer(11)]],                             \
-    constant int& kernel_width [[buffer(12)]],                              \
-    constant int& stride_depth [[buffer(13)]],                              \
-    constant int& stride_height [[buffer(14)]],                             \
-    constant int& stride_width [[buffer(15)]],                              \
-    constant int& padding_depth [[buffer(16)]],                             \
-    constant int& padding_height [[buffer(17)]],                            \
-    constant int& padding_width [[buffer(18)]],                             \
-    constant int& count_include_pad [[buffer(19)]],                         \
-    constant int& divisor_override [[buffer(20)]],                          \
+    constant packed_int4& input_dims [[buffer(4)]],                         \
+    constant packed_int4& output_dims [[buffer(5)]],                        \
+    constant packed_int4& kernel_dims [[buffer(6)]],                        \
+    constant packed_int4& padding_dims [[buffer(7)]],                       \
+    constant int& divisor_override [[buffer(8)]],                           \
     uint index [[thread_position_in_grid]]);                                \
                                                                             \
 template                                                                    \
@@ -230,23 +241,11 @@ kernel void avg_pool3d_backward<DTYPE>(                                     \
     constant DTYPE* grad_output [[buffer(1)]],                              \
     constant int& batch_size [[buffer(2)]],                                 \
     constant int& channels [[buffer(3)]],                                   \
-    constant int& input_depth [[buffer(4)]],                                \
-    constant int& input_height [[buffer(5)]],                               \
-    constant int& input_width [[buffer(6)]],                                \
-    constant int& output_depth [[buffer(7)]],                               \
-    constant int& output_height [[buffer(8)]],                              \
-    constant int& output_width [[buffer(9)]],                               \
-    constant int& kernel_depth [[buffer(10)]],                              \
-    constant int& kernel_height [[buffer(11)]],                             \
-    constant int& kernel_width [[buffer(12)]],                              \
-    constant int& stride_depth [[buffer(13)]],                              \
-    constant int& stride_height [[buffer(14)]],                             \
-    constant int& stride_width [[buffer(15)]],                              \
-    constant int& padding_depth [[buffer(16)]],                             \
-    constant int& padding_height [[buffer(17)]],                            \
-    constant int& padding_width [[buffer(18)]],                             \
-    constant int& count_include_pad [[buffer(19)]],                         \
-    constant int& divisor_override [[buffer(20)]],                          \
+    constant packed_int4& input_dims [[buffer(4)]],                         \
+    constant packed_int4& output_dims [[buffer(5)]],                        \
+    constant packed_int4& kernel_dims [[buffer(6)]],                        \
+    constant packed_int4& padding_dims [[buffer(7)]],                       \
+    constant int& divisor_override [[buffer(8)]],                           \
     uint index [[thread_position_in_grid]])
 
 // Register for float

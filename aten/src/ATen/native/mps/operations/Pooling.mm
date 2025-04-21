@@ -633,8 +633,8 @@ static void avg_pool3d_template(const Tensor& input,
   // Get MPS stream
   MPSStream* mpsStream = getCurrentMPSStream();
 
-  // Synchronize the MPS stream to ensure any previous operations are completed
-  mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
+  // Note: We only synchronize when necessary, not at the beginning of every operation
+  // This improves performance by allowing more operations to be batched together
 
   // Get MPS data types
   MPSDataType inputDataType = mps::getMPSDataType(input.scalar_type());
@@ -682,43 +682,45 @@ static void avg_pool3d_template(const Tensor& input,
   // Set parameters
   int batch_size = static_cast<int>(nbatch);
   int channels_val = static_cast<int>(channels);
-  int input_depth_val = static_cast<int>(input_depth);
-  int input_height_val = static_cast<int>(input_height);
-  int input_width_val = static_cast<int>(input_width);
-  int output_depth_val = static_cast<int>(output_depth);
-  int output_height_val = static_cast<int>(output_height);
-  int output_width_val = static_cast<int>(output_width);
-  int kernel_depth_val = static_cast<int>(kD);
-  int kernel_height_val = static_cast<int>(kH);
-  int kernel_width_val = static_cast<int>(kW);
-  int stride_depth_val = static_cast<int>(dD);
-  int stride_height_val = static_cast<int>(dH);
-  int stride_width_val = static_cast<int>(dW);
-  int padding_depth_val = static_cast<int>(pD);
-  int padding_height_val = static_cast<int>(pH);
-  int padding_width_val = static_cast<int>(pW);
-  int count_include_pad_val = count_include_pad ? 1 : 0;
+
+  // Create packed int4 structs for more efficient parameter passing
+  int input_dims[4] = {
+      static_cast<int>(input_depth),
+      static_cast<int>(input_height),
+      static_cast<int>(input_width),
+      static_cast<int>(output_depth)
+  };
+
+  int output_dims[4] = {
+      static_cast<int>(output_height),
+      static_cast<int>(output_width),
+      static_cast<int>(kD),
+      static_cast<int>(kH)
+  };
+
+  int kernel_dims[4] = {
+      static_cast<int>(kW),
+      static_cast<int>(dD),
+      static_cast<int>(dH),
+      static_cast<int>(dW)
+  };
+
+  int padding_dims[4] = {
+      static_cast<int>(pD),
+      static_cast<int>(pH),
+      static_cast<int>(pW),
+      count_include_pad ? 1 : 0
+  };
+
   int divisor_override_val = divisor_override.has_value() ? static_cast<int>(divisor_override.value()) : 0;
 
   [computeEncoder setBytes:&batch_size length:sizeof(int) atIndex:2];
   [computeEncoder setBytes:&channels_val length:sizeof(int) atIndex:3];
-  [computeEncoder setBytes:&input_depth_val length:sizeof(int) atIndex:4];
-  [computeEncoder setBytes:&input_height_val length:sizeof(int) atIndex:5];
-  [computeEncoder setBytes:&input_width_val length:sizeof(int) atIndex:6];
-  [computeEncoder setBytes:&output_depth_val length:sizeof(int) atIndex:7];
-  [computeEncoder setBytes:&output_height_val length:sizeof(int) atIndex:8];
-  [computeEncoder setBytes:&output_width_val length:sizeof(int) atIndex:9];
-  [computeEncoder setBytes:&kernel_depth_val length:sizeof(int) atIndex:10];
-  [computeEncoder setBytes:&kernel_height_val length:sizeof(int) atIndex:11];
-  [computeEncoder setBytes:&kernel_width_val length:sizeof(int) atIndex:12];
-  [computeEncoder setBytes:&stride_depth_val length:sizeof(int) atIndex:13];
-  [computeEncoder setBytes:&stride_height_val length:sizeof(int) atIndex:14];
-  [computeEncoder setBytes:&stride_width_val length:sizeof(int) atIndex:15];
-  [computeEncoder setBytes:&padding_depth_val length:sizeof(int) atIndex:16];
-  [computeEncoder setBytes:&padding_height_val length:sizeof(int) atIndex:17];
-  [computeEncoder setBytes:&padding_width_val length:sizeof(int) atIndex:18];
-  [computeEncoder setBytes:&count_include_pad_val length:sizeof(int) atIndex:19];
-  [computeEncoder setBytes:&divisor_override_val length:sizeof(int) atIndex:20];
+  [computeEncoder setBytes:&input_dims length:sizeof(input_dims) atIndex:4];
+  [computeEncoder setBytes:&output_dims length:sizeof(output_dims) atIndex:5];
+  [computeEncoder setBytes:&kernel_dims length:sizeof(kernel_dims) atIndex:6];
+  [computeEncoder setBytes:&padding_dims length:sizeof(padding_dims) atIndex:7];
+  [computeEncoder setBytes:&divisor_override_val length:sizeof(int) atIndex:8];
 
   // Calculate grid and threadgroup sizes
   MTLSize gridSize, threadgroupSize;
