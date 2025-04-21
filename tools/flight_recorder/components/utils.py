@@ -220,7 +220,7 @@ def match_coalesced_groups_with_non_p2p(
         ]
         for rank in all_rank_events
     }
-    is_p2p = any(op.type in P2P for op in all_ops[0])
+    is_p2p = any(op.type in P2P for ops in all_ops.values() for op in ops)
     pg_name = pg_info[0]
 
     def visualize_ops(
@@ -601,7 +601,8 @@ def find_coalesced_group_with_non_p2p(
             break
 
     if len(found) > 1:
-        if found[-1][1]["profiling_name"] != "nccl:coalesced":
+        name = found[-1][1]["profiling_name"]
+        if name.startswith("nccl:") and not name.endswith("_coalesced"):
             logger.error("Rank %s does not have a coalesced end.", rank)
         return found
     return []

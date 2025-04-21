@@ -126,6 +126,10 @@ except (unittest.SkipTest, ImportError):
     raise
 
 
+def _is_cpu_freezing(self):
+    return (config.freezing is None or config.freezing) and self.device != GPU_TYPE
+
+
 class AOTInductorTestsTemplate:
     def test_simple(self):
         class Model(torch.nn.Module):
@@ -214,6 +218,79 @@ class AOTInductorTestsTemplate:
             model = Model(device=self.device)
             actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
             self.assertTrue(same(model(*example_inputs), actual))
+
+    def test_constant_folding_with_update(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with torch.no_grad(), config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            model = Model(self.device)
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(4, 4, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Update with new weights on active buffer
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(4, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, False, False)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        # Update with new weights on inactive buffer
+        new_weights = {
+            "L__self___b": torch.randn(4, device=self.device),
+            "L__self___w_pre": torch.randn(4, 4, device=self.device),
+        }
+        model.w_pre = new_weights["L__self___w_pre"]
+        model.b = new_weights["L__self___b"]
+        expected = model(test_inputs)
+        runner.update_constant_buffer(new_weights, True, False)
+        new_output = runner_call(test_inputs)
+        # We have not yet swapped the buffer, new_output should be the same as the old one.
+        self.assertEqual(output, new_output)
+        # Swap the buffer, should get the correct result now.
+        runner.swap_constant_buffer()
+        new_output = runner_call(test_inputs)
+        self.assertEqual(expected, new_output)
 
     @requires_gpu
     def test_duplicate_constant_folding(self):
@@ -1199,6 +1276,48 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.ones(4, 4, device=self.device),)
         self.check_model(Foo(self.device), example_inputs)
+
+    def test_aoti_constant_tensor_name_collision(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant1",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Foo(torch.nn.Module):
+            def __init__(self, user_float_feature_idx, device):
+                super().__init__()
+                self.user_float_feature_idx = user_float_feature_idx
+                self.register_buffer(
+                    "_tensor_constant0",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
+                self.sub_mod = SubModule(device)
+
+            def forward(self, x):
+                return (
+                    torch.index_select(
+                        x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
+                    ),
+                    self._tensor_constant0,
+                    self.sub_mod._tensor_constant1,
+                )
+
+        example_inputs = (torch.ones(4, 4, device=self.device),)
+        user_float_feature_idx = [1]
+        # we have to have run_decomposition first to trigger the name collision
+        ep = torch.export.export(
+            Foo(user_float_feature_idx, self.device), example_inputs, strict=False
+        ).run_decompositions()
+        gm = ep.module()
+        self.check_model(gm, example_inputs)
 
     def test_large_grid(self):
         if self.device != GPU_TYPE:
@@ -3465,6 +3584,41 @@ class AOTInductorTestsTemplate:
 
             self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
 
+    def test_aoti_data_dependent_extern_kernel_op(self):
+        # Skip GPY because custom op only implemented for cpu
+        if self.device == GPU_TYPE:
+            raise unittest.SkipTest("skips for GPU")
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                assert a[0] != 0
+                return a + b
+
+            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            def foo_fake_impl(a, b):
+                return a + b
+
+            class Model(torch.nn.Module):
+                def forward(self, a, b):
+                    res = torch.ops.mylib.foo(a, b)
+                    return res
+
+            example_inputs = (torch.ones(10), torch.randn(10))
+            from torch._functorch import config as functorch_config
+
+            # use this config to mimic FakeTensors resulting from
+            # draft export
+            with functorch_config.patch({"fake_tensor_propagate_real_tensors": True}):
+                self.check_model(Model(), example_inputs)
+
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -3971,16 +4125,16 @@ class AOTInductorTestsTemplate:
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
 
-        kernel_calls = (
-            [
+        is_cpu_freezing = _is_cpu_freezing(self)
+        if self.device == GPU_TYPE:
+            kernel_calls = [
                 ("triton_poi_fused_0", 1),
                 (f"aoti_torch_{GPU_TYPE}_addmm_out", 2),
             ]
-            if self.device == GPU_TYPE
-            else [
-                ("aoti_torch_cpu_addmm_out", 2),
-            ]
-        )
+        elif is_cpu_freezing:
+            kernel_calls = [("cpp_fused_0", 1)]
+        else:
+            kernel_calls = [("aoti_torch_cpu_addmm_out", 2)]
 
         # test default debug printing all tensor values codegen
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
@@ -4004,7 +4158,9 @@ class AOTInductorTestsTemplate:
                 ).run(code)
 
         # test printing selected kernel's tensor values codegen
-        filtered_kernel_name = f"aoti_torch_{self.device}_addmm_out"
+        filtered_kernel_name = (
+            "cpp_fused_0" if is_cpu_freezing else f"aoti_torch_{self.device}_addmm_out"
+        )
         with config.patch(
             {
                 "aot_inductor.debug_intermediate_value_printer": "2",
@@ -4015,7 +4171,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
             filtered_kernel_calls = [
-                (filtered_kernel_name, 2),
+                (filtered_kernel_name, 1 if is_cpu_freezing else 2),
             ]
             for kernel_call, count in filtered_kernel_calls:
                 FileCheck().check_count(
@@ -4060,17 +4216,18 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
-        kernel_calls = (
-            f"aoti_torch_{GPU_TYPE}_addmm_out"
-            if self.device == GPU_TYPE
-            else "aoti_torch_cpu_addmm_out"
+
+        kernel_call = (
+            "graph_1_cpp_fused_0"
+            if _is_cpu_freezing(self)
+            else f"aoti_torch_{self.device}_addmm_out"
         )
         with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             shim_fn_codes = (
-                f'RECORD_FUNCTION("{kernel_calls}", c10::ArrayRef<c10::IValue>());'
+                f'RECORD_FUNCTION("{kernel_call}", c10::ArrayRef<c10::IValue>());'
             )
             if enable_kernel_profile:
                 FileCheck().check(shim_fn_codes).run(code)
@@ -4320,14 +4477,15 @@ class AOTInductorTestsTemplate:
         so_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.legacy_compile, model, example_inputs
         )
-        lowerbound_check = "u1 >= 1" if mark_unbacked else "u0 >= 2"
+        varname = f"u{int(mark_unbacked) + (2 if _is_cpu_freezing(self) else 0)}"
+        lowerbound_check = f"{varname} >= {1 if mark_unbacked else 2}"
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
         compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
         compiled(*example_inputs)
 
         # Check the runtime assertion.
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaises(Exception):
             unexpected_inputs = (torch.ones(0, device=self.device), b, c)
             compiled(*unexpected_inputs)
 
