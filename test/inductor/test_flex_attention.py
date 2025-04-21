@@ -63,7 +63,7 @@ M = TypeVar("M", bound=Callable)
 
 
 def large_tensor_test_class(
-    size: str, device: Optional[torch.device] = None
+    size: str, device: Optional[Union[torch.device, str]] = None
 ) -> Callable[[type[T]], type[T]]:
     def decorator(cls: type[T]) -> type[T]:
         for name, method in list(cls.__dict__.items()):
@@ -342,7 +342,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-@large_tensor_test_class("2GB", device=torch.device("cuda"))
+@large_tensor_test_class("2GB", device="cuda")
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4512,7 +4512,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
 
-@large_tensor_test_class("2GB", device=torch.device("cuda"))
+@large_tensor_test_class("2GB", device="cuda")
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4962,7 +4962,7 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
-@large_tensor_test_class("2GB", device=torch.device("cuda"))
+@large_tensor_test_class("2GB", device="cuda")
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
