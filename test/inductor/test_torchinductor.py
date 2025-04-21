@@ -6618,9 +6618,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if not self.is_dtype_supported(dtype):
                 continue
 
-            if dtype == torch.int64 and self.device == "mps":
-                continue
-
             self.common(
                 fn,
                 (torch.randn([64]).to(dtype=dtype),),
