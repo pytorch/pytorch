@@ -84,7 +84,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
     if (allow_typevars_ && !text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return c10::TypeFactory::createNamed<VarType>(text);
+      return c10::TypeFactory::createNamed<VarType>(std::move(text));
     }
     if (text == "double") {
       throw(
@@ -384,7 +384,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
+    fake_value = real_value = c10::TypeFactory::create<FutureType>(std::move(subtype));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Await") {
     L.next(); // Await
     L.expect('(');
@@ -392,7 +392,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<AwaitType>(subtype);
+    fake_value = real_value = c10::TypeFactory::create<AwaitType>(std::move(subtype));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "RRef") {
     L.next(); // RRef
     L.expect('(');
@@ -400,7 +400,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<RRefType>(subtype);
+    fake_value = real_value = c10::TypeFactory::create<RRefType>(std::move(subtype));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Tensor") {
     L.next();
     fake_value = real_value = c10::TypeFactory::get<TensorType>();
@@ -414,7 +414,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     fake_value = real_value =
-        c10::TypeFactory::create<DictType>(key_type, value_type);
+      c10::TypeFactory::create<DictType>(std::move(key_type), std::move(value_type));
   } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Union") {
     L.next();
     L.expect('(');
@@ -478,8 +478,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
       L.next(); // [
       L.next(); // ]
-      fake_value = c10::TypeFactory::create<ListType>(fake_value);
-      real_value = c10::TypeFactory::create<ListType>(real_value);
+      fake_value = c10::TypeFactory::create<ListType>(std::move(fake_value));
+      real_value = c10::TypeFactory::create<ListType>(std::move(real_value));
       auto container = parseAliasAnnotation();
       if (alias_info) {
         if (!container) {
