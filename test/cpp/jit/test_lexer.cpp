@@ -7,9 +7,7 @@ namespace torch::jit {
 TEST(LexerTest, AllTokens) {
   std::vector<std::pair<int /* TokenKind */, std::string>> tokens;
   for (const char* ch = valid_single_char_tokens; *ch; ch++) {
-    std::array<char, 1> s = {*ch};
-    tokens.push_back(
-        std::make_pair<int, std::string>(*ch, std::string(s.data(), s.size())));
+    tokens.emplace_back(*ch, std::string(1, *ch));
   }
 #define ADD_TOKEN(tok, _, tokstring)     \
   if (*tokstring) {                      \
@@ -30,7 +28,7 @@ TEST(LexerTest, AllTokens) {
 
 TEST(LexerTest, SlightlyOffIsNot) {
   std::vector<std::string> suffixes = {"", " ", "**"};
-  for (const auto& suffix: suffixes) {
+  for (const auto& suffix : suffixes) {
     std::vector<std::string> extras = {"n", "no", "no3", "note"};
     for (const auto& extra : extras) {
       std::string s = "is " + extra + suffix;
@@ -46,7 +44,7 @@ TEST(LexerTest, SlightlyOffIsNot) {
 
 TEST(LexerTest, SlightlyOffNotIn) {
   std::vector<std::string> suffixes = {"", " ", "**"};
-  for (const auto& suffix: suffixes) {
+  for (const auto& suffix : suffixes) {
     std::vector<std::string> extras = {"i", "i3", "inn"};
     for (const auto& extra : extras) {
       std::string s = "not " + extra + suffix;
@@ -55,7 +53,7 @@ TEST(LexerTest, SlightlyOffNotIn) {
       EXPECT_EQ(not_tok.kind, TK_NOT) << not_tok.range.text().str();
       const auto& in_tok = l.cur();
       EXPECT_EQ(in_tok.kind, TK_IDENT) << in_tok.range.text().str();
-      EXPECT_EQ(in_tok.range.text().str(), extra) << in_tok.range.text().str();;
+      EXPECT_EQ(in_tok.range.text().str(), extra) << in_tok.range.text().str();
     }
   }
 }
