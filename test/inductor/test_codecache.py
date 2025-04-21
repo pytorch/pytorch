@@ -1448,7 +1448,7 @@ class TestStandaloneCompile(TestCase):
         torch._dynamo.reset()
         clear_inductor_caches()
 
-    def capture(self, fn):
+    def capture(self, fn, dynamic=None):
         def inner(*args):
             gm = None
             actual_args = None
@@ -1463,7 +1463,9 @@ class TestStandaloneCompile(TestCase):
                 kwargs = kwargs_
                 return gm
 
-            _ = torch.compile(fn, fullgraph=True, backend=backend)(*args)
+            _ = torch.compile(fn, fullgraph=True, backend=backend, dynamic=dynamic)(
+                *args
+            )
             return gm, actual_args, kwargs
 
         return inner
@@ -1611,6 +1613,107 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                         + e.output.decode("utf-8")
                     )
                 )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_dynamic(self):
+        def f(x):
+            return x.shape[0] * x
+
+        x = torch.randn(3)
+        torch._dynamo.mark_dynamic(x, 0)
+        with fresh_inductor_cache():
+            gm, args, kwargs = self.capture(f)(x)
+            assert not kwargs
+
+        # By default, uses the graph's dynamism.
+        compiled_artifact = torch._inductor.standalone_compile(gm, args)
+        x = torch.randn(4)
+        (result,) = compiled_artifact(4, x)
+        self.assertEqual(result, x * 4)
+
+        # specialized on size 3
+        compiled_artifact = torch._inductor.standalone_compile(gm, args, dynamic=False)
+        x = torch.randn(3)
+        (result,) = compiled_artifact(3, x)
+        self.assertEqual(result, x * 3)
+        with self.assertRaisesRegex(AssertionError, "expected size 4==3"):
+            x = torch.randn(4)
+            (result,) = compiled_artifact(4, x)
+
+        # on static_gm, all of these options should produce a specialized artifact
+        static_x = torch.randn(3)
+        with fresh_inductor_cache():
+            static_gm, args, kwargs = self.capture(f, dynamic=False)(static_x)
+            assert not kwargs
+        for dynamic in ["from_graph", False]:
+            compiled_artifact = torch._inductor.standalone_compile(
+                static_gm, [static_x], dynamic=dynamic
+            )
+            x = torch.randn(3)
+            (result,) = compiled_artifact(x)
+            self.assertEqual(result, x * 3)
+            with self.assertRaisesRegex(AssertionError, "expected size 4==3"):
+                x = torch.randn(4)
+                (result,) = compiled_artifact(x)
+
+        # test calling standalone_compile in a backend
+        x = torch.randn(3)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def backend(gm, args, **kwargs):
+            compiled_artifact = torch._inductor.standalone_compile(
+                gm, args, dynamic="from_graph"
+            )
+            y = torch.randn(4)
+            (result,) = compiled_artifact(4, y)
+            self.assertEqual(result, y * 4)
+            return compiled_artifact
+
+        torch._dynamo.reset()
+        _ = torch.compile(f, backend=backend)(x)
+
+        def backend(gm, args, **kwargs):
+            compiled_artifact = torch._inductor.standalone_compile(
+                gm, args, dynamic="from_tracing_context"
+            )
+            y = torch.randn(4)
+            (result,) = compiled_artifact(4, y)
+            self.assertEqual(result, y * 4)
+            return compiled_artifact
+
+        torch._dynamo.reset()
+        _ = torch.compile(f, backend=backend)(x)
+
+        def backend(gm, args, **kwargs):
+            compiled_artifact = torch._inductor.standalone_compile(
+                gm, args, dynamic=False
+            )
+            y = torch.randn(3)
+            (result,) = compiled_artifact(3, y)
+            self.assertEqual(result, y * 3)
+
+            with self.assertRaisesRegex(AssertionError, "expected size 4==3"):
+                y = torch.randn(4)
+                (result,) = compiled_artifact(4, y)
+
+            return compiled_artifact
+
+        torch._dynamo.reset()
+        _ = torch.compile(f, backend=backend)(x)
+
+        # on static_x, all of these options should produce a static graph,
+        # but it's a bit hard to tell, so these are just smoke tests.
+        static_x = torch.randn(3)
+        for dynamic in ["from_tracing_context", "from_graph", False]:
+
+            def backend(gm, args, **kwargs):
+                return torch._inductor.standalone_compile(gm, args, dynamic=dynamic)
+
+            torch._dynamo.reset()
+            result = torch.compile(f, backend=backend)(static_x)
+            self.assertEqual(result, static_x * 3)
 
 
 class TestFxGraphCacheHashing(TestCase):
