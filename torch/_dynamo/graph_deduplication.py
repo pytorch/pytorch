@@ -9,13 +9,15 @@ structures across different parts of the network.
 
 import logging
 import operator
-from collections.abc import Iterable
-from typing import Any
+from collections import defaultdict
+from collections.abc import Generator, Iterable
+from typing import Any, Optional
 
 import torch
 import torch.fx
 from torch._dynamo import config
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+from torch.utils._ordered_set import OrderedSet
 
 from .graph_region_tracker import Node, Region
 from .graph_utils import _detect_cycles, _flatten_args_kwargs
@@ -51,11 +53,11 @@ The deduplication mutates the output_graph argument in place.
 Returns a mapping of nodes to their subgraph output replacement node to remap outputs
 when they are created in output_graph.
     """
-    from torch._inductor.pattern_matcher import stable_topological_sort
 
     duplicated_region_groups = output_graph.region_tracker.get_identical_regions(
         output_graph.graph
     )
+    node_to_additional_deps = _populate_additional_deps(output_graph.graph)
 
     sub_gms: dict[str, torch.fx.GraphModule] = {}
 
@@ -87,9 +89,10 @@ when they are created in output_graph.
                 inds_with_external_users,
                 sub_gm,
                 subgraph_name,
+                node_to_additional_deps,
             )
 
-    stable_topological_sort(output_graph.graph)
+    _stable_topological_sort(output_graph.graph, node_to_additional_deps)
     return sub_gms
 
 
@@ -101,6 +104,7 @@ def _replace_region_with_subgraph(
     inds_with_external_users: list[int],
     sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
+    node_to_additional_deps: dict[torch.fx.Node, list[torch.fx.Node]],
 ) -> None:
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
@@ -133,6 +137,12 @@ def _replace_region_with_subgraph(
     # Erase in reverse topological order
     for node in reversed(region):
         graph.erase_node(node)
+        node_to_additional_deps.pop(node)
+        for dep_list in node_to_additional_deps.values():
+            try:
+                dep_list.remove(node)
+            except ValueError:
+                pass
 
     if config.graph_deduplication_lint:
         _detect_cycles(graph)
@@ -222,3 +232,94 @@ def _create_subgraph(
     node_ind_input_inds = _copy_nodes_and_remap_inputs(subgraph, region)
     _create_subgraph_outputs(subgraph, inds_with_external_users)
     return subgraph, node_ind_input_inds
+
+
+def _args(
+    n: torch.fx.Node,
+    node_to_additional_deps: Optional[dict[torch.fx.Node, list[torch.fx.Node]]] = None,
+) -> list[torch.fx.node.Argument]:
+    if node_to_additional_deps is None:
+        node_to_additional_deps = {}
+
+    args: list[torch.fx.node.Argument] = []
+    torch.fx.map_arg((n.args, n.kwargs), args.append)
+    if n in node_to_additional_deps:
+        args.extend(node_to_additional_deps[n])
+    return args
+
+
+def _stable_topological_sort(
+    graph: torch.fx.Graph,
+    node_to_additional_deps: dict[torch.fx.Node, list[torch.fx.Node]],
+) -> None:
+    # Nodes are in exactly one of these three collections:
+
+    # - Nodes in `pending` are waiting to be processed (in reverse order):
+    pending = list(reversed(graph.nodes))
+
+    # - Nodes in `ready` have been processed and are already in the correct
+    #   order.
+    ready = OrderedSet[torch.fx.Node]()
+
+    # - `waiting` is a mapping from a dependency to nodes which depend on that
+    #   dependency.
+    waiting = defaultdict(list)
+
+    # The cursor indicates the last processed node so we can add new nodes
+    # after it.
+    cursor = None
+    while pending:
+        node = pending.pop()
+        waiting_for = [
+            x for x in _args(node, node_to_additional_deps) if x not in ready
+        ]
+        if waiting_for:
+            # We have unprocessed input nodes. Might as well wait for the last
+            # arg so an already sorted list will only recheck this node once.
+            waiting[waiting_for[-1]].append(node)
+        else:
+            ready.add(node)
+            if cursor and cursor.next is not node:
+                cursor.append(node)
+            cursor = node
+            # Mark the nodes that have been waiting for this node to finish as
+            # ready to check again.
+            pending.extend(reversed(waiting.pop(node, ())))
+
+    assert not waiting and len(ready) == len(graph.nodes)
+
+
+def _populate_additional_deps(
+    graph: torch.fx.Graph,
+) -> dict[torch.fx.Node, list[torch.fx.Node]]:
+    import torch.amp
+
+    node_to_additional_deps: dict[torch.fx.Node, list[torch.fx.Node]] = defaultdict(
+        list
+    )
+    all_nodes = list(graph.nodes)
+
+    # These are targets of the nodes which need to stay in the same relative place in the graph
+    global_state_targets = {torch.amp._enter_autocast, torch.amp._exit_autocast}
+    all_nodes_dep_on: list[torch.fx.Node] = []
+
+    def prev_cur_nodes(
+        all_nodes: list[torch.fx.Node],
+    ) -> Generator[tuple[list[torch.fx.Node], torch.fx.Node]]:
+        prev_nodes: list[torch.fx.Node] = []
+        next_nodes = list(reversed(all_nodes))
+
+        while next_nodes:
+            cur_node = next_nodes.pop()
+            yield prev_nodes, cur_node
+            prev_nodes.append(cur_node)
+
+    for prev_nodes, cur_node in prev_cur_nodes(all_nodes):
+        args_unique = _args(cur_node)
+        additional_deps = node_to_additional_deps[cur_node]
+        additional_deps.extend(n for n in all_nodes_dep_on if n not in args_unique)
+        if cur_node.target in global_state_targets:
+            additional_deps.extend(n for n in prev_nodes if n not in args_unique)
+            all_nodes_dep_on.append(cur_node)
+
+    return node_to_additional_deps
