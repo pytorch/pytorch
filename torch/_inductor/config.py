@@ -124,6 +124,9 @@ force_disable_caches: bool = Config(
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
+# Unsafe way to mark function as cacheable
+unsafe_marked_cacheable_functions: list[str] = []
+
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
