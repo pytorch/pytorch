@@ -37,7 +37,6 @@ TEST(SourceRangeTest, test_substr) {
 }
 
 TEST(SourceRangeTest, test_iter_simple) {
-  int idx = 0;
   for (const auto& view : sampleStringCordViews()) {
     EXPECT_NE(view.begin(), view.end());
     EXPECT_TRUE(view.begin().has_next());
