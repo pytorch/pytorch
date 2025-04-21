@@ -469,6 +469,8 @@ at::Tensor nvshmem_all_to_all(
   return out;
 }
 
+// This is a prefix sum function that calculates read (or write) offsets for each peer
+// TODO: currently it is assumed that the number of PE's is smaller than `THREADS_PER_BLOCK` (512)
 __device__ void scan(int64_t *odata, int64_t *idata, int n) {
   constexpr int N = THREADS_PER_BLOCK;
   assert (n <= N);
@@ -494,6 +496,11 @@ __device__ void scan(int64_t *odata, int64_t *idata, int n) {
   odata[thid] = temp[pout * N + thid]; // write output
 }
 
+// This kernel is used to exchange output splits and source offsets between peers.
+// `in_out_splits` is of size (3, npes) and contains:
+// - input splits (IN)
+// - output splits (OUT) and
+// - source offsets (OUT).
 __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + npes;
@@ -516,7 +523,9 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
   nvshmemx_barrier_all_block();
 }
 
-__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, int mype, int npes) {
+// This kernel is used to do the actual data exchange.
+// `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
+__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int bid = blockIdx.x;
@@ -527,12 +536,17 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   __syncthreads();
 
   // Each block targets a different peer
+  size_t row_size = stride * sizeof(float);  // Assuming float (TODO)
   for (int i = bid; i < npes; i += gridDim.x) {
     int peer = (mype + i) % npes;
-    auto size = output_splits[peer] * sizeof(float);
-    auto source_offset = source_offsets[peer] * sizeof(float);
-    auto write_offset = peer_offsets[peer] * sizeof(float);
-    nvshmemx_getmem_block(recv_data + write_offset, send_data + source_offset, size, peer);
+    auto size = output_splits[peer] * row_size;
+    auto source_offset = source_offsets[peer] * row_size;
+    auto write_offset = peer_offsets[peer] * row_size;
+    nvshmemx_getmem_block(
+      (char*)recv_data + write_offset,
+      (char*)send_data + source_offset,
+      size,
+      peer);
   }
 }
 
@@ -541,6 +555,15 @@ at::Tensor nvshmem_all_to_all_vdev(
     at::Tensor& out,
     at::Tensor& in_out_splits,
     std::string group_name) {
+  /* Perform AllToAllv operation using NVSHMEM, with split information provided on device.
+   * Arguments:
+   *  - `input` is the input tensor
+   *  - `out` is the output tensor
+   *  - `in_out_splits` is a 2D tensor of size (3, npes). The rows are (in order):
+        input splits (IN)
+        output splits (OUT) and
+        necessary scratchpad space.
+  */
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   auto splits_hdl = c10d::symmetric_memory::rendezvous(in_out_splits, group_name);
@@ -570,10 +593,13 @@ at::Tensor nvshmem_all_to_all_vdev(
   // All to all data exchange
   // Limit the number of blocks to 16
   int num_blocks = std::min(world_size, 16);
+  // Stride at dim 0 (assuming input is contiguous, TODO)
+  size_t stride = input.stride(0);
   void* args1[] = {
       &input_ptr,
       &output_ptr,
       &splits_ptr,
+      &stride,
       &rank,
       &world_size};
   nvshmemx_collective_launch(
