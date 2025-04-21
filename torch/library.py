@@ -420,30 +420,20 @@ class Library:
         self.m.fallback(dispatch_key, fn, with_keyset)
 
     def _destroy(self):
-        if self.m is not None:
-            self.m.reset()
-        self.m = None
-        for handle in self._registration_handles:
-            handle.destroy()
-        self._registration_handles.clear()
         global _impls
-        _impls -= self._op_impls
-        for name in self._op_defs:
-            # Delete the cached torch.ops.ns.foo if it was registered.
-            # Otherwise, accessing it leads to a segfault.
-            # It's possible that we only registered an overload in this Library
-            # and another library owns an alive overload.
-            # That's OK - the next time torch.ops.ns.foo gets called, it'll be
-            # recomputed to point at the right collection of overloads.
-            ns, name_with_overload = name.split("::")
-            name = name_with_overload.split(".")[0]
-            if not hasattr(torch.ops, ns):
-                continue
-            namespace = getattr(torch.ops, ns)
-            if not hasattr(namespace, name):
-                continue
-            delattr(namespace, name)
-            namespace._dir.remove(name)
+        global _defs
+
+        _del_library(
+            _impls,
+            self._op_impls,
+            _defs,
+            self._op_defs,
+            self._registration_handles,
+            self.m,
+        )
+
+        self.m = None
+        self._registration_handles.clear()
 
 
 def _del_library(
@@ -457,10 +447,13 @@ def _del_library(
     import torch.fx
 
     for op_def in op_defs:
-        name = op_def
-        overload_name = ""
-        if "." in op_def:
-            name, overload_name = op_def.split(".")
+        ns, name_with_overload = op_def.split("::")
+        if "." in name_with_overload:
+            name, overload_name = name_with_overload.split(".")
+        else:
+            name = name_with_overload
+            overload_name = ""
+
         if (
             name,
             overload_name,
@@ -468,6 +461,20 @@ def _del_library(
             del torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE[
                 (name, overload_name)
             ]
+
+        # Delete the cached torch.ops.ns.foo if it was registered.
+        # Otherwise, accessing it leads to a segfault.
+        # It's possible that we only registered an overload in this Library
+        # and another library owns an alive overload.
+        # That's OK - the next time torch.ops.ns.foo gets called, it'll be
+        # recomputed to point at the right collection of overloads.
+        if not hasattr(torch.ops, ns):
+            continue
+        namespace = getattr(torch.ops, ns)
+        if not hasattr(namespace, name):
+            continue
+        delattr(namespace, name)
+        namespace._dir.remove(name)
 
     captured_impls -= op_impls
     captured_defs -= op_defs
