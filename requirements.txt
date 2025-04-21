@@ -15,6 +15,7 @@ packaging
 psutil
 pyyaml
 requests
+pynvml
 # issue on Windows after >= 75.8.2 - https://github.com/pytorch/pytorch/issues/148877
 setuptools<=75.8.2
 sympy>=1.13.3
