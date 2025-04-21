@@ -3528,10 +3528,10 @@ Eq(s72, s71)""",
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s5 - 1, s1)
-Eq(s4, s1)
-Eq(s14 - 1, s9)
-Eq(s13, s11)""",
+Eq(s85 - 1, s64)
+Eq(s20, s64)
+Eq(s80 - 1, s77)
+Eq(s72, s71)""",
                 )
             return gm
 
