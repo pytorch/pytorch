@@ -278,8 +278,16 @@ class NCCLComm {
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
-  ncclUniqueId getNcclId();
   at::DeviceIndex getDeviceIndex();
+
+#if defined(IS_NCCLX) && defined(NCCL_COMM_GET_UNIQUE_HASH)
+  uint64_t getNcclUniqueHash() {
+    uint64_t ncclUniqueHash = 0;
+    C10D_NCCL_CHECK(
+        ncclCommGetUniqueHash(ncclComm_, &ncclUniqueHash), std::nullopt);
+    return ncclUniqueHash;
+  }
+#endif
 
   // Must not be copyable
   NCCLComm(const NCCLComm&) = delete;
@@ -338,7 +346,6 @@ class NCCLComm {
 
  protected:
   // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_{};
   bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};

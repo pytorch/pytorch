@@ -39,10 +39,6 @@ NCCLComm::NCCLComm(NCCLComm&& other) {
   std::swap(deviceIndex_, other.deviceIndex_);
 }
 
-ncclUniqueId NCCLComm::getNcclId() {
-  return ncclId_;
-}
-
 std::shared_ptr<NCCLComm> NCCLComm::create(
     int numRanks,
     int rank,
@@ -53,7 +49,6 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   C10D_NCCL_CHECK(
       ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
       std::nullopt);
-  comm->ncclId_ = commId;
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = true;
@@ -78,7 +73,6 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
       ncclCommInitRankConfig(
           &(comm->ncclComm_), numRanks, commId, rank, &config),
       std::nullopt);
-  comm->ncclId_ = commId;
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   // Under blocking mode, comm is initialized immediately after NCCL init
@@ -112,7 +106,6 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
   // Only the first ncclUniqueId will be used to create the
   // communicator hash id, which is used to identify the communicator
   // in the log file and in the replay tool.
-  comm->ncclId_ = commIds[0];
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = !comm->nonBlocking_;
