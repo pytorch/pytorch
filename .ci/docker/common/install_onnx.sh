@@ -16,7 +16,8 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.5 \
-  numpy==1.24.2
+  numpy==1.24.2 \
+  protobuf==4.25.1
 
 # ONNXRuntime should be installed before installing
 # onnx-weekly. Otherwise, onnx-weekly could be
@@ -31,7 +32,7 @@ pip_install \
 pip_install coloredlogs packaging
 
 pip_install onnxruntime==1.18.1
-pip_install onnx==1.17.0
+pip_install -i https://test.pypi.org/simple/ onnx==1.18.0rc1 --no-deps
 pip_install onnxscript==0.2.2 --no-deps
 # required by onnxscript
 pip_install ml_dtypes
