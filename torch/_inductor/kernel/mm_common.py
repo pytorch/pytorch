@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import sympy
@@ -10,7 +11,7 @@ from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, Layout
+from ..ir import _IntLike, ChoiceCaller, Layout, TensorBox
 from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE, use_aten_gemm_kernels
 
 
@@ -54,6 +55,11 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
     )
 
 
+@SymbolicGridFn
+def persistent_grouped_mm_grid(m, n, meta):
+    return (meta["NUM_SMS"], 1, 1)
+
+
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
@@ -72,15 +78,22 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
         not inductor_config.force_same_precision
         or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
     )
-    return dict(
-        GROUP_M=8,
+    options_dict = dict(
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=allow_tf32,
+        USE_FAST_ACCUM=False,  # Option for _scaled_mm
         ACC_TYPE=acc_type(layout.dtype),
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
     )
+
+    # If GROUP_M not specified then default to 8
+    if "GROUP_M" not in config.kwargs:
+        group_m = config.kwargs.get("GROUP_M", 8)
+        options_dict["GROUP_M"] = group_m
+
+    return options_dict
 
 
 def persistent_mm_options(mat1, mat2):
@@ -90,6 +103,47 @@ def persistent_mm_options(mat1, mat2):
         NUM_SMS=get_num_sms(),
         TMA_SIZE=TMA_DESCRIPTOR_SIZE,
     )
+
+
+def scaled_mm_options(  # type: ignore[no-untyped-def]
+    config,  # triton.Config
+    sym_m: sympy.core.numbers.Integer,
+    sym_n: sympy.core.numbers.Integer,
+    sym_k: sympy.core.numbers.Integer,
+    layout: Layout,
+    scale_a,
+    scale_b,
+    use_fast_accum: bool,
+    device_tma: bool = False,
+) -> dict[str, Any]:
+    def are_compatible_scales(size_a, size_b) -> bool:
+        # Same sized scales are compatable
+        if len(size_a) == len(size_b):
+            return True
+
+        # Both need to be scalars or len(1) tensors
+        if len(size_a) <= 1 and len(size_b) <= 1:
+            return True
+
+        return False
+
+    size_a, size_b = scale_a.get_size(), scale_b.get_size()
+    assert are_compatible_scales(size_a, size_b), (
+        "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+        f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+    )
+
+    mm_template_options = mm_options(config, sym_m, sym_n, sym_k, layout)
+
+    mm_template_options["ACC_TYPE"] = "tl.float32"
+    mm_template_options["USE_FAST_ACCUM"] = use_fast_accum
+    mm_template_options["SCALING_ROWWISE"] = len(size_a) == 2
+
+    if device_tma:
+        mm_template_options["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
+        mm_template_options["NUM_SMS"] = get_num_sms()
+
+    return mm_template_options
 
 
 def mm_args(
@@ -154,6 +208,34 @@ def addmm_epilogue(dtype, alpha, beta):
     return epilogue
 
 
+def scale_mm_epilogue():
+    """
+    Create an epilogue function that applies scaling to matrix multiplication result
+    using the given scale factors.
+
+    Args:
+        dtype: The data type of the output
+        scale_a: Scale factor for matrix A
+        scale_b: Scale factor for matrix B
+
+    Returns:
+        Epilogue function that takes the accumulator and applies scaling
+    """
+
+    def epilogue(acc, inv_a_scale, inv_b_scale, bias=None):
+        # The epilogue function receives the accumulator (result of mat1 @ mat2)
+        # and applies the scaling factors
+        # In the original scaled_mm, we use inverse scales, so we multiply by them
+        mul_scales = V.ops.mul(inv_a_scale, inv_b_scale)
+        mul_acc = V.ops.mul(acc, mul_scales)
+        if bias is not None:
+            return V.ops.add(mul_acc, bias)
+        else:
+            return mul_acc
+
+    return epilogue
+
+
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.
@@ -183,3 +265,26 @@ def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
         numel *= dim
     nonzero = numel > 0
     return static_shape, nonzero
+
+
+def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
+    def is_row_major(stride: Sequence[_IntLike]) -> bool:
+        return stride[-1] == 1
+
+    def is_col_major(stride: Sequence[_IntLike]) -> bool:
+        return stride[-2] == 1
+
+    def has_zero_dim(size: Sequence[_IntLike]) -> bool:
+        return bool(size[0] == 0 or size[1] == 0)
+
+    # Check mat_a (self) stride requirements
+    torch._check(
+        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+    )
+
+    # Check mat_b stride requirements
+    torch._check(
+        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+    )

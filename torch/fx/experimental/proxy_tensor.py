@@ -1124,18 +1124,53 @@ class PythonKeyTracer(Tracer):
                 return None
             return extract_val(v.meta["val"])
 
-        # TODO: opt-in mechanism ?
-        if isinstance(
-            target,
-            (
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
-                torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-            ),
-        ):
+        if _should_save_eager_input_vals(target, (args, kwargs)):
+            # NOTE "eager_input_vals"
+            # We save the original (args, kwargs) FakeTensor values for nodes
+            # that have exact stride requirements. This is useful downstream.
+            # We use this information inside Inductor to ensure that inputs to
+            # stride-sensitive operators have the correct strides.
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
-            node.meta["arg_kwarg_vals"] = (arg_inp, kwarg_inp)
+            node.meta["eager_input_vals"] = (arg_inp, kwarg_inp)
 
         return node
+
+
+def _should_save_eager_input_vals(
+    target: Any,
+    args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
+) -> bool:
+    if not callable(target):
+        return False
+    if isinstance(
+        target,
+        (
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
+            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ),
+    ):
+        return True
+    if args_kwargs is not None and (
+        target is torch.ops.higher_order.auto_functionalized
+        or target is torch.ops.higher_order.auto_functionalized_v2
+    ):
+        args = args_kwargs[0]
+        assert isinstance(args[0], torch._ops.OpOverload)
+        return _should_save_eager_input_vals(args[0], None)
+    if target is torch.ops.higher_order.with_effects:
+        # TODO: inductor lowering for with_effects needs to be updated to propagate
+        # the arg_kwarg_vals
+        return False
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        if pytree.tree_any(_should_save_eager_input_vals, args_kwargs):
+            raise RuntimeError(
+                f"NYI: The HOP {target} has an input that is an OpOverload that "
+                f"needs exact strides. We probably need special logic to "
+                f"propagate the FakeTensor vals. Please file an issue."
+            )
+    if isinstance(target, torch._ops.OpOverload):
+        return torch._C.Tag.needs_exact_strides in target.tags
+    return False
 
 
 def _make_temp_remove_mode_context_manager(
@@ -1369,10 +1404,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
         self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
-        self.decomp_layers = 0
+        self.decomp_layers: int = 0
         from torch._inductor import config
 
-        self.emulate_precision_casts = config.emulate_precision_casts
+        self.emulate_precision_casts: bool = config.emulate_precision_casts
 
     @count
     def __torch_dispatch__(

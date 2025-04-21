@@ -18,6 +18,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -1764,7 +1765,11 @@ class SIMDScheduling(BaseScheduling):
             return tilings
 
         pointwise_ranges, reduction_ranges = node.get_ranges()
-        if len(pointwise_ranges) <= 1 and len(reduction_ranges) <= 1:
+        if (
+            len(pointwise_ranges) <= 1
+            and len(reduction_ranges) <= 1
+            or free_unbacked_symbols(pointwise_ranges + reduction_ranges)
+        ):
             return []
 
         # Tile either pointwise or reduction dims.
@@ -1920,7 +1925,15 @@ class SIMDScheduling(BaseScheduling):
                     dims = match_result[0] if match_result is not None else [numel]
                     index_tiling.extend(dims)
 
-                node_tilings.append(index_tiling)
+                # Prune dimensions of size 1.
+                index_tiling = [
+                    dim
+                    for dim in index_tiling
+                    if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
+                ]
+
+                if len(index_tiling) > 0:
+                    node_tilings.append(index_tiling)
 
             # Flatten leading dimensions, assigning labels to each dim.
             for node_tiling in node_tilings:
@@ -2013,7 +2026,11 @@ class SIMDScheduling(BaseScheduling):
             ) -> Optional[dict[str, sympy.Expr]]:
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
-                if V.graph.sizevars.size_hint(a1 - b1) == 0:
+
+                if (
+                    free_unbacked_symbols([a1, b1])
+                    or V.graph.sizevars.size_hint(a1 - b1) == 0
+                ):
                     return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger

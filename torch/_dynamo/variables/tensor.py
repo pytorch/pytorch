@@ -67,9 +67,10 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import AttributeMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
+from .user_defined import UserDefinedClassVariable
 
 
 try:
@@ -79,6 +80,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -410,8 +412,6 @@ class TensorVariable(VariableTracker):
         return ConstantVariable(ret_val)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from . import UserDefinedClassVariable
-
         if self.is_strict_mode(tx):
             if name in self._strict_mode_banned_ops():
                 unimplemented(
@@ -453,7 +453,8 @@ class TensorVariable(VariableTracker):
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
                 return variables.misc.DelayGraphBreakVariable(
-                    source=AttrSource(self.source, name)
+                    source=AttrSource(self.source, name),
+                    msg="Getting an inplace view on a graph input is not supported",
                 )
 
         # For attributes (not methods) that were not caught in the special handling above,
@@ -613,7 +614,7 @@ class TensorVariable(VariableTracker):
         """
 
         # This is seen in inspect signature where we check if the value is a default value
-        if name == "__eq__" and isinstance(args[0], variables.UserDefinedClassVariable):
+        if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
             return variables.ConstantVariable(False)
 
         try:
@@ -788,9 +789,23 @@ class TensorVariable(VariableTracker):
 
             tx = InstructionTranslator.current_tx()
             py_cls = cls.as_python_constant()
-            return TensorWithTFOverrideVariable.from_tensor_var(
+            var = TensorWithTFOverrideVariable.from_tensor_var(
                 tx, self, py_cls, cls.source
             )
+            # See NOTE [Side effect tracking for newly constructed tensor]
+            tx.output.side_effects._track_obj(
+                object(), var, mutation_type_cls=AttributeMutationNew
+            )
+            return var
+        unimplemented_v2(
+            gb_type="Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
+            context=f"{self}.as_subclass({cls})",
+            explanation="Currently not supported",
+            hints=[
+                "Avoid this call or move it outside `torch.compile` regione",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def method_get_device(self):
         if isinstance(self.device, torch.device):
@@ -1431,25 +1446,58 @@ class FakeItemVariable(TensorVariable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
 
 
-class TensorSubclassVariable(VariableTracker):
-    def __init__(self, value, *args, **kwargs) -> None:
-        self.value = value
-        super().__init__(*args, **kwargs)
-
+class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if len(args) == 1 and isinstance(args[0], TensorVariable):
-            from .torch_function import TensorWithTFOverrideVariable
+        # Handle `Subclass(existing_tensor, ...)` calls.
+        from .torch_function import TensorWithTFOverrideVariable
 
-            return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, self.source
+        new_func = self.value.__new__
+        if new_func is torch.Tensor.__new__:
+            if (
+                len(args) == 1
+                and isinstance(args[0], TensorVariable)
+                and len(kwargs) == 0
+            ):
+                data = args[0]
+                # Simulate `torch.Tensor.__new__` as shallow-copying the input
+                # tensor data with a new type. TODO polyfill?
+                var = TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, data, self.value, self.source
+                )
+            else:
+                unimplemented_v2(
+                    gb_type="Calling subclass default constructor with more than tensor argument",
+                    context=f"{self.value}(args={args}, kwargs={kwargs})",
+                    explanation="Currently not supported",
+                    hints=[
+                        "Avoid this constructor call or move it outside "
+                        "`torch.compile` regione",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+        else:
+            # Let Dynamo trace through custom `__new__`
+            var = VariableTracker.build(tx, new_func).call_function(
+                tx, [self] + args, kwargs
             )
 
-        return super().call_function(tx, args, kwargs)
+        # Let Dynamo trace through custom `__init__`
+        init_func = self.value.__init__
+        # TODO builder should be able to handle `torch.Tensor.__init__`,
+        # which is `object.__init__`, so that we can remove this check.
+        if init_func is not torch.Tensor.__init__:
+            VariableTracker.build(tx, init_func).call_function(tx, [var], kwargs)
+
+        # See NOTE [Side effect tracking for newly constructed tensor]
+        tx.output.side_effects._track_obj(
+            object(), var, mutation_type_cls=AttributeMutationNew
+        )
+        return var
 
     def as_python_constant(self):
         return self.value
@@ -1511,7 +1559,7 @@ class UntypedStorageVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
         codegen.call_method(0)
@@ -1526,7 +1574,7 @@ class DataPtrVariable(VariableTracker):
         super().__init__(**kwargs)
         self.from_tensor = from_tensor
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.from_tensor)
         codegen.load_method("data_ptr")
         codegen.call_method(0)

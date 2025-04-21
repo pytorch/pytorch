@@ -178,6 +178,8 @@ def lift_constants_pass(
                 continue
             if "LoweredBackendModule" in type(constant_val).__name__:
                 continue
+            if "AOTInductorRunnerWrapper" in type(constant_val).__name__:
+                continue
             if isinstance(constant_val, torch.utils._pytree.TreeSpec):
                 continue
 
@@ -237,7 +239,6 @@ def lift_constants_pass(
                         constant_name = f"lifted_tensor_{num_tensor_constants}"
                         constant_fqn = get_constant_fqn(node, constant_name)
                     num_tensor_constants += 1
-
             else:
                 raise SpecViolationError(
                     f"getattr node {node} referencing unsupported type {type(constant_val)}"
