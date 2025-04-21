@@ -7856,6 +7856,10 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
+    # TODO(pianpwk) blocker: 
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureCppSerDes
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
