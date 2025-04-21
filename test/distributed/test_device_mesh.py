@@ -197,7 +197,7 @@ class DeviceMeshTest(DTensorTestBase):
         local_tensor = torch.randn(2, 8)
         global_tensor = funcol.all_gather_tensor(
             local_tensor, gather_dim=0, group=(mesh, 0)
-        )
+        ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
     @with_comms
