@@ -143,12 +143,9 @@ for some cloud providers, such as AWS or GCP.
 For a full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
 
-You can tune NCCL communicators even further using the following APIs:
-
-.. autoclass:: torch.distributed.ProcessGroupNCCL.NCCLConfig
-
-.. autoclass:: torch.distributed.ProcessGroupNCCL.Options
-
+You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`
+and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
+(e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
 .. _distributed-basics:
 
