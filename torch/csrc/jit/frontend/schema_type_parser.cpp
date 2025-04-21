@@ -308,7 +308,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       return;
     }
     bool shape_symbol = false;
-    if (L.cur().kind == TK_IDENT && L.cur().text() == "SS") {
+    if (L.cur().kind == TK_IDENT && L.cur().text_view() == "SS") {
       L.next();
       L.expect('(');
       L.expect('-');
@@ -377,7 +377,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     });
     fake_value = real_value =
         c10::TypeFactory::create<TupleType>(std::move(types));
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Future") {
     L.next(); // Future
     L.expect('(');
     auto p = parseType();
@@ -385,7 +385,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Await") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Await") {
     L.next(); // Await
     L.expect('(');
     auto p = parseType();
@@ -393,7 +393,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     fake_value = real_value = c10::TypeFactory::create<AwaitType>(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "RRef") {
     L.next(); // RRef
     L.expect('(');
     auto p = parseType();
@@ -401,11 +401,11 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     fake_value = real_value = c10::TypeFactory::create<RRefType>(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Tensor") {
     L.next();
     fake_value = real_value = c10::TypeFactory::get<TensorType>();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Dict") {
     L.next();
     L.expect('(');
     auto key_type = parseType().first;
@@ -415,7 +415,7 @@ SchemaTypeParser::parseFakeAndRealType() {
     alias_info = parseAliasAnnotation();
     fake_value = real_value =
         c10::TypeFactory::create<DictType>(key_type, value_type);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Union") {
     L.next();
     L.expect('(');
     std::vector<TypePtr> types;
@@ -433,7 +433,7 @@ SchemaTypeParser::parseFakeAndRealType() {
       parseTensorDType(L.cur().text())) {
     fake_value = real_value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "__torch__") {
     L.next();
     L.expect('.');
     auto torch_tok = L.expect(TK_IDENT);

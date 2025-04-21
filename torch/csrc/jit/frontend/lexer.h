@@ -400,6 +400,11 @@ struct Token {
   std::string text() {
     return std::string(range.token_text());
   }
+
+  std::string_view text_view() {
+    return range.token_text();
+  }
+
   std::string kindString() const {
     return kindToString(kind);
   }
