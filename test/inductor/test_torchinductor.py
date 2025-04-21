@@ -1369,6 +1369,10 @@ class CommonTemplate:
             b = torch.add(args[0], args[0])
             return (a, b)
 
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("No complex on MacOS13")
+
         x = torch.randn(41, dtype=torch.complex64, device=self.device)
         y = x.clone()
         # should not inplace write to the input
@@ -12521,7 +12525,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "erfcx",
                 "gammainc",
                 "gammaincc",
-                "hermite_polynomial_he",
                 "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",
