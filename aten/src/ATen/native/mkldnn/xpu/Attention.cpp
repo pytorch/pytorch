@@ -21,9 +21,9 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
     }
     return false;
   }
+
   constexpr int MAX_HEAD_DIM = 576;
-  const auto max_size_last =
-      query_size_last > value_size_last ? query_size_last : value_size_last;
+  const auto max_size_last = query_size_last.max(value_size_last);
   if (max_size_last > MAX_HEAD_DIM) {
     if (debug) {
       TORCH_WARN(
