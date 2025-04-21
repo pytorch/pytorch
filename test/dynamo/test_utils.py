@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
 import pprint
+import sys
 from unittest import mock
 
 import torch
@@ -40,7 +41,7 @@ class TestUtils(TestCase):
         self.assertFalse(
             utils.same(
                 a,
-                a * 6,
+                a * 9,
                 fp64_ref=fp64_ref,
                 use_larger_multiplier_for_smaller_tensor=True,
                 tol=tol,
@@ -228,14 +229,21 @@ class TestDynamoTimed(TestCase):
  '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
  '_recursive_pre_grad_passes': [0.0],
+ 'additional_fake_tensor_prop': [0.0, 0.0],
+ 'aot_collect_metadata': [0.0],
+ 'aot_trace_joint_graph': [0.0],
  'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
+ 'build_guards': [0.0],
+ 'bytecode_tracing': [0.0],
+ 'compile_attempt_0': [0.0],
  'compile_file': [0.0, 0.0],
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
  'create_aot_dispatcher_function': [0.0],
- 'gc': [0.0]}""",  # noqa: B950
+ 'gc': [0.0],
+ 'min_cut_rematerialization_partition': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -272,11 +280,16 @@ class TestDynamoTimed(TestCase):
             e.inductor_config = None
             e.cuda_version = None
             e.triton_version = None
+            e.python_version = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        del raw["ir_count"]
+        del raw["param_numel"]
+        del raw["param_bytes"]
+        del raw["param_count"]
         # guard_latency_us is not deterministic
         del raw["guard_latency_us"]
         self.assertExpectedInline(
@@ -298,6 +311,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': False,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': 0,
@@ -333,8 +347,11 @@ class TestDynamoTimed(TestCase):
  'non_compliant_ops': set(),
  'num_graph_breaks': 0,
  'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
+ 'python_version': None,
  'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
@@ -362,7 +379,11 @@ class TestDynamoTimed(TestCase):
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
+        del raw["ir_count"]
         del raw["guard_latency_us"]
+        del raw["param_numel"]
+        del raw["param_bytes"]
+        del raw["param_count"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -382,6 +403,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': None,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': None,
@@ -417,8 +439,11 @@ class TestDynamoTimed(TestCase):
  'non_compliant_ops': None,
  'num_graph_breaks': 0,
  'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
+ 'python_version': None,
  'recompile_reason': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
@@ -442,6 +467,111 @@ class TestDynamoTimed(TestCase):
  'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
+
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+        }
+    )
+    def test_ir_count(self):
+        # Different python versions have different potential IR counts.
+        version = (sys.version_info[0], sys.version_info[1])
+        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13)))
+        first, second = {
+            (3, 9): (10, 6),
+            (3, 10): (10, 6),
+            (3, 11): (10, 6),
+            (3, 12): (10, 6),
+            (3, 13): (11, 7),
+        }[version]
+
+        def test1(x):
+            y = x + x
+            z = y * y
+            return z
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(test1)(torch.randn(10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].ir_count, first)
+
+        def test2(x):
+            y = x + x
+            return y
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(test2)(torch.randn(10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].ir_count, second)
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    def test_num_params(self):
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        class ModelSimple(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5)
+
+            def forward(self, x):
+                return F.relu(self.conv1(x))
+
+        self.assertEqual([x.numel() for x in ModelSimple().parameters()], [500, 20])
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            m = ModelSimple()
+            torch.compile(m)(torch.randn(1, 10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 520)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 520)
+        self.assertEqual(compilation_events[0].param_count, 2)
+
+        class ModelWrapped(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m1 = ModelSimple()
+                self.m2 = ModelSimple()
+
+            def forward(self, x):
+                return self.m1(x) + self.m2(x)
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            m = ModelWrapped()
+            torch.compile(m)(torch.randn(1, 10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 1040)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 1040)
+        self.assertEqual(compilation_events[0].param_count, 4)
+
+        # Test a tied module
+        l1 = nn.Linear(4, 4)
+        l2 = nn.Linear(4, 4)
+        m = nn.Sequential(l1, nn.Sequential(l1, l2))
+        self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 16, 4])
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(m)(torch.randn(4, 4))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 40)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 40)
+        self.assertEqual(compilation_events[0].param_count, 4)
+
+        # Test tied weights
+        l1 = nn.Linear(4, 4)
+        l2 = nn.Linear(4, 4)
+        l1.weight = l2.weight
+        m = nn.Sequential(l1, nn.Sequential(l2))
+        self.assertEqual([x.numel() for x in m.parameters()], [16, 4, 4])
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(m)(torch.randn(4, 4))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 24)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 24)
+        self.assertEqual(compilation_events[0].param_count, 3)
 
 
 class TestInductorConfigParsingForLogging(TestCase):

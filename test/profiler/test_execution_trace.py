@@ -389,6 +389,9 @@ class TestExecutionTrace(TestCase):
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False)
         fp.close()
+        et = ExecutionTraceObserver()
+        et.register_callback(fp.name)
+        et.set_extra_resource_collection(True)
 
         with profile(
             activities=torch.profiler.supported_activities(),
@@ -396,9 +399,7 @@ class TestExecutionTrace(TestCase):
             schedule=torch.profiler.schedule(
                 skip_first=3, wait=1, warmup=1, active=2, repeat=1
             ),
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback(fp.name)
-            ),
+            execution_trace_observer=et,
         ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):

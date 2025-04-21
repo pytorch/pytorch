@@ -1040,9 +1040,10 @@
   result: logsumexp_jvp(self_p, self_t, dim, keepdim)
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  self, b: linalg_lstsq_backward(grad, self, b, grad_input_mask)
-  solution: linalg_lstsq_jvp(self_p, b_p, self_t, b_t)
-  output_differentiability: [True, False, False, False]
+  self, b: linalg_lstsq_backward(grads[0], grads[1], self, b, solution, grad_input_mask)
+  solution: linalg_lstsq_solution_jvp(self_p, b_p, self_t, b_t)
+  residuals: linalg_lstsq_residuals_jvp(self_p, b_p, self_t, b_t, solution, residuals)
+  output_differentiability: [True, True, False, False]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -1204,6 +1205,10 @@
   self: mm_mat1_backward(grad, mat2, self.sym_sizes(), self.sym_strides(), self.layout(), 1)
   mat2: mm_mat2_backward(grad, self, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), 1)
   result: at::mm(self_t, mat2_p) + at::mm(self_p, mat2_t)
+
+- name: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
+  self: _grouped_mm_mat1_backward(grad, mat2, self.sym_sizes(), self.sym_strides(), self.layout(), offs, 1)
+  mat2: _grouped_mm_mat2_backward(grad, self, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), offs, 1)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
@@ -2975,7 +2980,7 @@
 - name: ne.Tensor(Tensor self, Tensor other) -> Tensor
   output_differentiability: [False]
 
-- name: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+- name: multinomial(Tensor self, SymInt num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   output_differentiability: [False]
 
 - name: nonzero(Tensor self) -> Tensor

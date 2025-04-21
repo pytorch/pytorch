@@ -1271,6 +1271,23 @@ class TestFX(JitTestCase):
             "call_module"
         ).check("clamp").check("call_method").run(all_formatted)
 
+    def test_print_graph(self):
+        op: torch._ops.OpOverload = torch.ops.aten.relu.default
+        type_name: str = torch.typename(op)
+
+        graph: torch.fx.Graph = torch.fx.Graph()
+        a: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node("call_function", op, (a,), type_expr=type_name)
+        c: torch.fx.Node = graph.create_node("call_function", op, (b,), type_expr=type_name)
+        graph.output((b, c))
+
+        gm: torch.fx.GraphModule = torch.fx.GraphModule(
+            torch.nn.Module(), graph
+        )
+        gm.graph.lint()
+        text = gm.print_readable(False)
+        assert 2 == text.count("_torch__ops_aten_aten_relu_")
+
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
         # We used to call anonymous Tensor values `__tensor_constant*`, but
@@ -2324,9 +2341,7 @@ class TestFX(JitTestCase):
 
         copied_graph = copy.deepcopy(g)
 
-        val_map = {}
-        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
-            val_map[orig_node] = new_node
+        val_map = dict(zip(g.nodes, copied_graph.nodes))
 
         for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
             orig_users = set(orig_node.users.keys())

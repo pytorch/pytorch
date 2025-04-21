@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
+#include <c10/metal/common.h>
 #include <functional>
 #include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -324,13 +325,15 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
         str += "Scalar";
       } else {
         if (exclude_shape) {
-          str += "[-1]";
+          str += "-1";
         } else {
           str +=
               std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
         }
       }
       str += "]";
+      if (tensor.is_conj())
+        str += "_conj";
     } else {
       str += "Undefined";
     }
@@ -542,7 +545,12 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
       Tensor emptyShell = Tensor();
       // use "_tensor" from Placeholder to retain view's output during its usage in other ops
-      _tensor = gatherViewTensor(src, emptyShell);
+      // And preserve conjugated property here
+      if (!src.is_conj()) {
+        _tensor = gatherViewTensor(src, emptyShell);
+      } else {
+        _tensor = gatherViewTensor(src.conj(), emptyShell).conj();
+      }
       if (!_tensor.has_storage()) {
         // if we cannot gather, we make the tensor contiguous implicitly, and keep
         // it in placeholder to be able to retrieve it when we return from constructor
@@ -638,28 +646,28 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
   switch (type) {
     case ScalarType::Double:
     case ScalarType::Float:
-      return {.value.f = scalar.to<float>(), .size = sizeof(float), .type = type};
+      return {.size = sizeof(float), .type = type, .value.f = scalar.to<float>()};
     case ScalarType::Half:
-      return {.value.h = scalar.to<Half>(), .size = sizeof(short), .type = type};
+      return {.size = sizeof(short), .type = type, .value.h = scalar.to<Half>()};
     case ScalarType::BFloat16:
-      return {.value.bf16 = scalar.to<BFloat16>(), .size = sizeof(short), .type = type};
+      return {.size = sizeof(short), .type = type, .value.bf16 = scalar.to<BFloat16>()};
     case ScalarType::Long:
-      return {.value.i = scalar.to<int64_t>(), .size = sizeof(int64_t), .type = type};
+      return {.size = sizeof(int64_t), .type = type, .value.i = scalar.to<int64_t>()};
     case ScalarType::Int:
-      return {.value.i = scalar.to<int32_t>(), .size = sizeof(int32_t), .type = type};
+      return {.size = sizeof(int32_t), .type = type, .value.i = scalar.to<int32_t>()};
     case ScalarType::Short:
-      return {.value.i = scalar.to<int16_t>(), .size = sizeof(int16_t), .type = type};
+      return {.size = sizeof(int16_t), .type = type, .value.i = scalar.to<int16_t>()};
     case ScalarType::Char:
-      return {.value.i = scalar.to<int8_t>(), .size = sizeof(int8_t), .type = type};
+      return {.size = sizeof(int8_t), .type = type, .value.i = scalar.to<int8_t>()};
     case ScalarType::Byte:
-      return {.value.i = scalar.to<uint8_t>(), .size = sizeof(uint8_t), .type = type};
+      return {.size = sizeof(uint8_t), .type = type, .value.i = scalar.to<uint8_t>()};
     case ScalarType::Bool:
-      return {.value.b = scalar.to<bool>(), .size = sizeof(bool), .type = type};
+      return {.size = sizeof(bool), .type = type, .value.b = scalar.to<bool>()};
     case ScalarType::ComplexHalf:
-      return {.value.ch = scalar.to<c10::complex<Half>>(), .size = sizeof(int32_t), .type = type};
+      return {.size = sizeof(int32_t), .type = type, .value.ch = scalar.to<c10::complex<Half>>()};
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
-      return {.value.cf = scalar.to<c10::complex<float>>(), .size = sizeof(int64_t), .type = type};
+      return {.size = sizeof(int64_t), .type = type, .value.cf = scalar.to<c10::complex<float>>()};
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
@@ -823,19 +831,19 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
   auto it = params.begin();
   switch (nparams) {
     case 1:
-      lib = compileLibrary(fmt::format(shaderSource, *it));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), *it));
       break;
     case 2: {
       auto& first = *it++;
       auto& second = *it;
-      lib = compileLibrary(fmt::format(shaderSource, first, second));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), first, second));
       break;
     }
     case 3: {
       auto& first = *it++;
       auto& second = *it++;
       auto& third = *it;
-      lib = compileLibrary(fmt::format(shaderSource, first, second, third));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), first, second, third));
       break;
     }
     default:
@@ -914,7 +922,8 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 }
 
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
-  return std::make_shared<MetalKernelFunction>(getPipelineStateForFunc(name));
+  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  return std::make_shared<MetalKernelFunction>(cpl, func);
 }
 
 class BundledShaderLibary : public MetalShaderLibrary {
@@ -965,45 +974,108 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            std::optional<int64_t> extra) {
   auto inputTensor = iter.input(0);
   auto outputTensor = iter.output(0);
-  bool is_dense_strided = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
-  bool needs_output_copy = false;
-  uint32_t length = outputTensor.numel();
+  bool is_storage_dense = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
+  uint32_t length = iter.numel();
   if (length == 0) {
     return;
   }
   using namespace mps;
   @autoreleasepool {
     id<MTLComputePipelineState> cplState = nil;
-    cplState = getPipelineStateForFunc(fmt::format(
-        "{}_dense_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
-
-    if (!is_dense_strided) {
-      inputTensor = inputTensor.contiguous();
-      if (!outputTensor.is_contiguous()) {
-        outputTensor = outputTensor.contiguous();
-        needs_output_copy = true;
-      }
-    }
+    cplState = getPipelineStateForFunc(fmt::format("{}_{}_{}_{}",
+                                                   name,
+                                                   is_storage_dense ? "dense" : "strided",
+                                                   scalarToMetalTypeString(outputTensor),
+                                                   scalarToMetalTypeString(inputTensor)));
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto computeEncoder = mpsStream->commandEncoder();
 
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setArgs(computeEncoder, outputTensor, inputTensor);
-      if (extra) {
-        mtl_setBytes(computeEncoder, *extra, 2);
+      if (is_storage_dense) {
+        mtl_setArgs(computeEncoder, outputTensor, inputTensor);
+        if (extra) {
+          mtl_setBytes(computeEncoder, *extra, 2);
+        }
+      } else {
+        mtl_setArgs(computeEncoder,
+                    outputTensor,
+                    inputTensor,
+                    outputTensor.sizes(),
+                    inputTensor.strides(),
+                    outputTensor.strides(),
+                    inputTensor.ndimension());
+        if (extra) {
+          mtl_setBytes(computeEncoder, *extra, 6);
+        }
       }
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });
   }
-  if (needs_output_copy) {
-    iter.output(0).copy_(outputTensor);
-  }
+}
+
+void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std::string& name) {
+  TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
+  TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+
+  Tensor input = iter.input(0);
+  Tensor other = iter.input(1);
+  Tensor out = iter.output();
+
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  const uint32_t nDim = iter.ndim();
+  constexpr uint32_t nOffsets = 3;
+  const uint32_t numThreads = iter.numel();
+  const auto cast_needed = input.scalar_type() != other.scalar_type();
+  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  // TODO: Implicitly pass both input and output types to non-cast kernels
+  const auto kernel_name = cast_needed
+      ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out))
+      : fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      auto binaryPSO = getPipelineStateForFunc(kernel_name);
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
+      [computeEncoder setComputePipelineState:binaryPSO];
+      // Iterator is contiguous if all of its elements are dense in storage,
+      // i.e. it's true for both row-first and column-first tensors
+      if (iter.is_contiguous()) {
+        mtl_setArgs(computeEncoder, out, input, other);
+        if (cast_needed) {
+          std::array<int, 4> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
+                                               static_cast<int>(c10::elementSize(other.scalar_type())),
+                                               static_cast<int>(input.scalar_type()),
+                                               static_cast<int>(other.scalar_type())};
+          mtl_setBytes(computeEncoder, size_and_types, 3);
+        }
+      } else {
+        // Please note that shapes and strides of the iterator might be
+        // different than that of its operands, for example binary op
+        // between 4x4 tensor and scalar will result in 1D 16 element iterator
+        std::array<int, 3> ndim_and_types = {
+            iter.ndim(), static_cast<int>(input.scalar_type()), static_cast<int>(other.scalar_type())};
+        mtl_setArgs(computeEncoder,
+                    out,
+                    input,
+                    other,
+                    iter.shape(),
+                    iter.strides(0),
+                    iter.strides(1),
+                    iter.strides(2),
+                    ndim_and_types);
+      }
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
+      getMPSProfiler().endProfileKernel(binaryPSO);
+    }
+  });
 }
 
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
@@ -1017,10 +1089,12 @@ DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
 }
 
 // MetalKernelFunction implementation
-MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_) : cps([cps_ retain]) {}
+MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_, MTLFunction_t f_)
+    : cps([cps_ retain]), func([f_ retain]) {}
 
 MetalKernelFunction::~MetalKernelFunction() {
   [cps release];
+  [func release];
 }
 
 void MetalKernelFunction::runCommandBlock(std::function<void(void)> run) {
@@ -1081,4 +1155,13 @@ uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
   return [cps staticThreadgroupMemoryLength];
 }
 
+void* get_tensor_gpu_address(const at::TensorBase& t) {
+  return reinterpret_cast<void*>(getMTLBufferStorage(t).gpuAddress + t.storage_offset() * t.element_size());
+}
+
 } // namespace at::native::mps
+
+// Check that c10::metal::ScalarType is strict subset (with matching values) of c10::ScalarType
+#define DTYPE_CHECKER(_n, _v) \
+  static_assert(static_cast<int>(::c10::ScalarType::_n) == static_cast<int>(::c10::metal::ScalarType::_n));
+C10_METAL_ALL_TYPES_FUNCTOR(DTYPE_CHECKER)

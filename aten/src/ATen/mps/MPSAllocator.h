@@ -345,7 +345,6 @@ class MPSHeapAllocatorImpl {
     return m_device;
   }
 
-  // TODO: make a common function to do size unit conversions in PyTorch.
   inline std::string format_size(uint64_t size) const;
 
  private:

@@ -272,7 +272,6 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
 }
 
 Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support angle op with int64 input");
   if (mps::supportsComplex()) {
     mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
@@ -281,7 +280,7 @@ Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
     });
     return output;
   } else {
-    TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex imput on macOS13")
+    TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex input on macOS13")
     mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       // On macOS 13 with non-complex input, realPartOfTensor and imaginaryPartOfTensor are
       // not available, and NaN is not propagated correctly:
@@ -374,7 +373,11 @@ Tensor& logit_out_mps(const Tensor& self, std::optional<double> eps, Tensor& res
 }
 
 Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
-  Tensor result = at::empty(self.sizes(), ScalarType::Float, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  auto out_dtype = self.scalar_type();
+  if (c10::isIntegralType(out_dtype, /*includeBool*/ true)) {
+    out_dtype = kFloat;
+  }
+  Tensor result = at::empty(self.sizes(), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
 }

@@ -196,12 +196,9 @@ class ROCmTemplateKernel(ROCmKernel):
             kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
-        current_device = V.graph.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             kernel_args,
-            device_index=current_device.index,
-            gpu=True,
             triton=False,
             arg_types=arg_types,
         )

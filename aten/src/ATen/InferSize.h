@@ -36,35 +36,32 @@ inline void infer_size_impl(
       TORCH_CHECK(false, "invalid shape dimension ", shape[dim]);
     }
   }
-  
-  auto set_infer_dim = [&](){
+
+  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, newsize)) ||
+      (infer_dim && newsize > 0 && numel % newsize == 0)) {
+    if (infer_dim) {
       // We have a degree of freedom here to select the dimension size; follow
-    // NumPy semantics and just bail.  However, a nice error message is needed
-    // because users often use `view` as a way to flatten & unflatten
-    // dimensions and will otherwise be confused why
-    //   empty_tensor.view( 0, 0)
-    // works yet
-    //   empty_tensor.view(-1, 0)
-    // doesn't.
-    TORCH_CHECK(
-        newsize != 0,
-        "cannot reshape tensor of 0 elements into shape ",
-        shape,
-        " because the unspecified dimension size -1 can be any "
-        "value and is ambiguous");
-    res[*infer_dim] = numel / newsize;
-    return;
-  };
-
-  if (infer_dim && newsize > 0 && numel % newsize == 0) {
-    set_infer_dim();
+      // NumPy semantics and just bail.  However, a nice error message is needed
+      // because users often use `view` as a way to flatten & unflatten
+      // dimensions and will otherwise be confused why
+      //   empty_tensor.view( 0, 0)
+      // works yet
+      //   empty_tensor.view(-1, 0)
+      // doesn't.
+      TORCH_CHECK(
+          newsize != 0,
+          "cannot reshape tensor of 0 elements into shape ",
+          shape,
+          " because the unspecified dimension size -1 can be any "
+          "value and is ambiguous");
+      res[*infer_dim] = numel / newsize;
+    }
     return;
   }
 
-  TORCH_MAYBE_SYM_CHECK(sym_eq(numel, newsize), "shape '", shape, "' is invalid for input of size ",numel);
-  if (infer_dim) {
-    set_infer_dim();
-  }
+  std::ostringstream ss;
+  ss << "shape '" << shape << "' is invalid for input of size " << numel;
+  throw std::runtime_error(ss.str());
 }
 
 inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {

@@ -51,7 +51,7 @@ struct Functor {
 auto lambda = []() {};
 // func() and func__ just exists to silence a compiler warning about lambda
 // being unused
-bool func() {
+static bool func() {
   lambda();
   return true;
 }
@@ -151,6 +151,7 @@ struct MyStatelessConstFunctor final {
   Result operator()(Args...) const {}
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void func() {
   auto stateless_lambda = [](int a) { return a; };
   static_assert(is_stateless_lambda<decltype(stateless_lambda)>::value, "");

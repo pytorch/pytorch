@@ -1,5 +1,12 @@
 #pragma once
 
+// On Windows, math.h needs to be included with _USE_MATH_DEFINES defined to
+// access constants such as M_SQRT2 and M_2_SQRTPI.
+#ifdef _WIN32
+#define _USE_MATH_DEFINES
+#include <cmath>
+#endif // _WIN32
+
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/BFloat16.h> // For c10::is_reduced_floating_point_v.
 
