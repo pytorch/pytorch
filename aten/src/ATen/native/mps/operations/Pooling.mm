@@ -735,7 +735,8 @@ static void avg_pool3d_template(const Tensor& input,
   // Calculate optimal threadgroup size
   threadgroupSize = MTLSizeMake(
       std::min(static_cast<NSUInteger>(pipelineState.maxTotalThreadsPerThreadgroup), static_cast<NSUInteger>(256)),
-      1, 1);
+      1,
+      1);
 
   // Dispatch threads
   [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
@@ -792,9 +793,9 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
 
   // Check data type
   TORCH_CHECK(input.scalar_type() == at::ScalarType::Float || input.scalar_type() == at::ScalarType::Half,
-              "avg_pool3d: MPS implementation only supports Float and Half data types, got ", input.scalar_type());
-  TORCH_CHECK(input.scalar_type() == output.scalar_type(),
-              "avg_pool3d: Input and output data types must match");
+              "avg_pool3d: MPS implementation only supports Float and Half data types, got ",
+              input.scalar_type());
+  TORCH_CHECK(input.scalar_type() == output.scalar_type(), "avg_pool3d: Input and output data types must match");
 
   // Create a new stream for non-contiguous tensors to avoid command buffer conflicts
   if (!input.is_contiguous()) {
@@ -803,29 +804,29 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
 
     // Use the contiguous input tensor
     avg_pool3d_template(contiguous_input,
-                       output,
-                       std::nullopt,
-                       kernel_size,
-                       stride,
-                       padding,
-                       {1, 1, 1},
-                       ceil_mode,
-                       count_include_pad,
-                       divisor_override,
-                       "avg_pool3d");
+                        output,
+                        std::nullopt,
+                        kernel_size,
+                        stride,
+                        padding,
+                        {1, 1, 1},
+                        ceil_mode,
+                        count_include_pad,
+                        divisor_override,
+                        "avg_pool3d");
   } else {
     // Use the original input tensor directly
     avg_pool3d_template(input,
-                       output,
-                       std::nullopt,
-                       kernel_size,
-                       stride,
-                       padding,
-                       {1, 1, 1},
-                       ceil_mode,
-                       count_include_pad,
-                       divisor_override,
-                       "avg_pool3d");
+                        output,
+                        std::nullopt,
+                        kernel_size,
+                        stride,
+                        padding,
+                        {1, 1, 1},
+                        ceil_mode,
+                        count_include_pad,
+                        divisor_override,
+                        "avg_pool3d");
   }
 }
 
@@ -841,7 +842,10 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
  const Tensor& grad_input) {
   // Check input dimensions
   TORCH_CHECK(input.dim() == 5, "avg_pool3d_backward: Expected 5D tensor as input, got ", input.dim(), "D tensor");
-  TORCH_CHECK(grad_output.dim() == 5, "avg_pool3d_backward: Expected 5D tensor as grad_output, got ", grad_output.dim(), "D tensor");
+  TORCH_CHECK(grad_output.dim() == 5,
+              "avg_pool3d_backward: Expected 5D tensor as grad_output, got ",
+              grad_output.dim(),
+              "D tensor");
 
   // Extract dimensions
   const int64_t nbatch = input.size(0);
@@ -851,8 +855,12 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
   const int64_t input_width = input.size(4);
 
   // Check grad_input dimensions
-  TORCH_CHECK(grad_input.dim() == 5, "avg_pool3d_backward: Expected 5D tensor as grad_input, got ", grad_input.dim(), "D tensor");
-  TORCH_CHECK(grad_input.size(0) == nbatch, "avg_pool3d_backward: grad_input batch size doesn't match input batch size");
+  TORCH_CHECK(grad_input.dim() == 5,
+              "avg_pool3d_backward: Expected 5D tensor as grad_input, got ",
+              grad_input.dim(),
+              "D tensor");
+  TORCH_CHECK(grad_input.size(0) == nbatch,
+              "avg_pool3d_backward: grad_input batch size doesn't match input batch size");
   TORCH_CHECK(grad_input.size(1) == channels, "avg_pool3d_backward: grad_input channels doesn't match input channels");
   TORCH_CHECK(grad_input.size(2) == input_depth, "avg_pool3d_backward: grad_input depth doesn't match input depth");
   TORCH_CHECK(grad_input.size(3) == input_height, "avg_pool3d_backward: grad_input height doesn't match input height");
@@ -860,7 +868,8 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
 
   // Check data type
   TORCH_CHECK(input.scalar_type() == at::ScalarType::Float || input.scalar_type() == at::ScalarType::Half,
-              "avg_pool3d_backward: MPS implementation only supports Float and Half data types, got ", input.scalar_type());
+              "avg_pool3d_backward: MPS implementation only supports Float and Half data types, got ",
+              input.scalar_type());
   TORCH_CHECK(input.scalar_type() == grad_output.scalar_type() && input.scalar_type() == grad_input.scalar_type(),
               "avg_pool3d_backward: Input, grad_output, and grad_input data types must match");
 
@@ -872,29 +881,29 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)
 
     // Use the contiguous tensors
     avg_pool3d_template(contiguous_input,
-                       grad_input,
-                       contiguous_grad_output,
-                       kernel_size,
-                       stride,
-                       padding,
-                       {1, 1, 1},
-                       ceil_mode,
-                       count_include_pad,
-                       divisor_override,
-                       "avg_pool3d_backward");
+                        grad_input,
+                        contiguous_grad_output,
+                        kernel_size,
+                        stride,
+                        padding,
+                        {1, 1, 1},
+                        ceil_mode,
+                        count_include_pad,
+                        divisor_override,
+                        "avg_pool3d_backward");
   } else {
     // Use the original tensors directly
     avg_pool3d_template(input,
-                       grad_input,
-                       grad_output,
-                       kernel_size,
-                       stride,
-                       padding,
-                       {1, 1, 1},
-                       ceil_mode,
-                       count_include_pad,
-                       divisor_override,
-                       "avg_pool3d_backward");
+                        grad_input,
+                        grad_output,
+                        kernel_size,
+                        stride,
+                        padding,
+                        {1, 1, 1},
+                        ceil_mode,
+                        count_include_pad,
+                        divisor_override,
+                        "avg_pool3d_backward");
   }
 }
 
