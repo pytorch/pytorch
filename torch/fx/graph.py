@@ -222,6 +222,7 @@ dtype_abbrs = {
     torch.float8_e4m3fnuz: "f8e4m3fnuz",
     torch.float8_e5m2fnuz: "f8e5m2fnuz",
     torch.float8_e8m0fnu: "f8e8m0fnu",
+    torch.float4_e2m1fn_x2: "f4e2m1fnx2",
     torch.complex32: "c32",
     torch.complex64: "c64",
     torch.complex128: "c128",
@@ -438,7 +439,7 @@ class CodeGen:
             global_name = namespace.create_name(name_hint, obj)
 
             if global_name in globals_:
-                assert globals_[global_name] is obj
+                assert globals_[global_name] == obj
                 return global_name
             globals_[global_name] = obj
             return global_name
@@ -1809,10 +1810,14 @@ class Graph:
         # DCE below will not behave as expected.
         self.lint()
 
+        impure_random = True
+        if torch._guards.TracingContext.try_get():
+            impure_random = torch._inductor.config.fallback_random
+
         def has_side_effect(node):
             if is_impure_node is not None:
                 return is_impure_node(node)
-            return node.is_impure()
+            return node.is_impure(impure_random)
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects

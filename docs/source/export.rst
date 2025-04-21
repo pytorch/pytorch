@@ -797,6 +797,12 @@ API Reference
 
     .. automethod:: dynamic_shapes
 
+.. autoclass:: torch.export.dynamic_shapes.AdditionalInputs
+
+    .. automethod:: add
+    .. automethod:: dynamic_shapes
+    .. automethod:: verify
+
 .. autofunction:: torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram

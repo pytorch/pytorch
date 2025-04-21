@@ -194,6 +194,9 @@ def get_pt_compiler_flags():
     return select({
         "DEFAULT": _PT_COMPILER_FLAGS,
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
+    }) + select({
+        "DEFAULT": [],
+        "ovr_config//os:macos": ["-fvisibility=default"],
     })
 
 _PT_COMPILER_FLAGS = [
@@ -228,6 +231,9 @@ ATEN_COMPILER_FLAGS = [
     # Not supported by clang on Windows
     "DEFAULT": ["-fPIC"],
     "ovr_config//compiler:clang-windows": [],
+}) + select({
+    "DEFAULT": [],
+    "ovr_config//os:macos": ["-fvisibility=default"],
 })
 
 def get_aten_compiler_flags():
@@ -982,6 +988,10 @@ def define_buck_targets(
     fb_xplat_cxx_library(
         name = "torch_mobile_headers",
         header_namespace = "",
+        compiler_flags = select({
+            "DEFAULT": [],
+            "ovr_config//os:macos": ["-fvisibility=default"],
+        }),
         exported_headers = subdir_glob(
             [
                 ("", "torch/csrc/jit/mobile/*.h"),
@@ -1185,7 +1195,10 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/jit/mobile/observer.cpp",
         ] + ([] if IS_OSS else ["torch/fb/observers/MobileObserverUtil.cpp"]),
-        compiler_flags = ["-fexceptions"],
+        compiler_flags = ["-fexceptions"] + select({
+            "DEFAULT": [],
+            "ovr_config//os:macos": ["-fvisibility=default"],
+        }),
         header_namespace = "",
         exported_headers = subdir_glob(
             [
@@ -2035,7 +2048,7 @@ def define_buck_targets(
             "ovr_config//os:xtensa-xos": [
                 "-fdata-sections",
                 "-ffunction-sections",
-            ],
+            ]
         }),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DMIN_EDGE_RUNTIME",

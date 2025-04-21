@@ -433,9 +433,7 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
         # Use odd dim sizes to test uneven shards
-        # TODO: change "mlp_dim" back to 9 when uneven sharding
-        # is supported for FSDP+TP
-        model = MLP(8, dim_multiplier=3)
+        model = MLP(9, dim_multiplier=3)
         orig_params = [param.detach().clone() for param in model.parameters()]
         orig_param_names = [param_name for param_name, _ in model.named_parameters()]
         parallelize_module(

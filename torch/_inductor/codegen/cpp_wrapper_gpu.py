@@ -54,6 +54,7 @@ class DeferredTritonCallWrapper:
 
     wrapper_name: str
     kernel_name: str
+    kernel_name_to_body: dict[str, str]
     arg_types: list[Any]
 
     def generate(self, wrapper: CppWrapperGpu):
@@ -122,6 +123,11 @@ class DeferredTritonCallWrapper:
             )
         prefix.writeline("){")
         with prefix.indent():
+            if V.graph.aot_mode:
+                # Emit the original Triton kernel for debugging purposes
+                prefix.writeline("/*")
+                prefix.splice(self.kernel_name_to_body[self.kernel_name])
+                prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
             self.generate_load_kernel(prefix, kernel_var_name, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
@@ -205,6 +211,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
+        self._kernel_name_to_body: dict[str, str] = {}
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
 
@@ -233,7 +240,7 @@ class CppWrapperGpu(CppWrapperCpu):
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
-    def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
+    def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         name = f"stream{device_idx}"
         self.writeline(
             maybe_hipify_code_wrapper(
@@ -287,7 +294,7 @@ class CppWrapperGpu(CppWrapperCpu):
 
         super().codegen_inputs()
 
-    def define_kernel(
+    def _define_kernel_helper(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -296,13 +303,14 @@ class CppWrapperGpu(CppWrapperCpu):
         cpp_definition: Optional[str] = None,
     ):
         if gpu:
+            self._kernel_name_to_body[kernel_name] = kernel_body
             if config.triton.autotune_at_compile_time:
                 # Call PythonWrapperCodegen to create the autotune code block
-                PythonWrapperCodegen.define_kernel(
+                PythonWrapperCodegen._define_kernel_helper(
                     self, kernel_name, kernel_body, metadata, gpu, cpp_definition
                 )
         else:
-            return CppWrapperCpu.define_kernel(
+            return CppWrapperCpu._define_kernel_helper(
                 self, kernel_name, kernel_body, metadata, gpu, cpp_definition
             )
 
@@ -432,12 +440,12 @@ class CppWrapperGpu(CppWrapperCpu):
             is not None
         ):
             global_scratch_def, global_scratch_var = global_scratch
-            code.writeline(global_scratch_def)
+            code.writeline(maybe_hipify_code_wrapper(global_scratch_def))
             new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
 
-    def generate_kernel_call(
+    def _generate_kernel_call_helper(
         self,
         kernel_name: str,
         call_args,
@@ -448,6 +456,7 @@ class CppWrapperGpu(CppWrapperCpu):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        graph_name="",
         original_fxnode_name=None,
     ):
         """
@@ -458,7 +467,7 @@ class CppWrapperGpu(CppWrapperCpu):
         device = device or V.graph.get_current_device_or_throw()
         if device.type == "cpu":
             # Even in CppWrapperGpu, we may see cpp kernels
-            return CppWrapperCpu.generate_kernel_call(
+            return CppWrapperCpu._generate_kernel_call_helper(
                 self,
                 kernel_name,
                 call_args,
@@ -476,7 +485,7 @@ class CppWrapperGpu(CppWrapperCpu):
             and kernel_name not in self.kernel_autotune_names
         ):
             # Call PythonWrapperCodegen to create the autotune code block
-            PythonWrapperCodegen.generate_kernel_call(
+            PythonWrapperCodegen._generate_kernel_call_helper(
                 self,
                 kernel_name,
                 call_args,
@@ -492,7 +501,7 @@ class CppWrapperGpu(CppWrapperCpu):
         stream = (
             "stream"
             if V.graph.aot_mode
-            else self.write_get_raw_stream(device.index, V.graph)
+            else self.write_get_raw_stream(device.index, graph_name)
         )
 
         if triton:
@@ -502,7 +511,10 @@ class CppWrapperGpu(CppWrapperCpu):
             wrapper_name = f"call_{kernel_name}"
             if wrapper_name not in self._triton_call_wrappers:
                 self._triton_call_wrappers[wrapper_name] = DeferredTritonCallWrapper(
-                    wrapper_name, kernel_name, arg_types
+                    wrapper_name,
+                    kernel_name,
+                    self._kernel_name_to_body,
+                    arg_types,
                 )
             call_args.append(stream)
             if V.graph.aot_mode:
