@@ -12033,7 +12033,6 @@ def forward(self, x, y):
             list(ep.module()(torch.tensor([0, 1, 0])).shape),
             [0, 1, 0],
         )
-        breakpoint()
 
         class Bar(torch.nn.Module):
             def forward(self, xs):
@@ -12052,7 +12051,7 @@ def forward(self, x, y):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(u1, u0\) .*",
+            r"Runtime assertion failed for expression Eq\(u0, u1\) .*",
         ):
             ep.module()(torch.tensor([1, 5]))
 
