@@ -23,13 +23,13 @@ namespace {
 }
 
 static const std::vector<DispatchKey>& allDispatchKeysInFullSet() {
-  static const auto result = ([]() {
+  static const auto result = []() {
     std::vector<DispatchKey> vec;
     for (const auto dispatch_key: DispatchKeySet(DispatchKeySet::FULL)) {
       vec.push_back(dispatch_key);
     }
     return vec;
-  })();
+  }();
   return result;
 }
 
@@ -37,17 +37,14 @@ static const std::vector<DispatchKey>& allDispatchKeysInFullSet() {
 // entry is the DispatchKey that the corresponding index in the
 // dispatch table represents.
 static const auto& getDispatchTableIndexToKey() {
-  static const auto result = ([]() {
+  static const auto result = []() {
     using result_type = std::array<DispatchKey, c10::num_runtime_entries>;
     result_type arr;
     arr.fill(DispatchKey::Undefined);
-    const auto update_array_entry = [](result_type& arr_, DispatchKey dk) {
-      const auto index = getDispatchTableIndexForDispatchKey(dk);
-      TORCH_INTERNAL_ASSERT(arr_.at(index) == DispatchKey::Undefined);
-      arr_.at(index) = dk;
-    };
-    for (const auto dk_outer: allDispatchKeysInFullSet()) {
-      update_array_entry(arr, dk_outer);
+    for (const auto dispatch_key: allDispatchKeysInFullSet()) {
+      const auto index = getDispatchTableIndexForDispatchKey(dispatch_key);
+      TORCH_INTERNAL_ASSERT(arr.at(index) == DispatchKey::Undefined);
+      arr.at(index) = dispatch_key;
     }
     // Self-test. Should be plenty cheap enough to just run in prod
     // builds. We just need to make sure that we have the dispatch key
@@ -60,7 +57,7 @@ static const auto& getDispatchTableIndexToKey() {
       TORCH_INTERNAL_ASSERT(arr[index] != DispatchKey::Undefined, "missing dispatch key at index ", index);
     }
     return arr;
-  })();
+  }();
   return result;
 }
 
