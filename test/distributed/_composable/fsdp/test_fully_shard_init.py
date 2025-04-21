@@ -840,7 +840,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         # since the ref has a parent mesh, while the `from_group` one does not
         self.assertEqual(dp_mesh.mesh, ref_dp_mesh.mesh)
         self.assertEqual(dp_mesh._coordinate_on_dim, ref_dp_mesh._coordinate_on_dim)
-        self.assertEqual(dp_mesh._dim_group_infos, ref_dp_mesh._dim_group_infos)
+        self.assertEqual(dp_mesh._dim_group_names, ref_dp_mesh._dim_group_names)
 
         # Check 1D FSDP forward/backward parity over the DP mesh
         # NOTE: We cannot use 2D DTensor-based training here because the DP
@@ -916,12 +916,6 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)
-        for (_, ranks, _), (_, ref_ranks, _) in zip(
-            mesh._dim_group_infos, ref_mesh._dim_group_infos
-        ):
-            # Since we manually constructed new subgroups, the test and ref
-            # groups are not the same
-            self.assertEqual(ranks, ref_ranks)
         for mesh_dim_name in mesh_dim_names:
             child_mesh = mesh[mesh_dim_name]
             ref_child_mesh = ref_mesh[mesh_dim_name]
