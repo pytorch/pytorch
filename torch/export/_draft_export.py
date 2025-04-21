@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Callable, Optional, Union
@@ -20,6 +21,7 @@ from torch._export.passes.insert_custom_op_guards import (
 from torch.export import ExportedProgram
 from torch.export._trace import _export
 from torch.export.dynamic_shapes import _DimHint, _DimHintType, Dim
+from torch.utils._sympy.symbol import prefix_str, SymT
 
 
 log = logging.getLogger(__name__)
@@ -77,6 +79,32 @@ def get_loc(filename: str, lineno: int) -> Optional[str]:
         pass
     return None
 
+
+def normalize_sympy_expr(expr: str) -> str:
+    """
+    For expression deduplication; normalizes by ignoring symbol indices.
+    For example, treats "u0 > u1", "u0 > u2", "u2 > u0" as the same, but "u0 > u0" and "u0 > s0" differently.
+    Does this by searching for symbol matches in order of appearance and replacing with a normalized index.
+    """
+    symbol_types = [SymT.SIZE, SymT.FLOAT, SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT]
+
+    def replace(s, start, end, repl):
+        return s[:start] + repl + s[end:]
+
+    symbol_map = {}
+    for sym_type in symbol_types:
+        count = 0
+        pattern = rf"{prefix_str[sym_type]}(?:0|[1-9][0-9]*)"
+        while (match := re.search(pattern, expr)) is not None:
+            sym = match.group()
+            if sym not in symbol_map:
+                repl = f"_{prefix_str[sym_type]}_{count}"
+                symbol_map[sym] = repl
+                count += 1
+            expr = replace(expr, match.start(), match.end(), symbol_map[sym])
+
+    return expr
+    
 
 class FailureReport:
     def __init__(
@@ -224,7 +252,7 @@ class LogRecord:
         elif key == "mismatched_fake_kernel":
             return hash((key, data["op"], data["reason"]))
         elif key == "propagate_real_tensors_provenance":
-            return hash((key, json.dumps(data["user_stack"])))
+            return hash((key, json.dumps(data["user_stack"]), normalize_sympy_expr(data["expr"])))
         elif key == "guard_added":
             return hash((key, json.dumps(data["user_stack"])))
         elif key == "create_unbacked_symbol":

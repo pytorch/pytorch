@@ -8,6 +8,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Dim, export
 from torch.export._draft_export import draft_export, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.nn.functional import normalize
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 from torch.testing._internal.torchbind_impls import (
@@ -311,11 +312,14 @@ class TestDraftExport(TestCase):
 
         ep = draft_export(M(), (torch.tensor([938]),))
         report = ep._report
-        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(len(report.failures), 2)
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(2*u1, 10)")
+        self.assertEqual(
+            [fail.data["expr"] for fail in report.failures],
+            ["Eq(2*u1, 10)", "Ne(Mod(10, 2*u1), 0)"],
+        )
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
@@ -662,6 +666,25 @@ class TestDraftExport(TestCase):
                 package_path=f.name,
             )
 
+    def test_data_dep_error_normalization(self):
+        from torch.export._draft_export import normalize_sympy_expr
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2, u3 = xs.tolist()
+                return torch.empty(u0, u1)[u2:-1, 1:u3]
+
+        ep = draft_export(Foo(), (torch.tensor([16, 16, 2, 14]),))
+        self.assertExpectedInline(
+            " | ".join([failure.data["expr"] for failure in ep._report.failures]),
+            """u2 < 0 | u2 > u0 | u0 - 1 < u2 | Ne(u2*Max(1, u1), 32) | Eq(u1*(u0 - u2 - 1), 0) | Ne(u0 - u2 - 1, 1) | u3 < 1 | Eq((u3 - 1)*(u0 - u2 - 1), 0) | Ne(u3 - 1, 1) | Eq(Max(1, u1), u3 - 1)""",
+        )
+
+        # test normalizer
+        self.assertEqual(normalize_sympy_expr("u0 > u2 + u0"), normalize_sympy_expr("u1 > u2 + u1"))
+        self.assertEqual(normalize_sympy_expr("u0 > u2 + u0"), normalize_sympy_expr("u2 > u0 + u2"))
+        self.assertNotEqual(normalize_sympy_expr("u0 > u2 + u0"), normalize_sympy_expr("u0 > u0 + u0"))
+        self.assertEqual(normalize_sympy_expr("u0*zuf0 + s0*zf0 - s0"), normalize_sympy_expr("u10*zuf12 + s64*zf22 - s64"))
 
 if __name__ == "__main__":
     run_tests()
