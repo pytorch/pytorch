@@ -1197,13 +1197,14 @@ class TestMaxAutotune(TestCase):
                 remove_white_space(cache_key),
                 remove_white_space(
                     """
-                {'input_nodes': ["[[10, 22], [22, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                "[[22, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]"],
-                  'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
-                  'call_sizes': [10, 30], 'layout': "[[10, 30], [30, 1], torch.float32, device(type='cuda', index=0), 0]",
-                  'num_consumer_groups': 0, 'num_buffers_warp_spec': 0,
-                  'kwargs': {'EVEN_K': False, 'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32',
-                  'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                {'input_nodes': ["[['10', '22'], ['22', '1'], torch.float32, device(type='cuda', index=0), '0']",
+                                "[['22', '30'], ['30', '1'], torch.float32, device(type='cuda', index=0), '0']"],
+                 'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': ['10', '30'],
+                 'layout': "[['10', '30'], ['30', '1'], torch.float32, device(type='cuda', index=0), '0']",
+                 'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {'EVEN_K': False, 'ALLOW_TF32': True,
+                 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32,
+                 'BLOCK_K': 16, 'GROUP_M': 8}}
+                """
                 ),
             )
 
@@ -1231,21 +1232,26 @@ class TestMaxAutotune(TestCase):
 
             self.assertEqual(compiled_results, eager_results, atol=0.05, rtol=0.05)
 
-            self.assertEqual(hits(), 0)
-            self.assertEqual(misses(), 8)
+            self.assertEqual(hits(), 4)
+            self.assertEqual(misses(), 4)
 
             cache_key, events = get_cache_key_and_events()
 
             self.assertEqual(
                 remove_white_space(cache_key),
                 remove_white_space(
-                    """{'input_nodes': ["[[s77, s17], [s17, 1], torch.float32, device(type='cuda', index=0), 0]",
-                                        "[[s17, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]"],
-                        'num_stages': 1, 'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0, 'call_sizes': [s77, s94],
-                        'layout': "[[s77, s94], [s94, 1], torch.float32, device(type='cuda', index=0), 0]",
+                    """{'input_nodes':
+                        ["[['_normalized_symbol1', '_normalized_symbol2'], ['_normalized_symbol2', '1'],
+                                torch.float32, device(type='cuda', index=0), '0']",
+                        "[['_normalized_symbol2', '_normalized_symbol3'], ['_normalized_symbol3', '1'],
+                                torch.float32, device(type='cuda', index=0), '0']"], 'num_stages': 1,
+                        'num_warps': 2, 'prefix_args': 0, 'suffix_args': 0,
+                        'call_sizes': ['_normalized_symbol1', '_normalized_symbol3'],
+                        'layout': "[['_normalized_symbol1', '_normalized_symbol3'], ['_normalized_symbol3', '1'],
+                            torch.float32, device(type='cuda', index=0), '0']",
                         'num_consumer_groups': 0, 'num_buffers_warp_spec': 0, 'kwargs': {'EVEN_K': False,
-                        'ALLOW_TF32': True, 'USE_FAST_ACCUM': False,
-                        'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16, 'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
+                        'ALLOW_TF32': True, 'USE_FAST_ACCUM': False, 'ACC_TYPE': 'tl.float32', 'BLOCK_M': 16,
+                        'BLOCK_N': 32, 'BLOCK_K': 16, 'GROUP_M': 8}}"""
                 ),
             )
 

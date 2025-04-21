@@ -14,6 +14,7 @@ import re
 import sys
 import textwrap
 import time
+from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
@@ -1159,15 +1160,35 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
     ) -> Optional[str]:
+        symbol_mapping = {}
+        next_symbol_index = 1
+
+        def normalize_symbols(x: sympy.core.Expr) -> str:
+            symbols = x.free_symbols
+            nonlocal next_symbol_index
+            original_string = str(x)
+            for s in symbols:
+                if str(s) not in symbol_mapping:
+                    symbol_mapping[str(s)] = f"_normalized_symbol{next_symbol_index}"
+                    next_symbol_index += 1
+                original_string = original_string.replace(
+                    str(s), symbol_mapping[str(s)]
+                )
+
+            return original_string
+
+        def normalize_list(ls: Sequence[sympy.core.Expr]) -> list[str]:
+            return [normalize_symbols(x) for x in ls]
+
         def layout_key(layout: ir.Layout) -> str:
             assert not isinstance(layout, ir.FlexibleLayout)
             return repr(
                 [
-                    layout.size,
-                    layout.stride,
+                    normalize_list(layout.size),
+                    normalize_list(layout.stride),
                     layout.dtype,
                     layout.device,
-                    layout.offset,
+                    normalize_symbols(layout.offset),
                 ]
             )
 
@@ -1198,7 +1219,7 @@ class GeneratedCodeCache:
                 "num_warps": num_warps,
                 "prefix_args": prefix_args,
                 "suffix_args": suffix_args,
-                "call_sizes": call_sizes,
+                "call_sizes": normalize_list(call_sizes),
                 "layout": layout_key(layout),
                 "num_consumer_groups": num_consumer_groups,
                 "num_buffers_warp_spec": num_buffers_warp_spec,
@@ -1620,6 +1641,7 @@ class ExternKernelChoice:
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
+
         setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
