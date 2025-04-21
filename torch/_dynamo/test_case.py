@@ -43,7 +43,7 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
         return  # skip testing
 
     if (
-        not torch.xpu.is_available()
+        torch.cuda.is_available() and IS_WINDOWS
     ):
         return
 
