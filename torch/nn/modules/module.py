@@ -1437,7 +1437,9 @@ class Module:
         r"""Register a backward hook on the module.
 
         The hook will be called every time the gradients with respect to a module
-        are computed, i.e. the hook will execute if and only if the gradients with
+        are computed. When all inputs to the module do not require gradients, the hook will be
+        fired when the gradients are computed with respect to the module's outputs instead.
+        In other cases, the hook will execute if and only if the gradients with
         respect to module outputs are computed. The hook should have the following
         signature::
 
