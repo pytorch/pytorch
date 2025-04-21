@@ -6164,6 +6164,8 @@ class ShapeEnv:
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
         sloc, maybe_extra_debug = self._get_stack_summary(True)
+        if torch.compiler.is_exporting() and not torch._dynamo.eval_frame._is_dynamo_exporting():
+            breakpoint()
         if expr.is_integer:  # type: ignore[attr-defined]
             desc = (
                 "Could not extract specialized integer from data-dependent expression"

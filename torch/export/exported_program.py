@@ -1385,14 +1385,13 @@ class ExportedProgram:
             python_decomp_table,
         ) = _split_decomp_table_to_cia_and_python_decomp(_decomp_table)
 
-        with _compiling_state_context():
-            return _decompose_exported_program(
-                self,
-                cia_to_decomp=cia_to_decomp,
-                python_decomp_table=python_decomp_table,
-                joint_loss_index=None,
-                decompose_custom_triton_ops=decompose_custom_triton_ops,
-            )
+        return _decompose_exported_program(
+            self,
+            cia_to_decomp=cia_to_decomp,
+            python_decomp_table=python_decomp_table,
+            joint_loss_index=None,
+            decompose_custom_triton_ops=decompose_custom_triton_ops,
+        )
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
