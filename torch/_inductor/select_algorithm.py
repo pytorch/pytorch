@@ -1266,9 +1266,9 @@ class TritonTemplate(KernelTemplate):
         TritonTemplate.all_templates[name] = self
         self.debug = debug
         self._cache_codegen = cache_codegen
-        if cache_codegen:
-            self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
-            clear_on_fresh_inductor_cache(self._generated_code_cache)
+     
+        self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
+        clear_on_fresh_inductor_cache(self._generated_code_cache)
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -1295,7 +1295,7 @@ class TritonTemplate(KernelTemplate):
         # breakpoint()
         """Generate the python code and load it into the current process"""
         cache_key = None
-        if  self._cache_codegen:
+        if self._cache_codegen:
             cache_key = self._generated_code_cache.make_key(
                 input_nodes,
                 num_stages,
