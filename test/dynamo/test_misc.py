@@ -1507,11 +1507,13 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         @torch.compile(fullgraph=True)
         def f(x):
+            # At this point, this isn't statically known, only the hint says so.
             if statically_known_true(x.shape[0] > 9):
                 x -= 1
             else:
                 x += 1
             torch._check(x.shape[0] >= 10)
+            # But now it is.
             if statically_known_true(x.shape[0] > 9):
                 x += 1
             else:
