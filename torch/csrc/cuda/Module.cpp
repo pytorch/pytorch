@@ -1083,6 +1083,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
           )
       .def_readonly("uuid", &cudaDeviceProp::uuid)
+      .def_readonly("pci_bus_id", &cudaDeviceProp::pciBusID)
+      .def_readonly("pci_device_id", &cudaDeviceProp::pciDeviceID)
+      .def_readonly("pci_domain_id", &cudaDeviceProp::pciDomainID)
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
@@ -1094,6 +1097,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
                << ", uuid=" << uuid_to_string(prop.uuid.bytes)
+               << ", pci_bus_id=" << prop.pciBusID
+               << ", pci_device_id=" << prop.pciDeviceID
+               << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
         return stream.str();
