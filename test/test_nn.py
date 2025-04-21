@@ -12152,7 +12152,7 @@ if __name__ == '__main__':
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("120GB", "cpu")
     @largeTensorTest("70GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
