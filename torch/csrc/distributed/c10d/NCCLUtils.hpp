@@ -336,9 +336,12 @@ class NCCLComm {
   ncclResult_t registerSegment(
       void* ptr,
       size_t size,
+      bool isExpandable,
+      bool regSnapshot,
+      size_t snapshotSegmentSize = 0,
       bool errorOnRereg = true);
 
-  ncclResult_t deregisterSegment(void* ptr);
+  ncclResult_t deregisterSegment(void* ptr, size_t size);
 
   std::string repr() const;
 
@@ -363,8 +366,11 @@ class NCCLComm {
   // Device index for which the NCCL comm is created
   at::DeviceIndex deviceIndex_{-1};
 #ifdef NCCL_HAS_COMM_REGISTER
-  // Stores handlers for tensors registered by NCCL
-  std::unordered_map<void*, void*> registeredSegmentHandles_;
+  // Stores handlers for tensors registered by NCCL using ptr as key, and
+  // <handle, size> as value. We store size here to track for expanded segment
+  // at unmap that may contain multiple underlying segments, each needs to be
+  // deregistered separately.
+  std::unordered_map<void*, std::pair<void*, size_t>> registeredSegmentHandles_;
 #endif // NCCL_HAS_COMM_REGISTER
 
  private:

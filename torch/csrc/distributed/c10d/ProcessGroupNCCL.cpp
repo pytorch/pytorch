@@ -263,16 +263,18 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 bool shouldAllCommunicatorsRegisterAllTensors() {
 #ifdef NCCL_HAS_COMM_REGISTER
   static const bool flag = [] {
-    const bool flag =
-        getCvarBool(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, false);
-    if (flag &&
-        c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-            expandable_segments()) {
-      LOG(INFO)
-          << "disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+    std::string tensorRegisterOption =
+      getCvarString(TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK, "DISABLE");
+    if (tensorRegisterOption == "DISABLE" || tensorRegisterOption == "0") {
       return false;
+    } else if (tensorRegisterOption == "ALL" || tensorRegisterOption == "1") {
+      return true;
+    } else {
+       TORCH_INTERNAL_ASSERT(
+           false,
+            "Unknown tensor register option. TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK accepts DISABLE or ALL but is ",
+            tensorRegisterOption);
     }
-    return flag;
   }();
   return flag;
 #else
@@ -310,10 +312,17 @@ std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 static void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
-  if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
+  bool needRegister =
+      (te.action_ ==
+       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) ||
+      (te.action_ ==
+       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_MAP);
+  if (!needRegister) {
     return;
   }
+
+  bool isExpandable = te.action_ ==
+      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_MAP;
 
   std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
   for (auto& [ncclComm, memPools] : ncclCommMemPoolMap) {
@@ -321,7 +330,8 @@ static void cacheAllocatorRegisterHook(
       if (shouldAllCommunicatorsRegisterAllTensors() ||
           memPools.find(te.mempool_) != memPools.end()) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+        ncclComm->registerSegment(
+            reinterpret_cast<void*>(te.addr_), te.size_, isExpandable, false);
       }
     }
   }
@@ -329,9 +339,12 @@ static void cacheAllocatorRegisterHook(
 
 static void cacheAllocatorDeregisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
-  // deregister before SEGMENT_FREE
-  if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) {
+  bool needDeregister =
+      (te.action_ ==
+       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) ||
+      (te.action_ ==
+       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_UNMAP);
+  if (!needDeregister) {
     return;
   }
 
@@ -341,7 +354,7 @@ static void cacheAllocatorDeregisterHook(
       if (shouldAllCommunicatorsRegisterAllTensors() ||
           memPools.find(te.mempool_) != memPools.end()) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+        ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_), te.size_);
       }
     }
   }
@@ -1198,6 +1211,9 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<void*>(segmentInfo.address),
         segmentInfo.total_size,
+        /*isExpandable=*/false,
+        /*regSnapshot=*/true,
+        /*snapshotSegmentSize=*/0,
         /*errorOnRereg=*/false); // ignores reregistration error
   }
 }
@@ -1230,7 +1246,8 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+    ncclComm->deregisterSegment(
+        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
   }
 }
 
@@ -3051,10 +3068,19 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
         TORCH_INTERNAL_ASSERT(
             segmentInfo.device == device.index(),
             "Mismatch between CUDA memory segment device and current device");
+        // FIXME: set kLargeBuffer to
+        // c10::cuda::CUDACachingAllocator::kLargeBuffer
+        // FIXME: set kSmallBuffer to
+        // c10::cuda::CUDACachingAllocator::kSmallBuffer
+        const size_t kLargeBuffer = 20971520;
+        const size_t kSmallBuffer = 2097152;
         ncclComm->registerSegment(
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             reinterpret_cast<void*>(segmentInfo.address),
-            segmentInfo.total_size);
+            segmentInfo.total_size,
+            segmentInfo.is_expandable,
+            true,
+            segmentInfo.is_large ? kLargeBuffer : kSmallBuffer);
       }
     }
     // Record the mapping between ncclComm and device index so that later

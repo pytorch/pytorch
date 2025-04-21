@@ -148,6 +148,11 @@ constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
 
+enum TensorRegisterOption {
+  DISABLE = 0,
+  ALL = 1,
+};
+
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
 // CleanUpOnly: just clean up collectives and abort communicators without

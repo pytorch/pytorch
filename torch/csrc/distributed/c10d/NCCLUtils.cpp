@@ -289,7 +289,7 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
 #ifdef NCCL_HAS_COMM_REGISTER
   // Deregister all registered segments before aborting.
   for (auto& it : registeredSegmentHandles_) {
-    void* handle = it.second;
+    auto& [handle, segmentSize] = it.second;
     C10D_NCCL_CHECK(
         ::ncclCommDeregister(ncclComm_, handle),
         c10::str(
@@ -358,69 +358,117 @@ ncclResult_t NCCLComm::checkForNcclError() {
 ncclResult_t NCCLComm::registerSegment(
     void* ptr,
     size_t size,
-    bool errorOnRereg /*=true*/) {
-  LockType lock(mutex_);
+    bool isExpandable,
+    bool regSnapshot,
+    size_t snapshotSegmentSize,
+    bool errorOnRereg) {
 #ifdef NCCL_HAS_COMM_REGISTER
-  // We register only segments from cache allocator
-  // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
-  // maps to a unique handle and should not be registered before the current
-  // ptr is deregistered and freed.
-  if (registeredSegmentHandles_.count(ptr) > 0) {
+  size_t segmentSize = size;
+  // For large buffer in expandable segment mode, it may contains multiple
+  // segment each with kLargeBuffer size; For small buffer in expandable
+  // segment mode or default mode, it is always single segment with the full
+  // size;  small buffer in expandable segment mode or default mode is always
+  // single segment with the full size
+  // FIXME: set kLargeBuffer to c10::cuda::CUDACachingAllocator::kLargeBuffer
+  const auto kLargeBuffer = 20971520;
+  if (isExpandable && !regSnapshot && size >= kLargeBuffer) {
+    segmentSize = kLargeBuffer;
     TORCH_CHECK(
-        !errorOnRereg,
+        size % segmentSize == 0,
         "Segment with ptr ",
         ptr,
-        " has already been registered on ncclComm_ ",
-        ncclComm_);
-    // Skip below
-    return ncclSuccess;
+        " size ",
+        size,
+        " is not a multiple of ",
+        segmentSize);
   }
 
-  void* handle = nullptr;
-  // Use getNcclComm to make sure comm is ready before calling nccl APIs
-  auto comm = getNcclComm();
-  C10D_NCCL_CHECK(
-      ncclCommRegister(comm, ptr, size, &handle),
-      c10::str(
-          "Failed to register segment with ptr ",
-          ptr,
-          ", size ",
-          size,
-          " on ncclComm_ ",
-          comm));
-  registeredSegmentHandles_[ptr] = handle;
+  LockType lock(mutex_);
+
+  for (size_t offset = 0; offset < size; offset += segmentSize) {
+    void* segmentPtr = reinterpret_cast<char*>(ptr) + offset;
+    // We register only segments from cache allocator
+    // which are guaranteed to be with disjoint addr ranges. Thus, a ptr
+    // always maps to a unique handle and should not be registered before the
+    // current ptr is deregistered and freed.
+    if (registeredSegmentHandles_.count(segmentPtr) > 0) {
+      TORCH_CHECK(
+          !errorOnRereg,
+          "Segment with ptr ",
+          segmentPtr,
+          " has already been registered on ncclComm_ ",
+          ncclComm_);
+      // Skip below
+      return ncclSuccess;
+    }
+
+    void* handle;
+    C10D_NCCL_CHECK(
+        ncclCommRegister(ncclComm_, segmentPtr, segmentSize, &handle),
+        c10::str(
+            "Failed to register segment with ptr ",
+            segmentPtr,
+            ", size ",
+            segmentSize,
+            " in [",
+            ptr,
+            ", ",
+            size,
+            "] on ncclComm_ ",
+            ncclComm_));
+    registeredSegmentHandles_[segmentPtr] = std::make_pair(handle, segmentSize);
+  }
   return ncclSuccess;
 #else
   return ncclInvalidUsage;
 #endif
 }
 
-ncclResult_t NCCLComm::deregisterSegment(void* ptr) {
-  LockType lock(mutex_);
+ncclResult_t NCCLComm::deregisterSegment(void* ptr, size_t size) {
 #ifdef NCCL_HAS_COMM_REGISTER
-  TORCH_CHECK(
-      registeredSegmentHandles_.count(ptr) == 1,
-      "Segment with ptr ",
-      ptr,
-      " is not registered on ncclComm_ ",
-      ncclComm_);
+  LockType lock(mutex_);
 
-  void* handle = registeredSegmentHandles_[ptr];
-  // Use getNcclComm to make sure comm is ready before calling nccl APIs
-  auto comm = getNcclComm();
-  C10D_NCCL_CHECK(
-      ncclCommDeregister(comm, handle),
-      c10::str(
-          "Failed to deregister segment handle ",
-          handle,
-          ", with ptr ",
-          ptr,
-          " on ncclComm_ ",
-          comm));
-  registeredSegmentHandles_.erase(ptr);
-  return ncclSuccess;
-#else
-  return ncclInvalidUsage;
+  // Expandable segment may merge multiple registered segments and unmap as a
+  // single one; search registered segment handles starting from the ptr to
+  // find the corresponding registered segments and deregister them.
+  size_t remainingSize = size;
+  void* segmentPtr = ptr;
+  while (remainingSize > 0) {
+    if (registeredSegmentHandles_.count(segmentPtr) != 1) {
+      LOG(INFO)
+          << "C10D-REGISTER:  Deregister failed, dump registeredSegmentHandles_:";
+      for (auto& it : registeredSegmentHandles_) {
+        void* ptr = it.first;
+        auto& [handle, segmentSize] = it.second;
+        LOG(INFO) << "C10D-REGISTER:          " << "ptr " << ptr << " size "
+                  << segmentSize << " handle " << handle;
+      }
+    }
+    TORCH_CHECK(
+        registeredSegmentHandles_.count(segmentPtr) == 1,
+        "Segment with ptr ",
+        segmentPtr,
+        " is not registered on ncclComm_ ",
+        ncclComm_);
+    auto& [handle, segmentSize] = registeredSegmentHandles_[segmentPtr];
+    C10D_NCCL_CHECK(
+        ncclCommDeregister(ncclComm_, handle),
+        c10::str(
+            "Failed to deregister segment handle ",
+            handle,
+            ", with ptr ",
+            ptr,
+            " on ncclComm_ ",
+            ncclComm_));
+    registeredSegmentHandles_.erase(segmentPtr);
+
+    // Move to the next segment
+    segmentPtr = reinterpret_cast<char*>(segmentPtr) + segmentSize;
+    remainingSize -= segmentSize;
+  }
+   return ncclSuccess;
+ #else
+   return ncclInvalidUsage;
 #endif
 }
 
