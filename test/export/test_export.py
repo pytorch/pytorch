@@ -7856,7 +7856,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    # TODO(pianpwk) blocker: 
+    # TODO(pianpwk) blocker: https://github.com/pytorch/pytorch/issues/151809
     @testing.expectedFailureSerDer
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureCppSerDes
