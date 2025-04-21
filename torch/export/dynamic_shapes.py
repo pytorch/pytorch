@@ -1090,7 +1090,7 @@ def _process_dynamic_shapes(
             )
         return constraint
 
-    def _parse_tensor_dim(tensor, idx, dim) -> None:
+    def _parse_tensor_dim(path, tensor, idx, dim) -> None:
         def _create_static_dim(tensor, i, value):
             return _StaticDim(value)
 
@@ -1101,6 +1101,11 @@ def _process_dynamic_shapes(
             symbols[dim.__name__].append(constraint)
         elif isinstance(dim, _DimHint):
             if dim.type == _DimHintType.AUTO:
+                if tensor.size(idx) in [0, 1] and not torch.fx.experimental._config.backed_size_oblivious:
+                    log.warning(
+                        f"dimension inputs{keystr(path)}.shape[{idx}] is likely to 0/1 specialize; Dim.AUTO "
+                        f"was specified along with a sample input with shape = {tensor.size(idx)}."
+                    )
                 torch._dynamo.maybe_mark_dynamic(tensor, idx)
             elif dim.type == _DimHintType.STATIC:
                 torch._dynamo.mark_static(tensor, idx)
@@ -1121,13 +1126,13 @@ def _process_dynamic_shapes(
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                _parse_tensor_dim(tensor, i, dim)
+                _parse_tensor_dim(path, tensor, i, dim)
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                _parse_tensor_dim(tensor, i, dim)
+                _parse_tensor_dim(path, tensor, i, dim)
         elif shape is None:
             for i in range(tensor.dim()):
-                _parse_tensor_dim(tensor, i, None)
+                _parse_tensor_dim(path, tensor, i, None)
 
     def assoc_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
