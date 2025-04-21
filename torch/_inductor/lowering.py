@@ -2621,6 +2621,7 @@ make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_t
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
+make_fallback(aten.embedding_dense_backward, warn=False) # (XPU-only and faster than decomp)
 
 
 # 1.5) Easy or Impossible
@@ -2811,7 +2812,6 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
-make_fallback(aten.embedding_dense_backward)
 
 
 # Register with type_promotion_kind None.
