@@ -157,6 +157,7 @@ def check_node_safe(node: Node):
         return (
             function_name in torch_non_c_binding_in_graph_functions
             or function_name in SAFE_TORCH_FUNCTIONS
+            or function_name in torch._inductor.config.unsafe_marked_cacheable_functions
         )
 
     def is_torch_function(target):
@@ -824,6 +825,7 @@ class AOTAutogradCache:
             except Exception as e:
                 cache_key = None
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1
+                log.info("Bypassing autograd cache due to: %s", e)
                 cache_state = "bypass"
                 cache_event_time = time.time_ns()
                 cache_info["cache_bypass_reason"] = str(e)
