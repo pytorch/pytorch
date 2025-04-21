@@ -301,15 +301,11 @@ persistent_tma_mm_template = TritonTemplate(
         )
 
         if ki == k_tiles - 1:
-            # rematerialize rm and rn to save registers
-            rcm = rm + tl.arange(0, BLOCK_M)
-            rcn = rn + tl.arange(0, BLOCK_N)
-            idx_m = rcm[:, None]
-            idx_n = rcn[None, :]
-            mask = (idx_m < M) & (idx_n < N)
+            # cast acc to output type for TMA store
+            out = acc.cast(A.dtype.element_ty)
 
             # inductor generates a suffix
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
+            {{store_output(["rm", "rn"], "out", indent_width=12, mode = "TMA")}}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
 """,

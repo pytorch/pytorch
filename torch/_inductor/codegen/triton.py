@@ -2285,35 +2285,55 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return result_var
 
     def store(
-        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+        self,
+        name: str,
+        index: Union[sympy.Expr, tuple[sympy.Expr, ...]],
+        value: CSEVariable,
+        mode: StoreMode = None,
     ) -> None:
         var = self.args.output(name)
-        original_index = index
-        indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
-
-        # Guard against write-after-read corruption in triton.
-        # See # https://github.com/openai/triton/issues/1615
-        # This triton bug means that a load which is broadcasted over multiple
-        # warps may see the result of a store that happens later in the triton
-        # program. The workaround is to add a barrier before storing, which
-        # enforces that all warps have already read the data.
-        is_inplace = name in self.args.inplace_buffers
-        is_broadcasted = self.is_broadcasted(original_index)
-        if is_inplace and is_broadcasted:
-            self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
-
-        if isinstance(indexing, BlockPtrOptions):
-            block_ptr, other = self.codegen_block_ptr(name, var, indexing)
-            # block_ptr stores don't do implicit casting
-            line = self.codegen_block_ptr_store_line(
-                name, indexing, block_ptr, value, other
+        if mode == "TMA":
+            ROW_DIM, COL_DIM, ROW_BLOCK_SIZE, COL_BLOCK_SIZE, ROW_OFFSET, COL_OFFSET = (
+                index
             )
-        elif mode is None:
-            line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
-        elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
+            line = textwrap.dedent(
+                f"""
+                out_desc = tl.make_tensor_descriptor(
+                    {var},
+                    shape = [{ROW_DIM}, {COL_DIM}],
+                    strides = [{COL_DIM}, 1],
+                    block_shape = [{ROW_BLOCK_SIZE}, {COL_BLOCK_SIZE}],
+                )
+                tl.store_tensor_descriptor(out_desc, [{ROW_OFFSET}, {COL_OFFSET}], {value})
+                """
+            )
         else:
-            raise NotImplementedError(f"store mode={mode}")
+            original_index = index
+            indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
+
+            # Guard against write-after-read corruption in triton.
+            # See # https://github.com/openai/triton/issues/1615
+            # This triton bug means that a load which is broadcasted over multiple
+            # warps may see the result of a store that happens later in the triton
+            # program. The workaround is to add a barrier before storing, which
+            # enforces that all warps have already read the data.
+            is_inplace = name in self.args.inplace_buffers
+            is_broadcasted = self.is_broadcasted(original_index)
+            if is_inplace and is_broadcasted:
+                self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
+
+            if isinstance(indexing, BlockPtrOptions):
+                block_ptr, other = self.codegen_block_ptr(name, var, indexing)
+                # block_ptr stores don't do implicit casting
+                line = self.codegen_block_ptr_store_line(
+                    name, indexing, block_ptr, value, other
+                )
+            elif mode is None:
+                line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
+            elif mode == "atomic_add":
+                line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
+            else:
+                raise NotImplementedError(f"store mode={mode}")
 
         exit_stack = contextlib.ExitStack()
         if not self.inside_reduction and self.cooperative_reduction:
