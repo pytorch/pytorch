@@ -9,8 +9,8 @@ from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
 
 def mps_ops_modifier(
     ops: Sequence[OpInfo],
-    device_type=Optional[str],
-    xfail_exclusion=Optional[list[str]],
+    device_type: Optional[str] = None,
+    xfail_exclusion: Optional[list[str]] = None,
 ) -> Sequence[OpInfo]:
     if xfail_exclusion is None:
         xfail_exclusion = []
