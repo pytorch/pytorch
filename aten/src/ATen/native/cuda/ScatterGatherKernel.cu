@@ -113,8 +113,8 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-template <int Alignment>
-__global__ void vectorized_gather_kernel(char * out, char * inp, int64_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride) {
+template <int Alignment, typename index_t>
+__global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride) {
     int64_t ind = idx[blockIdx.x];
     CUDA_KERNEL_ASSERT(ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds");
     int32_t off = (blockDim.x * blockIdx.y + threadIdx.x) * Alignment; // off is guaranteed to be within int32 limits
@@ -125,8 +125,8 @@ __global__ void vectorized_gather_kernel(char * out, char * inp, int64_t * idx, 
 
 
 
-template <int64_t Alignment>
-void vectorized_gather_kernel_launch(char * out, char * inp, int64_t * idx, int num_ind,
+template <int64_t Alignment, typename index_t>
+void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int num_ind,
                                      int64_t slice_size_in_bytes, int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes){
 
   constexpr int64_t max_num_threads=256;
@@ -141,7 +141,7 @@ void vectorized_gather_kernel_launch(char * out, char * inp, int64_t * idx, int 
 
 }
 
-template <bool is_scatter_like, typename scalar_t>
+template <bool is_scatter_like, typename scalar_t, typename index_t>
 struct _cuda_scatter_gather_internal_kernel {
   template <typename func_t>
   void operator() (
@@ -153,7 +153,7 @@ struct _cuda_scatter_gather_internal_kernel {
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
-        _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
+        _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t, index_t>()(
           sub_iter, index_size, index_stride, numel, f
         );
       }
@@ -185,7 +185,7 @@ struct _cuda_scatter_gather_internal_kernel {
         auto inp_stride_bytes = index_stride * element_size;
         auto out_stride_bytes = iter.strides(0)[1];
         if (iter.numel() == 0) return;
-        vectorized_gather_kernel_launch<alignment>(self_ptr, src_ptr, (int64_t*)index_ptr, num_ind, slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes);
+        vectorized_gather_kernel_launch<alignment>(self_ptr, src_ptr, (index_t*)index_ptr, num_ind, slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes);
         return;
       }
     }
@@ -193,7 +193,7 @@ struct _cuda_scatter_gather_internal_kernel {
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
 
-      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
+      int64_t idx_dim = *(index_t*)(index_ptr + offsets[2]);
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "scatter gather kernel index out of bounds");
 
@@ -263,9 +263,11 @@ struct cuda_scatter_gather_base_kernel {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
-        _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, self.numel(), f
-        );
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
+              _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
+                iter, index_size, index_stride, self.numel(), f
+              );
+        });
       }
     );
   }
@@ -313,19 +315,40 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      iter.dtype(),
-      "cuda_scatter_gather_base_kernel_func", [&] {
+    if (self.is_quantized()) {
+      TORCH_CHECK(
+          self.qscheme() == kPerTensorAffine,
+          "Only per_tensor quantized quantized tensors are supported by gather.")
+      AT_DISPATCH_QINT_TYPES(iter.dtype(), "gather_quant_cuda", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
-          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
-
-        _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, self.numel(), f
-        );
-      }
-    );
+            OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
+          _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
+            iter, index_size, index_stride, self.numel(), f
+          );
+        });
+      });
+    } else {
+      AT_DISPATCH_V2(
+          iter.dtype(),
+          "gather_cuda",
+          AT_WRAP([&] {
+            using dtype = typename std::conditional<cast_to_opaque,
+                OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+            AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
+              _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
+                iter, index_size, index_stride, self.numel(), f
+              );
+            });
+          }),
+          AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+          AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+          AT_EXPAND(AT_FLOAT8_TYPES),
+          kComplexHalf,
+          kHalf,
+          kBool,
+          kBFloat16);
+    }
   }
 
   template <typename func_t>
@@ -372,7 +395,6 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
-
     AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
@@ -380,15 +402,17 @@ struct cuda_scatter_gather_base_kernel {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
-        _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, self.numel(), f
-        );
+       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
+         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
+           iter, index_size, index_stride, self.numel(), f
+         );
+       });
       }
     );
   }
 }; // struct cuda_scatter_gather_base_kernel
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t>
 struct _cuda_scatter_fill_internal_kernel {
   template <typename func_t>
   void operator()(
@@ -401,7 +425,7 @@ struct _cuda_scatter_fill_internal_kernel {
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
-        _cuda_scatter_fill_internal_kernel<scalar_t>()(
+        _cuda_scatter_fill_internal_kernel<scalar_t, index_t>()(
           sub_iter, src_val, index_size, index_stride, numel, f
         );
       }
@@ -415,7 +439,7 @@ struct _cuda_scatter_fill_internal_kernel {
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
 
-      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
+      int64_t idx_dim = *(index_t*)(index_ptr + offsets[1]);
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds"
       );
@@ -471,9 +495,11 @@ struct cuda_scatter_fill_base_kernel {
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
 
-        _cuda_scatter_fill_internal_kernel<dtype>()(
-          iter, src_val, index_size, index_stride, self.numel(), f
-        );
+    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_func", [&] () {
+          _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
+            iter, src_val, index_size, index_stride, self.numel(), f
+          );
+    });
       }
     );
   }
@@ -514,9 +540,11 @@ struct cuda_scatter_fill_base_kernel {
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
 
-        _cuda_scatter_fill_internal_kernel<dtype>()(
-          iter, src_val, index_size, index_stride, self.numel(), f
-        );
+    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_reduce_multiply", [&] () {
+          _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
+            iter, src_val, index_size, index_stride, self.numel(), f
+          );
+    });
       }
     );
   }
