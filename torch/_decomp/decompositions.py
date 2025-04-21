@@ -1236,8 +1236,6 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
-    if grad_output.is_xpu:
-        return NotImplemented
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
