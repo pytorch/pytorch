@@ -236,11 +236,13 @@ class IterationRangesRoot(IterationRanges):
         """Figure out vars from this tree used in index"""
 
         def get_sort_key(x: IterationRangesEntry) -> tuple[int, bool]:
-            # Gets the key for sorting nodes. When two nodes have the
-            # same divisor, the node with length as 1 should be handled
-            # first so the current divisor is not changed after multiplied
-            # node.length. Returns `not length_is_one_hint` for ascending
-            # sort.
+            """
+            Gets the key for sorting nodes. When two nodes have the
+            same divisor, the node with length as 1 should be handled
+            first so the current divisor is not changed after multiplied
+            node.length. Returns `not length_is_one_hint` for ascending
+            sort.
+            """
             divisor_hint = V.graph.sizevars.size_hint(
                 x.divisor, fallback=config.unbacked_symint_fallback
             )
