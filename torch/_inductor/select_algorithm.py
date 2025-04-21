@@ -1140,6 +1140,7 @@ class TritonTemplate(KernelTemplate):
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
         }
+
         if HAS_WARP_SPEC:
             kernel_options.update(
                 {
@@ -1157,28 +1158,28 @@ class TritonTemplate(KernelTemplate):
                 **kernel_options,
             )
 
-        def make_extra():
-            extra_parts = [
-                f"{kwarg}={repr(kwargs[kwarg])}" for kwarg in sorted(kwargs.keys())
-            ]
-
-            extra_parts.extend(
-                [
-                    f"num_stages={num_stages}",
-                    f"num_warps={num_warps}",
+        def generate_code(kernel) -> Optional[tuple[str, str]]:
+            def make_extra() -> str:
+                extra_parts = [
+                    f"{kwarg}={repr(kwargs[kwarg])}" for kwarg in sorted(kwargs.keys())
                 ]
-            )
-            if HAS_WARP_SPEC:
+
                 extra_parts.extend(
                     [
-                        f"num_consumer_groups={num_consumer_groups}",
-                        f"num_buffers_warp_spec={num_buffers_warp_spec}",
+                        f"num_stages={num_stages}",
+                        f"num_warps={num_warps}",
                     ]
                 )
-            extra = "-".join(extra_parts) + "-"
-            return extra
+                if HAS_WARP_SPEC:
+                    extra_parts.extend(
+                        [
+                            f"num_consumer_groups={num_consumer_groups}",
+                            f"num_buffers_warp_spec={num_buffers_warp_spec}",
+                        ]
+                    )
+                extra = "-".join(extra_parts) + "-"
+                return extra
 
-        def generate_code(kernel) -> Optional[tuple[str, str]]:
             try:
                 template = kernel.render(self.template, kwargs)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
@@ -1192,7 +1193,7 @@ class TritonTemplate(KernelTemplate):
             extra = make_extra()
             return code, extra
 
-        # Generate code, extra, and kernel state.
+        # Generate code, extra.
         code: Optional[str] = None
         extra: Optional[str] = None
         with (
