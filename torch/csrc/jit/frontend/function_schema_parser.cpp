@@ -126,7 +126,7 @@ struct SchemaParser {
         is_a_valid_overload_name,
         overload_name,
         " is not a legal overload name for aten operators");
-    return {name, overload_name};
+    return {std::move(name), std::move(overload_name)};
   }
 
   std::vector<std::variant<OperatorName, FunctionSchema>> parseDeclarations() {
