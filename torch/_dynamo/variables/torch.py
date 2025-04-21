@@ -902,23 +902,31 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
-        def handle_guard_or_true(self, tx: "InstructionTranslator", expr):
+        def handle_guard_or_true(
+            self, tx: "InstructionTranslator", expr, assert_on_assumption=None
+        ):
             if isinstance(expr, SymNodeVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
-                    torch.fx.experimental.symbolic_shapes.guard_or_true(expr.sym_num)
+                    torch.fx.experimental.symbolic_shapes.guard_or_true(
+                        expr.sym_num, assert_on_assumption
+                    )
                 )
             elif isinstance(expr, ConstantVariable):
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_false)
-        def handle_guard_or_false(self, tx: "InstructionTranslator", expr):
+        def handle_guard_or_false(
+            self, tx: "InstructionTranslator", expr, assert_on_assumption=None
+        ):
             if isinstance(expr, SymNodeVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
-                    torch.fx.experimental.symbolic_shapes.guard_or_false(expr.sym_num)
+                    torch.fx.experimental.symbolic_shapes.guard_or_false(
+                        expr.sym_num, assert_on_assumption
+                    )
                 )
             elif isinstance(expr, ConstantVariable):
                 return expr

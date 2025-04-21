@@ -1187,14 +1187,34 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
-def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+def _log_and_assert_on_dde_assumption(
+    a: SymBool, assert_on_assumption: bool, assumed_value: bool
+) -> None:
     sloc, extra = a.node.shape_env._get_stack_summary(True)
+    if not assert_on_assumption:
+        log.info(
+            "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions.  %s %s",
+            a,
+            assumed_value,
+            sloc,
+            extra,
+        )
+        return
+
     log.info(
-        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        "could not evaluate %s due to data dependency, it was assumed to be %s."
+        "A runtime assertion was added to ensure that.  %s %s",
         a,
         assumed_value,
         sloc,
         extra,
+    )
+
+    torch._check(
+        a if assumed_value else torch.sym_not(a),
+        f"{a} was assumed to be {assumed_value} during tracing due to unbacked value. "
+        f"\nIf this is not a correct assumption you can add torch.check to assert that value of {a} is {not assumed_value}."
+        f"\nIf using torch.compile, you can manually graph break to avoid such assumption.",
     )
 
 
@@ -1206,7 +1226,7 @@ def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
 #  (1) It's an optimization/additional check I do not want to fail for not performing it.
 #  (2) I am willing to deviate from the normal semantics when I have unbacked for the
 #      benefit of not failing.
-def guard_or_false(a: BoolLikeType) -> bool:
+def guard_or_false(a: BoolLikeType, assert_on_assumption: bool = None) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
@@ -1221,11 +1241,11 @@ def guard_or_false(a: BoolLikeType) -> bool:
             try:
                 return guard_bool(a)
             except GuardOnDataDependentSymNode:
-                _log_suppressed_dde(a, False)
+                _log_and_assert_on_dde_assumption(a, assert_on_assumption, False)
                 return False
 
 
-def guard_or_true(a: BoolLikeType) -> bool:
+def guard_or_true(a: BoolLikeType, assert_on_assumption: bool = False) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
@@ -1243,7 +1263,7 @@ def guard_or_true(a: BoolLikeType) -> bool:
             try:
                 return guard_bool(a)
             except GuardOnDataDependentSymNode:
-                _log_suppressed_dde(a, True)
+                _log_and_assert_on_dde_assumption(a, assert_on_assumption, True)
                 return True
 
 
@@ -1558,7 +1578,9 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: Union[SymBool, bool], skip: int = 0, msg: Optional[str] = None) -> bool:
+def expect_true(
+    a: Union[SymBool, bool], skip: int = 0, msg: Optional[str] = None
+) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1567,7 +1589,9 @@ def expect_true(a: Union[SymBool, bool], skip: int = 0, msg: Optional[str] = Non
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0, msg
+            frame.f_code.co_filename if frame else "",
+            frame.f_lineno if frame else 0,
+            msg,
         )
     assert type(a) is bool, a
     return a
@@ -2332,6 +2356,16 @@ class RuntimeAssert:
     loc: str = field(repr=False)
     stack: CapturedTraceback = field(repr=False)
     msg: Optional[str] = field(repr=False)
+
+    def make_assert_message(self, node: Optional[Any] = None) -> str:
+        node_message = f" on node {node}." if node is not None else "."
+        msg = f"Runtime assertion failed for expression {self.expr}{node_message}"
+        assert_msg = (
+            f"{msg}\n\nThe original traceback points to the following location and error message:\n{self.loc}\n{self.msg}"
+            if self.msg
+            else msg
+        )
+        return assert_msg
 
 
 # Used for printing SymExprs in compile_fx
@@ -7220,7 +7254,11 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def defer_runtime_assert(
-        self, orig_expr: SympyBoolean, loc: str, fx_node: Optional[torch.fx.Node] = None, msg: Optional[str] = None
+        self,
+        orig_expr: SympyBoolean,
+        loc: str,
+        fx_node: Optional[torch.fx.Node] = None,
+        msg: Optional[str] = None,
     ) -> bool:
         """Create an assert that is checked at runtime
 

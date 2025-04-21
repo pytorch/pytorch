@@ -1847,6 +1847,16 @@ class GraphLowering(torch.fx.Interpreter):
             # Emit code for runtime asserts that can be inserted at this point.
             for i0 in new_unbacked_defs:
                 ras = self.ras_by_symbol.pop(i0, [])
+
+                for ra in ras:
+                    fvs = free_unbacked_symbols(ra.expr)
+                    missing = fvs - self.bound_unbacked_symbols
+                    if missing:
+                        i1 = min(missing, key=str)
+                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                    else:
+                        make_assert(ra.expr, ra.make_assert_message())
+
                 # NB: size-like not needed, we won't retrace
                 vr = shape_env.var_to_range[i0]
                 if not shape_env._default_unspecified_value_range().issubset(vr):
@@ -1864,15 +1874,6 @@ class GraphLowering(torch.fx.Interpreter):
                         make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
                     if is_convertible(vr.upper):
                         make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
-
-                for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
-                    if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
-                    else:
-                        make_assert(ra.expr, f"{ra.expr}")
 
         return result
 

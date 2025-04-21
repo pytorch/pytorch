@@ -2836,12 +2836,10 @@ class TestGuardsExpressions(TestCase):
         # call with guarding.
         self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
         self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
-
         unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
         a = torch.tensor([1])
         b = torch.tensor([1])
         unbacked_func(a, b)
-
         # always return b*10
         self.assertEqual(
             unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
@@ -2869,7 +2867,6 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(
             unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
         )
-
         # Test backed_size_oblivious
         with torch.fx.experimental._config.patch("backed_size_oblivious", True):
 
@@ -2882,9 +2879,46 @@ class TestGuardsExpressions(TestCase):
             compiled = torch.compile(func3, dynamic=True, fullgraph=True)
             a = torch.rand(9, 2)
             b = torch.rand(3, 4)
-
             self.assertEqual(func3(a, b), b * 20)
             self.assertEqual(compiled(a, b), b * 10)
+
+        # Test assert_on_assumption
+        def func4(a, b):
+            x = a.item()
+            if guard_or_true(x != 1, assert_on_assumption=True):
+                return b * 12
+            else:
+                return b * 20
+
+        # x != 1 assumed true with an assertion.
+        unbacked_func4 = torch.compile(func4, dynamic=True, fullgraph=True)
+        a = torch.tensor([2])
+        b = torch.tensor([2])
+        unbacked_func4(a, b)
+        try:
+            unbacked_func4(torch.tensor([1]), torch.tensor([1]))
+            self.assertTrue(False)
+        except RuntimeError as e:
+            error = str(e)
+            self.assertTrue(
+                """Runtime assertion failed for expression Ne(u0, 1).""" in error
+            )
+            self.assertTrue(
+                """The original traceback points to the following location and error message:"""
+                in error
+            )
+            self.assertTrue(
+                """Ne(u0, 1) was assumed to be True during tracing due to unbacked value."""
+                in error
+            )
+            self.assertTrue(
+                """If this is not a correct assumption you can add torch.check to assert that value of Ne(u0, 1) is False"""
+                in error
+            )
+            self.assertTrue(
+                """If using torch.compile, you can manually graph break to avoid such assumption."""
+                in error
+            )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -2950,6 +2984,44 @@ class TestGuardsExpressions(TestCase):
 
             self.assertEqual(func3(a, b), b * 10)
             self.assertEqual(compiled(a, b), b * 20)
+
+        # Test assert_on_assumption
+        def func4(a, b):
+            x = a.item()
+            if guard_or_false(x == 0, assert_on_assumption=True):
+                return b * 12
+            else:
+                return b * 20
+
+        # x == 0 assumed false with an assertion.
+        unbacked_func4 = torch.compile(func4, dynamic=True, fullgraph=True)
+        a = torch.tensor([2])
+        b = torch.tensor([2])
+        unbacked_func4(a, b)
+        try:
+            unbacked_func4(torch.tensor([0]), torch.tensor([1]))
+            self.assertTrue(False)
+        except RuntimeError as e:
+            error = str(e)
+            self.assertTrue(
+                """Runtime assertion failed for expression Ne(u0, 0).""" in error
+            )
+            self.assertTrue(
+                """The original traceback points to the following location and error message:"""
+                in error
+            )
+            self.assertTrue(
+                """Eq(u0, 0) was assumed to be False during tracing due to unbacked value."""
+                in error
+            )
+            self.assertTrue(
+                """If this is not a correct assumption you can add torch.check to assert that value of Eq(u0, 0) is True."""
+                in error
+            )
+            self.assertTrue(
+                """If using torch.compile, you can manually graph break to avoid such assumption."""
+                in error
+            )
 
     def test_guards_float_div(self):
         shape_env = ShapeEnv()
