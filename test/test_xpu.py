@@ -159,6 +159,9 @@ if __name__ == "__main__":
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
 
+    @unittest.skipIf(
+        IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
+    )
     def test_lazy_init(self):
         """Validate that no XPU calls are made during `import torch` call"""
 
@@ -255,6 +258,15 @@ if __name__ == "__main__":
                 "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
             ):
                 start_event.elapsed_time(end_event)
+
+        event = torch.xpu.Event(enable_timing=True)
+        self.assertEqual(event.sycl_event, 0)
+        self.assertEqual(event.event_id, 0)
+
+        event.record()
+        self.assertNotEqual(event.sycl_event, 0)
+        self.assertNotEqual(event.event_id, 0)
+        self.assertEqual(event.sycl_event, event.event_id)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
