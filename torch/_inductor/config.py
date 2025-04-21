@@ -239,7 +239,7 @@ memory_pool: Literal["none", "intermediates", "outputs", "combined"] = os.enviro
 benchmark_harness = True
 
 # fuse pointwise into templates epilogues
-epilogue_fusion = True
+epilogue_fusion = False
 
 # fuse pointwise into template prologues
 prologue_fusion = prologue_fusion_enabled()
