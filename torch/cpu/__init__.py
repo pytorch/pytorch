@@ -15,6 +15,7 @@ from . import amp
 
 __all__ = [
     "is_available",
+    "is_initialized",
     "synchronize",
     "current_device",
     "current_stream",
