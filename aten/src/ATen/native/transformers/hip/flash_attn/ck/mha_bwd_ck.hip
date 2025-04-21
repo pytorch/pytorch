@@ -3,8 +3,11 @@
  ******************************************************************************/
 
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
+#include <mha_bwd.h>
 #include <fmha_bwd.hpp>
 #include <mask.hpp>
+
+#include <iostream>
 
 namespace pytorch_flash {
 
@@ -26,6 +29,26 @@ fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
                            has_dropout,
                            false, // s_randval
                            deterministic};
+}
+
+
+
+aiter::mha_bwd_traits get_mha_bwd_traits(fmha_bwd_traits t, mask_info mask)
+{
+    return aiter::mha_bwd_traits(t.hdim_q,
+                          t.hdim_v,
+                          t.data_type,
+                          t.is_group_mode,
+                          mask,
+                          t.bias_type,
+                          t.has_dbias,
+                          t.has_dropout,
+                          t.is_store_randval,
+                          t.is_deterministic,
+                          true,                 // use_ext_asm
+                          false,                // is_v3_atomic_fp32,
+                          1);                    // how_v3_bf16_cvt
+    
 }
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
@@ -385,6 +408,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                                    deterministic,
                                    bias_requires_grad);
 
+
         auto args =
             get_ck_fmha_bwd_args(
                 mask,
@@ -411,6 +435,11 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
+        std::cout << "ABOUT TO CALL V3" << std::endl;
+        auto new_traits = get_mha_bwd_traits(traits, mask);
+        float test = aiter::fmha_bwd_v3(new_traits, args, stream_config);
+        std::cout << "BACK FROM V3" << std::endl;
+
         float t = fmha_bwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
