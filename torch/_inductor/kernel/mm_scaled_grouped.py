@@ -93,18 +93,15 @@ def early_config_prune(configs, named_args):
             config.num_warps,
             getattr(config, "num_consumer_groups", 0),
         )
-        G, M, N, K, M_IS_DYNAMIC, N_IS_DYNAMIC, K_IS_DYNAMIC = (
+        G, M, N, M_IS_DYNAMIC, N_IS_DYNAMIC = (
             named_args["G"],
             named_args["M"],
             named_args["N"],
-            named_args["K"],
             named_args["M_IS_DYNAMIC"],
             named_args["N_IS_DYNAMIC"],
-            named_args["K_IS_DYNAMIC"],
         )
         M_PER_GROUP = next_power_of_2(M) // G if M_IS_DYNAMIC else M
         N_PER_GROUP = next_power_of_2(N) // G if N_IS_DYNAMIC else N
-        K_PER_GROUP = next_power_of_2(K) // G if K_IS_DYNAMIC else K
 
         # 1. make sure we have enough smem
         max_shared_memory = get_gpu_shared_memory()
@@ -145,11 +142,7 @@ def early_config_prune(configs, named_args):
         if BLOCK_N < 128 and G * M_PER_GROUP * N_TILES > 2 * num_sm:
             continue
 
-        # 6. make sure K can be evenly divided
-        if K_PER_GROUP % BLOCK_K != 0:
-            continue
-
-        # 7. make sure we can partition for ws
+        # 6. make sure we can partition for ws
         if use_warp_specialization:
             if num_warps != 4:
                 continue
@@ -256,9 +249,6 @@ triton_scaled_grouped_mm_source = r"""
                 tile_n_idx = gidx // num_m_tiles
 
                 accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-{% if not K_IS_DYNAMIC %}
-                tl.static_assert(K % BLOCK_K == 0)
-{% endif %}
 
 {% if USE_TMA_LOAD %}
                 m_offset = (m_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
@@ -274,6 +264,13 @@ triton_scaled_grouped_mm_source = r"""
                     b = b_desc.load([n_offset, k_start_offset + k_offset])
 {% else %}
                     b = b_desc.load([g, n_offset, k_start_offset + k_offset]).reshape(BLOCK_N, BLOCK_K)
+{% endif %}
+
+{% if K_IS_DYNAMIC %}
+                    if k_offset + BLOCK_K > k_size:
+                        group_offs_k = k_offset + tl.arange(0, BLOCK_K)
+                        a = tl.where(group_offs_k < k_size, a, 0)
+                        b = tl.where(group_offs_k < k_size, b, 0)
 {% endif %}
 
 {% if USE_FAST_ACCUM %}
@@ -304,6 +301,10 @@ triton_scaled_grouped_mm_source = r"""
                 for k_offset in range(0, k_size, BLOCK_K):
                     a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
                     b = tl.load(b_ptrs, mask=offs_bn[:, None] < n_size)
+                    if k_offset + BLOCK_K > k_size:
+                        group_offs_k = k_offset + tl.arange(0, BLOCK_K)
+                        a = tl.where(group_offs_k < k_size, a, 0)
+                        b = tl.where(group_offs_k < k_size, b, 0)
 {% if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
 {% else %}
