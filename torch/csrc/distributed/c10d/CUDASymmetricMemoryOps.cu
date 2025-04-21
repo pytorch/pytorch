@@ -20,7 +20,7 @@
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
