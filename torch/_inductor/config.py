@@ -402,9 +402,8 @@ force_same_precision = (
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
-# SUBGRAPH: Subgraph decompositions as backends, defined in torch inductor 
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP,SUBGRAPH"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
 # As above, specify candidate backends for conv autotune.
