@@ -148,14 +148,14 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   // Note: cudaEventElapsedTime can be safely called from any device
   float elapsed_time(const CUDAEvent& other) const {
     TORCH_CHECK_VALUE(
+        !(flags_ & cudaEventDisableTiming) && !(other.flags_ & cudaEventDisableTiming),
+        "Both events must be created with argument 'enable_timing=True'.");
+    TORCH_CHECK_VALUE(
         is_created_ && other.isCreated(),
         "Both events must be recorded before calculating elapsed time.");
     TORCH_CHECK(
         query() && other.query(),
         "Both events must be completed before calculating elapsed time.");
-    TORCH_CHECK_VALUE(
-        !(flags_ & cudaEventDisableTiming) && !(other.flags_ & cudaEventDisableTiming),
-        "Both events must be created with argument 'enable_timing=True'.");
 
     float time_ms = 0;
     // We do not strictly have to set the device index to the same as our event,
