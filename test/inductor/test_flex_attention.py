@@ -327,7 +327,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
 
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
-        super(self.__class__, self).setUp()
+        super().setUp()
         self.test_inference_only = False
         if test_device[0] == "cpu":
             if LONG_COMPILATION_ON_CPU:
@@ -3903,8 +3903,8 @@ class GraphModule(torch.nn.Module):
         keyword_args = {
             "kernel_options": {
                 "num_warps": 4,
-                "num_consumer_groups": 0,
-                "num_buffers_warp_spec": 0,
+                "num_consumer_groups": 2,
+                "num_buffers_warp_spec": 3,
             }
         }
 
@@ -3933,7 +3933,7 @@ class GraphModule(torch.nn.Module):
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
-        super(self.__class__, self).setUp()
+        super().setUp()
         if test_device[0] == "cpu":
             self.skipTest(
                 "skip UT for CPUs as 'BlockMask' is common and covered on CUDA"
@@ -4496,7 +4496,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
-        super(self.__class__, self).setUp()
+        super().setUp()
         if test_device[0] == "cpu":
             if LONG_COMPILATION_ON_CPU:
                 self.skipTest(
