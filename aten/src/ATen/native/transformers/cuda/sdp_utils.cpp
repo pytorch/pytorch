@@ -32,6 +32,11 @@
 #endif
 #endif
 
+// Avoid potential compiler -Wall -Werror complains undefined macro
+#ifndef AOTRITON_VERSION_MINOR
+#define AOTRITON_VERSION_MINOR 0
+#endif
+
 /**
 * Note [SDPA Runtime Dispatch]
 * SDPA relies on a runtime dispatch mechanism to select the appropriate
@@ -100,13 +105,11 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
-#if USE_AOTRITON && AOTRITON_VERSION_MAJOR == 0 && AOTRITON_VERSION_MINOR == 8 && AOTRITON_VERSION_PATCH >= 1
-  // Head dim 512 is only support in AOTriton >= 0.8.1 and < 0.9
-  // AOTriton 0.9 will support > 256 head dim with another set of kernels,
-  // exposed as efficient attention.
+#if USE_ROCM_ATTENTION && AOTRITON_VERSION_MINOR >= 9
+  // AOTriton 0.9+ supports head_dim up to 512
   const auto max_size = c10::SymInt(512);
 #else
-  // Otherwise, all head_dim sizes must be equal and less than 256
+  // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
 #endif
   const auto query_size_last = params.query.sym_size(-1);
@@ -236,6 +239,16 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
         }
         return false;
     }
+#if AOTRITON_VERSION_MINOR >= 9
+    if (aotriton::isArchExperimentallySupported(stream)) {
+      static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+      if (!enable_experimental) {
+        TORCH_WARN_ONCE("Flash Efficient attention on Current AMD GPU is still experimental."
+            " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+        return false;
+      }
+    }
+#endif
   }
 #else
   return false;
@@ -272,6 +285,16 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
+#if AOTRITON_VERSION_MINOR >= 9
+  if (aotriton::isArchExperimentallySupported(stream)) {
+    static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+    if (!enable_experimental) {
+      TORCH_WARN_ONCE("Mem Efficient attention on Current AMD GPU is still experimental."
+          " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+      return false;
+    }
+  }
+#endif
 #else
   return false;
 #endif
