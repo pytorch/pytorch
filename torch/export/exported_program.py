@@ -42,7 +42,6 @@ from torch._export.utils import (
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
-    _compiling_state_context,
     _detect_fake_mode_from_gm,
     _fakify_params_buffers,
     _get_decomp_for_cia,

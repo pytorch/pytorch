@@ -1704,16 +1704,19 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with config.patch(
-            specialize_int=True,
-            specialize_float=specialize_float,
-            assume_static_by_default=assume_static_by_default,
-            automatic_dynamic_shapes=False,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-        ), _dynamo_export_state_context():
+        with (
+            config.patch(
+                specialize_int=True,
+                specialize_float=specialize_float,
+                assume_static_by_default=assume_static_by_default,
+                automatic_dynamic_shapes=False,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+                prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            ),
+            _dynamo_export_state_context(),
+        ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
