@@ -1471,11 +1471,15 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
-    def test_basic(self, format: str, dynamic: bool) -> None:
-        mod = torch.nn.Linear(1, 3)
-        x = torch.randn(4, 1)
+    def test_basic(self, device: str, format: str, dynamic: bool) -> None:
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        mod = torch.nn.Linear(1, 3, device=device)
+        x = torch.randn(4, 1, device=device)
         if dynamic:
             torch._dynamo.mark_dynamic(x, 0)
 
