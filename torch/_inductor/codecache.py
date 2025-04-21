@@ -46,6 +46,7 @@ from typing_extensions import Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -1771,7 +1772,14 @@ class AotCodeCompiler:
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
-                wrapper_builder.build()
+                try:
+                    wrapper_builder.build()
+                except (exc.CppCompileError, SkipFrame) as e:
+                    if " is too big to optimize" in str(e):
+                        raise RuntimeError(
+                            "Please use torch._inductor.config.aot_inductor.compile_wrapper_opt_level = 'O0' flag."
+                        ) from e
+                    raise e
                 kernel_builder.build()
 
             if not use_mmap_weights:
