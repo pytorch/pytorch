@@ -3845,6 +3845,32 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_runtime_checks_device_type_failed(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(1, 4, dtype=torch.float16, device="cpu")
+        model = Model()
+        with torch.no_grad():
+            package_path: str = AOTIRunnerUtil.compile(
+                model,
+                (x,),
+            )
+
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        aot_inductor_module(x)
+        x_casted = x.to("cuda")
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(x_casted)
+
     def test_non_contiguous_output_alias(self):
         # Test return x, x.contiguous() where x is non-contiguous.
         class Model(torch.nn.Module):
