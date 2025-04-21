@@ -460,9 +460,8 @@ at::Tensor nvshmem_all_to_all(
   int world_size = input_hdl->get_world_size();
   auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
 
-  void* input_ptr = (float*)(input_hdl->get_buffer_ptrs()[rank]);
-  void* output_ptr = (float*)(out_hdl->get_buffer_ptrs()[rank]);
-  assert input_hdl->get_buffer_size() % world_size == 0;
+  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
   size_t bytes_per_rank = input_hdl->get_buffer_size() / world_size;
 
   auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
