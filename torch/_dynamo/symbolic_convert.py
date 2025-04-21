@@ -3008,7 +3008,7 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        self.push(ctx.enter(self))
+        self.push(ctx.enter(self))  # type: ignore[arg-type]
 
     def append_prefix_inst(self, inst):
         assert self.accept_prefix_inst
