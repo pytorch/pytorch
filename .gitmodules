@@ -109,7 +109,7 @@
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
 [submodule "third_party/cutlass"]
 	path = third_party/cutlass
-	url = https://github.com/NVIDIA/cutlass.git
+	url = https://github.com/yzhaiustc/cutlass.git
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
