@@ -1986,6 +1986,12 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
         lambda: f"expected 'shape' to be int or sequence of ints, but got {type(shape)}",
     )
 
+    if indices.device.type == "mps":
+        torch._check_not_implemented(
+            indices.dtype != torch.int32 and indices.dtype != torch.int64,
+            lambda: "integral types are not implemented on mps",
+        )
+
     if isinstance(shape, (int, torch.SymInt)):
         shape = torch.Size([shape])
     else:

@@ -1,7 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -826,11 +826,11 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
   using namespace mps;
   TORCH_CHECK(delta > 0, op_name + ": huber_loss does not support non-positive values for delta.")
   TORCH_CHECK(output.is_mps());
-  
+
   if (!target.is_same_size(input)) { // for vmap
     TORCH_INTERNAL_ASSERT(reduction == Reduction::None, op_name + ": reduction needs to be None when vmapped.");
   }
-  
+
   if (reduction == Reduction::None)
     output.resize_(infer_size_dimvector(input.sizes(), target.sizes()));
   else if (reduction == Reduction::Sum)

@@ -13,7 +13,7 @@ from torch.testing._internal.common_methods_invocations import (
     OpInfo,
     SampleInput,
 )
-from torch.testing._internal.common_utils import make_tensor
+from torch.testing._internal.common_utils import MACOS_VERSION, make_tensor
 
 
 # List of OpInfos that aren't in PyTorch Core yet.
@@ -620,6 +620,11 @@ additional_op_db.extend(
                 DecorateInfo(
                     unittest.skip("Skipped!"), "TestNNCOpInfo", "test_nnc_correctness"
                 ),
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    device_type="mps",
+                    active_if=MACOS_VERSION < 14,
+                ),
             ),
         ),
         OpInfo(
@@ -660,6 +665,10 @@ additional_op_db.extend(
                 # RuntimeError: attribute lookup is not defined on builtin
                 DecorateInfo(
                     unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+                ),
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    device_type="mps",
                 ),
             ),
         ),
@@ -702,6 +711,11 @@ additional_op_db.extend(
                 # RuntimeError: attribute lookup is not defined on builtin
                 DecorateInfo(
                     unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+                ),
+                # MPS does not support double
+                DecorateInfo(
+                    unittest.expectedFailure,
+                    device_type="mps",
                 ),
             ),
         ),
