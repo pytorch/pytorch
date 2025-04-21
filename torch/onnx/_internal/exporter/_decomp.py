@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 def get_onnx_implemented_overloads(
     registry: _registration.ONNXRegistry,
-) -> list[torch._ops.OperatorBase]:
+) -> list[_registration.TorchOp]:
     """
     Creates a set of OperatorBase and Callable objects that represent ONNX-supported PyTorch operations.
 
@@ -24,18 +24,13 @@ def get_onnx_implemented_overloads(
     Returns:
         A collection of OperatorBase and Callable objects representing ONNX-supported PyTorch operations.
     """
-    registered_ops: list[torch._ops.OperatorBase] = []
-    for op_namespace in (torch.ops.aten, torch.ops.prims):
-        op_names = dir(op_namespace)
-        for op_name in op_names:
-            op_overload_packet = getattr(op_namespace, op_name)
-            if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
-                continue
-
-            for overload_name in op_overload_packet.overloads():
-                op_overload = getattr(op_overload_packet, overload_name)
-                if registry.is_registered(op_overload):
-                    registered_ops.append(op_overload)
+    registered_ops: list[_registration.TorchOp] = []
+    for onnx_decomp_meta in registry.functions.values():
+        assert len(onnx_decomp_meta) > 0
+        # Different OnnxDecompMeta for the same TorOp should
+        # have the same fx_target.
+        fx_target = onnx_decomp_meta[0].fx_target
+        registered_ops.append(fx_target)
     return registered_ops
 
 
