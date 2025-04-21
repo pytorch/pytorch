@@ -1227,7 +1227,6 @@ utils_device.CURRENT_DEVICE == None""".split(
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_float_32_scalar_tensor_item(self):
         def f(y):
-            y = y * y
             y_scalar = y.item()
             return y_scalar
 
