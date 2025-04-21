@@ -4306,7 +4306,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Ne(Mod(u1, u2), 0)
+                # Could not guard on data-dependent expression Eq(u2, -1)
                 return r.view(items[0], items[2])
 
         M = M_v0
@@ -4315,10 +4315,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}.*\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
-            f".*{re.escape('or r.shape[1], `u2` with items[2] in Ne(Mod(u1, u2), 0) and its negation.')}",
+            f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
+            f".*{re.escape('torch._check(items[2] != (-1))')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in Eq(u2, -1) and its negation.)')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -4326,12 +4325,59 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # TODO(pianpwk): this isn't the suggested fixes.
-                # fix issue with % being interpreted as PythonMod instead of Mod
-                torch._check(items[1] == items[2])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
                 return r.view(items[0], items[2])
 
         M = M_v1
+        with self.assertRaisesRegex(
+            error_type,
+            "The following call raised this error(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "To fix the error, insert one of the following checks before this call.*:\n"
+            f".*{re.escape('You can add either: torch._check_is_size(u2) or torch._check(u2>=0) Note: torch._check_is_size(u2) could prevent data dependent errors that happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning. See documentation on guard_size_oblivious for more details: https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html')}.*\n"
+            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v2(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(items[2] >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                return r.view(items[0], items[2])
+
+        M = M_v2
+        with self.assertRaisesRegex(
+            error_type,
+            "The following call raised this error(.*\n)+"
+            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
+            "To fix the error, insert one of the following checks before this call.*:\n"
+            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
+            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
+        ):
+            export(N(), (t,), strict=strict)
+
+        class M_v3(torch.nn.Module):
+            def forward(self, t):
+                items = [t[i].item() for i in range(t.numel())]
+                r = torch.randn([items[0], items[1]])
+                # Could not guard on data-dependent expression Eq(u2, -1)
+                torch._check(items[2] != -1)
+                # Could not guard on data-dependent expression u2 >= 0
+                torch._check(items[2] >= 0)
+                # Could not guard on data-dependent expression Eq(u1, u2)
+                torch._check(items[2] == r.shape[1])
+                return r.view(items[0], items[2])
+
+        M = M_v3
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
@@ -4443,29 +4489,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[],  # nothing to fix!
         )
 
-    def test_simple_unbacked_view(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                u0 = x.item()
-                y = torch.empty(5, u0)
-                return y.view(u0, 5)  # [5, u0] -> [u0, 5]
-
-        ep = export(Foo(), (torch.tensor([9]),))
-        self.assertEqual(ep.module()(torch.tensor([8])).size(0), 8)
-        self.assertEqual(ep.module()(torch.tensor([5])).size(0), 5)
-
-        class Foov2(torch.nn.Module):
-            def forward(self, xs):
-                xsl = xs.tolist()
-                a, b = xsl
-                x = torch.zeros(a)
-                return x.reshape(b)
-
-        xs = torch.tensor([4, 4])
-        ep = export(Foov2(), (xs,))
-        self.assertEqual(ep.module()(xs).size(0), 4)
-        self.assertEqual(ep.module()(torch.tensor([5, 5])).size(0), 5)
-
     def test_no_suggested_fixes_for_data_dependent_errors(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False
@@ -4553,6 +4576,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
+    @testing.expectedFailureCppSerDes  # cpp ser/der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -4577,7 +4601,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch.rand((1, 1, 32, 32)),
         )
 
-        dim = torch.export.Dim("Dim", min=16, max=64)
+        dim = torch.export.Dim.AUTO
         dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
 
         exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
@@ -7388,19 +7412,22 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 2
             )
 
-    def test_no_check_is_size_error(self):
+    def test_check_is_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
+                # We cannot automatically infer a is a size here because view
+                # accepts -1
                 return torch.randn(24).view(a, 4)
 
         f = Module()
-        ep = export(f, (torch.tensor(6),))
-        ep.module()(torch.tensor(6))
-        with self.assertRaisesRegex(
-            RuntimeError, r"Runtime assertion failed for .* u.* 6"
-        ):
-            ep.module()(torch.tensor(5))
+        if is_non_strict_test(self._testMethodName):
+            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        else:
+            error = torch._dynamo.exc.UserError
+        error_msg = r"Could not guard on data-dependent expression"
+        with self.assertRaisesRegex(error, error_msg):
+            _ = export(f, (torch.tensor(6),))
 
     def test_is_non_negative_check_function(self):
         import sympy as sp
@@ -13244,7 +13271,7 @@ def forward(self, x):
             node.target == torch.ops.aten._assert_scalar.default
             for node in ep.graph.nodes
         ].count(True)
-        self.assertEqual(num_asserts, 2)
+        self.assertEqual(num_asserts, 1)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
