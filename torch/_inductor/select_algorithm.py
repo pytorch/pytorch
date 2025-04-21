@@ -290,6 +290,8 @@ RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
 class TritonTemplateKernel(TritonKernel):
+    """ """
+
     def __init__(
         self,
         kernel_name,
@@ -402,6 +404,7 @@ class TritonTemplateKernel(TritonKernel):
                 result = fn(*args, **kwargs)
                 post_state = self.input_dependent_preserved_state()
                 if pre_state != post_state:
+                    assert self.cached_replay_events is not None
                     self.cached_replay_events.append((fn.__name__, [*args], {**kwargs}))
                 return result
 
@@ -1128,6 +1131,12 @@ class GeneratedCodeCacheEntry(NamedTuple):
 
 
 class GeneratedCodeCache:
+    """
+    Cache for generated code. The cache key is a string representation of the input nodes,
+    number of stages, number of warps, and call sizes. The cache value is a tuple of the
+    generated code, extra code, and events.
+    """
+
     def __init__(self, *args, **kwargs):
         self._cache: dict[str, GeneratedCodeCacheEntry] = {}
 
@@ -1153,6 +1162,7 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
     ) -> Optional[str]:
+
         symbol_mapping = {}
         next_symbol_index = 1
 
@@ -1174,6 +1184,7 @@ class GeneratedCodeCache:
             return [normalize_symbols(x) for x in ls]
 
         def layout_key(layout: ir.Layout) -> str:
+            assert not isinstance(layout, ir.FlexibleLayout)
             return repr(
                 [
                     normalize_list(layout.size),
@@ -1184,26 +1195,40 @@ class GeneratedCodeCache:
                 ]
             )
 
-        if subgraphs is None and workspace_arg is None:
-            return repr(
-                {
-                    "input_nodes": [
-                        layout_key(input.get_layout()) for input in input_nodes
-                    ],
-                    "num_stages": num_stages,
-                    "num_warps": num_warps,
-                    "prefix_args": prefix_args,
-                    "suffix_args": suffix_args,
-                    "call_sizes": normalize_list(call_sizes),
-                    "layout": layout_key(layout),
-                    "num_consumer_groups": num_consumer_groups,
-                    "num_buffers_warp_spec": num_buffers_warp_spec,
-                    "kwargs": kwargs,
-                    "epilogue_fn": id(epilogue_fn),
-                }
-            )
+        def has_flexiable_layout() -> bool:
+            if isinstance(layout, ir.FlexibleLayout):
+                return True
 
-        return None
+            for input in input_nodes:
+                if isinstance(input.get_layout(), ir.FlexibleLayout):
+                    return True
+            return False
+
+        # we do not cache under those conditions right now.
+        if (
+            has_flexiable_layout()
+            or subgraphs is not None
+            or workspace_arg is not None
+            or epilogue_fn is not identity
+        ):
+            return None
+
+        return repr(
+            {
+                "input_nodes": [
+                    layout_key(input.get_layout()) for input in input_nodes
+                ],
+                "num_stages": num_stages,
+                "num_warps": num_warps,
+                "prefix_args": prefix_args,
+                "suffix_args": suffix_args,
+                "call_sizes": normalize_list(call_sizes),
+                "layout": layout_key(layout),
+                "num_consumer_groups": num_consumer_groups,
+                "num_buffers_warp_spec": num_buffers_warp_spec,
+                "kwargs": kwargs,
+            }
+        )
 
     def get_entry(self, cache_key: Optional[str]) -> Optional[GeneratedCodeCacheEntry]:
         if cache_key is None:
@@ -1269,21 +1294,23 @@ class TritonTemplate(KernelTemplate):
     ]:
         # breakpoint()
         """Generate the python code and load it into the current process"""
-        cache_key = self._generated_code_cache.make_key(
-            input_nodes,
-            num_stages,
-            num_warps,
-            call_sizes,
-            prefix_args,
-            suffix_args,
-            epilogue_fn,
-            subgraphs,
-            workspace_arg,
-            layout,
-            num_consumer_groups,
-            num_buffers_warp_spec,
-            kwargs,
-        )
+        cache_key = None
+        if  self._cache_codegen:
+            cache_key = self._generated_code_cache.make_key(
+                input_nodes,
+                num_stages,
+                num_warps,
+                call_sizes,
+                prefix_args,
+                suffix_args,
+                epilogue_fn,
+                subgraphs,
+                workspace_arg,
+                layout,
+                num_consumer_groups,
+                num_buffers_warp_spec,
+                kwargs,
+            )
 
         assert self.template, "requires jinja2"
         defines = StringIO()
