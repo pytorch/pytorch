@@ -4517,7 +4517,10 @@ class TestOpProfiles(TestCase):
             ):
                 torch.ops.mylib.foo(t1, t2)
 
-            with torch._library.fake_profile.register_fake_profile(op_profiles), fm:
+            with (
+                torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles),
+                fm,
+            ):
                 torch.ops.mylib.foo(t1, t2)
 
                 with self.assertRaisesRegex(MissingOpProfile, "mylib::foo"):
@@ -4560,7 +4563,7 @@ class TestOpProfiles(TestCase):
             with fm:
                 self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
 
-            with torch._library.fake_profile.register_fake_profile(op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
                 with fm:
                     self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.float32)
 
@@ -4591,7 +4594,7 @@ class TestOpProfiles(TestCase):
             "mylib.foo1.default": self.get_sample_op_profile()["mylib.foo.default"]
         }
 
-        with torch._library.fake_profile.register_fake_profile(op_profiles):
+        with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
             with fm:
                 self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.float32)
 
