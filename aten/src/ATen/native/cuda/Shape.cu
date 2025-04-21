@@ -252,7 +252,6 @@ __global__ void CatArrayBatchedCopy_vectorized(
                     os.tensorSize, os.tensorStride, dimSize, concatDim, tid) * alignment; // in bytes
       auto vec = at::native::memory::ld_vec<alignment>(data + alignment * tid);
       at::native::memory::st_vec<alignment>(output + dataOffset + elementOffset, vec);
-      //output[dataOffset + elementOffset] = data[tid];
       tid += stride;
     }
 }
@@ -329,12 +328,27 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   scalar_t *data = (scalar_t *)(out.mutable_data_ptr());
   CatArrInputTensorMetadata<scalar_t, unsigned int, batch_size, stride_size> catMetaData;
   TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> outputParam;
+  // If all batches are contiguous we can call a specialized implementation
+  // which requires the input tensor addresses to be aligned to a
+  // 16 Byte boundary.
+
+  const bool isContig = stride_size == 1;
+  bool isAligned = true;
+  constexpr int alignment = 16;
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
+  // for contig case, we'll canonicalize output strides, so that
+  // we don't have arbitrary strides for dims of size 0
+  size_t stride0 = 1;
   if (memory_format == c10::MemoryFormat::Contiguous) {
-    for (int i = 0; i < nDims; ++i) {
+    for (int i = nDims - 1; i >= 0; --i) {
       outputParam.tensorSize[i] = out.size(i);
-      outputParam.tensorStride[i] = out.stride(i);
+      if (isContig) {
+        outputParam.tensorStride[i] = stride0;
+        stride0 *= out.size(i);
+      } else {
+        outputParam.tensorStride[i] = out.stride(i);
+      }
     }
   } else if (memory_format == c10::MemoryFormat::ChannelsLast || memory_format == c10::MemoryFormat::ChannelsLast3d) {
     // permute the semantics of dims from NCHW to NHWC so that the input
@@ -353,13 +367,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
-  // If all batches are contiguous we can call a specialized implementation
-  // which requires the input tensor addresses to be aligned to a
-  // 16 Byte boundary.
 
-  bool isContig = stride_size == 1;
-  bool isAligned = true;
-  constexpr int alignment = 16;
   // for channels last computing slice size correctly is much more involved, so we never send it
   // on the fully vectorized path
   // we need output stride in cat dimension to be multiple of alignment,
@@ -385,7 +393,11 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         dimSize = inputs[i+batchCounter].get().size(dimension);
         if (isInOutAligned) {
           auto t = inputs[i+batchCounter].get();
-          int64_t slice_size = dimension == 0 ? t.numel() : t.strides()[dimension - 1];
+          // similarly to output stride, we cannot trust stride value to
+          // determine slice size if the corresponding dimension is 1
+          // we have to multiply all the subsequent sizes
+          int64_t slice_size = dimension == 0 ? t.numel() : t.sizes()[dimension - 1] != 1 ?
+             t.strides()[dimension - 1] : c10::multiply_integers(t.sizes().begin() + dimension, t.sizes().end());
           slice_size *= sizeof(scalar_t);
           isInOutAligned &= (slice_size % alignment == 0);
         }
@@ -437,7 +449,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 #else
     dim3 applyBlock, catGrid;
     if (isInOutAligned) {
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_16>(
+      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, alignment>(
         max_elements_per_tensor, batchCounter);
     } else if (isContig && isAligned && sizeof(scalar_t) > 2) {
       std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_16>(
