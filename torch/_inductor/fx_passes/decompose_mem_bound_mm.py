@@ -78,7 +78,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
     ) or (
         check_device(mat1, mat2, device="cpu")
         and statically_known_true(mat1.shape[0] == 1)
-        and statically_known_true(mat2.shape[0] <= 64)
+        and statically_known_true(mat2.shape[0] <= 128)
         and statically_known_true(mat2.shape[1] <= 512)
     )
 
