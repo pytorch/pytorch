@@ -49,3 +49,10 @@ TEST(SourceRangeTest, test_iter) {
   iter = view.iter_for_pos(13);
   EXPECT_EQ(iter.pos(), 13);
 }
+
+TEST(SourceRangeTest, SimpleString) {
+  Source src("hello");
+  EXPECT_EQ(src.num_lines(), 1);
+  EXPECT_EQ(src.get_line(0), "hello");
+  EXPECT_EQ(src.text_str().str(), "hello");
+}

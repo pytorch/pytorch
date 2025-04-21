@@ -192,17 +192,10 @@ struct TORCH_API Source {
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr,
       CopiesString copies_str = COPIES_STRING)
-      : filename_(std::move(filename)),
+      : text_view_(create_text_view(copies_str, text_view)),
+        filename_(std::move(filename)),
         starting_line_no_(starting_line_no),
         gen_ranges_(std::move(gen_ranges)) {
-    if (copies_str == COPIES_STRING) {
-      std::shared_ptr<std::string> allocated_str =
-          std::make_shared<std::string>(text_view.data(), text_view.size());
-      text_view_ = StringCordView({*allocated_str}, {allocated_str});
-    } else {
-      text_view_ = StringCordView({text_view}, {});
-    }
-
     calc_line_start_offsets();
   }
 
@@ -284,6 +277,18 @@ struct TORCH_API Source {
     size_t pos = 0;
     while ((pos = text_view_.find("\n", pos)) != std::string::npos) {
       line_starting_offsets_.push_back(++pos);
+    }
+  }
+
+  static StringCordView create_text_view(
+      CopiesString copies_str,
+      std::string_view text_view) {
+    if (copies_str == COPIES_STRING) {
+      std::shared_ptr<std::string> allocated_str =
+          std::make_shared<std::string>(text_view.data(), text_view.size());
+      return StringCordView({*allocated_str}, {allocated_str});
+    } else {
+      return StringCordView({text_view}, {});
     }
   }
 
