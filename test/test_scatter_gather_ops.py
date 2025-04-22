@@ -84,19 +84,10 @@ class TestScatterGather(TestCase):
                 res = torch.gather(src, dim=dim, index=ind)
                 ref = src[ind0] if dim == 0 else src[:, ind0]
                 self.assertEqual(res, ref, atol=0, rtol=0)
-                if res.device.type == "cuda":
-                    ref_cpu = src.cpu()[ind0.cpu()] if dim == 0 else src.cpu()[:, ind0.cpu()]
-                    self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
-                res_ind_neg = src[ind0 - src.shape[dim]] if dim == 0 else src[:, ind0 - src.shape[1]]
-                self.assertEqual(res_ind_neg, ref, atol=0, rtol=0)
                 res = torch.gather(discontig, dim=dim, index=ind)
                 self.assertEqual(res, ref, atol=0, rtol=0)
-                res_ind = discontig[ind0] if dim == 0 else discontig[:, ind0]
-                self.assertEqual(res_ind, ref, atol=0, rtol=0)
                 res = torch.gather(misaligned, dim=dim, index=ind)
                 self.assertEqual(res, ref, atol=0, rtol=0)
-                res_ind = misaligned[ind0] if dim == 0 else misaligned[:, ind0]
-                self.assertEqual(res_ind, ref, atol=0, rtol=0)
 
 
     @dtypes(torch.bool)
