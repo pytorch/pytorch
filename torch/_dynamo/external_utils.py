@@ -198,3 +198,9 @@ def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         return fn(*args, **kwargs)
 
     return nonrecursive_disable_wrapper
+
+
+def to_int(x: Union[torch.Tensor, int]) -> int:
+    if isinstance(x, torch.Tensor):
+        return x.size(1)
+    return x
