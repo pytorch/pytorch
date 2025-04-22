@@ -114,9 +114,20 @@ class Block:
         ending = "" if self.is_class else "()"
         return f"{self.category.value} {self.full_name}{ending}"
 
+    @cached_property
+    def decorators(self) -> list[str]:
+        return list(_get_decorators(self.tokens, self.begin))
+
+    @cached_property
+    def is_override(self) -> bool:
+        return not self.is_class and any(
+            d.rpartition(".")[2] == "override" for d in self.decorators
+        )
+
     DATA_FIELDS = (
         "category",
         "children",
+        "decorators",
         "display_name",
         "docstring",
         "full_name",
@@ -150,6 +161,38 @@ class Block:
     def __lt__(self, o: Self) -> bool:
         assert isinstance(o, Block) and o.tokens is self.tokens
         return o.index < self.index
+
+
+def _join_tokens(tl: Sequence[TokenInfo]) -> str:
+    # Gets rid of carriage returns and indents
+    lines = {j.start[0]: j.line for j in tl}
+    return " ".join(" ".join(lines.values()).split()).strip()
+
+
+_IGNORE = {token.COMMENT, token.DEDENT, token.INDENT, token.NL}
+
+
+def _get_decorators(tokens: Sequence[TokenInfo], start: int) -> list[str]:
+    decorators: list[str] = []
+
+    # We work backward through lines before the block until we find one that
+    # can't be part of a decorator.
+    nls = (i for i in reversed(range(start)) if tokens[i].type == token.NEWLINE)
+    nls = itertools.chain(nls, [-1])  # The first line has no NEWLINE!
+    it = iter(nls)
+
+    end = next(it, -1)
+    for begin in it:
+        for i in range(begin + 1, end):
+            tok = tokens[i]
+            if tok.type == token.OP and tok.string == "@":
+                decorators.insert(0, _join_tokens(tokens[i:end]))
+                break
+            elif tok.type not in _IGNORE:
+                return decorators
+        end = begin
+
+    return decorators
 
 
 class DocstringFile(_linter.PythonFile):
@@ -337,7 +380,9 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
         def_name = "function" if b.category == "def" else "class"
         msg = f"docstring found for {def_name} '{b.name}' ({b.line_count} lines)"
         if len(b.docstring):
-            msg = msg + f" was too short ({len(b.docstring)} characters)"
+            s = "" if len(b.docstring) == 1 else "s"
+            needed = f"needed {self.args.min_docstring}"
+            msg = f"{msg} was too short ({len(b.docstring)} character{s}, {needed})"
         else:
             msg = "No " + msg
         return _linter.LintResult(msg, *df.tokens[b.begin].start)

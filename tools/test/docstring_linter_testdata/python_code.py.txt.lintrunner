@@ -6,7 +6,7 @@ tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found f
    18 |     # A comment isn't a docstring
    19 |
 
-tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for class 'LongWithShortDocstring' (6 lines) was too short (10 characters)
+tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for class 'LongWithShortDocstring' (6 lines) was too short (10 characters, needed 16)
    22 |
    23 |
    24 | class LongWithShortDocstring:
