@@ -1217,29 +1217,28 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                     raise Exception(f"{func} {output}")
             return output
 
-    match _dispatch_mode:
-        case _DispatchMode.MONEKY_PATCHING:
-            _distribute_function(
-                F.scaled_dot_product_attention,
-                F,
-                mesh,
-                attention_input_fn,
-                attention_output_fn,
-            )
+    if _dispatch_mode == _DispatchMode.MONEKY_PATCHING:
+        _distribute_function(
+            F.scaled_dot_product_attention,
+            F,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
+        )
+        with _enable_cp_dispatcher():
+            yield
+        _restore_function(F.scaled_dot_product_attention, F)
+    elif _dispatch_mode == _DispatchMode.TORCH_FUNTION:
+        with DistributeFunction(
+            F.scaled_dot_product_attention,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
+        ):
             with _enable_cp_dispatcher():
                 yield
-            _restore_function(F.scaled_dot_product_attention, F)
-        case _DispatchMode.TORCH_FUNTION:
-            with DistributeFunction(
-                F.scaled_dot_product_attention,
-                mesh,
-                attention_input_fn,
-                attention_output_fn,
-            ):
-                with _enable_cp_dispatcher():
-                    yield
-        case _DispatchMode.TORCH_DISPATCH:
-            raise NotImplementedError("torch dispatch mode is not supported yet.")
+    else:
+        raise NotImplementedError("torch dispatch mode is not supported yet.")
 
 
 class _LoadBalancer(ABC):
