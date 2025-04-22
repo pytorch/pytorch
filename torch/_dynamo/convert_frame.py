@@ -773,13 +773,6 @@ def _compile(
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                dynamo_timed(
-                    "_compile.compile_inner",
-                    phase_name="entire_frame_compile",
-                    dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-                )
-            )
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
@@ -930,14 +923,13 @@ def _compile(
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
-        with dynamo_timed("build_guards", log_pt2_compile_event=True):
-            check_fn = CheckFunctionManager(
-                code,
-                output,
-                cache_entry,
-                hooks.guard_fail_fn if hooks else None,
-                hooks.guard_filter_fn if hooks else None,
-            )
+        check_fn = CheckFunctionManager(
+            code,
+            output,
+            cache_entry,
+            hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
+        )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -967,7 +959,11 @@ def _compile(
         ),
         _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,
-        _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
+        dynamo_timed(
+            "_compile.compile_inner",
+            phase_name="entire_frame_compile",
+            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+        ),
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
