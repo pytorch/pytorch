@@ -1,9 +1,13 @@
 # mypy: allow-untyped-defs
+import builtins
 import contextlib
+import functools
 import inspect
 import logging
+import math
 from collections import defaultdict
 from collections.abc import Sequence
+from contextlib import contextmanager
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -156,6 +160,97 @@ def fakify(
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
+
+
+def _is_unbacked_symint(symbol):
+    if not isinstance(symbol, torch.SymInt):
+        return False
+
+    return symbol.node.shape_env.is_unbacked_symint(symbol.node.expr)
+
+
+def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
+    """
+    This logic is replicated from dynamo/variables/builtin.py
+    """
+    if len(args) == 2 and not kwargs:
+        arg1, arg2 = args
+
+        # Case 1: Both are tensors
+        if isinstance(arg1, torch.Tensor) and isinstance(arg2, torch.Tensor):
+            return tensor_callable(arg1, arg2)
+
+        # Case 2: One tensor, one scalar
+        elif isinstance(arg1, torch.Tensor) or isinstance(arg2, torch.Tensor):
+            if not isinstance(arg1, torch.Tensor):
+                arg1, arg2 = arg2, arg1
+
+            if isinstance(arg2, (int, float)):
+                kwarg = {"min" if tensor_callable is torch.maximum else "max": arg2}
+                return torch.clamp(arg1, **kwarg)  # type: ignore[call-overload]
+            else:
+                return real_callable(arg1, arg2)
+
+        # Case 3: SymInts
+        elif isinstance(arg1, torch.SymInt) or isinstance(arg2, torch.SymInt):
+            return (
+                torch.sym_max(arg1, arg2)
+                if tensor_callable is torch.maximum
+                else torch.sym_min(arg1, arg2)
+            )
+
+        # Fallback
+        else:
+            return real_callable(arg1, arg2)
+
+    # Single iterable argument handling
+    if len(args) == 1 and not kwargs:
+        iterable = args[0]
+
+        if isinstance(iterable, torch.Tensor):
+            return tensor_callable(iterable)
+        try:
+            iterator = iter(iterable)
+        except TypeError:
+            pass
+        else:
+            items = list(iterator)
+            if not items:
+                raise ValueError(f"{real_callable.__name__}() arg is an empty sequence")
+
+            return functools.reduce(
+                lambda a, b: _tensor_min_max(
+                    a, b, real_callable=real_callable, tensor_callable=tensor_callable
+                ),
+                items,
+            )
+
+    # Fallback to original callable
+    return real_callable(*args, **kwargs)
+
+
+@contextmanager
+def _override_builtin_ops():
+    original_max = builtins.max
+    original_min = builtins.min
+    original_pow = math.pow
+
+    builtins.max = functools.partial(
+        _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
+    )
+
+    builtins.min = functools.partial(
+        _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
+    )
+
+    math.pow = lambda x, y: x**y  # type: ignore[operator]
+
+    try:
+        yield
+    finally:
+        builtins.max = original_max
+        builtins.min = original_min
+        math.pow = original_pow
 
 
 def make_fake_inputs(
