@@ -500,8 +500,6 @@ class InstallParamsWhenExport(torch._dynamo.test_case.TestCase):
         graph, _ = ep(inp)
         self.assertEqual(graph(inp), res)
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-    @torch._dynamo.config.patch(install_params_as_graph_attr=True)
     def test_list_of_tensor(self) -> None:
         def fn(x: list[torch.Tensor]):
             return x[0] + x[1]
