@@ -6,6 +6,7 @@ import math
 import torch
 import torch._inductor.config
 import torch.utils.checkpoint
+from torch._C import FileCheck
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
@@ -1014,6 +1015,42 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_rewriter_19_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
         )
+
+        def test_skip_non_tf32(self):
+            try:
+                orig = torch.backends.cuda.matmul.allow_tf32
+                torch.backends.cuda.matmul.allow_tf32 = False
+
+                class Model(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.inv_scale = 1.0 / 8**0.5
+                        self.query = torch.nn.Linear(64, 64)
+                        self.key = torch.nn.Linear(64, 64)
+                        self.value = torch.nn.Linear(64, 64)
+
+                    def forward(self, x1, attn_mask):
+                        q = self.query(x1).permute([0, 2, 1, 3])
+                        k = self.key(x1).permute([0, 2, 1, 3])
+                        v = self.value(x1).permute([0, 2, 1, 3])
+                        t1 = torch.matmul(q, k.transpose(-2, -1))
+                        t2 = t1.div(self.inv_scale)
+                        t3 = t2 + attn_mask
+                        t4 = t3.softmax(dim=-1)
+                        t5 = t4.matmul(v)
+                        return t5
+
+                func = Model().to("cuda")
+                x1 = torch.randn(1, 16, 64, 64, device="cuda")
+                attn_mask = torch.zeros(1, 1, 16, 16, device="cuda")
+                test_inputs = [x1, attn_mask]
+
+                out, code = run_and_get_code(torch.compile(func), *test_inputs)
+                FileCheck().check_not("scaled_dot_product").run(code[0])
+                self.assertEqual(out, func(*test_inputs))
+
+            finally:
+                torch.backends.cuda.matmul.allow_tf32 = orig
 
     class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
         use_static_shapes = False

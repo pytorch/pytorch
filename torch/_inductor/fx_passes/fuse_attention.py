@@ -551,6 +551,14 @@ def _sfdp_params_check(match):
         query.device == key.device == value.device
     ):
         return False
+    # fused kernels use tf32
+    if (
+        query.device.type == "cuda"
+        and query.dtype == torch.float32
+        and not torch.backends.cuda.matmul.allow_tf32
+    ):
+        return False
+
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
     # Has attn_mask add.
     if len(add_mask_node) > 0:
