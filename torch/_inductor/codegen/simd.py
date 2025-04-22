@@ -136,6 +136,12 @@ class IterationRanges:
 
 
 class IterationRangesRoot(IterationRanges):
+    """
+    Root of a iteration range tree that represents a single
+    tiled dimension in the output kernel. It contains muliple
+    sets of iteration represented with IterationRangesEntry.
+    """
+
     def __init__(
         self,
         name: str,
@@ -228,13 +234,29 @@ class IterationRangesRoot(IterationRanges):
         self, index: sympy.Expr
     ) -> tuple[list[sympy.Symbol], list[sympy.Expr]]:
         """Figure out vars from this tree used in index"""
-        nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
-        nodes = [n for n in nodes if n and n.prefix == self.prefix]
-        nodes.sort(
-            key=lambda x: V.graph.sizevars.size_hint(
+
+        def get_sort_key(x: IterationRangesEntry) -> tuple[int, bool]:
+            """
+            Gets the key for sorting nodes. When two nodes have the
+            same divisor, the node with length as 1 should be handled
+            first so the current divisor is not changed after multiplied
+            node.length. Returns `not length_is_one_hint` for ascending
+            sort.
+            """
+            divisor_hint = V.graph.sizevars.size_hint(
                 x.divisor, fallback=config.unbacked_symint_fallback
             )
-        )
+            length_is_one_hint = (
+                V.graph.sizevars.size_hint(
+                    x.length, fallback=config.unbacked_symint_fallback
+                )
+                == 1
+            )
+            return (divisor_hint, not length_is_one_hint)
+
+        nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
+        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes.sort(key=lambda x: get_sort_key(x))
         divisor = sympy.S.One
         index_vars = []
         sizes = []
