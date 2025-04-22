@@ -898,9 +898,14 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp(aten.view)
-def view_noop(arg, size):
-    return arg.shape == size
+@register_noop_decomp(aten.view.default)
+def view_default_noop(arg, size):
+    return statically_known_true(sym_eq(arg.shape, tuple(size)))
+
+
+@register_noop_decomp(aten.view.dtype)
+def view_dtype_noop(arg, dtype):
+    return arg.dtype == dtype
 
 
 # Note, we also always have a check for identical metadata, which is why these
