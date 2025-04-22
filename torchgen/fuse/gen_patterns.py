@@ -7,7 +7,7 @@ from torch._inductor.fx_passes import joint_graph
 
 if __name__ == "__main__":
     # Start by deleting all the existing patterns.
-    for path in pattern_matcher.SERIALIZED_PATTERN_PATH.iterdir():
+    for path in pattern_matcher.TORCHINDUCTOR_SERIALIZED_PATTERN_PATH.iterdir():
         if path.name in {"__init__.py", "__pycache__"}:
             continue
         if path.is_file():

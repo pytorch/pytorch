@@ -1612,9 +1612,9 @@ def _serialize_pattern(
         formatted_imports = f"from torch._inductor.pattern_matcher import (\n   {formatted_imports},\n)\n"
         return f"{file_template}{formatted_imports}"
 
-    if not SERIALIZED_PATTERN_PATH.is_dir():
+    if not TORCHINDUCTOR_SERIALIZED_PATTERN_PATH.is_dir():
         raise RuntimeError(
-            f"Could not find serialized patterns directory at {SERIALIZED_PATTERN_PATH}"
+            f"Could not find serialized patterns directory at {TORCHINDUCTOR_SERIALIZED_PATTERN_PATH}"
         )
 
     pattern_name = search_fn.__name__
@@ -1633,7 +1633,7 @@ def _serialize_pattern(
 
     file_template = get_file_template()
 
-    with open(SERIALIZED_PATTERN_PATH / f"{pattern_name}.py", write_mode) as f:
+    with open(TORCHINDUCTOR_SERIALIZED_PATTERN_PATH / f"{pattern_name}.py", write_mode) as f:
         if write_mode == "w":
             f.write(file_template)
         else:
@@ -1644,10 +1644,10 @@ def _serialize_pattern(
     return pattern
 
 
-if torch._inductor.config.torchinductor_serialized_pattern_path == "DEFAULT":
-    SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
+if torch._inductor.config.serialized_pattern_path == "DEFAULT":
+    TORCHINDUCTOR_SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patterns"
 else:
-    SERIALIZED_PATTERN_PATH = Path(torch._inductor.config.torchinductor_serialized_pattern_path)
+    TORCHINDUCTOR_SERIALIZED_PATTERN_PATH = Path(torch._inductor.config.serialized_pattern_path)
 
 # This is the set of serialized patterns that we've registered.  Used by
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
@@ -1684,12 +1684,12 @@ def gen_register_replacement(
         )
     else:
         pattern_name = search_fn.__name__
-        if torch._inductor.config.torchinductor_serialized_pattern_path == "DEFAULT":
+        if torch._inductor.config.serialized_pattern_path == "DEFAULT":
             m = importlib.import_module(
                 f"torch._inductor.fx_passes.serialized_patterns.{pattern_name}"
             )
         else:
-            modu_path = SERIALIZED_PATTERN_PATH / f"{pattern_name}.py"
+            modu_path = TORCHINDUCTOR_SERIALIZED_PATTERN_PATH / f"{pattern_name}.py"
             modu_spec = importlib.util.spec_from_file_location(pattern_name, modu_path)
             if modu_spec is not None:
                 m = importlib.util.module_from_spec(modu_spec)
