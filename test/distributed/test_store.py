@@ -159,7 +159,7 @@ class StoreTestBase:
 
         return store
 
-    def test_queues(self):
+    def test_queues(self) -> None:
         store = self._create_store_or_skip_if_no_queues()
 
         self.assertFalse(store.check(["foo"]))
@@ -177,6 +177,15 @@ class StoreTestBase:
 
         self.assertFalse(store.check(["foo"]))
         self.assertEqual(store.queue_len("foo"), 0)
+
+    def test_queues_nonblocking(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        with self.assertRaisesRegex(dist.QueueEmptyError, "empty"):
+            store.queue_pop("foo", block=False)
+
+        store.queue_push("foo", "a")
+        self.assertEqual(store.queue_pop("foo", block=False), b"a")
 
     def test_queues_bidirectional(self) -> None:
         store = self._create_store_or_skip_if_no_queues()
@@ -202,7 +211,7 @@ class StoreTestBase:
             for fut in futures:
                 fut.result()
 
-    def test_queues_timeout(self):
+    def test_queues_timeout(self) -> None:
         store = self._create_store_or_skip_if_no_queues()
 
         store.set_timeout(timedelta(seconds=0.01))
