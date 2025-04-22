@@ -71,7 +71,7 @@ using Block = HostBlock<CUDAStream>;
 
 struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
-  bool is_pinned(void* ptr) override {
+  bool is_pinned(const void* ptr) override {
     // First check if driver is broken/missing, in which case PyTorch CPU
     // functionalities should still work, we should report `false` here.
     if (!at::cuda::is_available()) {
