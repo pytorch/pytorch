@@ -11,6 +11,7 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
+import ctypes
 import importlib
 import os
 import sys
@@ -19,7 +20,6 @@ import traceback
 import warnings
 from functools import lru_cache
 from typing import Any, Callable, cast, Optional, Union
-import ctypes
 
 import torch
 import torch._C
@@ -62,7 +62,6 @@ try:
         if not _version.hip:
             import pynvml  # type: ignore[import]
         else:
-            import ctypes
             from pathlib import Path
 
             # In ROCm (at least up through 6.3.2) there're 2 copies of libamd_smi.so:
@@ -1040,7 +1039,7 @@ def current_device() -> int:
     return torch._C._cuda_getDevice()
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: Optional[_device_t] = None) -> None:
     r"""Wait for all kernels in all streams on a CUDA device to complete.
 
     Args:
@@ -1695,14 +1694,13 @@ def _register_triton_kernels():
 _lazy_call(_register_triton_kernels)
 
 
-
 def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: str = None,
+    compute_capability: Optional[str] = None,
     header_code: str = "",
-    cuda_include_dirs: list = None,
-    nvcc_options: list = None
+    cuda_include_dirs: Optional[list] = None,
+    nvcc_options: Optional[list] = None,
 ):
     """
     Compiles a CUDA kernel using NVRTC and returns a callable function.
@@ -1740,7 +1738,7 @@ def _compile_kernel(
         >>> c = torch.empty_like(a)
         >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
     """
-    from torch.cuda._utils import _nvrtc_compile, _cuda_load_module
+    from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
 
     # Compile the kernel to PTX
     ptx = _nvrtc_compile(
@@ -1749,12 +1747,19 @@ def _compile_kernel(
         compute_capability,
         header_code,
         cuda_include_dirs,
-        nvcc_options
+        nvcc_options,
     )
 
     # Load the module and get the kernel
-    kernels = _cuda_load_module(ptx, [kernel_name])
-    return kernels[kernel_name]
+    result = _cuda_load_module(ptx, [kernel_name])
+
+    if isinstance(result, dict):
+        return result[kernel_name]
+    else:
+        # This branch shouldn't be executed if kernel_names is provided,
+        # but MyPy needs this to understand type narrowing
+        return getattr(result, kernel_name)
+
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
 

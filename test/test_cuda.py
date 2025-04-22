@@ -5982,6 +5982,7 @@ class TestCompileKernel(TestCase):
 
         # Compile the kernel
         from torch.cuda import _compile_kernel
+
         add_kernel = _compile_kernel(kernel_source, "add_tensors")
 
         # Prepare data
@@ -5998,7 +5999,7 @@ class TestCompileKernel(TestCase):
         add_kernel(
             grid=(blocks_per_grid, 1, 1),
             block=(threads_per_block, 1, 1),
-            args=[a, b, c, N]
+            args=[a, b, c, N],
         )
 
         # Verify results
@@ -6026,7 +6027,7 @@ class TestCompileKernel(TestCase):
         add_int_kernel(
             grid=(blocks_per_grid, 1, 1),
             block=(threads_per_block, 1, 1),
-            args=[a_int, b_int, c_int, N]
+            args=[a_int, b_int, c_int, N],
         )
 
         # Verify results
@@ -6051,9 +6052,7 @@ class TestCompileKernel(TestCase):
         """
 
         scale_kernel = _compile_kernel(
-            scale_kernel_source,
-            "scale_tensors",
-            header_code=header_code
+            scale_kernel_source, "scale_tensors", header_code=header_code
         )
 
         input_tensor = torch.rand(N, device="cuda")
@@ -6062,7 +6061,7 @@ class TestCompileKernel(TestCase):
         scale_kernel(
             grid=(blocks_per_grid, 1, 1),
             block=(threads_per_block, 1, 1),
-            args=[input_tensor, output_tensor, N]
+            args=[input_tensor, output_tensor, N],
         )
 
         # Verify scaling
@@ -6097,6 +6096,7 @@ class TestCompileKernel(TestCase):
         }
         """
         from torch.cuda import _compile_kernel
+
         matmul_kernel = _compile_kernel(matmul_kernel_source, "matrix_multiply")
 
         # Matrix dimensions
@@ -6109,15 +6109,17 @@ class TestCompileKernel(TestCase):
 
         # Calculate grid and block dimensions
         block_dim = (16, 16, 1)
-        grid_dim = ((N + block_dim[0] - 1) // block_dim[0],
-                    (M + block_dim[1] - 1) // block_dim[1],
-                    1)
+        grid_dim = (
+            (N + block_dim[0] - 1) // block_dim[0],
+            (M + block_dim[1] - 1) // block_dim[1],
+            1,
+        )
 
         # Launch kernel
         matmul_kernel(
             grid=grid_dim,
             block=block_dim,
-            args=[A.contiguous(), B.contiguous(), C, M, N, K]
+            args=[A.contiguous(), B.contiguous(), C, M, N, K],
         )
 
         # Verify results
@@ -6130,9 +6132,7 @@ class TestCompileKernel(TestCase):
 
         # Recompile with explicit compute capability
         matmul_kernel_explicit = _compile_kernel(
-            matmul_kernel_source,
-            "matrix_multiply",
-            compute_capability=compute_cap
+            matmul_kernel_source, "matrix_multiply", compute_capability=compute_cap
         )
 
         C_explicit = torch.zeros((M, N), device="cuda")
@@ -6141,7 +6141,7 @@ class TestCompileKernel(TestCase):
         matmul_kernel_explicit(
             grid=grid_dim,
             block=block_dim,
-            args=[A.contiguous(), B.contiguous(), C_explicit, M, N, K]
+            args=[A.contiguous(), B.contiguous(), C_explicit, M, N, K],
         )
 
         # Verify results

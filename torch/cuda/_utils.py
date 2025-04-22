@@ -56,6 +56,8 @@ def _get_nvrtc_library() -> ctypes.CDLL:
     # Get NVRTC version based on CUDA runtime version
     # Use an alternative approach to get the CUDA version
     # since cudart().getVersion() is failing
+    import torch
+
     try:
         import torch.cuda
 
@@ -79,7 +81,6 @@ def _get_nvrtc_library() -> ctypes.CDLL:
         lib_name = f"nvrtc64_{version}_0.dll"
         return ctypes.CDLL(lib_name)
     else:
-
         lib_paths = [
             f"libnvrtc.so.{version}",
             os.path.join(
@@ -102,10 +103,10 @@ def _get_nvrtc_library() -> ctypes.CDLL:
 def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: Optional[str] = None,
+    compute_capability: str | None = None,
     header_code: str = "",
-    cuda_include_dirs: Optional[list] = None,
-    nvcc_options: Optional[list] = None,
+    cuda_include_dirs: list[str] | None = None,
+    nvcc_options: list[str] | None = None,
 ) -> bytes:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
@@ -113,11 +114,11 @@ def _nvrtc_compile(
     Args:
         kernel_source (str): The CUDA kernel source code as a string
         kernel_name (str): The name of the kernel function to compile
-        compute_capability (str, optional): The compute capability to target (e.g., "86").
+        compute_capability (str, None): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
         header_code (str, optional): Additional header code to prepend to the kernel source
-        cuda_include_dirs (list, optional): List of directories containing CUDA headers
-        nvcc_options (list, optional): Additional options to pass to NVRTC
+        cuda_include_dirs (list, None): List of directories containing CUDA headers
+        nvcc_options (list, None): Additional options to pass to NVRTC
 
     Returns:
         str: The compiled PTX code
@@ -265,9 +266,9 @@ class _CudaKernel:
         self,
         grid: tuple[int, int, int] = (1, 1, 1),
         block: tuple[int, int, int] = (1, 1, 1),
-        args: Optional[list] = None,
+        args: list | None = None,
         shared_mem: int = 0,
-        stream: Optional[Any] = None,
+        stream: Any | None = None,
     ) -> None:
         """
         Call the compiled CUDA kernel
