@@ -2846,9 +2846,7 @@ def get_dynamic_sources() -> set[str]:
         return _DYNAMIC_SOURCES
 
     # Config has changed or first time, (re)calculate the sources
-    _DYNAMIC_SOURCES = set(
-        torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
-    )
+    _DYNAMIC_SOURCES = {s for s in torch.compiler.config.dynamic_sources.replace(" ", "").split(",") if s}
     _DYNAMIC_SOURCES_CONFIG_HASH = current_hash
 
     return _DYNAMIC_SOURCES
