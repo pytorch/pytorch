@@ -894,21 +894,23 @@ class AutogradCompilerInstance:
         assert sizes_node.name == "sizes"
 
         for getitem_node in sizes_node.users.keys():
+            assert getitem_node.target == operator.getitem
             if getitem_node.users:
                 used_sizes.append(getitem_node)
             else:
                 # remove from the graph
                 unused_sizes.append(getitem_node)
 
-        used_sizes_idx = set()
+        used_sizes_idx: set[int] = set()
         for used in used_sizes:
             assert isinstance(used.args, tuple)
             assert used.args[0] == sizes_node
             assert isinstance(used.args[1], int)
+            next_size_idx = len(used_sizes_idx)
             # used later reindex the runtime sizes arg
             used_sizes_idx.add(used.args[1])
             # reindex the graph
-            used.args = (used.args[0], len(used_sizes_idx))
+            used.args = (used.args[0], next_size_idx)
 
         for unused in unused_sizes:
             self.fx_tracer.graph.erase_node(unused)
