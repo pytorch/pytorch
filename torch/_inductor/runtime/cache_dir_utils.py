@@ -5,6 +5,8 @@ import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 
+from torch._environment import is_fbcode
+
 
 # Factoring out to file without torch dependencies
 
@@ -20,7 +22,7 @@ def cache_dir() -> str:
 def default_cache_dir() -> str:
     sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
     return os.path.join(
-        tempfile.gettempdir(),
+        tempfile.gettempdir() if not is_fbcode() else "/var/tmp",
         "torchinductor_" + sanitized_username,
     )
 
