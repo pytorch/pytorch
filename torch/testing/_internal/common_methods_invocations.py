@@ -2620,6 +2620,10 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
         gather_variable((S, S), 1, M, True, device=device))
     yield SampleInput(
         make_arg((M, S)),
+        0,
+        gather_variable((S, S), 1, M, True, device=device).to(torch.int32))
+    yield SampleInput(
+        make_arg((M, S)),
         1,
         gather_variable((M, S // 2), 0, S, True, device=device))
     # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
@@ -2662,11 +2666,6 @@ def error_inputs_gather(op_info, device, **kwargs):
     bad_src = make_tensor((1, 1), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(bad_src, args=(1, idx,)),
                      error_regex="Size does not match at dimension 0")
-
-    # Index must have long dtype
-    bad_idx = idx.to(torch.int32)
-    yield ErrorInput(SampleInput(src, args=(1, bad_idx)),
-                     error_regex="Expected dtype int64 for index")
 
     # TODO: FIXME
     # out.dtype must match src.dtype
