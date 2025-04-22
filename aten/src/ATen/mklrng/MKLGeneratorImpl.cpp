@@ -34,7 +34,7 @@ MKLGeneratorImpl::MKLGeneratorImpl(uint64_t seed_in)
   : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
     seed_(seed_in),
     offset_(0) {
-    vslNewStream(&stream_, VSL_BRNG_MCG59, seed_);
+    vslNewStream(&stream_, VSL_BRNG_PHILOX4X32X10, seed_);
   }
 
 /**
@@ -44,7 +44,7 @@ MKLGeneratorImpl::MKLGeneratorImpl(uint64_t seed_in)
 void MKLGeneratorImpl::set_current_seed(uint64_t seed) {
   this->seed_ = seed;
   vslDeleteStream(&stream_);
-  vslNewStream(&stream_, VSL_BRNG_MCG59, seed_);
+  vslNewStream(&stream_, VSL_BRNG_PHILOX4X32X10, seed_);
   this->offset_ = 0;
 }
 
