@@ -134,6 +134,11 @@ class MetalExprPrinter(ExprPrinter_):
         x = self.doprint(expr.args[0])
         return f"static_cast<int>(metal::floor({x}))"
 
+    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        x = self.doprint(expr.args[0])
+        return f"static_cast<int>(metal::trunc({x}))"
+
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
