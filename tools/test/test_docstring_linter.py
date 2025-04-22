@@ -26,6 +26,7 @@ else:
     from .linter_test_case import LinterTestCase
 
 TEST_FILE = Path("tools/test/docstring_linter_testdata/python_code.py.txt")
+TEST_FILE2 = Path("tools/test/docstring_linter_testdata/more_python_code.py.txt")
 TEST_BLOCK_NAMES = Path("tools/test/docstring_linter_testdata/block_names.py.txt")
 ARGS = "--max-class=3", "--max-def=4", "--min-docstring=16"
 
