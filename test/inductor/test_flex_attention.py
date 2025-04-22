@@ -148,7 +148,23 @@ TEST_ON_CUDA = (
 
 device_configs = {}
 test_device = ("cpu", "cuda")
-DEVICE_SUPPORTS_BACKWARDS = set("cuda")
+
+
+class SubstringSet:
+    def __init__(self, items):
+        self.items = set(items)
+
+    def __contains__(self, item):
+        if "cuda" in item:
+            item = "cuda"
+        return item in self.items
+
+
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
+    [
+        "cuda",
+    ]
+)
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
@@ -672,10 +688,9 @@ class TestFlexAttention(InductorTestCase):
 
         # compute
         return_lse = True
-        if self.test_inference_only:
-            return_lse = False
-            compiled_lse = None
-            compiled_out = compiled_sdpa(
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
+        if requires_grad:
+            compiled_out, compiled_lse = compiled_sdpa(
                 q,
                 k_cache,
                 v_cache,
@@ -684,9 +699,10 @@ class TestFlexAttention(InductorTestCase):
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
             )
-
         else:
-            compiled_out, compiled_lse = compiled_sdpa(
+            return_lse = False
+            compiled_lse = None
+            compiled_out = compiled_sdpa(
                 q,
                 k_cache,
                 v_cache,
@@ -2178,22 +2194,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def sliding_window(b, h, q, kv):
             return (q - kv) <= 512
 
+        local_s = 2048
         block_mask = create_block_mask(
-            and_masks(causal_mask, sliding_window), 1, 1, S, S, device=device
+            and_masks(causal_mask, sliding_window),
+            1,
+            1,
+            local_s,
+            local_s,
+            device=device,
         )
         self.assertExpectedInline(block_mask.kv_num_blocks.sum().item(), """28""")
         attention = functools.partial(flex_attention, block_mask=block_mask)
-        self.run_test_with_call(attention, dtype=torch.float16, device=device)
+        self.run_test_with_call(
+            attention, Q_S=local_s, KV_S=local_s, dtype=torch.float16, device=device
+        )
 
         block_mask = create_block_mask(
-            and_masks(causal_mask, neg_causal_mask), 1, 1, S, S, device=device
+            and_masks(causal_mask, neg_causal_mask),
+            1,
+            1,
+            local_s,
+            local_s,
+            device=device,
         )
         self.assertEqual(block_mask.kv_num_blocks.sum(), 0)
 
         block_mask1 = create_block_mask(
-            or_masks(causal_mask, neg_causal_mask), 1, 1, S, S, device=device
+            or_masks(causal_mask, neg_causal_mask),
+            1,
+            1,
+            local_s,
+            local_s,
+            device=device,
         )
-        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S, device=device)
+        block_mask2 = create_block_mask(
+            noop_mask, 1, 1, local_s, local_s, device=device
+        )
         self.assertEqual(block_mask1.sparsity(), block_mask2.sparsity())
 
     @supported_platform
@@ -2944,8 +2980,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(out[:, :, M:, :].sum(), 0)
 
     @supported_platform
-    @common_utils.parametrize("compile", [True, False])
-    def test_fully_masked_out_rows(self, device, compile: bool):
+    def test_fully_masked_out_rows(self, device):
         M = S // 2
 
         def mask_mod(b, h, q, kv):
@@ -2957,7 +2992,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(
-            noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask, device=device
+            noop_mod, torch.float32, device, B, H, S, D, B, H, S, D, block_mask
         )
 
     @supported_platform
@@ -3228,7 +3263,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             inv_dist = torch.exp(-dist / scale)
             return inv_dist * score
 
-        self.run_test(euclidean_dist_pos_embed, torch.bfloat16)
+        self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device)
 
     @supported_platform
     @skip_on_cpu
