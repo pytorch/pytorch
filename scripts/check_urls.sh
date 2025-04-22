@@ -34,7 +34,7 @@ while IFS=: read -r filepath url; do
   fi
 done < <(
   git --no-pager grep --no-color -I -P -o \
-    '(?<!git\+)(?<!\$\{)https?://(?![^\s<>\")]*[\{\}\$])[^[:space:]<>\")\[\]\(]+' \
+    '(?<!git\+)(?<!\$\{)https?://(?![^\s<>\")]*[\{\}\$])[^[:space:]<>\")\[\]\(\\]+' \
     -- '*' \
     ':(exclude).*' \
     ':(exclude)**/.*' \
