@@ -1,16 +1,16 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
+
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ceil_div.h>
 #include <ATen/MemoryOverlap.h>
 
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/cuda/IndexKernelUtils.h>
+#include <ATen/native/TensorIterator.h>
+
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
-#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -112,6 +112,7 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+
 template <bool is_scatter_like, typename scalar_t>
 struct _cuda_scatter_gather_internal_kernel {
   template <typename func_t>
@@ -135,29 +136,13 @@ struct _cuda_scatter_gather_internal_kernel {
     char* src_ptr = (char*)iter.data_ptr(1);
     char* index_ptr = (char*)iter.data_ptr(2);
 
-    if constexpr (!is_scatter_like) {
-      // we can go to faster path if we are indexing on the first dim
-      // the dst and src are contiguous and all the dims and pts are multiple of 16
-      constexpr size_t element_size = sizeof(scalar_t);
-      constexpr size_t alignment = 16;
-      if (at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride, element_size)) {
-        auto slice_size = iter.shape()[0] * element_size;
-        auto num_ind = iter.shape()[1];
-        auto ind_dim_size = index_size;
-        auto inp_stride_bytes = index_stride * element_size;
-        auto out_stride_bytes = iter.strides(0)[1];
-        if (iter.numel() == 0) return;
-        at::native::vectorized_gather_kernel_launch<alignment>(self_ptr, src_ptr, (int64_t*)index_ptr, num_ind, slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes);
-        return;
-      }
-    }
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "scatter gather kernel index out of bounds");
+        && "index out of bounds");
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
@@ -168,7 +153,6 @@ struct _cuda_scatter_gather_internal_kernel {
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
-
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
