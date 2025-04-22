@@ -1772,6 +1772,17 @@ class GraphLowering(torch.fx.Interpreter):
         for op in self.operations[operation_watermark:]:
             new_unbacked_defs |= op.get_unbacked_symbol_defs()
 
+        shape_env = V.graph.sizevars.shape_env
+
+        # An input can an unbacked symint i.e.: when mark_unabcked is ued symbol
+        # in that case add it to new_unbacked_defs.
+        if (
+            n.op == "placeholder"
+            and isinstance(result, sympy.Symbol)
+            and shape_env.is_unbacked_symint(result)
+        ):
+            new_unbacked_defs.add(result)
+
         def format_new_defs() -> str:
             r = [
                 f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
@@ -1783,96 +1794,94 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return "***\n".join(r)
 
-        if n.op != "placeholder":
-            # Note [Backwards runtime asserts]
-            # Backwards poses an interesting problem for deferred runtime
-            # asserts.  In the easy case, we may solely close over data
-            # dependent sized tensors, and there are no binding sites for
-            # unbacked SymInts.  In this case, we can just drop all the
-            # runtime asserts on the floor: no non-placeholder bindings, no
-            # problem.
-            #
-            # However, it is *possible* for a fresh runtime assert to show up
-            # between forwards and backwards.  Right now, the freezing process
-            # that happens when we lower forwards means that we will freeze
-            # runtime asserts, and then the moment the backwards lowering
-            # process attempts to add a new deferred runtime assert, we will
-            # fail.  Let's say you remove that assert.  Now when we get here,
-            # we need to make sure we actually emit these asserts (because we
-            # can't emit them in forwards, we already compiled it).  So we
-            # have to do something here.  But we don't want to reemit ALL
-            # deferred runtime asserts, we only want to emit the NEW ones.
-            # Therefore needing some sort of stratification in the ShapeEnv.
-            # This is all doable, it just hasn't been done yet.
-            shape_env = V.graph.sizevars.shape_env
+        # Note [Backwards runtime asserts]
+        # Backwards poses an interesting problem for deferred runtime
+        # asserts.  In the easy case, we may solely close over data
+        # dependent sized tensors, and there are no binding sites for
+        # unbacked SymInts.  In this case, we can just drop all the
+        # runtime asserts on the floor: no non-placeholder bindings, no
+        # problem.
+        #
+        # However, it is *possible* for a fresh runtime assert to show up
+        # between forwards and backwards.  Right now, the freezing process
+        # that happens when we lower forwards means that we will freeze
+        # runtime asserts, and then the moment the backwards lowering
+        # process attempts to add a new deferred runtime assert, we will
+        # fail.  Let's say you remove that assert.  Now when we get here,
+        # we need to make sure we actually emit these asserts (because we
+        # can't emit them in forwards, we already compiled it).  So we
+        # have to do something here.  But we don't want to reemit ALL
+        # deferred runtime asserts, we only want to emit the NEW ones.
+        # Therefore needing some sort of stratification in the ShapeEnv.
+        # This is all doable, it just hasn't been done yet.
 
-            def make_assert(expr: SympyBoolean, msg: str) -> None:
-                assert_op = ir.AssertScalar(expr, msg)
-                self.register_buffer(assert_op, set_name=True)
-                self.register_operation(assert_op)
+        def make_assert(expr: SympyBoolean, msg: str) -> None:
+            assert_op = ir.AssertScalar(expr, msg)
+            self.register_buffer(assert_op, set_name=True)
+            self.register_operation(assert_op)
 
-            # bound_unbacked_symbols tracks the symbols that are created so far,
-            # we use it to make sure that runtime assertions are added after all
-            # symbols used in them are defined.
-            self.bound_unbacked_symbols |= new_unbacked_defs
+        # bound_unbacked_symbols tracks the symbols that are created so far,
+        # we use it to make sure that runtime assertions are added after all
+        # symbols used in them are defined.
+        self.bound_unbacked_symbols |= new_unbacked_defs
 
-            unbacked_bindings = resolve_unbacked_bindings(
-                V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
-            )
-            assert unbacked_bindings is not None
-            # When we do lowering, it is possible we reallocate unbacked SymInts.
-            # So we need to line up the unbacked SymInts when performing the test
-            # here
-            #
-            # In principle, we could permit lowering to introduce MORE unbacked
-            # SymInts: as long as all the old unbacked ones are accounted for,
-            # it's fine for inductor to introduce extra calls to item()/unbacked()
-            # whatever.  This actually happens in practice when an unbacked SymInt
-            # gets memoized away; naively, when Inductor reprocesses a kernel, it
-            # doesn't know that the memo still applies, and ends up allocating a
-            # new symbol.  However, this is generally a bad thing: we may still
-            # end up needing to test equalities on the symbols, and a fresh
-            # symbol is likely to hit lots of GuardOnDataDependent errors that
-            # we already know facts for.
-            renamed_unbacked_bindings = OrderedSet(
-                V.fake_mode.shape_env.unbacked_renamings.get(s, s)
-                for s in unbacked_bindings.keys()
-            )
-            assert new_unbacked_defs >= renamed_unbacked_bindings, (
-                f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
-                f"fx node is: {n.format_node()}\n"
-                f"new operations are:\n\n{format_new_defs()}"
-            )
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
+        )
+        assert unbacked_bindings is not None
+        # When we do lowering, it is possible we reallocate unbacked SymInts.
+        # So we need to line up the unbacked SymInts when performing the test
+        # here
+        #
+        # In principle, we could permit lowering to introduce MORE unbacked
+        # SymInts: as long as all the old unbacked ones are accounted for,
+        # it's fine for inductor to introduce extra calls to item()/unbacked()
+        # whatever.  This actually happens in practice when an unbacked SymInt
+        # gets memoized away; naively, when Inductor reprocesses a kernel, it
+        # doesn't know that the memo still applies, and ends up allocating a
+        # new symbol.  However, this is generally a bad thing: we may still
+        # end up needing to test equalities on the symbols, and a fresh
+        # symbol is likely to hit lots of GuardOnDataDependent errors that
+        # we already know facts for.
+        renamed_unbacked_bindings = OrderedSet(
+            V.fake_mode.shape_env.unbacked_renamings.get(s, s)
+            for s in unbacked_bindings.keys()
+        )
+        assert new_unbacked_defs >= renamed_unbacked_bindings, (
+            f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+            f"fx node is: {n.format_node()}\n"
+            f"new operations are:\n\n{format_new_defs()}"
+        )
 
-            # Emit code for runtime asserts that can be inserted at this point.
-            for i0 in new_unbacked_defs:
-                ras = self.ras_by_symbol.pop(i0, [])
-                # NB: size-like not needed, we won't retrace
-                vr = shape_env.var_to_range[i0]
-                if not shape_env._default_unspecified_value_range().issubset(vr):
+        # Emit code for runtime asserts that can be inserted at this point.
+        for i0 in new_unbacked_defs:
+            ras = self.ras_by_symbol.pop(i0, [])
+            # NB: size-like not needed, we won't retrace
+            vr = shape_env.var_to_range[i0]
+            if not shape_env._default_unspecified_value_range().issubset(vr):
 
-                    def is_convertible(s: Expr) -> bool:
-                        if s in (int_oo, -int_oo):
-                            return False
-                        try:
-                            int(s)
-                            return True
-                        except TypeError:
-                            return False
+                def is_convertible(s: Expr) -> bool:
+                    if s in (int_oo, -int_oo):
+                        return False
+                    try:
+                        int(s)
+                        return True
+                    except TypeError:
+                        return False
 
-                    if is_convertible(vr.lower):
-                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
-                    if is_convertible(vr.upper):
-                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
+                if is_convertible(vr.lower):
+                    make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
+                if is_convertible(vr.upper):
+                    make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
 
-                for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
-                    if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
-                    else:
-                        make_assert(ra.expr, f"{ra.expr}")
+            for ra in ras:
+                fvs = free_unbacked_symbols(ra.expr)
+                missing = fvs - self.bound_unbacked_symbols
+                if missing:
+                    i1 = min(missing, key=str)
+                    self.ras_by_symbol.setdefault(i1, []).append(ra)
+                else:
+                    make_assert(ra.expr, f"{ra.expr}")
 
         return result
 
