@@ -189,18 +189,21 @@ def standalone_compile(
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
     context = torch._guards.TracingContext(fake_mode)
-    with torch._guards.tracing(context):
-        with CacheArtifactManager.with_fresh_cache():
-            # compile_fx can mutate gm
-            gm = copy.deepcopy(gm)
-            compiled_fn = compile_fx(gm, example_inputs, **kwargs)
-            assert callable(compiled_fn)
+    with (
+        torch._guards.tracing(context),
+        CacheArtifactManager.with_fresh_cache(),
+        config.patch("triton.autotune_at_compile_time", True),
+    ):
+        # compile_fx can mutate gm
+        gm = copy.deepcopy(gm)
+        compiled_fn = compile_fx(gm, example_inputs, **kwargs)
+        assert callable(compiled_fn)
 
-            artifacts = torch.compiler.save_cache_artifacts()
-            if artifacts is None:
-                log.warning(
-                    "standalone_compile artifact generation failed, cannot save. "
-                    "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
-                )
+        artifacts = torch.compiler.save_cache_artifacts()
+        if artifacts is None:
+            log.warning(
+                "standalone_compile artifact generation failed, cannot save. "
+                "Run with TORCH_LOGS=+torch._inductor.codecache to identify the problem"
+            )
 
     return CompiledArtifact(compiled_fn, artifacts)
