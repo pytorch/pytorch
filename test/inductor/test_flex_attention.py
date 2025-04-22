@@ -13,8 +13,6 @@ from typing import Callable, Optional, TypeVar, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
-from numba.cuda.decorators import declare_device
-
 import torch
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import metrics
@@ -2120,7 +2118,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         self.assertExpectedInline(block_mask.kv_num_blocks.sum().item(), """28""")
         attention = functools.partial(flex_attention, block_mask=block_mask)
-        self.run_test_with_call(attention, device=device)
+        self.run_test_with_call(attention, dtype=torch.float16, device=device)
 
         block_mask = create_block_mask(
             and_masks(causal_mask, neg_causal_mask), 1, 1, S, S, device=device
@@ -2194,8 +2192,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def score_mod(score, b, h, m, n):
             return score * 2
 
-        self.run_test(score_mod, device=device)
-        self.run_test_with_paged_attention(score_mod, device=device)
+        self.run_test(score_mod, dtype=torch.float16, device=device)
+        self.run_test_with_paged_attention(
+            score_mod, dtype=torch.float16, device=device
+        )
 
     @supported_platform
     @skip("TODO: Figure out why this is erroring")
@@ -2211,7 +2211,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             score = score + head_scale[head]
             return score
 
-        self.run_test(bias_mod, device=declare_device)
+        self.run_test(bias_mod, dtype=torch.float32, device=device)
 
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -2219,9 +2219,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
-        self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d, device=device)
+        self.run_test(score_mod, dtype, device, B, H, S, qk_d, B, H, S, V_D=v_d)
         self.run_test_with_paged_attention(
-            score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d, device=device
+            score_mod, dtype, device, B, H, S, qk_d, B, H, S, V_D=v_d
         )
 
     @supported_platform
@@ -2307,9 +2307,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("device,dtype", device_dtype_pairs(fast=True))
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
-        self.run_test(
-            _rel_bias, dtype, B, H, S, head_dim, B, H, S, head_dim, device=device
-        )
+        self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
 
     @supported_platform
     def test_GQA_causal_mask(self, device):
