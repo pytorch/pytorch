@@ -728,7 +728,17 @@ class ParameterList(Module):
         raise RuntimeError("ParameterList should not be called.")
 
 
-class _DictModule(Module):
+class _ModuleDict(Module):
+    def __getitem__(self, key: str) -> Any:
+        attr = self._key_to_attr(key)
+        return getattr(self, attr)
+
+    def __delitem__(self, key: str) -> None:
+        del self._keys[key]
+        attr = self._key_to_attr(key)
+        if hasattr(self, attr):
+            delattr(self, attr)
+
     def __len__(self) -> int:
         return len(self._keys)
 
@@ -765,6 +775,42 @@ class _DictModule(Module):
         del self[k]
         return k, val
 
+    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
+        """Set the default for a key in the Parameterdict.
+
+        If key is in the ParameterDict, return its value.
+        If not, insert `key` with a parameter `default` and return `default`.
+        `default` defaults to `None`.
+
+        Args:
+            key (str): key to set default for
+            default (Any): the parameter set to the key
+        """
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def get(self, key: str, default: Optional[Any] = None) -> Any:
+        r"""Return the parameter associated with key if present. Otherwise return default if provided, None if not.
+
+        Args:
+            key (str): key to get from the ParameterDict
+            default (Parameter, optional): value to return if key not present
+        """
+        return self[key] if key in self else default
+
+    def keys(self) -> Iterable[str]:
+        r"""Return an iterable of the dictionary keys."""
+        return self._keys.keys()
+
+    def items(self) -> Iterable[tuple[str, Any]]:
+        r"""Return an iterable of the dictionary key/value pairs."""
+        return ((k, self[k]) for k in self._keys)
+
+    def values(self) -> Iterable[Any]:
+        r"""Return an iterable of the dictionary values."""
+        return (self[k] for k in self._keys)
+
     def extra_repr(self) -> str:
         child_lines = []
         for k, p in self.items():
@@ -788,8 +834,22 @@ class _DictModule(Module):
         tmpstr = "\n".join(child_lines)
         return tmpstr
 
+    def __or__(self, other: Any) -> Any:
+        copy = self.copy()
+        copy.update(other)
+        return copy
 
-class ParameterDict(_DictModule):
+    def __ror__(self, other: Any) -> Any:
+        copy = other.copy()
+        copy.update(self)
+        return copy
+
+    def __ior__(self, other: Any) -> Self:
+        self.update(other)
+        return self
+
+
+class ParameterDict(_ModuleDict):
     r"""Holds parameters in a dictionary.
 
     ParameterDict can be indexed like a regular Python dictionary, but Parameters it
@@ -843,10 +903,6 @@ class ParameterDict(_DictModule):
             # Use the key as-is so that `.named_parameters()` returns the right thing
             return key
 
-    def __getitem__(self, key: str) -> Any:
-        attr = self._key_to_attr(key)
-        return getattr(self, attr)
-
     def __setitem__(self, key: str, value: Any) -> None:
         # Note that all other function that add an entry to the dictionary part of
         # the ParameterDict end up here. So this is the only place where we need
@@ -859,45 +915,11 @@ class ParameterDict(_DictModule):
             value = Parameter(value)
         setattr(self, attr, value)
 
-    def __delitem__(self, key: str) -> None:
-        del self._keys[key]
-        attr = self._key_to_attr(key)
-        delattr(self, attr)
-
     def copy(self) -> ParameterDict:
         """Return a copy of this :class:`~torch.nn.ParameterDict` instance."""
         # We have to use an OrderedDict because the ParameterDict constructor
         # behaves differently on plain dict vs OrderedDict
         return ParameterDict(OrderedDict((k, self[k]) for k in self._keys))
-
-    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
-        """Set the default for a key in the Parameterdict.
-
-        If key is in the ParameterDict, return its value.
-        If not, insert `key` with a parameter `default` and return `default`.
-        `default` defaults to `None`.
-
-        Args:
-            key (str): key to set default for
-            default (Any): the parameter set to the key
-        """
-        if key not in self:
-            self[key] = default
-        return self[key]
-
-    def clear(self) -> None:
-        """Remove all items from the ParameterDict."""
-        for k in self._keys.copy():
-            del self[k]
-
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
-        r"""Return the parameter associated with key if present. Otherwise return default if provided, None if not.
-
-        Args:
-            key (str): key to get from the ParameterDict
-            default (Parameter, optional): value to return if key not present
-        """
-        return self[key] if key in self else default
 
     def fromkeys(
         self, keys: Iterable[str], default: Optional[Any] = None
@@ -909,18 +931,6 @@ class ParameterDict(_DictModule):
             default (Parameter, optional): value to set for all keys
         """
         return ParameterDict((k, default) for k in keys)
-
-    def keys(self) -> Iterable[str]:
-        r"""Return an iterable of the ParameterDict keys."""
-        return self._keys.keys()
-
-    def items(self) -> Iterable[tuple[str, Any]]:
-        r"""Return an iterable of the ParameterDict key/value pairs."""
-        return ((k, self[k]) for k in self._keys)
-
-    def values(self) -> Iterable[Any]:
-        r"""Return an iterable of the ParameterDict values."""
-        return (self[k] for k in self._keys)
 
     def update(self, parameters: Union[Mapping[str, Any], ParameterDict]) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from ``parameters``, overwriting existing keys.
@@ -961,25 +971,8 @@ class ParameterDict(_DictModule):
                 # parameters as length-2 list too cumbersome to type, see ModuleDict.update comment
                 self[p[0]] = p[1]  # type: ignore[assignment]
 
-    def __call__(self, input):
-        raise RuntimeError("ParameterDict should not be called.")
 
-    def __or__(self, other: ParameterDict) -> ParameterDict:
-        copy = self.copy()
-        copy.update(other)
-        return copy
-
-    def __ror__(self, other: ParameterDict) -> ParameterDict:
-        copy = other.copy()
-        copy.update(self)
-        return copy
-
-    def __ior__(self, other: ParameterDict) -> Self:
-        self.update(other)
-        return self
-
-
-class BufferDict(_DictModule):
+class BufferDict(_ModuleDict):
     def __init__(self, buffers: Any = None) -> None:
         super().__init__()
         self._keys: dict[str, None] = {}
@@ -994,12 +987,7 @@ class BufferDict(_DictModule):
                 "github if you need non - string keys."
             )
         else:
-            # Use the key as - is so that `.named_buffers()` returns the right thing
             return key
-
-    def __getitem__(self, key: str) -> Any:
-        attr = self._key_to_attr(key)
-        return getattr(self, attr)
 
     def __setitem__(self, key: str, value: Any) -> None:
         self._keys[key] = None
@@ -1009,39 +997,9 @@ class BufferDict(_DictModule):
         else:
             setattr(self, attr, value)
 
-    def __delitem__(self, key: str) -> None:
-        del self._keys[key]
-        attr = self._key_to_attr(key)
-        if hasattr(self, attr):
-            delattr(self, attr)
-
     def copy(self) -> BufferDict:
         """Return a copy of this :class:`~torch.nn.BufferDict` instance."""
         return BufferDict(OrderedDict((k, self[k]) for k in self._keys))
-
-    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
-        """Set the default for a key in the BufferDict.
-
-        If key is in the BufferDict, return its value.
-        If not, insert `key` with a buffer `default` and return `default`.
-        `default` defaults to `None`.
-
-        Args:
-            key (str): key to set default for
-            default (Any): the buffer set to the key
-        """
-        if key not in self:
-            self[key] = default
-        return self[key]
-
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
-        r"""Return the buffer associated with key if present. Otherwise return default if provided, None if not.
-
-        Args:
-            key (str): key to get from the BufferDict
-            default (Tensor, optional): value to return if key not present
-        """
-        return self[key] if key in self else default
 
     def fromkeys(
         self, keys: Iterable[str], default: Optional[Any] = None
@@ -1053,18 +1011,6 @@ class BufferDict(_DictModule):
             default (Tensor, optional): value to set for all keys
         """
         return BufferDict((k, default) for k in keys)
-
-    def keys(self) -> Iterable[str]:
-        r"""Return an iterable of the BufferDict keys."""
-        return self._keys.keys()
-
-    def items(self) -> Iterable[tuple[str, Any]]:
-        r"""Return an iterable of the BufferDict key/value pairs."""
-        return ((k, self[k]) for k in self._keys)
-
-    def values(self) -> Iterable[Any]:
-        r"""Return an iterable of the BufferDict values."""
-        return (self[k] for k in self._keys)
 
     def update(self, buffers: Union[Mapping[str, Any], BufferDict]) -> None:
         r"""Update the :class:`~torch.nn.BufferDict` with key - value pairs from ``buffers``, overwriting existing keys.
@@ -1102,21 +1048,4 @@ class BufferDict(_DictModule):
                         "BufferDict update sequence element "
                         "#" + str(j) + " has length " + str(len(p)) + "; 2 is required"
                     )
-                self[p[0]] = p[1]  # type: ignore[assignment]
-
-    def __call__(self, input):
-        raise RuntimeError("BufferDict should not be called.")
-
-    def __or__(self, other: BufferDict) -> BufferDict:
-        copy = self.copy()
-        copy.update(other)
-        return copy
-
-    def __ror__(self, other: BufferDict) -> BufferDict:
-        copy = other.copy()
-        copy.update(self)
-        return copy
-
-    def __ior__(self, other: BufferDict) -> Self:
-        self.update(other)
-        return self
+                self[p[0]] = p[1]
