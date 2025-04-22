@@ -1042,7 +1042,7 @@ class ChainedSource(Source):
         return current
 
 
-def detect_fake_mode(inputs: Any = None, ignore_context=False):
+def detect_fake_mode(inputs: Any = None):
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
@@ -1057,11 +1057,10 @@ def detect_fake_mode(inputs: Any = None, ignore_context=False):
 
     fake_modes = []
 
-    if not ignore_context:
-        if context := TracingContext.try_get():
-            fake_mode = context.fake_mode
-            if fake_mode is not None:
-                fake_modes.append((fake_mode, "tracing context", 0))
+    if context := TracingContext.try_get():
+        fake_mode = context.fake_mode
+        if fake_mode is not None:
+            fake_modes.append((fake_mode, "tracing context", 0))
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
