@@ -501,7 +501,6 @@ class TestCuda(TestCase):
         # restore the initial memory fraction
         torch.cuda.set_per_process_memory_fraction(init_fraction)
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "uuid attribute not yet available")
     def test_uuid(self):
         uuid = torch.cuda.get_device_properties(0).uuid
         self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
