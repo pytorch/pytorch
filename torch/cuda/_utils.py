@@ -1,7 +1,7 @@
 import ctypes
 import os
 import sys
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
 
@@ -31,24 +31,41 @@ def _get_nvrtc_version(cuda_version: int) -> str:
 
 
 # Load CUDA driver and NVRTC
-def _get_cuda_library():
+def _get_cuda_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         return ctypes.CDLL("nvcuda.dll")
     else:  # Unix-based systems
         return ctypes.CDLL("libcuda.so.1")
 
 
-def _get_nvrtc_library():
+# Helper: check CUDA errors
+def _check_cuda(result: int) -> None:
+    if result != 0:
+        err_str = ctypes.c_char_p()
+        libcuda = _get_cuda_library()  # Get reference to CUDA library
+        libcuda.cuGetErrorString(result, ctypes.byref(err_str))
+        error_message = (
+            err_str.value.decode()
+            if err_str.value is not None
+            else "Unknown CUDA error"
+        )
+        raise RuntimeError(f"CUDA error: {error_message}")
+
+
+def _get_nvrtc_library() -> ctypes.CDLL:
     # Get NVRTC version based on CUDA runtime version
     # Use an alternative approach to get the CUDA version
     # since cudart().getVersion() is failing
     try:
-        from torch.cuda import cudart
+        import torch.cuda
 
-        cuda_runtime_version = cudart().getVersion()
+        cuda_runtime_version = torch.cuda.cudart().getVersion()
     except (ImportError, AttributeError):
         # Fallback: if we have CUDA available, get version from device properties
-        if torch.cuda.is_available():
+        if hasattr(torch, "cuda") and torch.cuda.is_available():
+            # Import locally to avoid circular imports
+            import torch.cuda
+
             props = torch.cuda.get_device_properties(torch.cuda.current_device())
             cuda_runtime_version = props.major * 1000 + props.minor * 10
         else:
@@ -62,17 +79,6 @@ def _get_nvrtc_library():
         lib_name = f"nvrtc64_{version}_0.dll"
         return ctypes.CDLL(lib_name)
     else:
-        # TODO: Local workaround need to delete this
-        conda_paths = [
-            # Add all the paths you found
-            "/data/users/marksaroufim/dotsync-home/.conda/envs/nv/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
-            "/data/users/marksaroufim/dotsync-home/.conda/envs/ft/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
-            "/data/users/marksaroufim/dotsync-home/.conda/envs/kernel/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
-            # Also add the parent directories to search for other version-specific files
-            "/data/users/marksaroufim/dotsync-home/.conda/envs/nv/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib",
-            "/data/users/marksaroufim/dotsync-home/.conda/envs/ft/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib",
-            "/data/users/marksaroufim/dotsync-home/.conda/envs/kernel/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib",
-        ]
 
         lib_paths = [
             f"libnvrtc.so.{version}",
@@ -81,9 +87,6 @@ def _get_nvrtc_library():
             ),
             "/usr/local/cuda/lib64/libnvrtc.so",
         ]
-
-        # Add conda paths to the search list
-        lib_paths.extend(conda_paths)
 
         for path in lib_paths:
             try:
@@ -99,11 +102,11 @@ def _get_nvrtc_library():
 def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: str = None,
+    compute_capability: Optional[str] = None,
     header_code: str = "",
-    cuda_include_dirs: list = None,
-    nvcc_options: list = None,
-):
+    cuda_include_dirs: Optional[list] = None,
+    nvcc_options: Optional[list] = None,
+) -> bytes:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
 
@@ -120,10 +123,7 @@ def _nvrtc_compile(
         str: The compiled PTX code
     """
     # Ensure CUDA is initialized
-    from torch.cuda import _lazy_init
-
-    _lazy_init()
-    from torch.cuda._utils import _get_nvrtc_library
+    import torch.cuda
 
     # Load NVRTC library
     libnvrtc = _get_nvrtc_library()
@@ -132,11 +132,16 @@ def _nvrtc_compile(
     NVRTC_SUCCESS = 0
 
     # Helper: check NVRTC errors
-    def check_nvrtc(result):
+    def check_nvrtc(result: int) -> None:
         if result != NVRTC_SUCCESS:
             err_str = ctypes.c_char_p()
             libnvrtc.nvrtcGetErrorString(result, ctypes.byref(err_str))
-            raise RuntimeError(f"NVRTC error: {err_str.value.decode()}")
+            error_message = (
+                err_str.value.decode()
+                if err_str.value is not None
+                else "Unknown CUDA error"
+            )
+            raise RuntimeError(f"CUDA error: {error_message}")
 
     # Add 'extern "C"' if not already present to ensure C linkage
     if not kernel_source.strip().startswith('extern "C"'):
@@ -170,10 +175,14 @@ def _nvrtc_compile(
         for option in nvcc_options:
             options.append(option.encode("utf-8"))
 
-            # TODO: Should we refactor flags into a common place?
-            from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
+    # TODO: Should we refactor flags into a common place?
+    from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
 
-            options.extend(COMMON_NVCC_FLAGS)
+    # Filter out flags not supported by NVRTC
+    nvrtc_compatible_flags = [
+        flag for flag in COMMON_NVCC_FLAGS if flag != "--expt-relaxed-constexpr"
+    ]
+    options.extend([flag.encode("utf-8") for flag in nvrtc_compatible_flags])
 
     # Convert options to C array
     num_options = len(options)
@@ -214,18 +223,52 @@ def _nvrtc_compile(
     return ptx.value
 
 
+class _CudaModule:
+    def __init__(self, module: ctypes.c_void_p) -> None:
+        self._module = module
+        self._kernels: dict[str, _CudaKernel] = {}
+
+    def __getattr__(self, name: str) -> "_CudaKernel":
+        if name in self._kernels:
+            return self._kernels[name]
+
+        # Import the CUDA library inside the method
+        from torch.cuda._utils import _get_cuda_library
+
+        libcuda = _get_cuda_library()
+
+        func = ctypes.c_void_p()
+        try:
+            _check_cuda(
+                libcuda.cuModuleGetFunction(
+                    ctypes.byref(func), self._module, name.encode("utf-8")
+                )
+            )
+            kernel = _CudaKernel(func, self._module)
+            self._kernels[name] = kernel
+            return kernel
+
+        except RuntimeError as err:
+            raise AttributeError(f"No kernel named '{name}' in this module") from err
+
+
 class _CudaKernel:
     """
     Represents a compiled CUDA kernel that can be called with PyTorch tensors.
     """
 
-    def __init__(self, func, module):
+    def __init__(self, func: ctypes.c_void_p, module: ctypes.c_void_p) -> None:
         self.func = func
         self.module = module
 
     def __call__(
-        self, grid=(1, 1, 1), block=(1, 1, 1), args=None, shared_mem=0, stream=None
-    ):
+        self,
+        grid: tuple[int, int, int] = (1, 1, 1),
+        block: tuple[int, int, int] = (1, 1, 1),
+        args: Optional[list] = None,
+        shared_mem: int = 0,
+        stream: Optional[Any] = None,
+    ) -> None:
         """
         Call the compiled CUDA kernel
 
@@ -237,23 +280,15 @@ class _CudaKernel:
             shared_mem (int): Shared memory size in bytes
             stream (torch.cuda.Stream): CUDA stream to use. If None, uses current stream.
         """
-        from torch.cuda._utils import _get_cuda_library
+        import torch
 
-        libcuda = _get_cuda_library()
-        CUDA_SUCCESS = 0
-
-        # Helper: check CUDA errors
-        def check_cuda(result):
-            if result != CUDA_SUCCESS:
-                err_str = ctypes.c_char_p()
-                libcuda.cuGetErrorString(result, ctypes.byref(err_str))
-                raise RuntimeError(f"CUDA error: {err_str.value.decode()}")
+        libcuda = torch.cuda._utils._get_cuda_library()
 
         if not args:
             args = []
 
         # Process arguments and convert tensors to pointers
-        processed_args = []
+        processed_args: list[ctypes.c_void_p] = []
         c_args = []
 
         for arg in args:
@@ -267,12 +302,12 @@ class _CudaKernel:
             elif isinstance(arg, int):
                 # Convert integers to C int
                 c_int = ctypes.c_int(arg)
-                processed_args.append(c_int)
+                # Store the C int for reference keeping, not in processed_args
                 c_args.append(ctypes.byref(c_int))
             elif isinstance(arg, float):
                 # Convert floats to C float
                 c_float = ctypes.c_float(arg)
-                processed_args.append(c_float)
+                # Store the C float for reference keeping, not in processed_args
                 c_args.append(ctypes.byref(c_float))
             else:
                 raise TypeError(f"Unsupported argument type: {type(arg)}")
@@ -284,13 +319,14 @@ class _CudaKernel:
 
         # Get the stream
         if stream is None:
-            from torch.cuda import current_stream
+            # Defer import to avoid circular imports
+            import torch.cuda
 
-            stream = current_stream()
+            stream = torch.cuda.current_stream()
 
         # Launch the kernel with the current stream
         with stream:
-            check_cuda(
+            _check_cuda(
                 libcuda.cuLaunchKernel(
                     self.func,
                     grid[0],
@@ -307,7 +343,9 @@ class _CudaKernel:
             )
 
 
-def _cuda_load_module(ptx, kernel_names=None):
+def _cuda_load_module(
+    ptx: Union[str, bytes], kernel_names: Optional[list[str]] = None
+) -> Union[_CudaModule, dict[str, "_CudaKernel"]]:
     """
     Loads a CUDA module from PTX code and returns a module object that can access kernels.
 
@@ -321,23 +359,10 @@ def _cuda_load_module(ptx, kernel_names=None):
                If kernel_names is provided, returns a dict mapping kernel names to _CudaKernel objects.
     """
     # Ensure CUDA is initialized
-    from torch.cuda import _lazy_init
-
-    _lazy_init()
-    from torch.cuda._utils import _get_cuda_library
+    import torch.cuda
 
     # Load CUDA driver library
     libcuda = _get_cuda_library()
-
-    # CUDA constants
-    CUDA_SUCCESS = 0
-
-    # Helper: check CUDA errors
-    def check_cuda(result):
-        if result != CUDA_SUCCESS:
-            err_str = ctypes.c_char_p()
-            libcuda.cuGetErrorString(result, ctypes.byref(err_str))
-            raise RuntimeError(f"CUDA error: {err_str.value.decode()}")
 
     # Convert PTX to bytes if it's a string
     if isinstance(ptx, str):
@@ -345,17 +370,17 @@ def _cuda_load_module(ptx, kernel_names=None):
 
     # Load PTX module
     module = ctypes.c_void_p()
-    from torch.cuda import current_stream
-
-    with current_stream():
-        check_cuda(libcuda.cuModuleLoadData(ctypes.byref(module), ptx))
+    # Get the current stream without directly importing torch.cuda at module level
+    stream = torch.cuda.current_stream()
+    with stream:
+        _check_cuda(libcuda.cuModuleLoadData(ctypes.byref(module), ptx))
 
     if kernel_names:
         # Return specific kernels
         kernels = {}
         for name in kernel_names:
             func = ctypes.c_void_p()
-            check_cuda(
+            _check_cuda(
                 libcuda.cuModuleGetFunction(
                     ctypes.byref(func), module, name.encode("utf-8")
                 )
@@ -363,30 +388,7 @@ def _cuda_load_module(ptx, kernel_names=None):
             kernels[name] = _CudaKernel(func, module)
         return kernels
     else:
-        # Create a module-like object with __getattr__
-        class CudaModule:
-            def __init__(self, module):
-                self._module = module
-                self._kernels = {}
-
-            def __getattr__(self, name):
-                if name in self._kernels:
-                    return self._kernels[name]
-
-                func = ctypes.c_void_p()
-                try:
-                    check_cuda(
-                        libcuda.cuModuleGetFunction(
-                            ctypes.byref(func), self._module, name.encode("utf-8")
-                        )
-                    )
-                    kernel = _CudaKernel(func, self._module)
-                    self._kernels[name] = kernel
-                    return kernel
-                except RuntimeError:
-                    raise AttributeError(f"No kernel named '{name}' in this module")
-
-        return CudaModule(module)
+        return _CudaModule(module)
 
 
 def _get_device_index(
