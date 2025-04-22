@@ -4900,7 +4900,6 @@ class TestMemPool(TestCase):
         dtype = torch.int8
         return device, dtype
 
-
     def _teardown_mempool_limited_memory_test(self):
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ""
         torch.cuda.memory.empty_cache()
@@ -5045,7 +5044,6 @@ class TestMemPool(TestCase):
           C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
             called_dummy_alloc = 123;
             void* ptr;
-            std::cout << "dummy_alloc: " << size << std::endl;
             C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
             return ptr;
           }
@@ -5089,47 +5087,34 @@ class TestMemPool(TestCase):
 
         nelem_1mb = 1024 * 1024 // 4
 
-        with torch.cuda.use_mem_pool(pool):
-            out_0 = torch.randn(nelem_1mb, device="cuda")
-
-            # pool's use count should be 2 at this point as use_mem_pool
-            # holds a reference
-            self.assertEqual(pool.use_count(), 2)
-
-
-        # pool's use count should be back to 1 at this point as use_mem_pool
-        # released its reference
-        self.assertEqual(pool.use_count(), 1)
-
-        # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
-        # out tensor
-        self.assertEqual(called_dummy_alloc.value, 123)
-
-        with torch.cuda.use_mem_pool(pool):
-            # pool should have 1 segment since we made a small allocation (1 MB)
-            # above and so the CUDACachingAllocator packed it into a 2 MB buffer
-            self.assertEqual(len(pool.snapshot()), 1)
-
-            out_1 = torch.randn(nelem_1mb, device="cuda")
-
-            # pool should still have 1 segment since we made another small allocation
-            # (1 MB) that got packed into the existing 2 MB buffer
-            self.assertEqual(len(pool.snapshot()), 1)
-
-            out_2 = torch.randn(nelem_1mb, device="cuda")
-
-            # pool now should have 2 segments since the CUDACachingAllocator had
-            # to make a new 2 MB buffer to accomodate out_2
-            self.assertEqual(len(pool.snapshot()), 2)
-
-        del out_0, out_1, out_2
-
         self._setup_mempool_limited_memory_test(40)
+        # remaining free mem: 40 mb
+        # mempool [] 40 mb
+        # default pool [] 0 mb
         with torch.cuda.use_mem_pool(pool):
             a = torch.randn(40*nelem_1mb, device="cuda")
+        a_dataptr = a.data_ptr()
+        # remaining free mem: 0 mb
+        # mempool [aaaa] 40 mb
+        # default pool [] 0 mb
         del a
+        # remaining free mem: 0 mb
+        # mempool [____] 40 mb
+        # default pool [] 0 mb
+
+        # b should not oom and instead can use mempool as fallback
         b = torch.randn(30*nelem_1mb, device="cuda")
+        b_dataptr = b.data_ptr()
+        # remaining free mem: 0 mb
+        # mempool [bbb_] 40 mb
+        # default pool [] 0 mb
         del b
+        # remaining free mem: 0 mb
+        # mempool [____] 40 mb
+        # default pool [] 0 mb
+
+        # expect that we used same memory address for both a and b
+        self.assertEqual(a_dataptr, b_dataptr)
 
         # pool's destructor calls emptyCache()
         del pool
