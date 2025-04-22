@@ -320,7 +320,7 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-# extra check for CppMicroGemmWoQSmallMDim
+# extra check for small M dimension for int8 WoQ case
 def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
     return (
         k % config.register_blocking.block_k == 0
@@ -329,7 +329,7 @@ def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
     )
 
 
-# For int8 WoQ GEMM with small M, use CppMicroGemmWoQSmallMDim instead of CppMicroGemmFP32Vec
+# For int8 WoQ GEMM with small M, we use different blockings that shouldn't be used otherwise
 def do_not_use_with_small_m(config, m, n, k, alpha, num_threads, **kwargs):
     return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads)
 
