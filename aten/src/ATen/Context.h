@@ -106,7 +106,7 @@ class TORCH_API Context {
       // If the device is not initialized, no pointer can be pinned for it
       return false;
     }
-    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
+    return at::getHostAllocator(opt_device_type.value())->is_pinned(data);
   }
 
   C10_DEPRECATED_MESSAGE(

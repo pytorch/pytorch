@@ -62,6 +62,8 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
   }
 
+  C10_DEPRECATED_MESSAGE(
+    "getXPUHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kXPU)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override {
     return false;
   }

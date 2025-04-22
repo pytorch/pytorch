@@ -25,6 +25,8 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
         false, "Cannot get device of pointer on HPU without HPU backend");
   }
 
+  C10_DEPRECATED_MESSAGE(
+    "getHPUHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kHPU)->is_pinned(...) instead.")
   bool isPinnedPtr(const void*) const override {
     return false;
   }
