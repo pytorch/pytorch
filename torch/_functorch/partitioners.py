@@ -1966,6 +1966,49 @@ def min_cut_rematerialization_partition(
         joint_module.graph = cse_graph
     joint_graph = joint_module.graph
 
+
+    def serialize_node_meta(node):
+        meta = {}
+        for k, v in node.meta.items():
+            meta[k] = str(v)
+        return meta
+
+    def serialize_nodes(nodes):
+        import json
+        k = {}
+        for node in nodes:
+            k[str(node)] = serialize_node_meta(node)
+        return json.dumps(k)
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "partitioner_joint_graph",
+            "encoding": "string",
+        },
+        payload_fn=lambda: joint_module.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "partitioner_joint_graph_meta",
+            "encoding": "string",
+        },
+        payload_fn=lambda: serialize_nodes(joint_graph.nodes),
+    )
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "partitioner_num_fwd_outputs",
+            "encoding": "string",
+        },
+        payload_fn=lambda: str(num_fwd_outputs),
+    )
+
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
