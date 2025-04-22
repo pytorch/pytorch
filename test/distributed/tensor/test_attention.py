@@ -503,14 +503,12 @@ class RingFlexAttentionTest(DTensorTestBase):
             mesh_dim_names=("cp",),
         )
 
-        sharding = Shard(2)
-        q_dist = distribute_tensor(q, device_mesh, [sharding])
-        k_dist = distribute_tensor(k, device_mesh, [sharding])
-        v_dist = distribute_tensor(v, device_mesh, [sharding])
+        with CPMode(device_mesh):
+            out = flex_attention(q, k, v, block_mask=block_mask)
 
-        with CPMode():
-            dist_out = flex_attention(q_dist, k_dist, v_dist, block_mask=block_mask)
-
+        # all-gather the output
+        assert isinstance(out, torch.Tensor)
+        dist_out = DTensor.from_local(out, device_mesh, [Shard(2)])
         assert isinstance(dist_out, DTensor)
         torch.testing.assert_close(
             dist_out.full_tensor(), expect_out, atol=1e-1, rtol=1e-2
@@ -518,8 +516,9 @@ class RingFlexAttentionTest(DTensorTestBase):
 
 
 class CPMode(TorchDispatchMode):
-    def __init__(self):
+    def __init__(self, device_mesh: DeviceMesh):
         super().__init__()
+        self.device_mesh = device_mesh
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         return func(*args, **kwargs)
@@ -571,9 +570,41 @@ def rewrite_mask_mod_for_cp(
 
 
 @flex_attention_hop.py_impl(CPMode)
+def cp_flex_attention_cast_to_dtensor(
+    mode: CPMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[torch.Tensor, torch.Tensor]:
+    print("cp_flex_attention_cast_to_dtensor")
+    sharding = Shard(2)
+    q_dist = distribute_tensor(query, mode.device_mesh, [sharding])
+    k_dist = distribute_tensor(key, mode.device_mesh, [sharding])
+    v_dist = distribute_tensor(value, mode.device_mesh, [sharding])
+
+    out, lse = flex_attention_hop(
+        q_dist,
+        k_dist,
+        v_dist,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        scale=scale,
+        kernel_options=kernel_options,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+    )
+    assert isinstance(out, DTensor) and isinstance(lse, DTensor)
+
+    return out.to_local(), lse.to_local()
+
 @flex_attention_hop.py_impl(DTensor)
 def cp_flex_attention(
-    mode,
     query: DTensor,
     key: DTensor,
     value: DTensor,
