@@ -857,6 +857,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const c10::intrusive_ptr<Work>& work,
       const std::chrono::milliseconds& timeout);
 
+  void setEnableNanCheck(bool enableNanCheck);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -1285,10 +1287,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
-
-  // Whether or not to hook the cache allocator to register all allocated
-  // tensors
-  bool useTensorRegisterAllocatorHook_ = false;
 
   // Whether or not the workCleanupThread is used to perform async error
   // handling.

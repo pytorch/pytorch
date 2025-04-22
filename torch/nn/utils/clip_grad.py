@@ -197,12 +197,12 @@ def clip_grad_norm_(
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
         max_norm (float): max norm of the gradients
-        norm_type (float): type of the used p-norm. Can be ``'inf'`` for
-            infinity norm.
-        error_if_nonfinite (bool): if True, an error is thrown if the total
+        norm_type (float, optional): type of the used p-norm. Can be ``'inf'`` for
+            infinity norm. Default: 2.0
+        error_if_nonfinite (bool, optional): if True, an error is thrown if the total
             norm of the gradients from :attr:`parameters` is ``nan``,
-            ``inf``, or ``-inf``. Default: False (will switch to True in the future)
-        foreach (bool): use the faster foreach-based implementation.
+            ``inf``, or ``-inf``. Default: False
+        foreach (bool, optional): use the faster foreach-based implementation.
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
             fall back to the slow implementation for other device types.
             Default: ``None``
@@ -258,7 +258,7 @@ def clip_grad_value_(
         clip_value (float): maximum allowed value of the gradients.
             The gradients are clipped in the range
             :math:`\left[\text{-clip\_value}, \text{clip\_value}\right]`
-        foreach (bool): use the faster foreach-based implementation
+        foreach (bool, optional): use the faster foreach-based implementation
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and
             silently fall back to the slow implementation for other device types.
             Default: ``None``

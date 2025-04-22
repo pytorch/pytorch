@@ -7852,6 +7852,14 @@ class TestMPS(TestCaseMPS):
             torch.mps.synchronize()
         self.assertLess(x.sum().item(), x.numel())
 
+    @parametrize("dtype", [torch.int32, torch.int64, torch.int16, torch.int8, torch.uint8])
+    def test_inplace_bitwise_not(self, dtype):
+        # Start with bitwise not here (reported by @qqaatw)
+        x_mps, x_cpu = [torch.arange(64, device=device, dtype=dtype) for device in ["cpu", "mps"]]
+        for x in [x_mps, x_cpu]:
+            x[::2].bitwise_not_()
+        self.assertEqual(x_mps.cpu(), x_cpu)
+
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8015,13 +8023,14 @@ class TestLogical(TestCaseMPS):
 
         [helper(dtype) for dtype in dtypes]
 
+        # Mixed dtypes (see https://github.com/pytorch/pytorch/issues/151443 )
+        # torch.isin is broken in MacOS-13.2 even for the same dtype
+        if MACOS_VERSION >= 14.0:
+            x = torch.arange(4.0, device="mps")
+            y = torch.tensor([1, 3], device="mps", dtype=torch.float16)
+            self.assertEqual(torch.isin(x, y), torch.tensor([False, True, False, True], device="mps"))
+
     def test_isin_asserts(self):
-        A = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
-        B = torch.randn(size=[1, 4], device='mps', dtype=torch.float16)
-        with self.assertRaisesRegex(RuntimeError, 'Expected elements.dtype()*'):
-            out = torch.isin(A, B)
-
-
         C = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
         D = torch.randn(size=[1, 4], device='cpu', dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError, 'Expected elements.is_mps()*'):
@@ -12196,6 +12205,29 @@ class TestMetalLibrary(TestCaseMPS):
         max_err = (y - x_sum).abs().max().item()
         self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
                         f"results are {y}, but all elements should have been {x_sum.item()}")
+
+    def test_argument_buffers(self):
+        lib = torch.mps.compile_shader("""
+        constant constexpr auto nbuffers = 64;
+        struct Inputs {
+          metal::array<device float *, nbuffers> args;
+        };
+
+        kernel void sum_all(device float* output, constant Inputs& inputs, uint idx [[thread_position_in_grid]]) {
+          auto rc = inputs.args[0][idx];
+          for(auto i = 1; i < nbuffers; ++i) {
+            rc += inputs.args[i][idx];
+          }
+          output[idx] = rc;
+        }
+        """)
+        inputs = torch.rand(64, 32, device="mps").unbind(0)
+        output = torch.empty_like(inputs[0])
+        lib.sum_all(output, inputs)
+        correct = torch.zeros_like(inputs[0])
+        for inp in inputs:
+            correct += inp
+        self.assertEqual(correct, output)
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
