@@ -8343,6 +8343,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    def test_slice_scatter_types_promotion(self):
+
+        def fn(a, b):
+            return torch.slice_scatter(a, b, 0, start=6)
+
+        compiled = torch.compile(fn)
+
+        def compare(a, b):
+            out_eager = fn(a, b)
+            out_inductor = compiled(a, b)
+            self.assertEqual(
+                out_inductor.dtype,
+                out_eager.dtype,
+                f"Expected dtype {out_eager.dtype}, but got {out_inductor.dtype}",
+            )
+            self.assertTrue(
+                torch.allclose(out_inductor, out_eager),
+                f"Allclose failed for dtype {a.dtype}",
+            )
+
+        a = torch.randn([8, 8])
+        b = torch.randn([2, 8])
+
+        for dtype in (torch.int8, torch.float16, torch.int64, torch.bool):
+            compare(a.to(dtype), b)
+            compare(a, b.to(dtype))
+
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
