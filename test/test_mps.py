@@ -24,7 +24,7 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests)
-from torch.testing._internal.mps_utils import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
+from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -11980,7 +11980,12 @@ class TestConsistency(TestCaseMPS):
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
 
-    @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
+    @ops(
+        mps_ops_error_inputs_modifier(
+            [op for op in test_error_inputs_op_db if op.error_inputs_func is not None]
+        ),
+        dtypes=OpDTypes.none
+    )
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
 
