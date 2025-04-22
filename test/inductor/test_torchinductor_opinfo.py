@@ -1154,20 +1154,17 @@ class TestInductorOpInfo(TestCase):
                         # Triton
                         if has_triton():
                             adjusted_kwargs.update(
-                                {
-                                    "copy_to_gpu": False,
-                                    "reference_in_float": False,
-                                    "check_gradient": requires_grad,
-                                    "output_process_fn_grad": sample_input.output_process_fn_grad,
-                                }
+                                copy_to_gpu=False, reference_in_float=False
                             )
-                        # C++ CPU backend
-                        elif torch._inductor.config.cpu_backend == "cpp":
+
+                        # skip checking gradient on CPU for now
+                        if device_type == GPU_TYPE:
                             adjusted_kwargs.update(
-                                {
-                                    "check_gradient": False,  # Skip checking gradient on CPU for now
-                                }
+                                check_gradient=requires_grad,
+                                output_process_fn_grad=sample_input.output_process_fn_grad,
                             )
+                        else:
+                            adjusted_kwargs["check_gradient"] = False
 
                         # Update with overridden kwargs and context-specific overrides
                         adjusted_kwargs.update(overridden_kwargs)
