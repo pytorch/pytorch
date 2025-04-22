@@ -1724,9 +1724,6 @@ class FakeTensorMode(TorchDispatchMode):
             if non_cacheable:
                 raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
 
-        # Avoid caching for any ops that would require a more sophisticated
-        # caching implementation, e.g., data dependent ops or ops that modify
-        # the inputs.
         if output is None:
             output_info = _DispatchCacheEntryOutputInfo(
                 inplace_idx=None, metadata=None, view_idx=None
