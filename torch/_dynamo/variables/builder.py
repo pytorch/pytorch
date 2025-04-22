@@ -3055,6 +3055,10 @@ def _automatic_dynamic(
             log.debug("%s marked dynamic via source whitelist", name)
             automatic_dynamic_size = True
             automatic_dynamic_stride = True
+        elif (dim_name := f"{name}.size()[{i}]") in dynamic_sources:
+            log.debug("%s marked dynamic via source whitelist", dim_name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 

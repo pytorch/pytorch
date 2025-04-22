@@ -7847,6 +7847,21 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.compiler.config.patch(dynamic_sources="L['x'].size()[0]")
+    def test_dynamic_sources_dimension_level(self):
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x):
+            return x + 2
+
+        fn(torch.randn(4, 8, 6))
+        fn(torch.randn(5, 8, 6))
+        self.assertEqual(counter.frame_count, 1)
+        fn(torch.randn(4, 9, 6))
+        fn(torch.randn(4, 9, 7))
+        self.assertEqual(counter.frame_count, 3)
+
     def test_cannot_trace_mark_dynamic(self):
         y = torch.randn([3, 3, 3])
 
