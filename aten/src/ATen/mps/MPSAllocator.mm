@@ -854,6 +854,9 @@ struct MPSHostAllocator final : public at::HostAllocator {
   }
 
   bool is_pinned(const void* data) override {
+    if (!at::mps::is_available()) {
+      return false;
+    }
     return at::mps::_getSharedAllocator().isSharedBuffer(data);
   }
 
