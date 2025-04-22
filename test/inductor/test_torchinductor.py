@@ -7939,7 +7939,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
-    @xfail_if_mps  # 100% entries are wrong
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)

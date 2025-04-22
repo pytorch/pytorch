@@ -525,7 +525,15 @@ class MetalKernel(SIMDKernel):
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
-        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
+        cast_val = f"static_cast<{dtype_str}>({value})"
+        if mode is None:
+            line = f"{var}[{self.index_to_str(index)}] = {cast_val};"
+        elif mode == "atomic_add":
+            atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
+            cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
+            line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
+        else:
+            raise RuntimeError(f"Unimplemented store mode {mode}")
         if self.inside_reduction:
             self.compute.writeline(DeferredLine(name, line))
         else:
@@ -781,6 +789,7 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             code.splice(
                 """
+            #include <c10/metal/atomic.h>
             #include <c10/metal/random.h>
             #include <c10/metal/special_math.h>
             #include <c10/metal/utils.h>
