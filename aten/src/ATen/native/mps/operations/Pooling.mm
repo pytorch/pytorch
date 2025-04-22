@@ -1,10 +1,10 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/native/DispatchStub.h>
-#include <ATen/ops/avg_pool3d_native.h>
 #include <ATen/ops/avg_pool3d_backward_native.h>
+#include <ATen/ops/avg_pool3d_native.h>
 
 // Using Metal's built-in packed_int4 type for more efficient parameter passing
 
@@ -686,33 +686,18 @@ static void avg_pool3d_template(const Tensor& input,
   int channels_val = static_cast<int>(channels);
 
   // Create packed_int4 vectors for more efficient parameter passing
-  packed_int4 input_dims = {
-      static_cast<int>(input_depth),
-      static_cast<int>(input_height),
-      static_cast<int>(input_width),
-      static_cast<int>(output_depth)
-  };
+  packed_int4 input_dims = {static_cast<int>(input_depth),
+                            static_cast<int>(input_height),
+                            static_cast<int>(input_width),
+                            static_cast<int>(output_depth)};
 
   packed_int4 output_dims = {
-      static_cast<int>(output_height),
-      static_cast<int>(output_width),
-      static_cast<int>(kD),
-      static_cast<int>(kH)
-  };
+      static_cast<int>(output_height), static_cast<int>(output_width), static_cast<int>(kD), static_cast<int>(kH)};
 
-  packed_int4 kernel_dims = {
-      static_cast<int>(kW),
-      static_cast<int>(dD),
-      static_cast<int>(dH),
-      static_cast<int>(dW)
-  };
+  packed_int4 kernel_dims = {static_cast<int>(kW), static_cast<int>(dD), static_cast<int>(dH), static_cast<int>(dW)};
 
   packed_int4 padding_dims = {
-      static_cast<int>(pD),
-      static_cast<int>(pH),
-      static_cast<int>(pW),
-      count_include_pad ? 1 : 0
-  };
+      static_cast<int>(pD), static_cast<int>(pH), static_cast<int>(pW), count_include_pad ? 1 : 0};
 
   int divisor_override_val = divisor_override.has_value() ? static_cast<int>(divisor_override.value()) : 0;
 
