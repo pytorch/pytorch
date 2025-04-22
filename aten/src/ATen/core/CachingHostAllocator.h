@@ -113,7 +113,8 @@ struct alignas(64) HostStatsStaged {
  * never do any possible expensive operations (such as CUDA runtime API calls)
  * while holding the lock.
  *
- * There are four public methods: allocate, free, record_event and empty_cache.
+ * There are several public methods such as allocate, free, record_event,
+ * empty_cache, etc.
  *   1) In the allocate path, we first check to see if we can service our
  * request from this free list, and otherwise we create a new block with
  * allocate_host_memory.
@@ -446,6 +447,10 @@ struct CachingHostAllocatorImpl {
     }
   }
 
+  virtual bool is_pinned(void* ptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for is_pinned");
+  }
+
  private:
   virtual void add_allocated_block(B* block) {
     std::lock_guard<std::mutex> g(blocks_mutex_);
@@ -603,11 +608,6 @@ struct CachingHostAllocatorImpl {
   // Query event if it is completed.
   virtual bool query_event(E& event) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
-  }
-
-  // Check ptr if it is a pinned memory.
-  virtual bool is_pinned(void* ptr) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for is_pinned");
   }
 
   alignas(64) std::mutex blocks_mutex_;
