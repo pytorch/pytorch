@@ -222,7 +222,7 @@ test_torchbench_smoketest() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   local device=mps
-  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152)
+  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam pytorch_unet stable_diffusion_text_encoder moco speech_transformer)
 
   for backend in eager inductor; do
 
