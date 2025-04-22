@@ -105,7 +105,7 @@ void upsample_increment_value_bounded(
       data,
       n * strides.x + c * strides.y + access_y * strides.z +
           access_x * strides.w,
-      value);
+      static_cast<scalar_t>(value));
 }
 
 template <typename T>
