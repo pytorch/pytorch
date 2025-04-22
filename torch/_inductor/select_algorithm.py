@@ -1312,13 +1312,16 @@ class TritonTemplate(KernelTemplate):
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
+        options = result.kernel_options
+
         def make_kernel_render(out_node):
+            assert result is not None
             kernel = self.kernel_type(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
                 workspace_arg=workspace_arg,
                 use_jit=False,
-                **result.kernel_options,
+                **options,
             )
             render = functools.partial(
                 kernel.render,
