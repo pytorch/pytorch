@@ -124,6 +124,9 @@ force_disable_caches: bool = Config(
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
+# Unsafe way to mark function as cacheable
+unsafe_marked_cacheable_functions: list[str] = []
+
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
@@ -421,7 +424,7 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # NOTE: This feature is deprecated and will be defauled to False in the future.
 # Whether we fall back to ATen or hard error when no matches are found during autotuning
 autotune_fallback_to_aten = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "0") == "1"
 )
 
 # the value used as a fallback for the unbacked SymInts
