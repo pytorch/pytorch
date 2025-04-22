@@ -98,20 +98,24 @@ class AOTAutogradCacheTests(InductorTestCase):
 
             # A first call should miss in the cache.
             eager_result = fn(a, b)
+            expected_grads = torch.autograd.grad(eager_result.sum(), inputs=(a, b))
             compiled_result = compiled_fn(a, b)
             with torch._dynamo.compiled_autograd._enable(
                 torch.compile(dynamic=dynamic)
             ):
-                compiled_result.sum().backward()
+                actual_grads = torch.autograd.grad(compiled_result.sum(), inputs=(a, b))
             if hasattr(a, "_dynamo_weak_dynamic_indices"):
                 del a._dynamo_weak_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(expected_grads[0], actual_grads[0])
+            self.assertEqual(expected_grads[1], actual_grads[1])
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 3)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
         artifacts = torch.compiler.save_cache_artifacts()
 
@@ -131,7 +135,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         # Clean triton kernels
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-        # Hot load and hit
+        # Hot load and hit, should not recompile
         with fresh_inductor_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
@@ -140,21 +144,40 @@ class AOTAutogradCacheTests(InductorTestCase):
             self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
             self.assertEqual(len(cache_info.pgo_artifacts), 0)
 
-            eager_result = fn(a, b)
-            compiled_result = compiled_fn(a, b)
-            with torch._dynamo.compiled_autograd._enable(
-                torch.compile(dynamic=dynamic)
-            ):
-                compiled_result.sum().backward()
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
-            self.assertEqual(eager_result, compiled_result)
-            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
-            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            for i in range(3):
+                counters.clear()
+                eager_result = fn(a, b)
+                expected_grads = torch.autograd.grad(eager_result.sum(), inputs=(a, b))
+                compiled_result = compiled_fn(a, b)
+                breakpoint()
+                with torch._dynamo.compiled_autograd._enable(
+                    torch.compile(dynamic=dynamic)
+                ):
+                    actual_grads = torch.autograd.grad(
+                        compiled_result.sum(), inputs=(a, b)
+                    )
+                if hasattr(a, "_dynamo_weak_dynamic_indices"):
+                    del a._dynamo_weak_dynamic_indices
+                self.assertEqual(eager_result, compiled_result)
+                self.assertEqual(expected_grads[0], actual_grads[0])
+                self.assertEqual(expected_grads[1], actual_grads[1])
+
+                if i == 0:
+                    # initial compile
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+                    self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 3)
+                    self.assertEqual(
+                        counters["inductor"]["fxgraph_lookup_write_file"], 3
+                    )
+                    self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+                    self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+                    self.assertEqual(
+                        counters["aot_autograd"]["autograd_cache_saved"], 0
+                    )
+                    self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+                else:
+                    # no recompiles
+                    self.assertFalse(counters)
 
     @requires_triton()
     @functorch_config.patch({"enable_autograd_cache": True})
