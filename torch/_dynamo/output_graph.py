@@ -478,6 +478,19 @@ class OutputGraph:
 
         self.guard_on_key_order: set[str] = set()
 
+        self.compiler_trace_stack = contextlib.ExitStack()
+
+    def mark_bytecode_tracing_start(self):
+        self.compiler_trace_stack.enter_context(
+            dynamo_timed(
+                "bytecode_tracing",
+                log_pt2_compile_event=True,
+            )
+        )
+
+    def mark_bytecode_tracing_stop(self):
+        self.compiler_trace_stack.close()
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -1017,6 +1030,8 @@ class OutputGraph:
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        # bytecode tracing has finished. Pop the context manager for dynamo_timed
+        self.mark_bytecode_tracing_stop()
         assert reason is not None
 
         from .decorators import disable
