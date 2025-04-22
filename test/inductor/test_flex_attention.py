@@ -9,7 +9,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, TypeVar, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    largeTensorTest,
 )
 from torch.utils._triton import has_triton
 
@@ -55,6 +56,22 @@ torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
+
+
+T = TypeVar("T")
+M = TypeVar("M", bound=Callable)
+
+
+def large_tensor_test_class(
+    size: str, device: Optional[Union[torch.device, str]] = None
+) -> Callable[[type[T]], type[T]]:
+    def decorator(cls: type[T]) -> type[T]:
+        for name, method in list(cls.__dict__.items()):
+            if callable(method) and name.startswith("test_"):
+                setattr(cls, name, largeTensorTest(size, device)(method))
+        return cls
+
+    return decorator
 
 
 @contextmanager
@@ -325,6 +342,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
+@large_tensor_test_class("2GB", device="cuda")
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -3903,8 +3921,8 @@ class GraphModule(torch.nn.Module):
         keyword_args = {
             "kernel_options": {
                 "num_warps": 4,
-                "num_consumer_groups": 0,
-                "num_buffers_warp_spec": 0,
+                "num_consumer_groups": 2,
+                "num_buffers_warp_spec": 3,
             }
         }
 
@@ -4494,6 +4512,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
 
+@large_tensor_test_class("2GB", device="cuda")
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4943,6 +4962,7 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
+@large_tensor_test_class("2GB", device="cuda")
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
