@@ -2100,6 +2100,7 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
+            self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
 
         self.compute_last_usage()
@@ -4277,6 +4278,96 @@ class Scheduler:
             )
 
         return signatures[::-1]
+
+    def reorder_for_minimizing_partition(
+        self,
+        nodes: list[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder nodes to minimize the number of partitions via a bfs
+        topological sort. This is the optimal reodering such that the
+        number of partitions cannot be reduced further. This does not
+        change relative orders of two cudagraphable nodes, nor the
+        relative order of two non_cudagraphable nodes.
+        """
+        node_to_indegree: dict[BaseSchedulerNode, int] = dict()
+        cudagraphable_nodes: list[BaseSchedulerNode] = []
+        non_cudagraphable_nodes: list[BaseSchedulerNode] = []
+
+        def insert_pending_nodes(node: BaseSchedulerNode) -> None:
+            if self.should_partition(node):
+                non_cudagraphable_nodes.append(node)
+            else:
+                cudagraphable_nodes.append(node)
+
+        def update_indegree(node: BaseSchedulerNode) -> None:
+            for succ_node in node.mpi_node.succ_nodes:
+                assert node_to_indegree[succ_node] > 0
+                node_to_indegree[succ_node] -= 1
+                if node_to_indegree[succ_node] == 0:
+                    insert_pending_nodes(succ_node)
+
+        for node in nodes:
+            node_to_indegree[node] = len(node.mpi_node.pred_nodes)
+            if node_to_indegree[node] == 0:
+                insert_pending_nodes(node)
+
+        schedule: list[BaseSchedulerNode] = []
+        num_iters: int = 0
+        while (
+            num_iters < len(nodes) and non_cudagraphable_nodes and cudagraphable_nodes
+        ):
+            while non_cudagraphable_nodes:
+                node = non_cudagraphable_nodes.pop(0)
+                schedule.append(node)
+                update_indegree(node)
+
+            while cudagraphable_nodes:
+                node = cudagraphable_nodes.pop(0)
+                schedule.append(node)
+                update_indegree(node)
+
+            num_iters += 1
+
+        if num_iters >= len(nodes):
+            raise RuntimeError(
+                """
+                Failed to schedule, while loop ran too long when
+                reordering for minimizing the num of partitions
+                """
+            )
+
+        return schedule
+
+    def maybe_reorder_for_minimizing_partition(
+        self,
+        nodes: list[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder nodes to minimize the number of partitions if this only slightly
+        increase peak memory.
+        """
+        from .memory import estimate_peak_memory, prepare_planning_info
+
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+
+        default_peak_memory, name_to_freeable_input_buf = prepare_planning_info(
+            nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+            OrderedSet(V.graph.graph_inputs.keys()),
+            graph_outputs,
+        )
+
+        reordered_nodes = self.reorder_for_minimizing_partition(nodes)
+        reorder_peak_memory, _ = estimate_peak_memory(
+            reordered_nodes, name_to_freeable_input_buf, graph_outputs
+        )
+
+        if reorder_peak_memory < default_peak_memory * 1.1:
+            return reordered_nodes
+
+        return nodes
 
     def reorder_for_partition_with_simple_dependency(
         self, nodes: list[BaseSchedulerNode]
