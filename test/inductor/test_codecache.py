@@ -3,6 +3,8 @@ import functools
 import os
 import pickle
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from typing import Optional, Union
@@ -11,6 +13,7 @@ from unittest import mock
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
+from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
@@ -35,6 +38,7 @@ from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     TEST_WITH_ROCM,
 )
@@ -530,6 +534,56 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+    @torch._dynamo.config.patch(automatic_dynamic_local_pgo=True)
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    def test_cache_hot_load_pgo_swap_file_names(self):
+        """
+        Verify that we can populate and hot load functions from the cache with pgo
+        with file name swapping
+        """
+
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            return x * 2
+
+        # Record artifacts
+        with mock.patch(
+            "torch._utils_internal.get_mast_job_name_version", return_value=("foo", 5)
+        ):
+            with fresh_inductor_cache():
+                f(torch.randn(2, 3))
+                f(torch.randn(2, 4))
+                self.assertEqual(backend.frame_count, 2)
+
+            artifacts = torch.compiler.save_cache_artifacts()
+
+            self.assertIsNotNone(artifacts)
+
+        artifact_bytes, cache_info = artifacts
+
+        self.assertEqual(len(cache_info.pgo_artifacts), 2)
+
+        self.reset()
+        backend.clear()
+
+        # Clean triton kernels
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        # Hot load and hit
+        with mock.patch(
+            "torch._utils_internal.get_mast_job_name_version", return_value=("bar", 10)
+        ), fresh_inductor_cache():
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+
+            self.assertEqual(len(cache_info.pgo_artifacts), 2)
+
+            f(torch.randn(2, 5))
+            f(torch.randn(2, 6))
+            self.assertEqual(backend.frame_count, 1)
+
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -752,6 +806,55 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(fn2(a), compiled_fn2(a))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("variant", ("v1", "v2"))
+    def test_auto_functionalized_caching(self, variant):
+        if variant == "v1":
+            patch = torch._inductor.config.patch(enable_auto_functionalized_v2=False)
+        else:
+            assert variant == "v2"
+            patch = torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+
+        @torch.library.custom_op("mylib::sin_inplace", mutates_args=["x"])
+        def sin_inplace(x: torch.Tensor) -> None:
+            x.sin_()
+
+        @torch.library.custom_op("mylib::cos_inplace", mutates_args=["x"])
+        def cos_inplace(x: torch.Tensor) -> None:
+            x.cos_()
+
+        @torch.compile(fullgraph=True)
+        def fn(x, op):
+            y = torch.empty_like(x)
+            op(y)
+            return y
+
+        x = torch.randn(3)
+
+        with patch:
+            # A first call should miss in the cache.
+            fn(x, sin_inplace)
+            self.reset()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+            fn(x, sin_inplace)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+            # A third call with different operator should have a cache miss
+            self.reset()
+            fn(x, cos_inplace)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
     @requires_cuda
     @config.patch({"fx_graph_cache": True})
@@ -1325,6 +1428,252 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(
             counters["inductor"]["fxgraph_cache_hit"], 0 if inlinable else 1
         )
+
+
+@instantiate_parametrized_tests
+class TestStandaloneCompile(TestCase):
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+        PatchCaches.setUp()
+        CacheArtifactManager.clear()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
+
+    def reset(self):
+        AOTAutogradCache.clear()
+        PyCodeCache.cache_clear(purge=True)
+        torch._dynamo.reset()
+        clear_inductor_caches()
+
+    def capture(self, fn):
+        def inner(*args):
+            gm = None
+            actual_args = None
+            kwargs = None
+
+            def backend(gm_, args_, **kwargs_):
+                nonlocal gm
+                nonlocal actual_args
+                nonlocal kwargs
+                gm = gm_
+                actual_args = args_
+                kwargs = kwargs_
+                return gm
+
+            _ = torch.compile(fn, fullgraph=True, backend=backend)(*args)
+            return gm, actual_args, kwargs
+
+        return inner
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("format", ("binary", "unpacked"))
+    @parametrize("dynamic", (False, True))
+    def test_basic(self, device: str, format: str, dynamic: bool) -> None:
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        mod = torch.nn.Linear(1, 3, device=device)
+        x = torch.randn(4, 1, device=device)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x), x.sin()
+
+        eager_out = f(x)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = (
+                temp_dir
+                if format == "unpacked"
+                else os.path.join(temp_dir, "compiled_artifact.bin")
+            )
+            with fresh_inductor_cache():
+                gm, args, kwargs = self.capture(f)(x)
+                assert not kwargs
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_artifact.save(path=path, format=format)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            with fresh_inductor_cache():
+                loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
+                compiled_out = loaded(*args)
+                self.assertEqual(eager_out, compiled_out)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("dynamic", (False, True))
+    def test_call_in_backend(self, dynamic: bool) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+        if dynamic:
+            torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        def backend(gm, args, **kwargs):
+            return torch._inductor.standalone_compile(gm, args)
+
+        with fresh_inductor_cache():
+            compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
+            self.assertEqual(eager_out, compiled_out)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_save_in_new_path(self) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def f(x):
+            with torch.no_grad():
+                return mod(x)
+
+        eager_out = f(x)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "new_dir")
+            with fresh_inductor_cache():
+                gm, args, kwargs = self.capture(f)(x)
+                assert not kwargs
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_artifact.save(path=path, format="unpacked")
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            with fresh_inductor_cache():
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=path, format="unpacked"
+                )
+                compiled_out = loaded(*args)[0]
+                self.assertEqual(eager_out, compiled_out)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_modify_unpacked_file(self, device: str) -> None:
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        x = torch.ones(4, device=device)
+
+        def f(x):
+            with torch.no_grad():
+                return 2 * x, x.sin()
+
+        eager_out = f(x)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with fresh_inductor_cache():
+                gm, args, kwargs = self.capture(f)(x)
+                assert not kwargs
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_out = compiled_artifact(*args)
+                self.assertEqual(eager_out, compiled_out)
+
+                compiled_artifact.save(path=temp_dir, format="unpacked")
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            with fresh_inductor_cache():
+                # Now modify the output file and expect to see the changes
+                for subdir in os.listdir(temp_dir):
+                    if subdir in ["aotautograd", "fxgraph"]:
+                        continue
+                    subdir_path = os.path.join(temp_dir, subdir)
+                    for file in os.listdir(subdir_path):
+                        file_path = os.path.join(subdir_path, file)
+                        assert os.path.isfile(file_path)
+                        with open(file_path) as f:
+                            file_contents = f.read()
+                        if device == GPU_TYPE:
+                            file_contents = file_contents.replace(
+                                "tmp1 = 2.0", "tmp1 = 8.0"
+                            )
+                        else:
+                            assert device == "cpu"
+                            file_contents = file_contents.replace(
+                                "auto tmp1 = static_cast<float>(2.0);",
+                                "auto tmp1 = static_cast<float>(8.0);",
+                            )
+                        with open(file_path, "w") as f:
+                            f.write(file_contents)
+
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=temp_dir, format="unpacked"
+                )
+                compiled_out = loaded(*args)
+                self.assertEqual(4 * eager_out[0], compiled_out[0])
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @unittest.skipIf(IS_FBCODE, "torch import error")
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_different_process(self):
+        x = torch.ones(4, 1)
+
+        def f(x):
+            return x.sin() * 2
+
+        gm, args, kwargs = self.capture(f)(x)
+        assert not kwargs
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "compiled_artifact.bin")
+
+            with fresh_inductor_cache():
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_artifact.save(path=path)
+
+            script = f"""
+import torch
+from torch._inductor.utils import fresh_inductor_cache
+
+arg = torch.ones(4, 1)
+with fresh_inductor_cache():
+    loaded = torch._inductor.CompiledArtifact.load(path="{path}")
+    compiled_result = loaded(arg)[0]
+
+eager_result = arg.sin() * 2
+
+if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
+    raise RuntimeError("tensors do not match")
+"""
+            try:
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    stderr=subprocess.STDOUT,
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
+                )
+            except subprocess.CalledProcessError as e:
+                self.fail(
+                    msg=(
+                        "Subprocess exception while attempting to run test: "
+                        + e.output.decode("utf-8")
+                    )
+                )
 
 
 class TestFxGraphCacheHashing(TestCase):

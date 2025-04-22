@@ -115,7 +115,17 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
 # Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches: bool = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+    default=False,
+)
+
+# Unsafe way to skip dynamic shape guards to get faster cache load
+unsafe_skip_cache_dynamic_shape_guards: bool = False
+
+# Unsafe way to mark function as cacheable
+unsafe_marked_cacheable_functions: list[str] = []
 
 # If set to "DEFAULT", this will use the default path that is "torch/_inductor/fx_passes/serialized_patterns/"
 # If set to another path, torchinductor_serialized_pattern_path will generate patterens to the given path
@@ -163,6 +173,12 @@ size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
+# Disable by default in fbcode
+alignment_asserts = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")
+    == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -177,6 +193,9 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+
+# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
+bfloat16_atomic_adds_enabled = True
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
@@ -411,7 +430,7 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # NOTE: This feature is deprecated and will be defauled to False in the future.
 # Whether we fall back to ATen or hard error when no matches are found during autotuning
 autotune_fallback_to_aten = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "0") == "1"
 )
 
 # the value used as a fallback for the unbacked SymInts
@@ -506,6 +525,9 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
+assume_unaligned_fallback_output = (
+    os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
+)
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -933,9 +955,9 @@ class cpp:
     vec_isa_ok: Optional[bool] = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = int(
@@ -1105,13 +1127,12 @@ class triton:
     )
 
     # should we put op names in kernel names
-    # False: No special names (just triton__1, triton__2, etc.)
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # use alternate codegen for smaller reductions
     persistent_reductions = (
@@ -1135,7 +1156,7 @@ class triton:
     )  # type: ignore[assignment]
 
     # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
+    divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
@@ -1364,6 +1385,11 @@ class cuda:
     cutlass_instantiation_level: str = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
     )
+
+    # Experimental. Only for H100 for now. Flag to control whether to use presets.
+    # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
+    # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
+    cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
 
 
 class rocm:
