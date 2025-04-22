@@ -9,10 +9,7 @@ from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
-from torch._dynamo.utils import detect_fake_mode, dynamo_timed
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
-from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -22,6 +19,7 @@ from . import config
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from torch._inductor.utils import InputType
     from torch.compiler._cache import CacheInfo
     from torch.fx import GraphModule
 
@@ -64,6 +62,8 @@ class CompiledArtifact:
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
     ) -> None:
+        from torch._dynamo.utils import dynamo_timed
+
         with dynamo_timed("CompiledArtifact.save"):
             if self._artifacts is None:
                 raise RuntimeError(
@@ -116,6 +116,10 @@ class CompiledArtifact:
     def load(
         *, path: str, format: Literal["binary", "unpacked"] = "binary"
     ) -> CompiledArtifact:
+        from torch._dynamo.utils import dynamo_timed
+        from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+        from torch._inductor.utils import BoxedBool
+
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
                 # cant assert that it is a file since it might not exist yet
@@ -180,6 +184,7 @@ class CompiledArtifact:
 def standalone_compile(
     gm: GraphModule, example_inputs: Sequence[InputType], **kwargs: Any
 ) -> CompiledArtifact:
+    from torch._dynamo.utils import detect_fake_mode
     from torch.compiler._cache import CacheArtifactManager
 
     from .compile_fx import compile_fx
