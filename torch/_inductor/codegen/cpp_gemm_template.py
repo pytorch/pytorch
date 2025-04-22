@@ -26,7 +26,7 @@ from .cpp_micro_gemm import (
     CppMicroBrgemm,
     CppMicroGemm,
     CppMicroGemmAMX,
-    CppMicroGemmWoQSmallMDim,
+    CppMicroGemmFP32Vec,
     create_micro_gemm,
     LayoutType,
 )
@@ -42,7 +42,7 @@ from .cpp_utils import (
 
 log = logging.getLogger(__name__)
 
-GEMM_TEMPLATE_INIT_BLOCKING_SMALL_M = r"""
+GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK = r"""
     constexpr int64_t N = {{N}};
     constexpr int64_t K = {{K}};
     constexpr int64_t Mr = {{micro_gemm.register_blocking.block_m}};
@@ -52,25 +52,16 @@ GEMM_TEMPLATE_INIT_BLOCKING_SMALL_M = r"""
     constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
 {%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(GemmOut, 0)}};
+    const int64_t Mr_blocks = (M + Mr - 1) / Mr;
 {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
+    constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
 {%- endif %}
-    const int64_t Mr_blocks = (M + Mr - 1) / Mr;
 """
 
-GEMM_TEMPLATE_INIT_BLOCKING = r"""
-    constexpr int64_t num_threads = {{num_threads}};
-    constexpr int64_t N = {{N}};
-    constexpr int64_t K = {{K}};
-    constexpr int64_t Mr = {{micro_gemm.register_blocking.block_m}};
-    constexpr int64_t Nr = {{micro_gemm.register_blocking.block_n}};
-    constexpr int64_t Kr = {{micro_gemm.register_blocking.block_k}};
-    constexpr int64_t Nr_blocks = (N + Nr - 1) / Nr;
-    constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
+GEMM_TEMPLATE_INIT_BLOCKING_EXTENDED = r"""
 
 {%- if is_dynamic_M %}
-    const int64_t M = {{kernel.size(GemmOut, 0)}};
-    const int64_t Mr_blocks = (M + Mr - 1) / Mr;
     {%- if num_threads > 1 %}
     int64_t Mt_blocks, Nt_blocks, Kt_blocks;
     mm_get_thread_blocking(num_threads, {{config.cpp.gemm_max_k_slices}}, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
@@ -105,8 +96,6 @@ GEMM_TEMPLATE_INIT_BLOCKING = r"""
     const int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
     const int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
 {%- else %}
-    constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
-    constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
     constexpr int64_t Mt_blocks = {{template.thread_blocking(num_threads).block_m}};
     constexpr int64_t Nt_blocks = {{template.thread_blocking(num_threads).block_n}};
     constexpr int64_t Kt_blocks = {{template.thread_blocking(num_threads).block_k}};
@@ -353,7 +342,7 @@ SMALL_M_GEMM_TEMPLATE = r"""
             int64_t n_end = (nr_block_id + 1) * Nr;
     {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
-            {{ kernel.define_thread_local_buffer(acc_buf_name, ["M", "Nr"], acc_buf_dtype) }}
+            {{ kernel.define_stack_allocated_buffer(acc_buf_name, ["M", "Nr"], acc_buf_dtype) }}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
 {%- else %}
     {%- set acc = kernel.slice_nd(GemmOut, [(0, "M"), ("n_start", "n_end")]) %}
@@ -1485,6 +1474,24 @@ class CppGemmTemplate(CppTemplate):
         )
         return options
 
+    def is_int8_woq_gemm_small_m_dim(
+        self,
+        X: ir.ReinterpretView,
+        W: ir.ReinterpretView,
+        N,
+        K,
+        micro_gemm,
+    ):
+        """Use SMALL_M_GEMM_TEMPLATE"""
+        return (
+            isinstance(micro_gemm, CppMicroGemmFP32Vec)
+            and K % micro_gemm.register_blocking.block_k == 0
+            and N % micro_gemm.register_blocking.block_n == 0
+            and X.get_size()[0] < 16
+            and X.get_dtype() is torch.bfloat16
+            and W.get_dtype() is torch.int8
+        )
+
     def render(  # type: ignore[override, return]
         self,
         kernel: CppTemplateKernel,
@@ -1506,7 +1513,13 @@ class CppGemmTemplate(CppTemplate):
                 stack.enter_context(
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
-            if isinstance(options["micro_gemm"], CppMicroGemmWoQSmallMDim):
+            if not options["is_dynamic_M"] and self.is_int8_woq_gemm_small_m_dim(
+                options["X"],
+                options["W"],
+                options["N"],
+                options["K"],
+                options["micro_gemm"],
+            ):
                 return self._template_from_string(SMALL_M_GEMM_TEMPLATE).render(
                     **options
                 )
@@ -1544,14 +1557,17 @@ class CppGemmTemplate(CppTemplate):
             W=W,
             is_woq_int4=self.is_woq_int4(),
         )
-        if isinstance(micro_gemm, CppMicroGemmWoQSmallMDim):
+        if not is_dynamic_M and self.is_int8_woq_gemm_small_m_dim(
+            X, W, N, K, micro_gemm
+        ):
             return self._template_from_string(
-                GEMM_TEMPLATE_INIT_BLOCKING_SMALL_M
+                GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK
             ).render(options)
         else:
-            return self._template_from_string(GEMM_TEMPLATE_INIT_BLOCKING).render(
-                options
-            )
+            return self._template_from_string(
+                GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK
+                + GEMM_TEMPLATE_INIT_BLOCKING_EXTENDED
+            ).render(options)
 
     def codegen_microkernel_def(self):
         return self._template_from_string(GEMM_TEMPLATE_MICROKERNEL_DEF).render(

@@ -208,10 +208,10 @@ class CppTemplateKernel(CppKernel):
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
 
-    def define_thread_local_buffer(
+    def define_stack_allocated_buffer(
         self, name, sizes: list[Any], dtype=torch.float
     ) -> str:
-        """Define kernel thread local buffer"""
+        """Define stack-allocated buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
         buf = ir.Buffer(
             name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
