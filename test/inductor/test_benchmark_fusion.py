@@ -10,7 +10,12 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import get_func_call, HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    get_func_call,
+    HAS_CPU,
+    HAS_CUDA,
+    IS_BIG_GPU,
+)
 
 
 # Make the helper files in test/ importable
@@ -127,6 +132,9 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
         if self.device != "cuda":

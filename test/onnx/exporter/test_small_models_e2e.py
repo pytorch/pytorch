@@ -150,12 +150,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 x = torch.cond(x.sum() > 0, true_fn, false_fn, (x, z))
                 return x, z
 
-        onnx_program = torch.onnx.export(
-            CondModel(),
-            (torch.tensor([1, 2]),),
-            dynamo=True,
-            fallback=False,
-        )
+        onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
         onnx_testing.assert_onnx_program(onnx_program)
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
@@ -194,27 +189,27 @@ class DynamoExporterTest(common_utils.TestCase):
             _ = self.export(exported_program)
 
     @common_utils.parametrize(
-        "float8_type",
+        "float8_type, onnx_type",
         [
             common_utils.subtest(
-                torch.float8_e5m2,
+                (torch.float8_e5m2, ir.DataType.FLOAT8E5M2),
                 name="torch_float8_e5m2",
             ),
             common_utils.subtest(
-                torch.float8_e5m2fnuz,
+                (torch.float8_e5m2fnuz, ir.DataType.FLOAT8E5M2FNUZ),
                 name="torch_float8_e5m2fnuz",
             ),
             common_utils.subtest(
-                torch.float8_e4m3fn,
+                (torch.float8_e4m3fn, ir.DataType.FLOAT8E4M3FN),
                 name="torch_float8_e4m3fn",
             ),
             common_utils.subtest(
-                torch.float8_e4m3fnuz,
+                (torch.float8_e4m3fnuz, ir.DataType.FLOAT8E4M3FNUZ),
                 name="torch_float8_e4m3fnuz",
             ),
         ],
     )
-    def test_float8_support(self, float8_type):
+    def test_float8_support(self, float8_type: torch.dtype, onnx_type: ir.DataType):
         class Float8Module(torch.nn.Module):
             def forward(self, input: torch.Tensor):
                 input = input.to(float8_type)
