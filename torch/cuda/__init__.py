@@ -1783,7 +1783,6 @@ __all__ = [
     "LongTensor",
     "ShortStorage",
     "ShortTensor",
-    "_compile_kernel",
     "CUDAGraph",
     "CudaError",
     "DeferredCudaCallError",
