@@ -52,7 +52,6 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
-from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
@@ -118,7 +117,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "before_recompile_post_grad",
+                "name": "before apply group_batch_fusion_post_grad",
                 "encoding": "string",
             },
             payload_fn=lambda: gm.print_readable(
@@ -127,6 +126,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "after apply group_batch_fusion_post_grad",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
         GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
@@ -141,23 +150,29 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             if pass_name in POST_GRAD_FUSIONS:
                 continue
             pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
-            inductor_before_change = save_inductor_dict(
-                [pattern_matcher_pass.pass_name]
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": f"before apply {pattern_matcher_pass.pass_name}_post_grad",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
             )
             GraphTransformObserver(gm, pass_name).apply_graph_pass(
                 pattern_matcher_pass.apply
             )
-            if not is_same_dict(counters["inductor"], inductor_before_change):
-                trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": f"{pattern_matcher_pass.pass_name}_post_grad",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: gm.print_readable(
-                        print_output=False, include_stride=True, include_device=True
-                    ),
-                )
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": f"after apply {pattern_matcher_pass.pass_name}_post_grad",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
+            )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
