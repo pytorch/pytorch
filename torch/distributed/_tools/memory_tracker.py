@@ -155,8 +155,8 @@ class MemoryTracker:
         import matplotlib.pyplot as plt
 
         def _plot_figure(x, y_values, labels):
-            min_val = min(list(chain(*y_values))) * 0.999
-            max_val = max(list(chain(*y_values))) * 1.001
+            min_val = min(chain.from_iterable(y_values)) * 0.999
+            max_val = max(chain.from_iterable(y_values)) * 1.001
             plt.figure()
             for y, label in zip(y_values, labels):
                 plt.plot(x, y, label=label)

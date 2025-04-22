@@ -87,9 +87,9 @@ class CUDACPPScheduling(BaseScheduling):
         Codegen a CUDA template, possibly with fused epilogues
         """
         counters["inductor"]["cuda_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cuda_cpp_template(
-            template_node
-        ), "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
+        assert self.is_cuda_cpp_template(template_node), (
+            "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
+        )
         template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1

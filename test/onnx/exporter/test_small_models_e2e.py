@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 
-import torchvision
 import transformers
+from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -18,7 +18,13 @@ from torch.utils import _pytree as torch_pytree
 class DynamoExporterTest(common_utils.TestCase):
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
-            model, args, kwargs=kwargs, dynamo=True, fallback=False, **options
+            model,
+            args,
+            kwargs=kwargs,
+            dynamo=True,
+            fallback=False,
+            verbose=False,
+            **options,
         )
         assert onnx_program is not None
         return onnx_program
@@ -153,23 +159,6 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program)
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
-    def test_onnx_export_torchvision_ops(self):
-        class VisionModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, *x):
-                out = torchvision.ops.nms(x[0], x[1], x[2])
-                return out
-
-        args = (
-            torch.tensor([[0, 0, 1, 1], [0.5, 0.5, 1, 1]], dtype=torch.float),
-            torch.tensor([0.1, 0.2]),
-            0,
-        )
-        onnx_program = self.export(VisionModel(), args)
-        onnx_testing.assert_onnx_program(onnx_program)
-
     def test_empty(self):
         def func(x):
             return torch.empty(x.size(), dtype=torch.int64)
@@ -233,12 +222,35 @@ class DynamoExporterTest(common_utils.TestCase):
 
         _ = self.export(Float8Module(), (torch.randn(1, 2),))
 
+    def test_bfloat16_support(self):
+        class BfloatModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Test parameters
+                self.param = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.bfloat16))
+
+            def forward(self, x):
+                # Test constant tensors are stored as bfloat16
+                const = torch.tensor(1.0, dtype=torch.bfloat16)
+                return x * const * self.param
+
+        input = torch.tensor([1.0, 2.0], dtype=torch.bfloat16)
+        onnx_program = self.export(BfloatModel(), (input,), optimize=False)
+        initializers = onnx_program.model.graph.initializers.values()
+        self.assertEqual(len(initializers), 2)
+        for initializer in initializers:
+            self.assertEqual(initializer.dtype, ir.DataType.BFLOAT16)
+        self.assertEqual(onnx_program.model.graph.inputs[0].dtype, ir.DataType.BFLOAT16)
+        self.assertEqual(
+            onnx_program.model.graph.outputs[0].dtype, ir.DataType.BFLOAT16
+        )
+
     def test_export_with_logging_logger(self):
         logger = logging.getLogger(__name__)
 
         class LoggingLoggerModule(torch.nn.Module):
             def forward(self, x):
-                logger.log("abc")
+                logger.info("abc")
                 return x + 1
 
         onnx_program = self.export(LoggingLoggerModule(), (torch.tensor(1),))
@@ -462,7 +474,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
 
         dynamic_shapes = (
-            {0: torch.export.Dim("dim_x", min=3)},  # _Dim
+            {0: torch.export.Dim("dim_x", min=3)},  # Dim
             [("custom_name_axis_ys_0",), (torch.export.Dim.AUTO,)],  # custom name
             {
                 "a": {0: torch.export.Dim.AUTO},

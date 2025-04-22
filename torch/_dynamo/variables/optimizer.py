@@ -358,7 +358,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value)
             source = self.tensor_to_source[tensor_value]
-            self.static_tensor_names.add(tx.output.module_key_name(source.name))
+            self.static_tensor_names.add(tx.output.module_key_name(source.name()))
         elif tensor_value in self.grad_to_source:
             source = self.grad_to_source[tensor_value]
         else:
@@ -367,7 +367,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             source = GlobalWeakRefSource(global_name)
-            self.static_tensor_names.add(tx.output.module_key_name(source.name))
+            self.static_tensor_names.add(tx.output.module_key_name(source.name()))
 
         return VariableTracker.build(tx, tensor_value, source)
 
@@ -377,9 +377,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
-                assert isinstance(
-                    py_arg, list
-                ), "py_arg should be a list in optimizer variable"
+                assert isinstance(py_arg, list), (
+                    "py_arg should be a list in optimizer variable"
+                )
                 for i, val in enumerate(py_arg):
                     tx.output.side_effects.mutation(arg)
                     if isinstance(val, torch.Tensor):

@@ -17,32 +17,24 @@ curl -L -o "%INSTALLER_FILE%" %DOWNLOAD_URL%
 :: Install the Visual Studio Build Tools with C++ components
 echo Installing Visual Studio Build Tools with C++ components...
 echo Installing MSVC %MSVC_VERSION%
-if "%MSVC_VERSION%" == "latest" (
-    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
-        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
-        --add Microsoft.VisualStudio.Component.VC.ASAN ^
-        --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
-        --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
-        --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64
-) else if "%MSVC_VERSION%" == "14.40" (
-    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
-        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
-        --add Microsoft.VisualStudio.Component.VC.ASAN ^
-        --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
-        --add Microsoft.VisualStudio.Component.VC.14.40.17.10.ARM64 ^
-        --add Microsoft.VisualStudio.Component.VC.14.40.17.10.x86.x64
-) else if "%MSVC_VERSION%" == "14.36" (
-    "%INSTALLER_FILE%" --norestart --nocache --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
-        --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
-        --add Microsoft.VisualStudio.Component.VC.ASAN ^
-        --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
-        --add Microsoft.VisualStudio.Component.VC.14.36.17.6.ARM64 ^
-        --add Microsoft.VisualStudio.Component.VC.14.36.17.6.x86.x64
-)
+"%INSTALLER_FILE%" --norestart --quiet --wait --installPath "%DEPENDENCIES_DIR%\VSBuildTools" ^
+    --add Microsoft.VisualStudio.Workload.VCTools ^
+    --add Microsoft.VisualStudio.Component.Windows10SDK ^
+    --add Microsoft.VisualStudio.Component.Windows11SDK.22621 ^
+    --add Microsoft.VisualStudio.Component.VC.ASAN ^
+    --add Microsoft.VisualStudio.Component.VC.CMake.Project ^
+    --add Microsoft.VisualStudio.Component.VC.CoreBuildTools ^
+    --add Microsoft.VisualStudio.Component.VC.CoreIde ^
+    --add Microsoft.VisualStudio.Component.VC.Redist.14.Latest ^
+    --add Microsoft.VisualStudio.Component.VC.Tools.ARM64EC ^
+    --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
+    --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+
+echo exitcode = %errorlevel%
 
 :: Check if installation was successful
 if %errorlevel% neq 0 (
-    echo "Failed to install Visual Studio Build Tools with C++ components. (exitcode = %errorlevel%)"
+    echo Failed to install Visual Studio Build Tools with C++ components.
     exit /b 1
 )
 

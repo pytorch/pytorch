@@ -140,10 +140,12 @@ class StateDictOptions:
 @dataclass
 class _StateDictInfo(StateDictOptions):
     fqn_param_mapping: dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+        Union[str, torch.Tensor],
+        Union[FQNS_T, torch.Tensor],
     ] = field(default_factory=dict)
     shared_params_mapping: dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+        Union[str, torch.Tensor],
+        Union[FQNS_T, torch.Tensor],
     ] = field(default_factory=dict)
     submodule_prefixes: set[str] = field(default_factory=set)
     handle_model: bool = True
@@ -152,7 +154,6 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
-@functools.cache
 def _get_fqns(
     model: nn.Module,
     name: str,
@@ -164,7 +165,7 @@ def _get_fqns(
     This API is used to convert the name of a parameter to the FQNs. For FSDP
     without `use_orig_params`, the name of FlatParameter can be mapped to
     multiple original parameters. As a result, the return type of this function
-    is `Set[str]`.
+    is `set[str]`.
 
     Args:
         module (nn.Module): the root model.
@@ -594,8 +595,7 @@ def _load_model_state_dict(
             )
         elif info.full_state_dict:
             _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
-        for fqn, local_state in local_state_dict.items():
-            state_dict[fqn] = local_state
+        state_dict.update(local_state_dict)
 
     with info.fsdp_context():
         return cast(
@@ -729,6 +729,24 @@ def _unflatten_optim_state_dict(
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
+                # If a parameter is shared, only one of the FQN will be used.
+                # So we need to verify which if this fqn is actually used in
+                # the state_dict.
+                if fqn in info.shared_params_mapping:
+                    in_params = False
+                    for k in param_group.keys():
+                        if k == _PARAMS:
+                            continue
+                        flatten_key = f"{_PG}.{fqn}.{k}"
+                        if flatten_key in state_dict:
+                            in_params = True
+                        break
+                else:
+                    in_params = True
+
+                if not in_params:
+                    continue
+
                 params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)  # typing
                 params.append(fqn)
@@ -880,15 +898,37 @@ def _split_optim_state_dict(
                     if fqn in cast(list[str], loaded_param_group[_PARAMS]):
                         pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
 
+        if len(param_group[_PARAMS]) == 0:
+            # Param_group with empty params.
+            ret = []
+            for loaded_param_group in cast(ListDictValueType, optim_state_dict[_PG]):
+                if len(cast(list[str], loaded_param_group[_PARAMS])) == 0:
+                    ret.append(loaded_param_group)
+            if len(ret) != 1:
+                raise ValueError(
+                    "There are param groups that have zero parameters. "
+                    "In such a case, DSD only support exactly one param group "
+                    "with zero parameters."
+                    "But the loaded state_dict has zero or more than one param groups "
+                    "that have zero parameters."
+                )
+            if len(optim_state_dict[_PG]) != len(optim.param_groups):
+                raise ValueError(
+                    "When there is a parameter group that has zero parameters, "
+                    "multiple optimizers are not supported."
+                )
+            pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
+
     for param_group in cast(ListDictValueType, optim_state_dict[_PG]):
-        idx = pg_mapping.get(id(param_group), -1)
-        if idx == -1:
+        pg_idx = pg_mapping.get(id(param_group), -1)
+        if pg_idx == -1:
             continue
+
         for key, value in param_group.items():
             if key == _PARAMS:
                 continue
             # TODO: check if value is the same if exists.
-            pg_state[idx][key] = value
+            pg_state[pg_idx][key] = value
 
     return return_osd
 
@@ -980,6 +1020,9 @@ def _load_optim_state_dict(
             optim_state_dict = _unflatten_state_dict(
                 flatten_local_osd, local_osd_mapping
             )
+            for pg in optim_state_dict[_PG]:
+                if _PARAMS not in pg:
+                    cast(dict[str, ValueType], pg)[_PARAMS] = []
 
         # Note that we do not have to convert the FQN back to param id here if
         # order in optim.param_groups[idx][_PARAMS] is the same as the one in
@@ -1000,7 +1043,7 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1040,7 +1083,7 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1115,7 +1158,9 @@ def get_state_dict(
 
 
         >>> ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
-        >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
+        >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(
+        ...     fsdp_model, fsdp_optim
+        ... )
 
         >>> # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
         >>> # the asserts will fail.
@@ -1127,7 +1172,7 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1242,6 +1287,10 @@ def set_optimizer_state_dict(
     The counterpart of ``get_optimizer_state_dict`` to set the state_dict to the
     optimizers. See ``set_state_dict`` for the detail usage.
 
+    WARN: ``set_optimizer_state_dict`` can only be called before ``backward()`` or after
+        ``step()`` is called on the optimizers. Otherwise, the optimizer states won't be
+        initialized correctly.
+
     Args:
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[Optimizer, Iterable[Optimizer]]):
@@ -1286,6 +1335,10 @@ def set_state_dict(
     2) if a tensor is sharded, it must be either a ShardedTensor or DTensor,
     3) optimizer state_dict cannot contain the parameter IDs; the keys should be
     the canonical FQNs.
+
+    WARN: ``set_state_dict`` can only be called before ``backward()`` or after ``step()``
+        is called on the optimizers. Otherwise, the optimizer states won't be initialized
+        correctly.
 
     Args:
         model (nn.Module): the nn.Module to the model.

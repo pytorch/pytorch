@@ -5,12 +5,13 @@ import logging
 import operator
 import warnings
 from collections.abc import Sequence
-from typing import cast, Optional, TYPE_CHECKING
+from typing import cast, Optional
 
 import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
@@ -30,9 +31,6 @@ from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
 
 
-if TYPE_CHECKING:
-    from torch.distributed.device_mesh import DeviceMesh
-
 try:
     from torch.utils import _cxx_pytree as pytree
 except ImportError:
@@ -40,22 +38,6 @@ except ImportError:
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
-
-
-def decompose_handler(
-    op_call: torch._ops.OpOverload,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> object:
-    """
-    Decomposes a op to core ATen op, this handler is mostly here
-    for inference mode usage where the ops are not core aten ops.
-    """
-    r = op_call.decompose(*args, **kwargs)
-    if r is not NotImplemented:
-        return r
-    else:
-        raise RuntimeError("Decomposition failed")
 
 
 def is_same_size_handler(
@@ -75,7 +57,8 @@ def found_inf_reduce_handler(
 ) -> None:
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     local_tensor_args = pytree.tree_unflatten(
-        cast(list[object], op_info.local_args), op_info.args_tree_spec  # type: ignore[arg-type]
+        cast(list[object], op_info.local_args),
+        op_info.args_tree_spec,  # type: ignore[arg-type]
     )
     local_tensor_args = cast(tuple[object, ...], local_tensor_args)
     op_call(*local_tensor_args, **op_info.local_kwargs)
@@ -137,8 +120,6 @@ class OpDispatcher:
             aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
-            aten.linear.default: decompose_handler,
-            aten.matmul.default: decompose_handler,
             aten.is_same_size.default: is_same_size_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
@@ -161,6 +142,14 @@ class OpDispatcher:
         Main dispatching logic
         """
         # operators that does not need to go through sharding propagation
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        ):
+            # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
+            # so we manually decompose them, here
+            out = op_call.decompose(*args, **kwargs)
+            assert out is not NotImplemented
+            return out
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
@@ -173,7 +162,7 @@ class OpDispatcher:
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
-        mesh = op_info.mesh
+        mesh = op_info.compute_mesh
         if mesh.get_coordinate() is not None:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
@@ -198,10 +187,11 @@ class OpDispatcher:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
+                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
 
-                first_arg, first_local_arg = cast(dtensor.DTensor, args[0]), cast(
-                    torch.Tensor, local_tensor_args[0]
+                first_arg, first_local_arg = (
+                    cast(dtensor.DTensor, args[0]),
+                    cast(torch.Tensor, local_tensor_args[0]),
                 )
                 rng_context = (
                     random._rng_tracker._distribute_region(first_arg._spec)
@@ -349,58 +339,52 @@ class OpDispatcher:
         kwargs_schema: dict[str, object] = {}
         local_args: list[object] = []
         local_kwargs: dict[str, object] = {}
-        mesh: Optional[DeviceMesh] = None
+        compute_mesh: Optional[DeviceMesh] = None
 
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
                 local_args.append(arg._local_tensor)
-                if mesh is not None and mesh != arg.device_mesh:
-                    # TODO: try replicate dtensor spec in missing dimension would work
-                    # for most cases for foreach case except when the first DTensor in
-                    # the list is one that also need to be replicated. We need to revisit
-                    # how we want to handle this corner case. For now, this case would hit
-                    # the cross mesh error even if implicit replication is turned on.
-                    spec = self._try_replicate_dtensor_spec_in_missing_dim(
-                        op_call, arg, mesh
-                    )
-                    args_schema.append(spec)
-                else:
-                    mesh = arg.device_mesh
-                    args_schema.append(arg._spec)
+                args_schema.append(arg._spec)
+                if compute_mesh is None:
+                    # record the first compute device mesh from args
+                    compute_mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                compute_mesh = compute_mesh or try_find_mesh_from_args(
+                    op_call, args_list
+                )
                 args_schema.append(
-                    self._try_replicate_spec_for_scalar_tensor(op_call, arg, mesh)
+                    self._try_replicate_spec_for_scalar_tensor(
+                        op_call, arg, compute_mesh
+                    )
                 )
                 local_args.append(arg)
             else:
+                # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
                 args_schema.append(arg)
                 local_args.append(arg)
 
         for k, v in kwargs.items():
             if isinstance(v, dtensor.DTensor):
                 local_kwargs[k] = v._local_tensor
-                if mesh is not None and mesh != v.device_mesh:
-                    spec = self._try_replicate_dtensor_spec_in_missing_dim(
-                        op_call, v, mesh
-                    )
-                    kwargs_schema[k] = spec
-                else:
-                    mesh = v.device_mesh
-                    kwargs_schema[k] = v._spec
+                kwargs_schema[k] = v._spec
             elif isinstance(v, torch.Tensor):
-                mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                compute_mesh = compute_mesh or try_find_mesh_from_args(
+                    op_call, args_list
+                )
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
-                    op_call, v, mesh
+                    op_call, v, compute_mesh
                 )
                 local_kwargs[k] = v
             else:
+                # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert mesh is not None, f"found no DeviceMesh from dtensor args for {op_call}!"
+        assert compute_mesh is not None, (
+            f"found no DeviceMesh from dtensor args for {op_call}!"
+        )
         op_info = OpInfo(
-            mesh,
+            compute_mesh,
             OpSchema(
                 op_call,
                 (
@@ -422,18 +406,18 @@ class OpDispatcher:
     def wrap(res: object, spec: OutputSpecType) -> object:
         if isinstance(res, torch.Tensor):
             if spec is not None:
-                assert isinstance(
-                    spec, DTensorSpec
-                ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                assert isinstance(spec, DTensorSpec), (
+                    f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                )
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
                 assert res.ndim == 0, "output tensor should be scalar!"
                 return res
         elif isinstance(res, (list, tuple)):
-            assert spec is not None and isinstance(
-                spec, (list, tuple)
-            ), f"output spec does not match with output! Expected list/tuple, got {spec}."
+            assert spec is not None and isinstance(spec, (list, tuple)), (
+                f"output spec does not match with output! Expected list/tuple, got {spec}."
+            )
             res_list = []
             for e, s in zip(res, spec):
                 res_list.append(OpDispatcher.wrap(e, s))
@@ -448,7 +432,7 @@ class OpDispatcher:
         self,
         op_call: torch._ops.OpOverload,
         tensor_arg: torch.Tensor,
-        mesh: "DeviceMesh",
+        compute_mesh: DeviceMesh,
     ) -> DTensorSpec:
         # util function to produce a replicate spec for a scalar tensor arg/kwarg
         if tensor_arg.numel() == 1 and tensor_arg.ndim == 1:
@@ -462,8 +446,8 @@ class OpDispatcher:
         if tensor_arg.numel() == 1 or self._allow_implicit_replication:
             # scalar tensor can be safely treated as replicated
             replication_spec = DTensorSpec(
-                mesh,
-                (Replicate(),) * mesh.ndim,
+                compute_mesh,
+                (Replicate(),) * compute_mesh.ndim,
                 tensor_meta=TensorMeta(
                     shape=tensor_arg.shape,
                     stride=tensor_arg.stride(),
@@ -476,39 +460,3 @@ class OpDispatcher:
                 " torch.Tensor to DTensor before calling distributed operators!"
             )
         return replication_spec
-
-    def _try_replicate_dtensor_spec_in_missing_dim(
-        self,
-        op_call: torch._ops.OpOverload,
-        dtensor_arg: "dtensor.DTensor",
-        mesh: "DeviceMesh",
-    ) -> DTensorSpec:
-        # util function to produce a new spec for a DTensor arg/kwarg
-        # that puts Replicate() placement in the missing dimension for foreach ops
-        from torch.distributed.device_mesh import _mesh_resources
-
-        cur_mesh = dtensor_arg.device_mesh
-        root_mesh = _mesh_resources.get_root_mesh(cur_mesh)
-        if (
-            self._allow_implicit_replication
-            and "foreach" in op_call.__name__
-            and root_mesh == mesh
-        ):
-            placements = [Replicate() for _ in range(root_mesh.ndim)]
-            cur_mesh_root_idx = _mesh_resources.get_root_mesh_dim(cur_mesh)
-            placements[cur_mesh_root_idx] = dtensor_arg.placements[0]  # type: ignore[call-overload]
-            replicate_spec = DTensorSpec(
-                root_mesh,
-                tuple(placements),
-                tensor_meta=TensorMeta(
-                    shape=dtensor_arg.shape,
-                    stride=dtensor_arg.stride(),
-                    dtype=dtensor_arg.dtype,
-                ),
-            )
-        else:
-            raise NotImplementedError(
-                f"{op_call}: DTensor does not support cross-mesh operation yet! "
-                f"Got meshes: {mesh} {cur_mesh}"
-            )
-        return replicate_spec

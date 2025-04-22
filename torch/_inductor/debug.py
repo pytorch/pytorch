@@ -23,6 +23,7 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._logging import getArtifactLogger
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -43,8 +44,8 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-ir_pre_fusion_log = torch._logging.getArtifactLogger(__name__, "ir_pre_fusion")
-ir_post_fusion_log = torch._logging.getArtifactLogger(__name__, "ir_post_fusion")
+ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
+ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
@@ -239,7 +240,7 @@ def update_orig_fx_node_name_to_buf_name(
 
 
 def get_node_name_to_buf_meta(
-    node_name_to_buf_name: dict[str, str]
+    node_name_to_buf_name: dict[str, str],
 ) -> dict[str, BufMeta]:
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
@@ -525,12 +526,15 @@ class DebugFormatter:
             fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList) -> None:
-        ir_pre_fusion_log.debug("BEFORE FUSION\n%s", self._write_ir(nodes))
+        with self.fopen("ir_pre_fusion.txt") as fd:
+            fd.write(self._write_ir(nodes))
 
     def ir_post_fusion(self, nodes: SchedulerNodeList) -> None:
-        ir_post_fusion_log.debug("AFTER FUSION\n%s", self._write_ir(nodes))
+        with self.fopen("ir_post_fusion.txt") as fd:
+            fd.write(self._write_ir(nodes))
 
-    def _write_ir(self, nodes: SchedulerNodeList) -> str:
+    @staticmethod
+    def _write_ir(nodes: SchedulerNodeList) -> str:
         buf = io.StringIO()
         for node in nodes:
             buf.write(node.debug_str())
@@ -664,6 +668,20 @@ class DebugFormatter:
                 info_dict["benchmark_result"] = time
                 json.dump(info_dict, fd)
                 fd.write("\n")
+
+
+def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
+    if ir_pre_fusion_log.isEnabledFor(logging.INFO):
+        ir_pre_fusion_log.info("BEFORE FUSION\n%s", DebugFormatter._write_ir(nodes))
+
+    V.debug.ir_pre_fusion(nodes)
+
+
+def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
+    if ir_post_fusion_log.isEnabledFor(logging.INFO):
+        ir_post_fusion_log.info("AFTER FUSION\n%s", DebugFormatter._write_ir(nodes))
+
+    V.debug.ir_post_fusion(nodes)
 
 
 @dataclasses.dataclass

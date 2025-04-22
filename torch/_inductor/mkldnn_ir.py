@@ -73,6 +73,22 @@ def _prepare_convolution_fusion_create(
             input_size.append(input_size_d)
         return list(map(int, input_size))
 
+    # Port from aten/src/ATen/native/ConvUtils.h: _conv_output_size
+    def _conv_output_size(input_size, weight_size, padding, stride, dilation=None):
+        has_dilation = dilation is not None
+        dim = len(input_size)
+        output_size = []
+        output_size.append(input_size[0])
+        output_size.append(weight_size[0])
+        for d in range(2, dim):
+            dilation_ = dilation[d - 2] if has_dilation else 1
+            kernel = dilation_ * (weight_size[d] - 1) + 1
+            output_size_d = (input_size[d] + (2 * padding[d - 2]) - kernel) // stride[
+                d - 2
+            ] + 1
+            output_size.append(output_size_d)
+        return output_size
+
     # The size of prepacked_weight is the prepacked weight size of deconv:
     #   Groups > 1:  [g*o, i/g, ...]
     #   Groups == 1: [o, i, ...]
@@ -130,21 +146,18 @@ def _prepare_convolution_fusion_create(
                 groups,
             )
         else:
-            bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-            )
-            output = torch.ops.aten.convolution(
-                x_fake,
-                weight_fake,
-                bias_fake,
-                stride,
+            x_shape = list(x_fake.shape)
+            weight_shape = list(weight_fake.shape)
+            if len(x_shape) != len(weight_shape):
+                assert len(x_shape) == 3 and len(weight_shape) == 4
+                weight_shape.pop(2)
+            output_size = _conv_output_size(
+                x_shape,
+                weight_shape,
                 padding,
+                stride,
                 dilation,
-                transposed,
-                output_padding,
-                groups,
             )
-            output_size = output.size()
 
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
@@ -291,7 +304,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -349,7 +362,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -420,7 +433,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ]
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
@@ -489,7 +502,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -562,12 +575,12 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv2d_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu__qconv2d_pointwise_tensor",
+            op_overload=torch.ops.onednn.qconv_pointwise.default,
+            cpp_kernel_name="aoti_torch_cpu__qconv_pointwise_tensor",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -672,7 +685,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -751,9 +764,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        assert (
-            binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        assert binary_attr == "sum", (
+            "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        )
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
@@ -782,7 +795,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -826,7 +839,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -879,7 +892,7 @@ class LinearBinary(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
     @classmethod
@@ -943,7 +956,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
 
         if isinstance(self.layout, Layout):
@@ -1027,7 +1040,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -1225,5 +1238,60 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         return output_ir
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         return super().codegen(wrapper)
+
+
+# Add this IR so that we can include shim_cpu.h for cpp_wrapper
+class WeightInt4PackMatmul(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ) -> None:
+        """
+        inputs = [x, w, qGroupSize, qScalesAndZeros]
+        constant_args = ()
+        """
+        assert len(inputs) == 4
+        assert len(constant_args) == 0
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            op_overload=(torch.ops.quantized.int4mm_packed_weight_cpu.default),
+            cpp_kernel_name=("aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"),
+        )
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        super().codegen(wrapper)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        w: "TensorBox",
+        qGroupSize: "TensorBox",
+        qScalesAndZeros: "TensorBox",
+    ):
+        inputs = [x, w, qGroupSize, qScalesAndZeros]
+        *m, _ = x.get_size()
+        n, _ = w.get_size()
+        output_size = list(m) + [n]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
+        kernel_layout = FixedLayout(
+            x.get_device(),  # type: ignore[arg-type]
+            x.get_dtype(),
+            output_size,
+            output_stride,
+        )
+        return WeightInt4PackMatmul(
+            layout=kernel_layout,
+            inputs=inputs,
+        )

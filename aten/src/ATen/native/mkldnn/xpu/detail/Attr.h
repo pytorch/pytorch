@@ -131,7 +131,7 @@ struct PostOpParam {
 
 class Attr {
  public:
-  Attr() : q_scale_(1.f), q_zero_point_(0) {}
+  Attr() : q_scale_(1.f) {}
   Attr(float q_scale, int64_t zp = 0) : q_scale_(q_scale), q_zero_point_(zp) {}
 
   /***** eltwise *****/
@@ -193,18 +193,26 @@ class Attr {
   }
 
   // append binary post op
+  template <bool is_matmul = false>
   Attr& append_post_binary(dnnl::algorithm algo, const at::Tensor& binary) {
     auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
     bool binary_is_channels_last =
         (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
          binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
 
-    binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
+    if constexpr (!is_matmul) {
+      binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
+    }
     dnnl::memory::desc md = get_onednn_md(binary_);
     auto expected_md = dnnl::memory::desc(
         md.get_dims(), md.get_data_type(), dnnl::memory::format_tag::any);
-    ops_params_.push_back(
-        PostOpParam(binary_, md, expected_md, algo, kind_t::binary));
+    if constexpr (is_matmul) {
+      ops_params_.push_back(PostOpParam(binary_, md, md, algo, kind_t::binary));
+    } else {
+      ops_params_.push_back(
+          PostOpParam(binary_, md, expected_md, algo, kind_t::binary));
+    }
+
     return *this;
   }
 
@@ -330,8 +338,7 @@ class Attr {
     // [1, C, 1, 1], channel broadcast
     // [dst.shape], no broadcast and eltwise-wise binary operations on dst
 
-    auto engine = GpuEngineManager::Instance().get_engine(
-        {c10::kXPU, c10::xpu::current_device()});
+    auto& engine = GpuEngineManager::Instance().get_engine();
     for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       if (kind == kind_t::binary) {

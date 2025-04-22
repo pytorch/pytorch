@@ -118,9 +118,7 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(
-            name, call_args, triton=False, gpu=False, arg_types=arg_types
-        )
+        wrapper.generate_kernel_call(name, call_args, triton=False, arg_types=arg_types)
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -377,7 +375,10 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
-                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
+                    dst,
+                    epilogue_nodes,  # type: ignore[arg-type]
+                    offsets,
+                    reindexers,
                 )
         else:
             if dst.get_name() != src.get_name():

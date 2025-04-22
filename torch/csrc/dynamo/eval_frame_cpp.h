@@ -1,6 +1,5 @@
 #pragma once
 #include <Python.h>
-#include <stdbool.h>
 
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/extra_state.h>
@@ -16,6 +15,8 @@ PyObject* dynamo__custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback);
+
+PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* obj);
 
 #ifdef __cplusplus
 

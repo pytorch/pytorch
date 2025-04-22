@@ -29,7 +29,8 @@ import types
 import warnings
 from collections.abc import Iterable
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C import (
@@ -58,12 +59,15 @@ __all__ = [
     "enable_reentrant_dispatch",
 ]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 def _disable_user_warnings(
-    func: Callable,
+    func: Callable[_P, _R],
     regex: str = ".*is deprecated, please use.*",
     module: str = "torch",
-) -> Callable:
+) -> Callable[_P, _R]:
     """
     Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
     given ``regex`` pattern.
@@ -84,7 +88,7 @@ def _disable_user_warnings(
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message=regex, module=module
@@ -102,7 +106,7 @@ def get_ignored_functions() -> set[Callable]:
 
     Returns
     -------
-    Set[Callable]
+    set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.
@@ -1805,9 +1809,9 @@ has_torch_function_variadic = _add_docstr(
 
 
 @functools.lru_cache(None)
-def _get_overridable_functions() -> (
-    tuple[dict[Any, list[Callable]], dict[Callable, str]]
-):
+def _get_overridable_functions() -> tuple[
+    dict[Any, list[Callable]], dict[Callable, str]
+]:
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [

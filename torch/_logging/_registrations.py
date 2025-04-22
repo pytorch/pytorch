@@ -50,6 +50,7 @@ register_log(
         "torch._export.converter",
         "torch._export.non_strict_utils",
         "torch._export.serde.serialize",
+        "torch.fx.experimental.proxy_tensor",
     ],
 )
 
@@ -109,10 +110,12 @@ register_artifact(
 register_artifact(
     "ir_pre_fusion",
     "Prints the IR before inductor fusion passes.",
+    off_by_default=True,
 )
 register_artifact(
     "ir_post_fusion",
     "Prints the IR after inductor fusion passes.",
+    off_by_default=True,
 )
 register_artifact(
     "compiled_autograd",
@@ -207,8 +210,8 @@ register_artifact(
 register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
+    off_by_default=True,
 )
-
 register_artifact(
     "graph_region_expansion",
     "Logs detailed steps of the duplicate graph region tracker expansion algorithm",

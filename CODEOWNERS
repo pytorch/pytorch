@@ -164,6 +164,11 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 
+# Dynamic Shapes
+/torch/fx/experimental/symbolic_shapes.py @bobren @laithsakka
+/torch/fx/experimental/sym_node.py @bobren @laithsakka
+/torch/fx/experimental/recording.py @bobren @laithsakka
+
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki
 /caffe2/serialize/ @mikaylagawarecki
@@ -183,3 +188,9 @@ torch/cuda/ @eqy @syed-ahmed
 torch/csrc/cuda/ @eqy @syed-ahmed
 torch/backends/cuda/ @eqy @syed-ahmed
 torch/backends/cudnn/ @eqy @syed-ahmed
+
+# PyTree utilities
+/torch/utils/_pytree.py @XuehaiPan
+/torch/utils/_cxx_pytree.py @XuehaiPan
+/torch/utils/pytree/ @XuehaiPan
+/torch/_dynamo/polyfills/pytree.py @XuehaiPan

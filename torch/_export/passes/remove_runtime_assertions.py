@@ -14,7 +14,13 @@ class _RemoveRuntimeAssertionsPass(PassBase):
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
-                if node.target == torch.ops.aten._assert_async.msg:
+                if node.target in [
+                    torch.ops.aten._assert_async.msg,
+                    torch.ops.aten._assert_scalar.default,
+                    torch.ops.aten.sym_constrain_range_for_size.default,
+                    torch.ops.aten.sym_constrain_range.default,
+                    torch.ops.aten._assert_tensor_metadata.default,
+                ]:
                     assert_async_node = node
                     if len(assert_async_node.users) > 0:
                         continue
@@ -23,4 +29,8 @@ class _RemoveRuntimeAssertionsPass(PassBase):
                     # linear chain of nodes of nodes is removed by the
                     # downstream dead code elimination
                     modified = True
+
+        # We don't necessarily want to run DCE here because it could affect
+        # nodes that are in the module_call_graph attribute of the exported
+        # program. We will leave it to the pass caller to call DCE.
         return PassResult(graph_module, modified)

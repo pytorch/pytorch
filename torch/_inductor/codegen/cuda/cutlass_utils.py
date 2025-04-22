@@ -3,6 +3,7 @@ import functools
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -20,6 +21,8 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 
 
 log = logging.getLogger(__name__)
+
+CUTLASS_OPERATION_KIND: str = "gemm"
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -56,9 +59,9 @@ def try_import_cutlass() -> bool:
             "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
         )
         cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
-        assert os.path.isdir(
-            cutlass_library_dir
-        ), f"{cutlass_library_dir} is not a directory"
+        assert os.path.isdir(cutlass_library_dir), (
+            f"{cutlass_library_dir} is not a directory"
+        )
         config.cuda.cutlass_dir = os.path.abspath(
             os.path.join(
                 cutlass_library_dir,
@@ -86,9 +89,9 @@ def try_import_cutlass() -> bool:
     if os.path.isdir(cutlass_py_full_path):
         if tmp_cutlass_py_full_path not in sys.path:
             if os.path.exists(dst_link):
-                assert os.path.islink(
-                    dst_link
-                ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                assert os.path.islink(dst_link), (
+                    f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                )
                 assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
                     cutlass_py_full_path
                 ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
@@ -148,8 +151,8 @@ class CUTLASSArgs:
     architectures: Optional[str] = None
     cuda_version: Optional[str] = None
     instantiation_level: Optional[str] = None
+    operations: Optional[str] = None
 
-    operations = "all"
     build_dir = ""
     curr_build_dir = ""
     generator_target = ""
@@ -173,7 +176,7 @@ class CUTLASSArgs:
 
 @clear_on_fresh_inductor_cache
 @functools.lru_cache(None)
-def _gen_ops_cached(arch, version) -> list[Any]:
+def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
     # Import cutlass python scripts.
@@ -189,24 +192,23 @@ def _gen_ops_cached(arch, version) -> list[Any]:
             arch,
             version,
         )
-        return []
+        return {}
     arch = _normalize_cuda_arch(arch)
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
         cuda_version=version,
         instantiation_level=instantiation_level,
+        operations=CUTLASS_OPERATION_KIND,
     )
     manifest = cutlass_manifest.Manifest(args)
 
+    start_time = time.time()
     if arch == "100":
-        try:
-            from cutlass_generator import GenerateSM100  # type: ignore[import]
-
-            GenerateSM100(manifest, args.cuda_version)
-        except ImportError:
-            log.warning("Cannot find GenerateSM100. Only GenerateSM90 will be used. ")
+        if hasattr(cutlass_generator, "GenerateSM100"):
+            cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
+        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
     elif arch == "90":
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
         cutlass_generator.GenerateSM80(manifest, args.cuda_version)
@@ -218,10 +220,16 @@ def _gen_ops_cached(arch, version) -> list[Any]:
             raise NotImplementedError(
                 "Arch " + arch + " is not supported by current cutlass lib."
             ) from e
+
+    log.info(
+        "CUTLASS library generated a dict of %d operation kinds in %.2f seconds",
+        len(manifest.operations),
+        time.time() - start_time,
+    )
     return manifest.operations
 
 
-def gen_ops() -> list[Any]:
+def gen_ops() -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """

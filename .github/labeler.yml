@@ -98,7 +98,7 @@
 - test/distributed/**
 - torch/testing/_internal/distributed/**
 
-"module: distributed_checkpoint":
+"release notes: distributed (checkpoint)":
 - torch/distributed/checkpoint/**
 - test/distributed/checkpoint/**
 

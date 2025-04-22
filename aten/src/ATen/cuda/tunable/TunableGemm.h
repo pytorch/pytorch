@@ -95,10 +95,12 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->a_scale_ptr,
           params->lda,
           params->a_dtype,
+          params->a_scale_dtype,
           params->b,
           params->b_scale_ptr,
           params->ldb,
           params->b_dtype,
+          params->b_scale_dtype,
           params->bias_ptr,
           params->bias_dtype,
           params->c,
@@ -143,7 +145,11 @@ inline const char* TypeName(T v) {
 
 template <>
 inline const char* TypeName(float v) {
-  return "float";
+  if (at::globalContext().allowTF32CuBLAS()) {
+    return "tf32";
+  } else {
+    return "float";
+  }
 }
 
 template <>

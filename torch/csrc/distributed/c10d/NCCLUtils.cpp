@@ -92,7 +92,9 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
     int numRanks,
     int rank,
     std::vector<ncclUniqueId>& commIds,
+    at::DeviceIndex deviceIndex,
     ncclConfig_t& config) {
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
   auto comm = std::make_shared<NCCLComm>();
   comm->nonBlocking_ = config.blocking == 0;
   LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
@@ -112,6 +114,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
   // in the log file and in the replay tool.
   comm->ncclId_ = commIds[0];
   comm->rank_ = rank;
+  comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
@@ -148,6 +151,10 @@ ncclComm_t NCCLComm::getNcclComm() {
               << " is initialized.";
   }
   return ncclComm_;
+}
+
+at::DeviceIndex NCCLComm::getDeviceIndex() {
+  return deviceIndex_;
 }
 
 // Wait for the communicator to be ready. This is a blocking function.
@@ -457,6 +464,18 @@ std::string getNcclVersion() {
   return versionString;
 }
 
+int getNcclVersionNumber() {
+  static int version = []() {
+    int version = 0;
+    ncclResult_t status = ncclGetVersion(&version);
+    if (status != ncclSuccess) {
+      return 0; // Error.
+    }
+    return version;
+  }();
+  return version;
+}
+
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -467,7 +486,8 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
         std::vector<char> dst(data_size);
         // This is needed so that we trigger a device synchronization so we can
         // get the collective finished if launched on GPU and hash its output.
-        cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost);
+        AT_CUDA_CHECK(
+            cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost));
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor
           hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));

@@ -1378,6 +1378,7 @@ def gen_pyi(
             "float8_e5m2",
             "float8_e5m2fnuz",
             "float8_e8m0fnu",
+            "float4_e2m1fn_x2",
             "half",
             "uint8",
             "uint16",
@@ -1424,17 +1425,15 @@ def gen_pyi(
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
-    dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
-    torch_dispatch_mode_key_hints = [
-        f"{k.name}: _TorchDispatchModeKey = ..." for k in _TorchDispatchModeKey
-    ]
+    dispatch_key_hints = [f"{d.name} = ..." for d in DispatchKey]
+    torch_dispatch_mode_key_hints = [f"{k.name} = ..." for k in _TorchDispatchModeKey]
 
     # Tags Enum type hints
     # ~~~~~~~~~~~~~~~~~~~~
 
     tag_names = sorted(parse_tags_yaml(tags_yaml_path))
     tag_attributes = "\n".join(
-        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
+        f"{name} = {index}" for index, name in enumerate(tag_names)
     )
 
     # Write out the stub

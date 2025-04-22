@@ -13,12 +13,11 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestFullyShardGradientScaler(FSDPTest):
     @skip_if_lt_x_gpu(4)
-    @skipIfRocm
     def test_gradient_scaler(self):
         self.run_subtests(
             {"has_inf": [True, False], "test_2d": [True, False]},
