@@ -925,14 +925,13 @@ def _compile(
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
-        with dynamo_timed("build_guards", log_pt2_compile_event=True):
-            check_fn = CheckFunctionManager(
-                code,
-                output,
-                cache_entry,
-                hooks.guard_fail_fn if hooks else None,
-                hooks.guard_filter_fn if hooks else None,
-            )
+        check_fn = CheckFunctionManager(
+            code,
+            output,
+            cache_entry,
+            hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
+        )
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
