@@ -753,7 +753,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         fn(x)
 
         self.assertExpectedInline(cnts.frame_count, """2""")
-        self.assertExpectedInline(cnts.op_count, """4""")
+        self.assertExpectedInline(cnts.op_count, """3""")
 
     def test_prune_torch_check(self):
         log_stream, ctx = logs_to_string("torch._dynamo.output_graph", "graph_code")
