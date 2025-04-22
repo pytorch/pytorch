@@ -1658,6 +1658,7 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                     )
                 # TODO(avik): Assigning all other types are allowed right now.
                 # Maybe in the future we want to limit this to primitive types?
+            return v
 
         new_attrs = _get_attributes(mod)
         if len(new_attrs) != len(snapshot):
