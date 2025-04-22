@@ -1668,7 +1668,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(cfg), 64)
         # With unspec int, maximum computation is preserved
         self.assertExpectedInline(cnt.frame_count, """1""")
-        self.assertExpectedInline(cnt.op_count, """3""")
+        if torch._dynamo.config.automatic_dynamic_shapes:
+            if not torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(cnt.op_count, """4""")
+            else:
+                self.assertExpectedInline(cnt.op_count, """3""")
+        else:
+            self.assertExpectedInline(cnt.op_count, """3""")
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
