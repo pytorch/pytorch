@@ -13841,6 +13841,30 @@ def forward(self, args_0):
     return (abs_1,)""",
         )
 
+    def test_metadata_module(self):
+        def f(x):
+            return torch.abs(x)
+
+        from torch.export import _wrapper_utils
+
+        torch.fx.config.capture_source_locations = True
+
+        model = _wrapper_utils._WrapperModule(f)
+        ep = export(
+            model,
+            (
+                torch.randn(
+                    8,
+                ),
+            ),
+        )
+        # Skip assertions for SerDes tests
+        if "serdes" not in self.__class__.__name__.lower():
+            for node in ep.graph.nodes:
+                if node.target == torch.ops.aten.abs.default:
+                    assert node.meta["file_path"] is not None
+                    assert node.meta["line_number"] is not None
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

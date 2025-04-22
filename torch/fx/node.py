@@ -683,6 +683,12 @@ class Node(_NodeBase):
             The list of Nodes on which this change was made.
         """
         if propagate_meta:
+            # We clear the file_path and line_number
+            # from the meta of the node being replaced.
+            if "file_path" in replace_with.meta:
+                del replace_with.meta["file_path"]
+            if "line_number" in replace_with.meta:
+                del replace_with.meta["line_number"]
             assert len(replace_with.meta) == 0, (
                 "Called node.replace_all_uses_with(replace_with, propagate_meta=True), "
                 "but replace_with already has .meta keys"

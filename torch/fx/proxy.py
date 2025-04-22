@@ -247,6 +247,13 @@ class TracerBase:
         if self.record_stack_traces and not proxy.node.stack_trace:
             proxy.node.stack_trace = "".join(CapturedTraceback.extract().format())
 
+        if torch.fx.config.capture_source_locations:
+            # Populate file_path and line_number using _find_user_frame
+            user_frame = self._find_user_frame()
+            if user_frame:
+                proxy.node.meta["file_path"] = user_frame.f_code.co_filename
+                proxy.node.meta["line_number"] = user_frame.f_lineno
+
         return proxy
 
     def _find_user_frame(self):
@@ -259,29 +266,38 @@ class TracerBase:
         # the user code during tracing.
         frame = inspect.currentframe()
 
-        pt_files = [
-            "torch/fx/proxy.py",
-            "torch/fx/_symbolic_trace.py",
-            "torch/fx/experimental/proxy_tensor.py",
+        # Paths to exclude (both files and directories)
+        pt_paths = [
+            "torch/fx/",
             "torch/_ops.py",
             "torch/_tensor.py",
-            "torch/utils/_python_dispatch.py",
-            "torch/_prims_common/wrappers.py",
-            "torch/_refs/__init__.py",
-            "torch/_refs/nn/functional/__init__.py",
-            "torch/utils/_stats.py",
+            "torch/utils/",
+            "torch/_prims_common/",
+            "torch/_refs/",
+            "torch/_subclasses/",
+            "torch/_library/",
+            "torch/nn/",
+            "torch/_export/",
+            "torch/export/",
+            "torch/_decomp/",
+            "torch/_library/",
+            "torch/_dynamo/",
+            "torch/_higher_order_ops/",
+            "torch/_functorch/",
+            "torch/overrides.py",
+            "torch/_compile.py",
+            "<string>",  # lambda functions
         ]
+
         while frame:
             frame = frame.f_back
-            if frame and all(
-                not frame.f_code.co_filename.endswith(file) for file in pt_files
-            ):
-                break
+            if frame:
+                filename = frame.f_code.co_filename
+                # Check if the frame's file is not in any of the excluded paths
+                if all(path not in filename for path in pt_paths):
+                    return frame
 
-        if not frame:
-            return None
-
-        return frame
+        return None
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> Argument:

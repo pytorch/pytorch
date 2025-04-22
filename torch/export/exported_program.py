@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import collections
 import contextlib
 import copy
 import dataclasses
@@ -816,16 +817,25 @@ def _common_getitem_elimination_pass(
 
 def _get_updated_module_call_graph(
     gm: torch.fx.GraphModule,
-    old_module_call_graph: list[ModuleCallEntry],
+    old_gm: torch.fx.GraphModule,
 ):
+    old_module_call_graph: list[ModuleCallEntry] = old_gm.module_call_graph  # type: ignore[attr-defined, assignment]
     new_module_call_graph = copy.deepcopy(old_module_call_graph)
 
     # use node-level provenance metadata to create a map
     # from old node names to new node names
     provenance: dict[str, str] = {}
+    old_node_to_new_node = collections.defaultdict(list)
     for node in gm.graph.nodes:
         if history := node.meta.get("from_node", []):
             provenance[history[-1].name] = node.name
+            old_node_to_new_node[history[-1].name].append(node)
+    if torch.fx.config.capture_source_locations:
+        # Update node line_number and file_path.
+        for old_node in old_gm.graph.nodes:
+            for node in old_node_to_new_node[old_node.name]:
+                node.meta["line_number"] = old_node.meta["line_number"]
+                node.meta["file_path"] = old_node.meta["file_path"]
 
     # map old names to new names in module call signatures
     for entry in new_module_call_graph:
@@ -862,10 +872,7 @@ def _decompose_exported_program(
     # the original graph module. However, the new graph module may have
     # new nodes due to decompositions. So we need to update these signatures
     # in the decomposed exported program's module_call_graph.
-    new_module_call_graph = _get_updated_module_call_graph(
-        gm,
-        ep.module_call_graph,
-    )
+    new_module_call_graph = _get_updated_module_call_graph(gm, ep)
 
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
