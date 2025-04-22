@@ -5989,7 +5989,6 @@ class CommonTemplate:
             )
 
     @xfail_if_triton_cpu
-    @xfail_if_mps  # float64 is not MPS type
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
@@ -10516,7 +10515,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps  # float64 is not MPS type
     def test_rsqrt_dynamic_shapes(self):
         # From HF hf_BigBird model.
         @torch.compile(dynamic=True)
