@@ -114,6 +114,13 @@ class TORCH_API TCPStore : public Store {
 
   bool hasExtendedApi() const override;
 
+  void queuePush(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
+
+  int64_t queueLen(const std::string& key) override;
+
   // Waits for all workers to join.
   void waitForWorkers();
 

@@ -738,7 +738,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
         if not self.only_subclass:
             tx.symbolic_torch_function_state.torch_function_mode_enabled = False
-        tx.output.set_torch_function_state(False)
 
     def module_name(self):
         return "torch._C"
@@ -1341,13 +1340,14 @@ class EventVariable(VariableTracker):
                 ),
             )
         else:
+            method_name = (
+                f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
+            )
             unimplemented_v2(
-                gb_type="Unsupported torch.cuda.Event method",
+                gb_type=f"Unsupported {method_name} method",
                 context=str(name),
-                explanation=(
-                    f"Dynamo doesn't support tracing the torch.cuda.Event.{name} method. "
-                    f"We currently support wait, record, synchronize, and query.",
-                ),
+                explanation=f"Dynamo doesn't support tracing the {method_name} method. "
+                f"We currently support wait, record, synchronize, and query.",
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
