@@ -28,6 +28,7 @@ TORCH_IMPL_FUNC(gather_out_mps)
   TORCH_CHECK(self.scalar_type() == output.scalar_type(), "gather(): self and output must have the same scalar type");
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "gather(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(!self.is_complex(), "gather(): Yet not supported for complex");
+  TORCH_CHECK(index.scalar_type() != kInt, "gather(): gather for int32 indices not supported in MPS yet");
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
