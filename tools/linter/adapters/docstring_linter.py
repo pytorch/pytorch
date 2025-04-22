@@ -177,12 +177,9 @@ def _join_tokens(tl: Sequence[TokenInfo]) -> str:
 _IGNORE = {token.COMMENT, token.DEDENT, token.INDENT, token.NL}
 
 
-def _get_decorators(tokens: Sequence[TokenInfo], start: int) -> list[str]:
-    # We work backward through lines before start of the the block until we find one
-    # that can't be part of a decorator.
-
+def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
     def decorators() -> Iterator[str]:
-        rev = reversed(range(start))
+        rev = reversed(range(block_start))
         nls = (i for i in rev if tokens[i].type == token.NEWLINE)
         nls = itertools.chain(nls, [-1])
 
@@ -195,7 +192,7 @@ def _get_decorators(tokens: Sequence[TokenInfo], start: int) -> list[str]:
                     yield _join_tokens(tokens[i:end])
                     break
                 elif t.type not in _IGNORE:
-                    return
+                    return  # No more decorators
             end = begin
 
     return list(decorators())[::-1]
