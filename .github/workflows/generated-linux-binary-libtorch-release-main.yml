@@ -13,6 +13,9 @@ on:
       - 'ciflow/trunk/*'
   workflow_dispatch:
 
+permissions:
+  id-token: write
+
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -50,7 +53,8 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -71,7 +75,8 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       build_name: libtorch-cpu-shared-with-deps-release
