@@ -15,7 +15,6 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
-import contextlib
 import dis
 import functools
 import hashlib
@@ -1187,17 +1186,6 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
-def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
-    sloc, extra = a.node.shape_env._get_stack_summary(True)
-    log.info(
-        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
-        a,
-        assumed_value,
-        sloc,
-        extra,
-    )
-
-
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1210,41 +1198,30 @@ def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
-    if not isinstance(a, SymBool):
-        assert isinstance(a, bool)
-        return a
-
-    with a.node.shape_env.dde_suppressed():
-        if torch.fx.experimental._config.backed_size_oblivious:
-            return statically_known_true(a)
-        else:
-            try:
-                return guard_bool(a)
-            except GuardOnDataDependentSymNode:
-                _log_suppressed_dde(a, False)
-                return False
+    if torch.fx.experimental._config.backed_size_oblivious:
+        return statically_known_true(a)
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    if not isinstance(a, SymBool):
-        assert isinstance(a, bool)
-        return a
-
-    with a.node.shape_env.dde_suppressed():
-        if torch.fx.experimental._config.backed_size_oblivious:
-            result = _static_eval_sym_bool(a)
-            if result is not None:
-                return result
-            return True
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval(a)
+        if result is not None:
+            return result
         else:
-            try:
-                return guard_bool(a)
-            except GuardOnDataDependentSymNode:
-                _log_suppressed_dde(a, True)
-                return True
+            return True
+    else:
+        try:
+            return bool(guard_bool(a))
+        except GuardOnDataDependentSymNode:
+            return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1289,19 +1266,21 @@ def definitely_false(a: BoolLikeType) -> bool:
     return not bool(a)
 
 
-def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
-    assert isinstance(x, SymBool)
-    expr = x.node.expr
-    shape_env = x.node.shape_env
-    try:
-        simplified = shape_env._maybe_evaluate_static(expr)
-        if simplified is not None:
-            return bool(simplified)
-        else:
+def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
+    if isinstance(x, SymBool):
+        expr = x.node.expr
+        shape_env = x.node.shape_env
+        try:
+            simplified = shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+            else:
+                return None
+        except Exception:
+            log.debug("Could not simplify %s", expr)
             return None
-    except Exception:
-        log.debug("Could not simplify %s", expr)
-        return None
+    assert isinstance(x, bool)
+    return x
 
 
 def statically_known_true(x: Union[bool, SymBool]) -> bool:
@@ -1315,15 +1294,11 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     Args:
         x (bool, SymBool): The expression to try statically evaluating
     """
-    if not isinstance(x, SymBool):
-        assert isinstance(x, bool)
-        return x
-
-    result = _static_eval_sym_bool(x)
+    result = _static_eval(x)
     if result is None:
         return False
-
-    return result
+    else:
+        return result
 
 
 def sym_and(
@@ -3300,10 +3275,6 @@ class ShapeEnv:
             else []
         )
 
-        # Set true when data dependent errors are handled by caller side and not thrown. Ex: guard_or_false
-        # and guard_or_true. When its true, a different error message is produced.
-        self._dde_suppressed = False
-
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
         # operations that contain symbolic shapes which have guards on the
         # ShapeEnv (so are ShapeEnv-dependent).
@@ -3315,18 +3286,6 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheKey,
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
-
-    @contextlib.contextmanager
-    def dde_suppressed(self) -> Iterator[None]:
-        """Suppressed GuardOnDataDependent error logs"""
-
-        # We do not expect this to be called recursively.
-        assert not self._dde_suppressed, "not expected value for _dde_suppressed"
-        self._dde_suppressed = True
-        try:
-            yield
-        finally:
-            self._dde_suppressed = False
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
@@ -3627,7 +3586,6 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
-            "_dde_suppressed",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -6128,12 +6086,6 @@ class ShapeEnv:
         size_oblivious_result: Optional[sympy.Basic] = None,
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
-        if self._dde_suppressed:
-            return GuardOnDataDependentSymNode(
-                expr,
-                "This data dependent error is suppressed and handled by the caller",
-            )
-
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         size_like_symbols = []
@@ -6846,17 +6798,14 @@ class ShapeEnv:
                 size_oblivious,
                 forcing_spec=forcing_spec,
             )
-        except Exception as e:
-            if isinstance(e, GuardOnDataDependentSymNode) and self._dde_suppressed:
-                pass
-            else:
-                self.log.warning(
-                    "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
-                    orig_expr,
-                    hint,
-                    size_oblivious,
-                    forcing_spec,
-                )
+        except Exception:
+            self.log.warning(
+                "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+                orig_expr,
+                hint,
+                size_oblivious,
+                forcing_spec,
+            )
             raise
 
     def _evaluate_expr(
