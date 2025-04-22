@@ -43,6 +43,7 @@ from .cpp_utils import (
 log = logging.getLogger(__name__)
 
 GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK = r"""
+    constexpr int64_t num_threads = {{num_threads}};
     constexpr int64_t N = {{N}};
     constexpr int64_t K = {{K}};
     constexpr int64_t Mr = {{micro_gemm.register_blocking.block_m}};
@@ -60,7 +61,6 @@ GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK = r"""
 """
 
 GEMM_TEMPLATE_INIT_BLOCKING_EXTENDED = r"""
-
 {%- if is_dynamic_M %}
     {%- if num_threads > 1 %}
     int64_t Mt_blocks, Nt_blocks, Kt_blocks;
