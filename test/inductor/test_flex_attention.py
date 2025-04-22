@@ -1807,11 +1807,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_multiple_mask_calls(self, device):
-        # Create inputs
-        query = torch.randn(
-            (1, 4, 512, 64), dtype=torch.float32, device=device, requires_grad=True
-        )
-        # Create inputs
         make_tensor = functools.partial(
             torch.randn,
             (1, 4, 512, 64),
