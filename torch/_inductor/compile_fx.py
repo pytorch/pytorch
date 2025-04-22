@@ -1101,15 +1101,12 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            with dynamo_timed(
-                "additional_fake_tensor_prop", log_pt2_compile_event=True
-            ):
-                # It is safe to run FakeTensorProp under no_grad because by the time
-                # we're in inductor, we assume that AOTAutograd has already "taken care"
-                # of autograd, so there should be no more autograd-related API's in the
-                # graph.
-                with torch.no_grad():
-                    fake_mode = fake_tensor_prop(gm, example_inputs)
+            # It is safe to run FakeTensorProp under no_grad because by the time
+            # we're in inductor, we assume that AOTAutograd has already "taken care"
+            # of autograd, so there should be no more autograd-related API's in the
+            # graph.
+            with torch.no_grad():
+                fake_mode = fake_tensor_prop(gm, example_inputs)
 
             record_original_output_strides(gm)
 
@@ -1854,6 +1851,7 @@ def compile_fx(
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
+    ignore_shape_env: bool = False,
 ) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2138,17 +2136,13 @@ def compile_fx(
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
             )
-
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return min_cut_rematerialization_partition(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
+            return min_cut_rematerialization_partition(
+                gm,
+                joint_inputs,
+                compiler="inductor",
+                static_lifetime_input_indices=static_lifetime_input_indices,
+                **kwargs,
+            )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
@@ -2269,6 +2263,7 @@ def compile_fx(
                     keep_inference_input_mutations=True,
                     cudagraphs=cudagraphs,
                     boxed_forward_device_index=forward_device,
+                    ignore_shape_env=ignore_shape_env,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.

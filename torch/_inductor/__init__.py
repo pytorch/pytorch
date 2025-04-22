@@ -367,7 +367,9 @@ def standalone_compile(
     gm: torch.fx.GraphModule,
     example_inputs: list[InputType],
     *,
-    dynamic: Literal[False, "from_tracing_context", "from_graph"] = "from_graph",
+    dynamic_shapes: Literal[
+        "from_example_inputs", "from_tracing_context", "from_graph"
+    ] = "from_graph",
     options: Optional[dict[str, Any]] = None,
 ) -> CompiledArtifact:
     """
@@ -385,10 +387,12 @@ def standalone_compile(
     Args:
         gm: Graph Module
         example_inputs: Inputs for the graph module
-        dynamic: If "from_graph" (default), we will use the dynamic shapes in
-            the passed-in graph module.
-            If False, we will specialize the graph on the example_inputs.
-            If "from_tracing_context", we use the dynamic shape info in the ambient tracing context.
+        dynamic_shapes: If "from_graph" (default), we will use the dynamic
+            shapes in the passed-in graph module.
+            If "from_tracing_context", we use the dynamic shape info in the
+            ambient tracing context.
+            If "from_example_inputs", we will specialize the graph on the
+            example_inputs.
         options: Inductor compilation options
 
     Returns:
@@ -397,4 +401,6 @@ def standalone_compile(
     from .standalone_compile import standalone_compile
 
     options = options if options else {}
-    return standalone_compile(gm, example_inputs, dynamic=dynamic, options=options)
+    return standalone_compile(
+        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options
+    )

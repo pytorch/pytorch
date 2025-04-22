@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import pickle
 import shutil
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
@@ -69,7 +70,7 @@ class CompiledArtifact:
                     "CompiledArtifact.save failed to save since there's no artifact to save"
                 )
             artifact_bytes, cache_info = self._artifacts
-            assert len(cache_info.aot_autograd_artifacts) == 1
+            assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
@@ -92,9 +93,24 @@ class CompiledArtifact:
                     assert os.path.isdir(path)
                     shutil.rmtree(path, ignore_errors=True)
 
+                from .codecache import FxGraphCache
+
                 with temporary_cache_dir(path):
                     # This function unpacks the cache artifacts to disk
-                    torch.compiler.load_cache_artifacts(artifact_bytes)
+                    loaded_cache_info = torch.compiler.load_cache_artifacts(
+                        artifact_bytes
+                    )
+                    assert loaded_cache_info is not None
+                    # Now write all the output_code artifacts to disk so that
+                    # they can be inspected and modified
+                    for key in loaded_cache_info.inductor_artifacts:
+                        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+                        assert os.path.exists(subdir)
+                        for path in sorted(os.listdir(subdir)):
+                            with open(os.path.join(subdir, path), "rb") as f:
+                                graph = pickle.load(f)
+                            output_file = graph.write_to_disk()
+                            log.info("Output code written to: %s", output_file)
 
     @staticmethod
     def load(
@@ -160,21 +176,29 @@ class CompiledArtifact:
 
 
 def standalone_compile(
-    gm: GraphModule, example_inputs: Sequence[InputType], *, dynamic: Any, options: Any
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+    *,
+    dynamic_shapes: Any,
+    options: Any,
 ) -> CompiledArtifact:
     from torch.compiler._cache import CacheArtifactManager
 
     from .compile_fx import compile_fx
 
-    if dynamic is False:
-        fake_mode = None
-    elif dynamic == "from_tracing_context":
+    ignore_shape_env = False
+    if dynamic_shapes == "from_example_inputs":
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        # tells compile_fx to ignore the shape_envs on the ambient context
+        # and the graph_module.
+        ignore_shape_env = True
+    elif dynamic_shapes == "from_tracing_context":
         # Reuse fake_mode from the TracingContext.
         # NB: The TracingContext only exists if we're currently in a torch.compile backend.
         context = torch._guards.TracingContext.get()
         fake_mode = context.fake_mode
-    elif dynamic == "from_graph":
-        fake_mode = None
+    elif dynamic_shapes == "from_graph":
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
         # The graph passed to standalone_compile must be an Inductor-approved graph,
         # which means that there is at least one Tensor output and the output node
@@ -189,19 +213,17 @@ def standalone_compile(
                     fake_mode = maybe_tensor.fake_mode
     else:
         raise ValueError(
-            f"standalone_compile got unsupported `dynamic` value: dynamic={dynamic}."
+            f"standalone_compile got unsupported `dynamic_shapes` value: dynamic_shapes={dynamic_shapes}."
         )
-
-    if fake_mode is None:
-        # No shape env means static shapes.
-        fake_mode = FakeTensorMode()
 
     context = torch._guards.TracingContext(fake_mode)
     with torch._guards.tracing(context):
         with CacheArtifactManager.with_fresh_cache():
             # compile_fx can mutate gm
             gm = copy.deepcopy(gm)
-            compiled_fn = compile_fx(gm, example_inputs, **options)
+            compiled_fn = compile_fx(
+                gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
+            )
             assert callable(compiled_fn)
 
             artifacts = torch.compiler.save_cache_artifacts()

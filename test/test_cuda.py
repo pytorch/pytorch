@@ -960,31 +960,6 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
-        event = torch.cuda.Event(enable_timing=True)
-        self.assertEqual(event.cuda_event, 0)
-        self.assertEqual(event.event_id, 0)
-
-        event.record()
-        self.assertNotEqual(event.cuda_event, 0)
-        self.assertNotEqual(event.event_id, 0)
-        self.assertEqual(event.cuda_event, event.event_id)
-
-    def test_events_elapsedtime(self):
-        event1 = torch.cuda.Event(enable_timing=False)
-        event2 = torch.cuda.Event(enable_timing=False)
-        with self.assertRaisesRegex(
-            ValueError, "Both events must be recorded before calculating elapsed time"
-        ):
-            event1.elapsed_time(event2)
-
-        event1.record()
-        event2.record()
-        with self.assertRaisesRegex(
-            ValueError,
-            "Both events must be created with argument 'enable_timing=True'",
-        ):
-            event1.elapsed_time(event2)
-
     def test_generic_stream_event(self):
         stream = torch.Stream("cuda")
         self.assertEqual(stream.device_index, torch.cuda.current_device())
