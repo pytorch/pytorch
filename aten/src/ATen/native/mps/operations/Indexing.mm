@@ -108,11 +108,12 @@ static std::string getIndexFunctionName(ScalarType scalar_type,
       : (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_"
                                                : (serial ? "index_put_serial_" : "index_put_");
 
-  indexFunction += getBitSizeString(scalar_type);
+  indexFunction.append(getBitSizeString(scalar_type));
   if (accumulate) {
-    indexFunction += "_" + scalarToMetalTypeString(scalar_type);
+    indexFunction.append(1, '_');
+    indexFunction.append(scalarToMetalTypeString(scalar_type));
   }
-  indexFunction += use_64bit_indexing ? "_idx64" : "_idx32";
+  indexFunction.append(use_64bit_indexing ? "_idx64" : "_idx32");
   return indexFunction;
 }
 

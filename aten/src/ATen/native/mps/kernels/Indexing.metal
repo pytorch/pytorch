@@ -230,94 +230,29 @@ kernel void index_put_accumulate(
       in);
 }
 
-template [[host_name("index_put_accumulate_32bit_float_idx32")]] kernel void
-index_put_accumulate<float, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+#define REGISTER_INDEX_PUT_ACCUMULATE(DTS, DTYPE, IDXS, IDX_DTYPE) \
+  template [[host_name("index_put_accumulate_" #DTS "_" #DTYPE     \
+                       "_" #IDXS)]] kernel void                    \
+  index_put_accumulate<DTYPE, IDX_DTYPE>(                          \
+      constant IndexAB * indexAB [[buffer(0)]],                    \
+      constant void* indexSizes [[buffer(1)]],                     \
+      constant void* indexStrides [[buffer(2)]],                   \
+      constant IDX_DTYPE* offsets [[buffer(3)]],                   \
+      constant void* inputData [[buffer(4)]],                      \
+      device void* outputData [[buffer(5)]],                       \
+      constant uint32_t& num_indices [[buffer(6)]],                \
+      uint thread_index [[thread_position_in_grid]])
 
-template [[host_name("index_put_accumulate_32bit_float_idx64")]] kernel void
-index_put_accumulate<float, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("index_put_accumulate_32bit_int_idx32")]] kernel void
-index_put_accumulate<int, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("index_put_accumulate_32bit_int_idx64")]] kernel void
-index_put_accumulate<int, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("index_put_accumulate_16bit_half_idx32")]] kernel void
-index_put_accumulate<half, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("index_put_accumulate_16bit_half_idx64")]] kernel void
-index_put_accumulate<half, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, float, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, float, idx64, ulong3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, int, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(32bit, int, idx64, ulong3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, half, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, half, idx64, ulong3);
 
 #if __METAL_VERSION__ >= 310
-template [[host_name("index_put_accumulate_16bit_bfloat_idx32")]] kernel void
-index_put_accumulate<bfloat, uint3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
-
-template [[host_name("index_put_accumulate_16bit_bfloat_idx64")]] kernel void
-index_put_accumulate<bfloat, ulong3>(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant ulong3* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
-    uint thread_index [[thread_position_in_grid]]);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, bfloat, idx32, uint3);
+REGISTER_INDEX_PUT_ACCUMULATE(16bit, bfloat, idx64, ulong3);
 #endif
 
 template <typename T>
