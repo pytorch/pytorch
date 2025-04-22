@@ -9,14 +9,13 @@ from typing import Any, IO, Optional, TYPE_CHECKING, Union
 import torch._inductor.config
 import torch.fx
 
+from .standalone_compile import CompiledArtifact  # noqa: TC001
+
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
     from torch.types import FileLike
-
-    from .standalone_compile import CompiledArtifact
-
 
 __all__ = [
     "compile",
