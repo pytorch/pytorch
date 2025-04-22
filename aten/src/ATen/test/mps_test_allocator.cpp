@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+
 
 namespace replay {
 std::function<void()> callback_action;
@@ -43,4 +45,12 @@ TEST(MPSAllocator, MPSAllocatorCallbacks) {
     // does this implicitly, but we call this for testing purposes.
     torch::mps::synchronize();
     ASSERT_TRUE(replay_buffer.size() < max_iter);
+}
+
+TEST(MPSAllocator, MPSHostAllocator) {
+    // fail if mps isn't available
+    ASSERT_TRUE(torch::mps::is_available());
+
+    at::DataPtr data = at::getHostAllocator(at::kMPS)->allocate(1000);
+    ASSERT_TRUE(at::mps::isMPSPinnedPtr(data.get()));
 }
