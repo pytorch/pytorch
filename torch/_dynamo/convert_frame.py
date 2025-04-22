@@ -732,7 +732,6 @@ def _compile(
         )
 
         try:
-            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -768,13 +767,6 @@ def _compile(
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                dynamo_timed(
-                    "_compile.compile_inner",
-                    phase_name="entire_frame_compile",
-                    dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-                )
-            )
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
@@ -813,10 +805,7 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                with dynamo_timed(
-                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
-                ):
-                    out_code = transform_code_object(code, transform)
+                out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
@@ -961,7 +950,11 @@ def _compile(
         ),
         _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,
-        _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
+        dynamo_timed(
+            "_compile.compile_inner",
+            phase_name="entire_frame_compile",
+            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+        ),
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts

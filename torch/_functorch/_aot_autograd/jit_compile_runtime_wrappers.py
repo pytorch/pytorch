@@ -259,8 +259,9 @@ def aot_dispatch_base(
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
             debug_lines = getattr(compiled_fw, "_fx_graph_cache_debug_lines", [])
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
+            guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
             entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward((fw_key, debug_lines)),  # type: ignore[arg-type]
+                compiled_fw=CompiledForward((fw_key, debug_lines), getattr(compiled_fw, "guards_expr", None)),  # type: ignore[arg-type]
                 compiled_bw=None,
                 aot_joint_graph_str=None,
                 aot_forward_graph_str=aot_forward_graph_str,
@@ -273,6 +274,7 @@ def aot_dispatch_base(
                 forward_time_taken_ns=time_taken_ns,
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
+                guards_expr=guards_expr,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -1310,10 +1312,12 @@ def aot_dispatch_autograd(
                 aot_forward_graph_str: Optional[str] = fw_module_str
                 aot_backward_graph_str: Optional[str] = bw_module_str
                 aot_joint_graph_str: Optional[str] = joint_graph_str
+                guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
                 entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_info),  # type: ignore[arg-type]
+                    CompiledForward(fw_info, getattr(compiled_fw_func, "guards_expr", None)),  # type: ignore[arg-type]
                     CompiledBackward(
                         bw_info,  # type: ignore[arg-type]
+                        getattr(compiled_bw_func, "guards_expr", None),
                         backward_state_indices,
                         num_symints_saved_for_bw,
                     ),
@@ -1328,6 +1332,7 @@ def aot_dispatch_autograd(
                     forward_time_taken_ns,
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
+                    guards_expr=guards_expr,
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)

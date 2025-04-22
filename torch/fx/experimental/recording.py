@@ -252,8 +252,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
                 return r
 
+            shape_env = args[0]
+
             try:
-                shape_env = args[0]
                 if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
@@ -296,6 +297,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                         raise
 
             except Exception:
+                if not shape_env.should_record_events or shape_env.is_recording:
+                    # If ShapeEnv is disabled or already recording an event, re-raise the exception without logging.
+                    raise
                 log.error(  # noqa: G201
                     "failed while running %s(*%s, **%s)",
                     name,
