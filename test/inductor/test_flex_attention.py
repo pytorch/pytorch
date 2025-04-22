@@ -13,8 +13,6 @@ from typing import Callable, Optional, TypeVar, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
-from sympy.logic import true
-
 import torch
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import metrics
@@ -36,17 +34,16 @@ from torch.nn.attention.flex_attention import (
     or_masks,
 )
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import reparametrize
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
+    dtypes,
+    dtypesIfCUDA,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
-    dtypesIfCUDA,
-    dtypes
 )
 from torch.utils._triton import has_triton
 
@@ -178,17 +175,6 @@ if "CLANG" in torch_config_string.upper():
     # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
     # TODO: check reason of long compile time
     LONG_COMPILATION_ON_CPU = True
-
-
-def device_dtype_pairs(fast: bool = False):
-    """Generate (device, dtype) pairs for parameterization based on DeviceConfig"""
-    pairs = []
-    for device in test_device:
-        config = device_configs[device]
-        dtypes = config.dtypes_fast if fast else config.dtypes
-        for dtype in dtypes:
-            pairs.append((device, dtype))
-    return pairs
 
 
 # --------- Useful score mod functions for testing ---------
@@ -1239,7 +1225,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods_dynamic(
         self, device, dtype: torch.dtype, score_mask_mod: tuple[Callable, Callable]
     ):
-        self.run_dynamic_test(score_mask_mod, dtype, device=device)
+        self.run_dynamic_test(score_mask_mod, dtype, S=1024, device=device)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -4725,7 +4711,8 @@ class TestPagedAttention(InductorTestCase):
         self.assertEqual(k_cache, expected_cache)
 
     @supported_platform
-    @common_utils.parametrize("device,dtype", device_dtype_pairs(fast=True))
+    @dtypes(*device_configs["cpu"].dtypes)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_paged_builtin_score_mods(
         self, device, dtype: torch.dtype, score_mod: Callable
