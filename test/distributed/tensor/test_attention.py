@@ -23,12 +23,7 @@ from torch.distributed._tensor.experimental._attention import (
     set_rotate_method,
 )
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-    Shard,
-)
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -437,6 +432,7 @@ class RingAttentionTest(DTensorTestBase):
                 },
             )
 
+
 class RingFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -509,10 +505,20 @@ class RingFlexAttentionTest(DTensorTestBase):
         k_local = distribute_tensor(k, device_mesh, [sharding]).to_local()
         v_local = distribute_tensor(v, device_mesh, [sharding]).to_local()
 
-        # TODO: flex_attention checks block_mask shape and input shape before
+        block_mask_post_sharding = create_block_mask(
+            causal_mask,
+            B=bs,
+            H=nheads,
+            Q_LEN=q_local.size(2),
+            KV_LEN=k_local.size(2),
+            device=self.device_type,
+        )
+        # NOTE: flex_attention checks block_mask shape and input shape before
         # calling into flex_attention_hop.
         with CPMode(device_mesh):
-            out = flex_attention(q_local, k_local, v_local, block_mask=block_mask)
+            out = flex_attention(
+                q_local, k_local, v_local, block_mask=block_mask_post_sharding
+            )
 
         # all-gather the output
         assert isinstance(out, torch.Tensor)
@@ -550,7 +556,9 @@ def regular_sharding(
 ) -> torch.Tensor:
     assert Q_LEN == KV_LEN
     assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
-    assert Q_LEN % (Q_BLOCK_SIZE * cp_size) == 0, f"context parallel requires even sharding for now"
+    assert (
+        Q_LEN % (Q_BLOCK_SIZE * cp_size) == 0
+    ), f"context parallel requires even sharding for now"
     q_num_blocks = Q_LEN // Q_BLOCK_SIZE
     local_num_blk = q_num_blocks // cp_size
     return torch.arange(q_num_blocks, device=device_type).view(cp_size, local_num_blk)
@@ -610,6 +618,7 @@ def cp_flex_attention_cast_to_dtensor(
     assert isinstance(out, DTensor) and isinstance(lse, DTensor)
 
     return out.to_local(), lse.to_local()
+
 
 @flex_attention_hop.py_impl(DTensor)
 def cp_flex_attention(
