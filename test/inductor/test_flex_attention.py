@@ -478,6 +478,7 @@ class TestFlexAttention(InductorTestCase):
         V_D: Optional[int] = None,
         block_mask: Optional[BlockMask] = None,
     ):
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         if KV_B is None:
             KV_B = Q_B
         if KV_H is None:
