@@ -35,7 +35,6 @@ import torch.nn
 from .. import graph_break_hints, trace_rules, variables
 from ..exc import (
     raise_observed_exception,
-    unimplemented,
     unimplemented_v2,
     UnspecializeRestartAnalysis,
     Unsupported,
@@ -247,7 +246,17 @@ class NNModuleVariable(VariableTracker):
         base = tx.output.get_submodule(self.module_key)
 
         if object_has_getattribute(base):
-            unimplemented("NNModuleVariable with custom __getattribute__")
+            unimplemented_v2(
+                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                context=f"has_key_in_generic_dict {self} {key}",
+                explanation="Dynamo does not support checking key existence "
+                "on `nn.Module` instances that have a custom "
+                "`__getattribute__` method defined.",
+                hints=[
+                    "Avoid defining `__getattribute__` in your module. ",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
@@ -259,14 +268,31 @@ class NNModuleVariable(VariableTracker):
     def _custom_getattr_fallback(self, base, tx, name, obj_source):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
-            unimplemented("torch.nn.Module with a custom __getattribute__ defined")
+            unimplemented_v2(
+                gb_type="torch.nn.Module with a custom __getattribute__ defined",
+                context=f"var_getattr {self} {name}",
+                explanation="Dynamo does not support checking key existence "
+                "on `nn.Module` instances that have a custom "
+                "`__getattribute__` method defined.",
+                hints=[
+                    "Avoid defining `__getattribute__` in your module. ",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         getattr_fn = get_custom_getattr(base, ignore_nn_module_getattr=True)
         if getattr_fn is None:
             return None
 
         if not isinstance(getattr_fn, types.FunctionType):
-            unimplemented("torch.nn.Module with a non-function custom __getattr__")
+            unimplemented_v2(
+                gb_type="torch.nn.Module with a non-function custom __getattr__",
+                context=f"var_getattr {self}",
+                explanation="Dynamo encountered a custom `__getattr__` method "
+                "on an `nn.Module` instance that is not a standard Python function. "
+                "Only function-based `__getattr__` methods can be traced.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
 
         options = {"source": AttrSource(obj_source, "__getattr__")}
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
@@ -284,7 +310,14 @@ class NNModuleVariable(VariableTracker):
             all_class_attribute_names.update(x.__dict__.keys())
 
         if not self.source:
-            unimplemented("GETATTR with no source")
+            unimplemented_v2(
+                gb_type="GETATTR with no source",
+                context=f"var_getattr {self} {name}",
+                explanation="Dynamo does not know how to access an attribute "
+                "on an `nn.Module` instance that lacks a source. This is "
+                "usually an internal error in Dynamo.",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
 
         if name == "__dict__":
             return variables.GetAttrVariable(self, name, source=source)
@@ -565,7 +598,13 @@ class NNModuleVariable(VariableTracker):
             if not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             ):
-                unimplemented(f"non-const NNModule method {name}")
+                unimplemented_v2(
+                    gb_type="non-const NNModule method",
+                    context=f"call_method: {self} {name} {args} {kwargs}",
+                    explanation="Dynamo does not support calling "
+                    f"method `{name}` with non-constant arguments.",
+                    hints=[],
+                )
 
         def get_kwargs(*names):
             assert_all_args_kwargs_const()
@@ -756,7 +795,13 @@ class NNModuleVariable(VariableTracker):
             elif args[0].is_python_constant():
                 key = args[0].as_python_constant()
             else:
-                unimplemented(f"getitem on NNModuleVariable with key {args[0]}")
+                unimplemented_v2(
+                    gb_type="Unsupported key type for __getitem__",
+                    context=f"call_method: {self} {name} {args} {kwargs}",
+                    explanation="Dynamo does not support getitem on "
+                    "`nn.Module` with non-constant key.",
+                    hints=[],
+                )
 
             submod = module[key]
             return tx.output.register_attr_or_module(
@@ -991,7 +1036,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 hasattr(method, "__code__")
                 and id(method.__code__) in self._nn_module_method_ids()
             ):
-                unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+                unimplemented_v2(
+                    gb_type="UnspecializedNNModuleVariable missing method",
+                    context=f"call_method: {self} {name} {args} {kwargs}",
+                    explanation=f"Dynamo does not support tracing method {name}",
+                    hints=[],
+                )
 
             # "_parameters" in self.value.__dict__ checks that module is initialized
             if name == "__setattr__" and "_parameters" in self.value.__dict__:
