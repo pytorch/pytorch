@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import gzip
+import inspect
 import json
 import os
 import shutil
@@ -221,7 +222,7 @@ class _KinetoProfile:
                     "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
                 )
 
-            if hasattr(torch, "_inductor"):
+            if inspect.getattr_static(torch, "_inductor", None) is not None:
                 import torch._inductor.config as inductor_config
 
                 cuda_version = None
