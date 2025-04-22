@@ -1706,12 +1706,12 @@ def _compile_kernel(
 ):
     """
     Compiles a CUDA kernel using NVRTC and returns a callable function.
-    
+
     This function is a wrapper for NVRTC that enables runtime compilation of CUDA kernels.
     Note that this returns a raw CUDA kernel that operates on raw memory pointers.
     To use this kernel as a proper PyTorch operator, you should wrap it following the guide at:
     pytorch.org/tutorials/advanced/python_custom_ops.html
-    
+
     Args:
         kernel_source (str): The CUDA kernel source code as a string
         kernel_name (str): The name of the kernel function to compile
@@ -1720,10 +1720,10 @@ def _compile_kernel(
         header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, optional): List of directories containing CUDA headers
         nvcc_options (list, optional): Additional options to pass to NVRTC
-        
+
     Returns:
         callable: A Python function that can be called with PyTorch tensor arguments to execute the kernel
-        
+
     Example:
         >>> # xdoctest: +SKIP
         >>> kernel_code = '''
@@ -1741,17 +1741,17 @@ def _compile_kernel(
         >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
     """
     from torch.cuda._utils import _nvrtc_compile, _cuda_load_module
-    
+
     # Compile the kernel to PTX
     ptx = _nvrtc_compile(
-        kernel_source, 
-        kernel_name, 
-        compute_capability, 
-        header_code, 
-        cuda_include_dirs, 
+        kernel_source,
+        kernel_name,
+        compute_capability,
+        header_code,
+        cuda_include_dirs,
         nvcc_options
     )
-    
+
     # Load the module and get the kernel
     kernels = _cuda_load_module(ptx, [kernel_name])
     return kernels[kernel_name]
