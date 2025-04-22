@@ -3582,6 +3582,13 @@ def _unsafe_index_put(x, indices, values, accumulate=False):
     )
 
 
+@register_lowering(inductor_prims._unsafe_nowrap_index_put)
+def _unsafe_nowrap_index_put(x, indices, values, accumulate=False):
+    return index_put_impl_(
+        clone(x), indices, values, accumulate, check=False, may_realize=False, wrap_neg=False
+    )
+
+
 def index_put_as_masked_fill(self, indices, value, accumulate):
     if value.get_device() != self.get_device():
         value = to_device(value, self.get_device())
@@ -3620,7 +3627,7 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     )
 
 
-def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
+def index_put_impl_(self, indices, values, accumulate, check, may_realize=False, wrap_neg=True):
     if may_realize:
 
         def try_get_name(x):
@@ -3720,6 +3727,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         indexed_size,
         None,
         check=check,
+        wrap_neg=wrap_neg,
     )
 
     values = expand(values, expected_vals_size)
