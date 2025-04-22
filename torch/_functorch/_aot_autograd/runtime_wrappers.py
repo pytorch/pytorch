@@ -2253,7 +2253,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if try_save_cache_entry is not None:
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
-                                lazy_backward_info,
                                 fw_metadata,
                                 aot_config,
                             )
