@@ -30,7 +30,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 # NOTE: Also update the ROCm sources in tools/nightly.py when changing this list
-ROCM_ARCHES = ["6.3", "6.4"]
+ROCM_ARCHES = ["6.2.4", "6.3"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -173,7 +173,7 @@ WHEEL_CONTAINER_IMAGES = {
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
     "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
-    "cpu-s390x": "pytorch/manylinuxs390x-builder:cpu-s390x",
+    "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
 }
 
 RELEASE = "release"

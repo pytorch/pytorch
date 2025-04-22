@@ -11,11 +11,6 @@ if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
 fi
 
 pushd "$PYTORCH_ROOT/.ci/pytorch/"
-
-if [[ "$OS" == "windows-arm64" ]]; then
-    ./windows/arm64/smoke_test.bat
-else
-    ./windows/internal/smoke_test.bat
-fi
+./windows/internal/smoke_test.bat
 
 popd

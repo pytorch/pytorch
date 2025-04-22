@@ -1668,13 +1668,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(cfg), 64)
         # With unspec int, maximum computation is preserved
         self.assertExpectedInline(cnt.frame_count, """1""")
-        if torch._dynamo.config.automatic_dynamic_shapes:
-            if not torch._dynamo.config.assume_static_by_default:
-                self.assertExpectedInline(cnt.op_count, """4""")
-            else:
-                self.assertExpectedInline(cnt.op_count, """3""")
-        else:
-            self.assertExpectedInline(cnt.op_count, """3""")
+        self.assertExpectedInline(cnt.op_count, """3""")
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
@@ -3218,13 +3212,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "torch.Size"):
             opt_f(args)
-        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
-            if "assert with non-string message" in gb:
-                self.assertEqual(cnt, 1)
-                break
-        else:
-            # graph break not found
-            self.assertTrue(False)
+        self.assertEqual(
+            torch._dynamo.utils.counters["graph_break"][
+                "assert with non-string message"
+            ],
+            1,
+        )
 
     def test_rewrite_assert_noop(self):
         def f(x):

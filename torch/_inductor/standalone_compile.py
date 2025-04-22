@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import copy
 import logging
 import os
-import pickle
 import shutil
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
-from torch._dynamo.utils import detect_fake_mode, dynamo_timed
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
@@ -17,6 +15,7 @@ from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config
+from .utils import shape_env_from_inputs
 
 
 if TYPE_CHECKING:
@@ -59,7 +58,7 @@ class CompiledArtifact:
         self._artifacts = artifacts
 
     def __call__(self, *args: Any) -> Any:
-        return self._compiled_fn(*args)
+        return self._compiled_fn(*args)[0]
 
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
@@ -70,7 +69,7 @@ class CompiledArtifact:
                     "CompiledArtifact.save failed to save since there's no artifact to save"
                 )
             artifact_bytes, cache_info = self._artifacts
-            assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
+            assert len(cache_info.aot_autograd_artifacts) == 1
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
@@ -89,28 +88,12 @@ class CompiledArtifact:
                     file.write(writer.to_bytes())
             else:
                 assert format == "unpacked"
-                if os.path.exists(path):
-                    assert os.path.isdir(path)
-                    shutil.rmtree(path, ignore_errors=True)
-
-                from .codecache import FxGraphCache
+                assert os.path.isdir(path)
+                shutil.rmtree(path, ignore_errors=True)
 
                 with temporary_cache_dir(path):
                     # This function unpacks the cache artifacts to disk
-                    loaded_cache_info = torch.compiler.load_cache_artifacts(
-                        artifact_bytes
-                    )
-                    assert loaded_cache_info is not None
-                    # Now write all the output_code artifacts to disk so that
-                    # they can be inspected and modified
-                    for key in loaded_cache_info.inductor_artifacts:
-                        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-                        assert os.path.exists(subdir)
-                        for path in sorted(os.listdir(subdir)):
-                            with open(os.path.join(subdir, path), "rb") as f:
-                                graph = pickle.load(f)
-                            output_file = graph.write_to_disk()
-                            log.info("Output code written to: %s", output_file)
+                    torch.compiler.load_cache_artifacts(artifact_bytes)
 
     @staticmethod
     def load(
@@ -145,18 +128,13 @@ class CompiledArtifact:
                 key = files[0]
                 cache_dir_ctx = temporary_cache_dir(path)
 
-            with (
-                cache_dir_ctx,
-                config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
-            ):
+            with cache_dir_ctx:
                 with torch._functorch.config.patch(strict_autograd_cache=True):
                     from torch._functorch._aot_autograd.autograd_cache import (
                         AOTAutogradCache,
                     )
 
-                    entry = AOTAutogradCache._lookup(
-                        key, local=True, remote=False, args=[]
-                    )
+                    entry = AOTAutogradCache._lookup(key, local=True, remote=False)
 
                 assert entry is not None
 
@@ -170,7 +148,10 @@ class CompiledArtifact:
                 context = torch._guards.TracingContext(
                     FakeTensorMode(shape_env=ShapeEnv())
                 )
-                with torch._guards.tracing(context):
+                with (
+                    torch._guards.tracing(context),
+                    config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
+                ):
                     compiled_fn = entry.wrap_post_compile(
                         [], entry.sanitized_aot_config, fx_config
                     )
@@ -184,15 +165,12 @@ def standalone_compile(
 
     from .compile_fx import compile_fx
 
-    fake_mode = detect_fake_mode(example_inputs)
-    if fake_mode is None:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+    shape_env = shape_env_from_inputs(example_inputs, default=True)
+    assert shape_env is not None
 
-    context = torch._guards.TracingContext(fake_mode)
+    context = torch._guards.TracingContext(FakeTensorMode(shape_env=shape_env))
     with torch._guards.tracing(context):
         with CacheArtifactManager.with_fresh_cache():
-            # compile_fx can mutate gm
-            gm = copy.deepcopy(gm)
             compiled_fn = compile_fx(gm, example_inputs, **kwargs)
             assert callable(compiled_fn)
 

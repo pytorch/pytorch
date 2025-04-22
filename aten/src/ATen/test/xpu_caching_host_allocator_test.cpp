@@ -20,10 +20,10 @@ TEST(CachingHostAllocatorTest, testPinnedAliasSlice) {
       at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
   // TODO: Uncomment this line when op `pin_memory` is supported on XPU.
   // ASSERT_TRUE(pinned_tensor.is_pinned());
-  ASSERT_TRUE(at::getHostAllocator(at::kXPU)->record_event(
+  ASSERT_TRUE(at::xpu::CachingHostAllocator_recordEvent(
       pinned_tensor.data_ptr(),
       pinned_tensor.storage().data_ptr().get_context(),
-      at::xpu::getCurrentXPUStream().unwrap()));
+      at::xpu::getCurrentXPUStream()));
 
   // Check an tensor constructed with from_blob can be correctly recorded (via
   // the shared data_ptr)
@@ -35,10 +35,10 @@ TEST(CachingHostAllocatorTest, testPinnedAliasSlice) {
       alias_tensor.storage().data_ptr().get_context() ==
       pinned_tensor.storage().data_ptr().get_context());
   ASSERT_EQ(alias_tensor.data_ptr(), pinned_tensor.data_ptr());
-  ASSERT_TRUE(at::getHostAllocator(at::kXPU)->record_event(
+  ASSERT_TRUE(at::xpu::CachingHostAllocator_recordEvent(
       alias_tensor.data_ptr(),
       alias_tensor.storage().data_ptr().get_context(),
-      at::xpu::getCurrentXPUStream().unwrap()));
+      at::xpu::getCurrentXPUStream()));
 
   // Check an tensor constructed with slicing can be correctly recorded (via
   // the shared context)
@@ -48,20 +48,20 @@ TEST(CachingHostAllocatorTest, testPinnedAliasSlice) {
       slice_tensor.storage().data_ptr().get_context(),
       pinned_tensor.storage().data_ptr().get_context());
   ASSERT_NE(slice_tensor.data_ptr(), pinned_tensor.data_ptr());
-  ASSERT_TRUE(at::getHostAllocator(at::kXPU)->record_event(
+  ASSERT_TRUE(at::xpu::CachingHostAllocator_recordEvent(
       slice_tensor.data_ptr(),
       slice_tensor.storage().data_ptr().get_context(),
-      at::xpu::getCurrentXPUStream().unwrap()));
+      at::xpu::getCurrentXPUStream()));
 
   // Check a tensor that has neither a matching context nor data_ptr cannot be
   // recorded.
   auto alias_slice_tensor = at::from_blob(
       slice_tensor.data_ptr(), slice_tensor.sizes(), slice_tensor.options());
   // ASSERT_TRUE(alias_slice_tensor.is_pinned());
-  ASSERT_FALSE(at::getHostAllocator(at::kXPU)->record_event(
+  ASSERT_FALSE(at::xpu::CachingHostAllocator_recordEvent(
       alias_slice_tensor.data_ptr(),
       alias_slice_tensor.storage().data_ptr().get_context(),
-      at::xpu::getCurrentXPUStream().unwrap()));
+      at::xpu::getCurrentXPUStream()));
   ASSERT_NE(
       alias_slice_tensor.storage().data_ptr().get(),
       slice_tensor.storage().data_ptr().get());
@@ -72,7 +72,7 @@ TEST(CachingHostAllocatorTest, testRawAllocation) {
     return;
   }
 
-  auto data_ptr = at::getHostAllocator(at::kXPU)->allocate(N);
+  auto data_ptr = at::xpu::getCachingHostAllocator()->allocate(N);
   class UserDataDeleter {
    public:
     explicit UserDataDeleter(std::unique_ptr<void, c10::DeleterFnPtr> ptr)
@@ -105,10 +105,10 @@ TEST(CachingHostAllocatorTest, testRawAllocation) {
           .make_tensor();
 
   // ASSERT_TRUE(pinned_tensor.is_pinned());
-  ASSERT_TRUE(at::getHostAllocator(at::kXPU)->record_event(
+  ASSERT_TRUE(at::xpu::CachingHostAllocator_recordEvent(
       pinned_tensor.data_ptr(),
       pinned_tensor.storage().data_ptr().get_context(),
-      at::xpu::getCurrentXPUStream().unwrap()));
+      at::xpu::getCurrentXPUStream()));
 }
 
 TEST(CachingHostAllocatorTest, testUnknownTensor) {
@@ -119,10 +119,10 @@ TEST(CachingHostAllocatorTest, testUnknownTensor) {
   auto unpinned_tensor =
       at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(false));
 
-  ASSERT_FALSE(at::getHostAllocator(at::kXPU)->record_event(
+  ASSERT_FALSE(at::xpu::CachingHostAllocator_recordEvent(
       unpinned_tensor.data_ptr(),
       unpinned_tensor.storage().data_ptr().get_context(),
-      at::xpu::getCurrentXPUStream().unwrap()));
+      at::xpu::getCurrentXPUStream()));
 }
 
 TEST(CachingHostAllocatorTest, testEmptyCache) {
@@ -137,8 +137,8 @@ TEST(CachingHostAllocatorTest, testEmptyCache) {
         {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
     ptr = pinned_tensor.data_ptr();
     ctx = pinned_tensor.storage().data_ptr().get_context();
-    ASSERT_TRUE(at::getHostAllocator(at::kXPU)->record_event(
-        ptr, ctx, at::xpu::getCurrentXPUStream().unwrap()));
+    ASSERT_TRUE(at::xpu::CachingHostAllocator_recordEvent(
+        ptr, ctx, at::xpu::getCurrentXPUStream()));
   }
 
   {
@@ -147,9 +147,9 @@ TEST(CachingHostAllocatorTest, testEmptyCache) {
     at::xpu::syncStreamsOnDevice();
   }
 
-  at::getHostAllocator(at::kXPU)->empty_cache();
-  ASSERT_FALSE(at::getHostAllocator(at::kXPU)->record_event(
-      ptr, ctx, at::xpu::getCurrentXPUStream().unwrap()));
+  at::xpu::CachingHostAllocator_emptyCache();
+  ASSERT_FALSE(at::xpu::CachingHostAllocator_recordEvent(
+      ptr, ctx, at::xpu::getCurrentXPUStream()));
 }
 
 TEST(CachingHostAllocatorTest, testReuse) {

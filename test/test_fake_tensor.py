@@ -2158,31 +2158,6 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
-
-    def test_cache_aten_index(self):
-        with FakeTensorMode():
-            x = torch.randn(4, 4, 4)
-            idx_tensor1 = torch.tensor([0, 2, 3])
-            idx_tensor2 = torch.tensor([0, 1, 2])
-
-            FakeTensorMode.cache_clear()
-            self.assertHitsMisses(0, 0)
-
-            ref = torch.ops.aten.index(x, [None, idx_tensor1, idx_tensor2])
-            self.assertHitsMisses(0, 3)
-
-            res = torch.ops.aten.index(x, [None, idx_tensor1, idx_tensor2])
-            self.assertHitsMisses(1, 3)
-            self.assertEqual(extract_tensor_metadata(ref), extract_tensor_metadata(res))
-
-        with FakeTensorMode():
-            x = torch.randn(4, 4, 4)
-            idx_tensor1 = torch.tensor([True, True, False, True])
-            self.assertRaises(DynamicOutputShapeException, lambda: torch.ops.aten.index(x, [None, idx_tensor1]))
-
-            idx_tensor1 = torch.tensor([1, -2, 3, -4], dtype=torch.int8)
-            self.assertRaises(DynamicOutputShapeException, lambda: torch.ops.aten.index(x, [None, idx_tensor1]))
-
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_invoke_subgraph(self):
         """

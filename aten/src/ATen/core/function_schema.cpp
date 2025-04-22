@@ -41,15 +41,9 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
     }
   };
   std::vector<Argument> new_arguments, new_returns;
-  new_arguments.reserve(arguments().size());
-  for (const auto& arg: arguments()) {
-    new_arguments.push_back(cloneWithRealTypes(arg));
-  }
+  std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);
   // NB: SymInt returns are always SymInt
-  new_returns.reserve(returns().size());
-  for (const auto& ret: returns()) {
-    new_returns.push_back(alwaysCloneWithRealTypes(ret));
-  }
+  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), alwaysCloneWithRealTypes);
   return FunctionSchema(
     name(),
     overload_name(),

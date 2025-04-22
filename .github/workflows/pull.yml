@@ -184,7 +184,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-focal-py3.9-clang10
       docker-image-name: pytorch-linux-focal-py3.9-clang10
       test-matrix: |

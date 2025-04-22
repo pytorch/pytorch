@@ -559,8 +559,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool find_unused_parameters,
                  bool gradient_as_bucket_view,
                  std::unordered_map<size_t, std::string> param_to_name_mapping,
-                 int64_t first_bucket_bytes_cap,
-                 bool skip_all_reduce_unused_params) {
+                 int64_t first_bucket_bytes_cap) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -574,8 +573,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     find_unused_parameters,
                     gradient_as_bucket_view,
                     std::move(param_to_name_mapping),
-                    first_bucket_bytes_cap,
-                    skip_all_reduce_unused_params);
+                    first_bucket_bytes_cap);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -587,8 +585,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("gradient_as_bucket_view") = false,
           py::arg("param_to_name_mapping") =
               std::unordered_map<size_t, std::string>(),
-          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
-          py::arg("skip_all_reduce_unused_params") = false)
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -1582,25 +1579,20 @@ Arguments:
 )")
           .def(
               "queue_pop",
-              [](::c10d::Store& store, const std::string& key, bool block) {
+              [](::c10d::Store& store, const std::string& key) {
                 auto out = [&]() {
                   py::gil_scoped_release guard;
-                  return store.queuePop(key, block);
+                  return store.queuePop(key);
                 }();
                 return toPyBytes(out);
               },
-              py::arg("key"),
-              py::arg("block") = true,
               R"(
 Pops a value from the specified queue or waits until timeout if the queue is empty.
 
 See queue_push for more details.
 
-If block is False, a dist.QueueEmptyError will be raised if the queue is empty.
-
 Arguments:
     key (str): The key of the queue to pop from.
-    block (bool): Whether to block waiting for the key or immediately return.
 )")
           .def(
               "queue_len",
@@ -3148,14 +3140,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "get_error",
               &::c10d::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_set_enable_nan_check",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 bool enable_nan_check) {
-                self->setEnableNanCheck(enable_nan_check);
-              },
-              py::arg("enable_nan_check"),
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
