@@ -5969,6 +5969,7 @@ class TestCudaAutocast(TestAutocast):
 
 
 class TestCompileKernel(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
         # Simple vector addition kernel
         kernel_source = """
@@ -5980,7 +5981,7 @@ class TestCompileKernel(TestCase):
         """
         
         # Compile the kernel
-        add_kernel = torch.cuda.compile_kernel(kernel_source, "add_tensors")
+        add_kernel = torch.cuda._compile_kernel(kernel_source, "add_tensors")
         
         # Prepare data
         N = 1024
@@ -6017,7 +6018,7 @@ class TestCompileKernel(TestCase):
         }
         """
         
-        add_int_kernel = torch.cuda.compile_kernel(int_kernel_source, "add_int_tensors")
+        add_int_kernel = torch.cuda._compile_kernel(int_kernel_source, "add_int_tensors")
         
         # Launch kernel
         add_int_kernel(
@@ -6047,7 +6048,7 @@ class TestCompileKernel(TestCase):
         }
         """
         
-        scale_kernel = torch.cuda.compile_kernel(
+        scale_kernel = torch.cuda._compile_kernel(
             scale_kernel_source, 
             "scale_tensors",
             header_code=header_code
@@ -6074,7 +6075,7 @@ class TestCompileKernel(TestCase):
         """
         
         with self.assertRaises(RuntimeError):
-            torch.cuda.compile_kernel(invalid_kernel_source, "invalid_kernel")
+            torch.cuda._compile_kernel(invalid_kernel_source, "invalid_kernel")
     
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
@@ -6094,7 +6095,7 @@ class TestCompileKernel(TestCase):
         }
         """
         
-        matmul_kernel = torch.cuda.compile_kernel(matmul_kernel_source, "matrix_multiply")
+        matmul_kernel = torch.cuda._compile_kernel(matmul_kernel_source, "matrix_multiply")
         
         # Matrix dimensions
         M, K, N = 64, 32, 48
@@ -6126,7 +6127,7 @@ class TestCompileKernel(TestCase):
         compute_cap = f"{device_props.major}{device_props.minor}"
         
         # Recompile with explicit compute capability
-        matmul_kernel_explicit = torch.cuda.compile_kernel(
+        matmul_kernel_explicit = torch.cuda._compile_kernel(
             matmul_kernel_source, 
             "matrix_multiply",
             compute_capability=compute_cap

@@ -1695,9 +1695,45 @@ def _register_triton_kernels():
 _lazy_call(_register_triton_kernels)
 
 
+def _get_nvrtc_version(cuda_version: int) -> str:
+    # Follows same logic as PyTorch's LazyNVRTC.cpp getLibVersion()
+    major = cuda_version // 1000
+    minor = (cuda_version // 10) % 10
+    
+    if sys.platform == 'win32':
+        if major < 11 or (major == 11 and minor < 3):
+            return f"{major}{minor}"
+        elif major == 11:
+            return "112"
+        else:
+            return f"{major}0"
+    else:
+        if major < 11 or (major == 11 and minor < 3):
+            return f"{major}.{minor}"
+        elif major == 11:
+            return "11.2"
+        else:
+            return str(major)
+
+# Load CUDA driver and NVRTC
+if sys.platform == 'win32':
+    # Matches PyTorch's LazyNVRTC.cpp getLibName()
+    libnvrtc_name = f'nvrtc64_{_get_nvrtc_version(cudart().cudaRuntimeGetVersion())}_0.dll'
+    libnvrtc = ctypes.CDLL(libnvrtc_name)
+    libcuda = ctypes.CDLL('nvcuda.dll')
+else:  # Unix-based systems
+    # Matches PyTorch's LazyNVRTC.cpp getLibName() and getAltLibName()
+    version = _get_nvrtc_version(cudart().cudaRuntimeGetVersion())
+    libnvrtc_paths = [
+        f'libnvrtc.so.{version}',  # Primary name from getLibName()
+        os.path.join(os.environ.get('CUDA_HOME', ''), f'lib64/libnvrtc.so.{version}'),
+        '/usr/local/cuda/lib64/libnvrtc.so',  # Fallback paths
+    ]
 
 
-def compile_kernel(
+
+
+def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
     compute_capability: str = None,
@@ -1726,6 +1762,7 @@ def compile_kernel(
         callable: A Python function that can be called with PyTorch tensor arguments to execute the kernel
         
     Example:
+        >>> # xdoctest: +SKIP
         >>> kernel_code = '''
         extern "C"
         __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
@@ -1745,15 +1782,17 @@ def compile_kernel(
     
     # Load CUDA driver and NVRTC
     if sys.platform == 'win32':
-        libnvrtc_name = 'nvrtc64_%d_0.dll' % (cudart().cudaRuntimeGetVersion() // 1000)
+        # Matches PyTorch's LazyNVRTC.cpp getLibName()
+        libnvrtc_name = f'nvrtc64_{_get_nvrtc_version(cudart().cudaRuntimeGetVersion())}_0.dll'
         libnvrtc = ctypes.CDLL(libnvrtc_name)
         libcuda = ctypes.CDLL('nvcuda.dll')
     else:  # Unix-based systems
+        # Matches PyTorch's LazyNVRTC.cpp getLibName() and getAltLibName()
+        version = _get_nvrtc_version(cudart().cudaRuntimeGetVersion())
         libnvrtc_paths = [
-            # Try to find NVRTC library in common locations
-            'libnvrtc.so',
-            os.path.join(os.environ.get('CUDA_HOME', ''), 'lib64/libnvrtc.so'),
-            '/usr/local/cuda/lib64/libnvrtc.so',
+            f'libnvrtc.so.{version}',  # Primary name from getLibName()
+            os.path.join(os.environ.get('CUDA_HOME', ''), f'lib64/libnvrtc.so.{version}'),
+            '/usr/local/cuda/lib64/libnvrtc.so',  # Fallback path
         ]
         
         libnvrtc = None
@@ -1788,7 +1827,7 @@ def compile_kernel(
             raise RuntimeError(f'CUDA error: {err_str.value.decode()}')
     
     # Add 'extern "C"' if not already present to ensure C linkage
-    if 'extern "C"' not in kernel_source:
+    if not kernel_source.strip().startswith('extern "C"'):
         kernel_source = f'extern "C" {kernel_source}'
     
     # Combine header code and kernel source
@@ -1950,7 +1989,7 @@ __all__ = [
     "LongTensor",
     "ShortStorage",
     "ShortTensor",
-    "compile_kernel",
+    "_compile_kernel",
     "CUDAGraph",
     "CudaError",
     "DeferredCudaCallError",
