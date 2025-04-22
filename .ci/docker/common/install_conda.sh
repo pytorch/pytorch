@@ -87,7 +87,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   # Magma is installed from a tarball in the ossci-linux bucket into the conda env
   if [ -n "$CUDA_VERSION" ]; then
-    ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION}) ${ANACONDA_PYTHON_VERSION}
+    conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
   fi
 
   # Install some other packages, including those needed for Python test reporting
