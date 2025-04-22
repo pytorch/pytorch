@@ -106,23 +106,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: "pytorch"
+          submodules: recursive
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
-      - name: Git checkout PyTorch - recursive
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-          submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
@@ -198,18 +186,6 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Populate binary env
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "pytorch"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
