@@ -499,8 +499,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
-        backend = pg._get_backend(torch.device("cuda"))
-
         device = self.rank_to_GPU[self.rank][0]
         # Cover different buffer sizes
         if type == torch.float64:
@@ -528,12 +526,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             nan_tensor = nan_tensor.to(type)
 
         output = torch.empty(self.world_size, *size, dtype=type, device=device)
-
-        # confirm enable/disable flag works
-        backend._set_enable_nan_check(False)
-        pg.allreduce(nan_tensor)
-
-        backend._set_enable_nan_check(True)
         with self.assertRaises(RuntimeError):
             # Note: using all-gather here bc FP8 types do not support reduce ops
             # at the moment

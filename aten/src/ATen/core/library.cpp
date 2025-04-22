@@ -1,7 +1,6 @@
 #include <torch/library.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <fmt/format.h>
 
 namespace torch {
 
@@ -12,7 +11,7 @@ namespace {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
-    return fmt::format("registered at {}:{}", file, line);
+    return c10::str("registered at ", file, ":", line);
 #endif
   }
 

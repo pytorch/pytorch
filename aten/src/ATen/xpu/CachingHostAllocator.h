@@ -7,20 +7,14 @@
 
 namespace at::xpu {
 
-inline TORCH_XPU_API at::HostAllocator* getCachingHostAllocator() {
-  return at::getHostAllocator(at::kXPU);
-}
+TORCH_XPU_API c10::Allocator* getCachingHostAllocator();
 
-inline TORCH_XPU_API bool CachingHostAllocator_recordEvent(
+TORCH_XPU_API bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
-    c10::xpu::XPUStream stream) {
-  return getCachingHostAllocator()->record_event(ptr, ctx, stream.unwrap());
-}
+    c10::xpu::XPUStream stream);
 
-inline TORCH_XPU_API void CachingHostAllocator_emptyCache() {
-  getCachingHostAllocator()->empty_cache();
-}
+TORCH_XPU_API void CachingHostAllocator_emptyCache();
 
 inline TORCH_XPU_API at::DataPtr HostAlloc(size_t size) {
   return getCachingHostAllocator()->allocate(size);

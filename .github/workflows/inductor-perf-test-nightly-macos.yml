@@ -38,7 +38,7 @@ jobs:
     uses: ./.github/workflows/_mac-build.yml
     with:
       sync-tag: macos-perf-py3-arm64-build
-      build-environment: macos-py3-arm64-distributed
+      build-environment: macos-py3-arm64
       runner-type: macos-m1-stable
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
@@ -54,7 +54,7 @@ jobs:
     uses: ./.github/workflows/_mac-test.yml
     needs: macos-perf-py3-arm64-build
     with:
-      build-environment: macos-py3-arm64-distributed
+      build-environment: macos-py3-arm64
       # Same as the build job
       python-version: 3.9.12
       test-matrix: ${{ needs.macos-perf-py3-arm64-build.outputs.test-matrix }}

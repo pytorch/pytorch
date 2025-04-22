@@ -477,10 +477,6 @@ class MetalOverrides(OpOverrides):
     def hermite_polynomial_h(x: CSEVariable, n: CSEVariable) -> str:
         return f"c10::metal::hermite_polynomial_h_forward({x}, {n})"
 
-    @staticmethod
-    def hermite_polynomial_he(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::hermite_polynomial_he_forward({x}, {n})"
-
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 

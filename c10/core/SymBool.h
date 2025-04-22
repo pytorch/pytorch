@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <c10/core/SymNodeImpl.h>
@@ -63,7 +62,6 @@ class C10_API SymBool {
   bool guard_bool(const char* file, int64_t line) const;
   bool expect_true(const char* file, int64_t line) const;
   bool guard_size_oblivious(const char* file, int64_t line) const;
-  bool statically_known_true(const char* file, int64_t line) const;
   bool guard_or_false(const char* file, int64_t line) const;
   bool guard_or_true(const char* file, int64_t line) const;
 
@@ -131,20 +129,6 @@ inline bool guard_or_false(
   return b.guard_or_false(file, line);
 }
 
-inline bool statically_known_true(
-    bool b,
-    const char* file [[maybe_unused]],
-    int64_t line [[maybe_unused]]) {
-  return b;
-}
-
-inline bool statically_known_true(
-    const c10::SymBool& b,
-    const char* file,
-    int64_t line) {
-  return b.statically_known_true(file, line);
-}
-
 inline bool guard_or_true(
     bool b,
     const char* file [[maybe_unused]],
@@ -161,9 +145,6 @@ inline bool guard_or_true(
 
 #define TORCH_GUARD_SIZE_OBLIVIOUS(cond) \
   c10::guard_size_oblivious((cond), __FILE__, __LINE__)
-
-#define TORCH_STATICALLY_KNOWN_TRUE(cond) \
-  c10::statically_known_true((cond), __FILE__, __LINE__)
 
 #define TORCH_GUARD_OR_FALSE(cond) \
   c10::guard_or_false((cond), __FILE__, __LINE__)

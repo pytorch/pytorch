@@ -119,41 +119,6 @@ void fp16_gemv_trans(
 #endif // !defined(C10_MOBILE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
-  for (auto j = 0; j < n; j++) {
-    auto vecCol = vdup_n_f16(x[j]);
-    const auto* column = a + lda * j;
-    for (auto i = 0; i < m; i += 4) {
-      auto yf16 = y + i;
-      auto matRow = vld1_f16(column + i);
-      auto resVec = j != 0 ? vld1_f16(yf16) : vdup_n_f16(0);
-      resVec = vfma_lane_f16(resVec, matRow, vecCol, 0);
-      vst1_f16(yf16, resVec);
-    }
-  }
-}
-#endif
-
-static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
-  std::vector<float> sum(m);
-  for (auto j = 0; j < n; j++) {
-    auto vecCol = vdup_n_f32(x[j]);
-    const auto* column = a + lda * j;
-    for (auto i = 0; i < m; i += 4) {
-      auto sf32 = sum.data() + i;
-      auto matRow = vcvt_f32_f16(vld1_f16(column + i));
-      auto resVec = j != 0 ? vld1q_f32(sf32) : vdupq_n_f32(0);
-      resVec = vfmaq_lane_f32(resVec, matRow, vecCol, 0);
-      vst1q_f32(sf32, resVec);
-    }
-  }
-
-  for (auto i = 0; i < m; i+= 4) {
-    vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
-  }
-}
-
 void fp16_gemv_notrans(
     const int m,
     const int n,
@@ -165,44 +130,6 @@ void fp16_gemv_notrans(
     const float beta,
     Half* y,
     const int incy);
-
-void fp16_gemv_notrans(
-    const int m,
-    const int n,
-    const float alpha,
-    const Half* a,
-    const int lda,
-    const Half* x,
-    const int incx,
-    const float beta,
-    Half* y,
-    const int incy) {
-  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-    if (at::globalContext().allowFP16ReductionCPU())  {
-      return fp16_gemv_notrans_fp16_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
-    }
-#endif
-    return fp16_gemv_notrans_fp32_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
-  }
-  std::vector<float> sum(m);
-  for (const auto j : c10::irange(n)) {
-    const auto* column_ = a + lda * j;
-    auto z = alpha * x[j * incx];
-    for (const auto i : c10::irange(m)) {
-      sum[i] += z * column_[i];
-    }
-  }
-  if (beta == 0.0) {
-    for (const auto i : c10::irange(m)) {
-      y[i * incy] = sum[i];
-    }
-  } else {
-    for (const auto i : c10::irange(m)) {
-      y[i * incy] += sum[i];
-    }
-  }
-}
 
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
@@ -425,7 +352,14 @@ void gemv_fast_path<at::Half>(
       y,
       *incy);
 }
-#else // !defined(__aarch64__))
+#else
+template <>
+bool scal_use_fast_path<at::Half>(
+    [[maybe_unused]] int64_t n,
+    [[maybe_unused]] int64_t incx) {
+  return false;
+}
+
 template <>
 bool gemv_use_fast_path<at::Half>(
     char trans,
@@ -439,6 +373,79 @@ bool gemv_use_fast_path<at::Half>(
   return incx == 1 && c10::detail::fp16_from_bits(alpha.x) == 1.0f &&
       // TODO: enable nonzero beta for fp16_gemv_notrans
       (c10::detail::fp16_from_bits(beta.x) == 0.0f || trans == 't' || trans == 'T');
+}
+
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f16(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto yf16 = y + i;
+      auto matRow = vld1_f16(column + i);
+      auto resVec = j != 0 ? vld1_f16(yf16) : vdup_n_f16(0);
+      resVec = vfma_lane_f16(resVec, matRow, vecCol, 0);
+      vst1_f16(yf16, resVec);
+    }
+  }
+}
+#endif
+
+static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  std::vector<float> sum(m);
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f32(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto sf32 = sum.data() + i;
+      auto matRow = vcvt_f32_f16(vld1_f16(column + i));
+      auto resVec = j != 0 ? vld1q_f32(sf32) : vdupq_n_f32(0);
+      resVec = vfmaq_lane_f32(resVec, matRow, vecCol, 0);
+      vst1q_f32(sf32, resVec);
+    }
+  }
+
+  for (auto i = 0; i < m; i+= 4) {
+    vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
+  }
+}
+
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+    if (at::globalContext().allowFP16ReductionCPU())  {
+      return fp16_gemv_notrans_fp16_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
+    }
+#endif
+    return fp16_gemv_notrans_fp32_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
+  }
+  std::vector<float> sum(m);
+  for (const auto j : c10::irange(n)) {
+    const auto* column_ = a + lda * j;
+    auto z = alpha * x[j * incx];
+    for (const auto i : c10::irange(m)) {
+      sum[i] += z * column_[i];
+    }
+  }
+  if (beta == 0.0) {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] = sum[i];
+    }
+  } else {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] += sum[i];
+    }
+  }
 }
 
 template <>
