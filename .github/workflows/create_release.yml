@@ -108,6 +108,24 @@ jobs:
           if-no-files-found: warn
           path: ${{ needs.release.outputs.pt_release_name }}
 
+  publish_rc_source:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: release
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: source
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: ""
+      GPU_ARCH_TYPE: ""
+      build_name: ${{ needs.release.outputs.pt_release_name }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
   cancel-in-progress: true

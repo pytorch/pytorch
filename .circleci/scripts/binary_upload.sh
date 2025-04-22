@@ -78,6 +78,10 @@ case "${PACKAGE_TYPE}" in
     s3_upload "zip" "libtorch"
     BACKUP_DIR="libtorch/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}"
     ;;
+  source)
+    s3_upload "tar.gz" "src"
+    BACKUP_DIR="src/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}"
+    ;;
   # wheel can either refer to wheel/manywheel
   *wheel)
     s3_upload "whl" "whl"
