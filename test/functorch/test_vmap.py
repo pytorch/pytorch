@@ -96,18 +96,19 @@ PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 
 FALLBACK_REGEX = "There is a performance drop"
 
-op_db_mps_decorated = mps_ops_modifier(
-    op_db,
-    device_type="mps",
-    xfail_exclusion=[
-        # logspace batch rule does not invoke the mps logspace kernel which is not yet implemented and works as expected.
-        "logspace",
-        "masked.median",
-        "bincount",
-        "nanquantile",
-        "quantile",
-    ],
-)
+if torch.backends.mps.is_available():
+    mps_ops_modifier(
+        op_db,
+        device_type="mps",
+        xfail_exclusion=[
+            # logspace batch rule does not invoke the mps logspace kernel which is not yet implemented and works as expected.
+            "logspace",
+            "masked.median",
+            "bincount",
+            "nanquantile",
+            "quantile",
+        ],
+    )
 
 
 class EnableVmapFallbackWarnings:
@@ -4433,12 +4434,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("scatter_add", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail("scatter", device_type="mps"),
-                xfail(
-                    "amax", device_type="mps"
-                ),  # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
-                xfail(
-                    "amin", device_type="mps"
-                ),  # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
                 xfail("argsort", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail(
@@ -4730,7 +4725,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     @with_tf32_off
     @ops(
-        op_db_mps_decorated + additional_op_db + autograd_function_db + custom_op_db,
+        op_db + additional_op_db + autograd_function_db + custom_op_db,
         dtypes=OpDTypes.any_one,
     )
     @opsToleranceOverride(
@@ -4896,12 +4891,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("scatter_add", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail("scatter", device_type="mps"),
-                xfail(
-                    "amax", device_type="mps"
-                ),  # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
-                xfail(
-                    "amin", device_type="mps"
-                ),  # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
                 xfail("argsort", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail(
