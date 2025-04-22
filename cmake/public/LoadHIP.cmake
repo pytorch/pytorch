@@ -165,6 +165,12 @@ if(HIP_FOUND)
   endif()
   find_package_and_print_version(hipblaslt REQUIRED)
 
+  list(APPEND ROCM_INCLUDE ${rocthrust_INCLUDE_DIR})
+  list(APPEND ROCM_INCLUDE ${rocprim_INCLUDE_DIR})
+  list(APPEND ROCM_INCLUDE ${hipcub_INCLUDE_DIR})
+  list(APPEND ROCM_INCLUDE ${rocRAND_INCLUDE_DIR})
+  list(APPEND ROCM_INCLUDE ${INTERFACE_INCLUDE_DIRECTORIES})
+
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
