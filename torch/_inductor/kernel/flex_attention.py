@@ -930,6 +930,15 @@ def check_cpu_supported():
     return supported
 
 
+def contiguous_last_dim(x):
+    """Ensure that realized IR node has a contigous stride in the last dimension."""
+    strides = x.maybe_get_stride()
+    if strides and strides[-1] != 1:
+        contiguous_stride_order = list(reversed(range(len(x.get_size()))))
+        return ExternKernel.require_stride_order(x, contiguous_stride_order)
+    return x
+
+
 def lower_cpu(
     query,
     key,
@@ -1091,6 +1100,9 @@ def lower_cpu(
     for item in buffer_list:
         if isinstance(item, TensorBox):
             fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
+
+    # CPU kernel requires last dim to be contiguous
+    query, key, value = map(contiguous_last_dim, [query, key, value])
 
     (
         query,
