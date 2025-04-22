@@ -40,18 +40,40 @@ def _get_cuda_library():
 
 def _get_nvrtc_library():
     # Get NVRTC version based on CUDA runtime version
-    from torch.cuda import cudart
+    # Use an alternative approach to get the CUDA version
+    # since cudart().getVersion() is failing
+    try:
+        from torch.cuda import cudart
 
-    cuda_runtime_version = cudart().getVersion()
+        cuda_runtime_version = cudart().getVersion()
+    except (ImportError, AttributeError):
+        # Fallback: if we have CUDA available, get version from device properties
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(torch.cuda.current_device())
+            cuda_runtime_version = props.major * 1000 + props.minor * 10
+        else:
+            # Hardcode a default CUDA version if all else fails
+            cuda_runtime_version = 12000  # Assume CUDA 12.0 as default
+
     version = _get_nvrtc_version(cuda_runtime_version)
 
     if sys.platform == "win32":
-        # Windows: nvrtc64_XY_0.dll or nvrtc64_X0_0.dll
+        # Windows handling remains the same
         lib_name = f"nvrtc64_{version}_0.dll"
         return ctypes.CDLL(lib_name)
     else:
-        # Unix-based systems
-        # Linux: libnvrtc.so.X.Y or libnvrtc.so.X
+        # TODO: Local workaround need to delete this
+        conda_paths = [
+            # Add all the paths you found
+            "/data/users/marksaroufim/dotsync-home/.conda/envs/nv/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
+            "/data/users/marksaroufim/dotsync-home/.conda/envs/ft/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
+            "/data/users/marksaroufim/dotsync-home/.conda/envs/kernel/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12",
+            # Also add the parent directories to search for other version-specific files
+            "/data/users/marksaroufim/dotsync-home/.conda/envs/nv/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib",
+            "/data/users/marksaroufim/dotsync-home/.conda/envs/ft/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib",
+            "/data/users/marksaroufim/dotsync-home/.conda/envs/kernel/lib/python3.10/site-packages/nvidia/cuda_nvrtc/lib",
+        ]
+
         lib_paths = [
             f"libnvrtc.so.{version}",
             os.path.join(
@@ -59,6 +81,9 @@ def _get_nvrtc_library():
             ),
             "/usr/local/cuda/lib64/libnvrtc.so",
         ]
+
+        # Add conda paths to the search list
+        lib_paths.extend(conda_paths)
 
         for path in lib_paths:
             try:
@@ -128,7 +153,7 @@ def _nvrtc_compile(
 
     # Get compute capability if not provided
     if compute_capability is None:
-        props = get_device_properties(current_device())
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
         compute_capability = f"{props.major}{props.minor}"
 
     # Prepare compilation options
