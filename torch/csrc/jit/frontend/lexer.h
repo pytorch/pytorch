@@ -427,8 +427,8 @@ struct TORCH_API SharedParserData {
       int* kind,
       StringCordView::Iterator* end) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pos.has_next());
-    static char is_not[] = "is not";
-    static char not_in[] = "not in";
+    static constexpr char kIsNot[] = "is not";
+    static constexpr char kNotIn[] = "not in";
     constexpr char kMaybeIsNot = 'i';
     constexpr char kMaybeNotIn = 'n';
     constexpr int kIsNotSpaceIndex = 2;
@@ -447,7 +447,7 @@ struct TORCH_API SharedParserData {
     for (i = 1; pos.has_next(); ++pos, ++i) {
       auto ch = *pos;
       if (possible_special_token == kMaybeIsNot) {
-        if (ch != is_not[i]) {
+        if (ch != kIsNot[i]) {
           if (i >= kIsNotSpaceIndex + 1) {
             // Kick out to the after-loop flow, which will correctly
             // record that we found TK_IS.
@@ -457,14 +457,14 @@ struct TORCH_API SharedParserData {
         } else if (ch == ' ') {
           continue;
         }
-        if (possible_special_token && i == sizeof(is_not) - 2 &&
+        if (possible_special_token && i == sizeof(kIsNot) - 2 &&
             (!pos.has_next() || !valid_ident_char(*(pos + 1)))) {
           *kind = TK_ISNOT;
           *end = pos.next_iter();
           return;
         }
       } else if (possible_special_token == kMaybeNotIn) {
-        if (ch != not_in[i]) {
+        if (ch != kNotIn[i]) {
           if (i >= kNotInSpaceIndex + 1) {
             // Kick out to the after-loop flow, which will correctly
             // record that we found TK_NOT.
@@ -475,7 +475,7 @@ struct TORCH_API SharedParserData {
           continue;
         }
 
-        if (possible_special_token && i == sizeof(not_in) - 2 &&
+        if (possible_special_token && i == sizeof(kNotIn) - 2 &&
             (!pos.has_next() || !valid_ident_char(*(pos + 1)))) {
           *kind = TK_NOTIN;
           *end = pos.next_iter();

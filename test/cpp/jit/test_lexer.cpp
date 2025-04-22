@@ -20,7 +20,7 @@ TEST(LexerTest, AllTokens) {
     Lexer l(std::make_shared<Source>(token));
     const auto& tok = l.cur();
     EXPECT_EQ(kind, tok.kind) << tok.range.text().str();
-    EXPECT_EQ(token, tok.range.text()) << tok.range.text().str();
+    EXPECT_EQ(token, tok.range.text().str()) << tok.range.text().str();
     l.next();
     EXPECT_EQ(l.cur().kind, TK_EOF);
   }
