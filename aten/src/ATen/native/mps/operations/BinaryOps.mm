@@ -270,8 +270,7 @@ static void add_sub_lerp_template(const Tensor& self,
   auto commonDtype = at::result_type(self, other);
   if (alpha_has_value) {
     at::native::alpha_check(commonDtype, alpha);
-  } else if (self.is_mps() && other.is_mps() && (self_complex == other_complex) &&
-             output.scalar_type() == commonDtype) {
+  } else if (self.is_mps() && other.is_mps() && (self_complex == other_complex)) {
     mps::binary_op_kernel(op_name, self, other, output);
     return;
   }
