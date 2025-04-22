@@ -85,6 +85,14 @@ class CacheInfo:
         self.aot_autograd_artifacts.clear()
         self.pgo_artifacts.clear()
 
+    def empty(self) -> bool:
+        return not (
+            self.inductor_artifacts
+            or self.autotune_artifacts
+            or self.aot_autograd_artifacts
+            or self.pgo_artifacts
+        )
+
 
 class CacheArtifactManager:
     """
@@ -181,6 +189,12 @@ class CacheArtifactManager:
         for artifact in cls._new_cache_artifacts:
             log.debug("saving: %s", artifact)
             cls._cache_info.add(artifact)
+
+        if cls._cache_info.empty():
+            # If there are not artifacts, dont just return bytes with
+            # version.
+            return None
+
         try:
             # We deep copy cls._cache_info since later compilations
             # can keep adding to cache_info
