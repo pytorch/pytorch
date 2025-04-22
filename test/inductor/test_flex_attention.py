@@ -2026,9 +2026,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertTrue((ref - out).abs().mean() < 1e-2)
 
     @supported_platform
-    @unittest.skipIf(
-        SKIP_UT_ON_CPU, "TODO: fix https://github.com/pytorch/pytorch/issues/151290"
-    )
     def test_make_block_mask(self, device):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
