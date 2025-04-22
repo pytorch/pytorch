@@ -3383,7 +3383,7 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
+        weight_idx = [ops.indirect_indexing(var_index, weight_size[0], wrap_neg=False)] + [
             *idx[indices_ndim:]
         ]
         return weight_loader(weight_idx)
