@@ -1268,8 +1268,11 @@ class DistributedTest:
         # Coalescing manager (sync mode)
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" or IS_FBCODE or IS_SANDCASTLE,
-            "Coalescing manager currently tests with NCCL only; internal test flaky"
+            BACKEND != "nccl" or IS_FBCODE,
+            "Coalescing manager currently tests with NCCL only"
+        )
+        @skip_but_pass_in_sandcastle(
+            "internal test flaky"
         )
         def test_coalescing_manager(self):
             self._barrier()
@@ -1302,8 +1305,11 @@ class DistributedTest:
         # Coalescing manager (async mode)
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" or IS_FBCODE or IS_SANDCASTLE,
-            "Coalescing manager currently tests with NCCL only; internal test flaky"
+            BACKEND != "nccl" or IS_FBCODE,
+            "Coalescing manager currently tests with NCCL only"
+        )
+        @skip_but_pass_in_sandcastle(
+            "internal test flaky"
         )
         def test_coalescing_manager_async(self):
             self._barrier()
