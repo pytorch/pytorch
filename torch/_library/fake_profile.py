@@ -87,7 +87,7 @@ def _generate_fake_kernel(op_name: str, op_profile: set[OpProfile]) -> Callable:
 
 
 @contextlib.contextmanager
-def register_fake_profile(op_profiles: dict[str, set[OpProfile]]) -> Generator:
+def unsafe_generate_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -> Generator:
     """
     Registers a fake kernel based on the given operator profiles. This fake
     kernel registration will override any existing fake kernel registrations.
@@ -99,10 +99,40 @@ def register_fake_profile(op_profiles: dict[str, set[OpProfile]]) -> Generator:
     an output with the same metadata as in the recorded profile. If a profile
     doesn't exist then an exception will be thrown.
 
+    The fake kernel generation is considerd unsafe because it relies on the
+    rigid, pre-defined operator profiles that do not account for potential
+    variations in output behavior. Specifically, the generated kernels assume a
+    fixed relationship between input and output ranks. However, in reality, it's
+    possible that data-dependent operations may produce outputs of different
+    ranks even when given inputs of the same rank. The generated fake kernels
+    are inflexible and unable to accommodate these nuances, making them
+    potentially unsafe.
+
     Args:
         op_profiles (dict[str, set[OpProfile]]): A dictionary mapping operator
             name to a set of operator profiles from which we will generate fake
             kernels.
+
+    Examples:
+
+        >>> # Example: Registering an op-profile from draft-export
+        >>> import torch
+        >>> from torch.export._draft_export import draft_export
+        >>>
+        >>> @torch.library.custom_op("mylib::foo", mutates_args=())
+        >>> def foo(x: Tensor, y: Tensor) -> Tensor:
+        >>>     return x + y
+        >>>
+        >>> class M(torch.nn.Module):
+        >>>     def forward(self, a, b):
+        >>>         res = torch.ops.mylib.foo(a, b)  # no fake impl
+        >>>         return res
+        >>>
+        >>> ep = draft_export(M(), (torch.ones(3, 4), torch.ones(3, 4))
+        >>>
+        >>> with torch._library.fake_profile.unsafe_generate_fake_kernels(ep._report.op_profiles):
+        >>>     decomp = ep.run_decompositions()
+
     """
 
     libs: list[torch.library.Library] = []

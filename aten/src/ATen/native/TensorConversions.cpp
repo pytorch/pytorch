@@ -1023,11 +1023,9 @@ static Tensor _mask_to_indices(const Tensor& mask) {
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
-    Tensor not_zero_mask,
-    ScalarType index_dtype,
-    Device index_device) {
-  auto nz = not_zero_mask.nonzero().transpose(0, 1);
-  return std::pair<Tensor, Tensor>(nz[1], nz[0]);
+    Tensor not_zero_mask) {
+  auto nz = not_zero_mask.nonzero();
+  return {nz.select(1, 1), nz.select(1, 0)};
 }
 
 // Sparse layout conversions Start
@@ -1308,8 +1306,8 @@ static Tensor dense_to_sparse_compressed(
   Tensor col_indices;
   Tensor compressed_indices;
   if (compressed_rows_layout) {
-    std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask, at::kLong, not_zero_mask.device());
+    std::tie(col_indices, row_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask);
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         row_indices, not_zero_mask.size(0), false /*out_int32*/);
     {
@@ -1317,8 +1315,8 @@ static Tensor dense_to_sparse_compressed(
       values = values.flatten(0, 1).index_select(0, mask_indices);
     }
   } else {
-    std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
+    std::tie(row_indices, col_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask.transpose(1, 0));
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         col_indices, not_zero_mask.size(-1), false /*out_int32*/);
     {
