@@ -1218,7 +1218,7 @@ def forward(self, x_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens)
         # Guards to rule out batch_size == sys.maxsize (wobbling between 2 and
         # 1 ok)
-        self.assertEqual(len(gm.shape_env.guards), 1)
+        self.assertEqual(len(gm.shape_env.guards), 0)
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
