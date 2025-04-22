@@ -6295,7 +6295,7 @@ def logcumsumexp(x, dim):
 
 @register_lowering(aten.cummax, type_promotion_kind=None)
 def cummax(x, axis=None):
-    if x.get_numel() <= 1:
+    if V.graph.sizevars.statically_known_leq(x.get_numel(), 1):
         assert axis in [0, -1]
         return clone(x), zeros_like(x, dtype=torch.int64)
 
@@ -6315,7 +6315,7 @@ def cummax(x, axis=None):
 
 @register_lowering(aten.cummin, type_promotion_kind=None)
 def cummin(x, axis=None):
-    if x.get_numel() <= 1:
+    if V.graph.sizevars.statically_known_leq(x.get_numel(), 1):
         assert axis in [0, -1]
         return clone(x), zeros_like(x, dtype=torch.int64)
 
