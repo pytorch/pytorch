@@ -129,11 +129,7 @@ class LogRegistry:
 
     # flattens all the qnames together (TODO: consider memoizing?)
     def get_log_qnames(self) -> set[str]:
-        return {
-            qname
-            for qnames in self.log_alias_to_log_qnames.values()
-            for qname in qnames
-        }
+        return set(itertools.chain.from_iterable(self.log_alias_to_log_qnames.values()))
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
@@ -686,11 +682,12 @@ TORCH_LOGS Info
 
 
 def _invalid_settings_err_msg(settings, verbose=False):
-    valid_settings = ", ".join(
+    valid_settings = (
         ["all"]
         + list(log_registry.log_alias_to_log_qnames.keys())
         + list(log_registry.artifact_names)
     )
+    valid_settings = ", ".join(sorted(valid_settings))
     msg = f"""
 Invalid log settings: {settings}, must be a comma separated list of fully
 qualified module names, registered log names or registered artifact names.
@@ -1275,7 +1272,7 @@ def trace_structured(
 
                     # force newlines so we are unlikely to overflow line limit
                     payload = json.dumps(payload, default=json_default, indent=0)
-            h = hashlib.md5()
+            h = hashlib.md5(usedforsecurity=False)
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()
         trace_log.debug(
@@ -1297,7 +1294,7 @@ def dtrace_structured(
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
-    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
+    expect_trace_id: bool = False,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
 ):
     """

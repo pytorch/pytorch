@@ -260,9 +260,12 @@ class FunctionalTensor(torch.Tensor):
 
     def to(self, *args, **kwargs):
         if _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL).export:
-            # If copy is specified as pos arg, it's always the second one.
-            if len([arg for arg in args if isinstance(arg, bool)]) <= 1:
-                return super().to(*args, **{**kwargs, "copy": True})
+            torch.ops.aten._assert_tensor_metadata(
+                self,
+                dtype=self.dtype,
+                device=self.device,
+                layout=self.layout,
+            )
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):
@@ -354,23 +357,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        if self.export:
-            # We need to make sure that we don't decompose to() as usual in export mode,
-            # because it can get optimized away. Instead we always replace it with _to_copy().
-            if func == torch.ops.aten.to.dtype_layout:
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args, kwargs
-                )
-            if func == torch.ops.aten.to.dtype:
-                schema = tuple(arg.name for arg in func._schema.arguments)
-                for arg, name in zip(args[1:], schema[1:]):
-                    kwargs[name] = arg
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args[:1], kwargs
-                )
-
         unrecognized_types = [
             t
             for t in types
@@ -460,15 +446,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            # it doesn't matter what mode we use here because
-            # the implementation of do_auto_functionalize doesn't
-            # interact with FunctionalTensorMode at all
             import torch._inductor.config as inductor_config
 
             if self.export or not inductor_config.enable_auto_functionalized_v2:
-                return do_auto_functionalize(func, args, kwargs)
+                return do_auto_functionalize(self, func, args, kwargs)
             else:
-                return do_auto_functionalize_v2(func, args, kwargs)
+                return do_auto_functionalize_v2(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -530,36 +513,10 @@ class FunctionalTensorMode(TorchDispatchMode):
                         *args_unwrapped,
                         **kwargs_unwrapped,
                     )
-                    # We don't allow any mutation on result of dropout or _to_copy
+
                     if self.export:
-                        if func in (
-                            torch.ops.aten.dropout.default,
-                            torch.ops.aten._to_copy.default,
-                        ):
-
-                            def must_copy():
-                                """
-                                Return True if the output of the op must be copied, not an alias
-                                """
-                                # output dtype is different from input
-                                return (
-                                    func == torch.ops.aten._to_copy.default
-                                    and "dtype" in kwargs
-                                    and kwargs["dtype"] != args_unwrapped[0].dtype
-                                )
-
-                            # `args_unwrapped` might be a tensor constant, not a functional tensor.
-                            if must_copy() and torch._is_functional_tensor(
-                                args_unwrapped[0]
-                            ):
-                                # We can further relax to args_unwrapped[0] != kwargs["dtype"], but I don't think
-                                # we have an aten op for that.
-                                torch.ops.aten._assert_tensor_metadata.default(
-                                    torch._from_functional_tensor(args_unwrapped[0]),
-                                    dtype=args_unwrapped[0].dtype,
-                                )
-                            else:
-                                torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                        if func == torch.ops.aten.dropout.default:
+                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )

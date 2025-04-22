@@ -89,6 +89,10 @@ class Instruction:
     def short_inst_repr(self) -> str:
         return f"Instruction(opname={self.opname}, offset={self.offset})"
 
+    def copy_positions(self, other: "Instruction") -> None:
+        self.starts_line = other.starts_line
+        self.positions = other.positions
+
 
 if sys.version_info >= (3, 13):
 

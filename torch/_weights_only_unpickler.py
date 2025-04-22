@@ -71,7 +71,7 @@ from sys import maxsize
 from typing import Any, Callable, Union
 
 import torch
-from torch._utils import IMPORT_MAPPING, NAME_MAPPING
+from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
 
 
 # modules in this list are never allowed, even if the user attempts to allowlist
@@ -387,7 +387,10 @@ class Unpickler:
                     cls in _get_user_allowed_globals().values()
                     or cls in _get_allowed_globals().values()
                 ):
-                    self.append(cls.__new__(cls, *args))
+                    result = cls.__new__(cls, *args)
+                    if cls in torch._tensor_classes and "sparse" in cls.__module__:
+                        _sparse_tensors_to_validate.append(result)
+                    self.append(result)
                 else:
                     raise UnpicklingError(
                         "Can only create new object for nn.Parameter or classes allowlisted "
@@ -403,7 +406,10 @@ class Unpickler:
                     raise UnpicklingError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
-                self.stack[-1] = func(*args)
+                result = func(*args)
+                if func in torch._tensor_classes and "sparse" in func.__module__:
+                    _sparse_tensors_to_validate.append(result)
+                self.stack[-1] = result
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]

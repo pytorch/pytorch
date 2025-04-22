@@ -5,7 +5,7 @@
 #   functorch/docs/requirements.txt
 #   .ci/docker/requirements-ci.txt
 boto3==1.35.42
-jinja2==3.1.5
+jinja2==3.1.6
 lintrunner==0.10.7
 ninja==1.10.0.post1
 nvidia-ml-py==11.525.84

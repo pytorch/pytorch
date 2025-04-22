@@ -31,14 +31,17 @@ from typing import (
     Any,
     Callable,
     cast,
+    ClassVar,
+    Final,
     Generic,
+    NoReturn,
     Optional,
     overload,
     Protocol,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, NamedTuple
+from typing_extensions import deprecated, NamedTuple, Self
 
 
 __all__ = [
@@ -54,6 +57,7 @@ __all__ = [
     "keystr",
     "key_get",
     "register_pytree_node",
+    "tree_is_leaf",
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
@@ -73,6 +77,12 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -136,7 +146,7 @@ class NodeDef(NamedTuple):
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc]
 
 
-_NODE_REGISTRY_LOCK = threading.Lock()
+_NODE_REGISTRY_LOCK = threading.RLock()
 SUPPORTED_NODES: dict[type[Any], NodeDef] = {}
 
 
@@ -163,21 +173,12 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
+    # optree was not imported
     _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
 else:
+    # optree was imported
     _cxx_pytree_exists = True
-    from torch._vendor.packaging.version import Version
-
-    _cxx_pytree_dynamo_traceable = Version(_optree_version) >= Version("0.13.0")
-    if not _cxx_pytree_dynamo_traceable:
-        warnings.warn(
-            "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
-            "C++ pytree support is disabled. "
-            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`.",
-            FutureWarning,
-        )
-
-    del Version
+    _cxx_pytree_dynamo_traceable = True
 
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
@@ -194,6 +195,10 @@ def register_pytree_node(
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
+
+    Note:
+        :func:`register_dataclass` is a simpler way of registering a container-like
+        type as a pytree node.
 
     Args:
         cls: the type to register
@@ -255,14 +260,34 @@ def register_pytree_node(
         _cxx_pytree_pending_imports.append((args, kwargs))
 
 
-def register_dataclass(cls: type[Any]) -> None:
-    """Registers a ``dataclasses.dataclass`` type as a pytree node.
+def register_dataclass(
+    cls: type[Any],
+    *,
+    field_names: Optional[list[str]] = None,
+    drop_field_names: Optional[list[str]] = None,
+    serialized_type_name: Optional[str] = None,
+) -> None:
+    """
+    Registers a type that has the semantics of a ``dataclasses.dataclass`` type
+    as a pytree node.
 
     This is a simpler API than :func:`register_pytree_node` for registering
-    a dataclass.
+    a dataclass or a custom class with the semantics of a dataclass.
 
     Args:
-        cls: the dataclass type to register
+        cls: The python type to register. The class must have the semantics of a
+        dataclass; in particular, it must be constructed by passing the fields
+        in.
+        field_names (Optional[List[str]]): A list of field names that correspond
+            to the **non-constant data** in this class. This list must contain
+            all the fields that are used to initialize the class. This argument
+            is optional if ``cls`` is a dataclass, in which case the fields will
+            be taken from ``dataclasses.fields()``.
+        drop_field_names (Optional[List[str]]): A list of field names that
+            should not be included in the pytree.
+        serialized_type_name: A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec. This is only
+            needed for serializing the treespec in torch.export.
 
     Example:
 
@@ -283,25 +308,99 @@ def register_dataclass(cls: type[Any]) -> None:
         >>> assert torch.allclose(point.y, torch.tensor(2))
 
     """
-    import torch.export
+    drop_field_names = drop_field_names or []
 
-    # Eventually we should move the export code here. It is not specific to export,
-    # aside from the serialization pieces.
-    torch.export.register_dataclass(cls)
+    if not dataclasses.is_dataclass(cls):
+        if field_names is None:
+            raise ValueError(
+                "field_names must be specified with a list of all fields used to "
+                f"initialize {cls}, as it is not a dataclass."
+            )
+    elif field_names is None:
+        field_names = [f.name for f in dataclasses.fields(cls) if f.init]
+    else:
+        dataclass_init_fields = {f.name for f in dataclasses.fields(cls) if f.init}
+        dataclass_init_fields.difference_update(drop_field_names)
+
+        if dataclass_init_fields != set(field_names):
+            error_msg = "field_names does not include all dataclass fields.\n"
+
+            if missing := dataclass_init_fields - set(field_names):
+                error_msg += (
+                    f"Missing fields in `field_names`: {missing}. If you want "
+                    "to include these fields in the pytree, please add them "
+                    "to `field_names`, otherwise please add them to "
+                    "`drop_field_names`.\n"
+                )
+
+            if unexpected := set(field_names) - dataclass_init_fields:
+                error_msg += (
+                    f"Unexpected fields in `field_names`: {unexpected}. "
+                    "Please remove these fields, or add them to `drop_field_names`.\n"
+                )
+
+            raise ValueError(error_msg)
+
+    def _flatten_fn(obj: Any) -> tuple[list[Any], Context]:
+        flattened = []
+        flat_names = []
+        none_names = []
+        for name in field_names:
+            val = getattr(obj, name)
+            if val is not None:
+                flattened.append(val)
+                flat_names.append(name)
+            else:
+                none_names.append(name)
+        return flattened, [flat_names, none_names]
+
+    def _unflatten_fn(values: Iterable[Any], context: Context) -> Any:
+        flat_names, none_names = context
+        return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
+
+    def _flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
+        flattened, (flat_names, _none_names) = _flatten_fn(obj)  # type: ignore[misc]
+        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
+
+    _private_register_pytree_node(
+        cls,
+        _flatten_fn,
+        _unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        flatten_with_keys_fn=_flatten_fn_with_keys,
+    )
+
+
+CONSTANT_NODES: set[type] = set()
 
 
 def register_constant(cls: type[Any]) -> None:
     """Registers a type as a pytree node with no leaves.
 
-    Instances of these types are treated as a constant (sometimes referred to as
-    "static") by :func:`torch.compile`. When used in a function compiled by
-    :func:`torch.compile`, :func:`torch.compile` guards on the instance
-    object's hash: if :func:`torch.compile` sees a new hash then
+    In a :func:`torch.compile` region, if instances of these types get passed to
+    :func:`torch._dynamo.nonstrict_trace`-ed function, they treated as a
+    constant (sometimes referred to as "static"):
+
+    1. if the instance object existed before the :func:`torch.compile` region,
+    we _assume_ no mutation will happen to it inside the :func:`torch.compile`
+    region, require that it has non-default `__eq__` and `__hash__` methods, and
+    we guard on the instance based on its `__eq__` method, i.e., if a new
+    instance fails to match any instances from the previous compilations,
     :func:`torch.compile` will recompile the function using the new instance.
+
+    2. else if the instance object is created inside the :func:`torch.compile`
+    region, we currently don't support using it in a
+    :func:`torch._dynamo.nonstrict_trace`-ed function.
 
     In general, if your class holds Tensors or dynamic int/float/bool (values that
     may change from run-to-run of a function being compiled), then you probably
     do not want to register it as a constant.
+
+    Otherwise if you want to pass instance of a class to a
+    :func:`torch._dynamo.nonstrict_trace`-ed function, but you either can't use
+    :func:`register_pytree_node` on the class, or the class is "constant" enough
+    that you don't want to bother using :func:`register_pytree_node`, you should
+    consider using this function.
 
     Args:
         cls: the type to register as a constant. This type must be hashable.
@@ -311,7 +410,7 @@ def register_constant(cls: type[Any]) -> None:
         >>> from dataclasses import dataclass
         >>> import torch.utils._pytree as pytree
         >>>
-        >>> @dataclass
+        >>> @dataclass(frozen=True)
         >>> class Config:
         >>>     norm: str
         >>>
@@ -322,6 +421,17 @@ def register_constant(cls: type[Any]) -> None:
         >>> assert len(values) == 0
 
     """
+    if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+        raise TypeError(
+            "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
+        )
+
+    # Class with a custom `__eq__` without `__hash__` won't inherit the default
+    # `__hash__` from object; see https://stackoverflow.com/a/1608907.
+    if cls.__hash__ is None:  # type: ignore[comparison-overlap]
+        raise TypeError(
+            "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
+        )
 
     def _flatten(x):  # type: ignore[no-untyped-def]
         return [], ConstantNode(x)
@@ -329,14 +439,24 @@ def register_constant(cls: type[Any]) -> None:
     def _unflatten(_, context):  # type: ignore[no-untyped-def]
         return context.value
 
-    _private_register_pytree_node(
-        cls,
-        _flatten,
-        _unflatten,
-    )
+    def _flatten_with_keys(x):  # type: ignore[no-untyped-def]
+        return [], ConstantNode(x)
+
+    with _NODE_REGISTRY_LOCK:
+        _private_register_pytree_node(
+            cls,
+            _flatten,
+            _unflatten,
+            flatten_with_keys_fn=_flatten_with_keys,
+        )
+        CONSTANT_NODES.add(cls)
 
 
-@dataclasses.dataclass
+def is_constant_class(cls: type[Any]) -> bool:
+    return isinstance(cls, type) and cls in CONSTANT_NODES
+
+
+@dataclasses.dataclass(frozen=True)
 class ConstantNode:
     value: Any
 
@@ -451,6 +571,7 @@ def _deregister_pytree_node(
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
         del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
+        CONSTANT_NODES.discard(cls)
 
 
 def _private_register_pytree_node(
@@ -531,6 +652,90 @@ class GetAttrKey:
 
     def get(self, obj: Any) -> Any:
         return getattr(obj, self.name)
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_namedtuple(obj: Union[object, type]) -> bool:
+    """Return whether the object is an instance of namedtuple or a subclass of namedtuple."""
+    cls = obj if isinstance(obj, type) else type(obj)
+    return is_namedtuple_class(cls)
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_namedtuple_class(cls: type) -> bool:
+    """Return whether the class is a subclass of namedtuple."""
+    return (
+        isinstance(cls, type)
+        and issubclass(cls, tuple)
+        and isinstance(getattr(cls, "_fields", None), tuple)
+        and all(type(field) is str for field in cls._fields)  # type: ignore[attr-defined]
+        and callable(getattr(cls, "_make", None))
+        and callable(getattr(cls, "_asdict", None))
+    )
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_namedtuple_instance(obj: object) -> bool:
+    """Return whether the object is an instance of namedtuple."""
+    return is_namedtuple_class(type(obj))
+
+
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+class structseq(tuple[_T_co, ...]):
+    """A generic type stub for CPython's ``PyStructSequence`` type."""
+
+    __slots__: ClassVar[tuple[()]] = ()
+
+    n_fields: Final[int]  # type: ignore[misc]
+    n_sequence_fields: Final[int]  # type: ignore[misc]
+    n_unnamed_fields: Final[int]  # type: ignore[misc]
+
+    def __init_subclass__(cls) -> NoReturn:
+        """Prohibit subclassing."""
+        raise TypeError("type 'structseq' is not an acceptable base type")
+
+    def __new__(
+        cls: type[Self],
+        sequence: Iterable[_T_co],
+        dict: dict[str, Any] = ...,
+    ) -> Self:
+        raise NotImplementedError
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_structseq(obj: Union[object, type]) -> bool:
+    """Return whether the object is an instance of PyStructSequence or a class of PyStructSequence."""
+    cls = obj if isinstance(obj, type) else type(obj)
+    return is_structseq_class(cls)
+
+
+# Set if the type allows subclassing (see CPython's Include/object.h)
+Py_TPFLAGS_BASETYPE: int = 1 << 10
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_structseq_class(cls: type) -> bool:
+    """Return whether the class is a class of PyStructSequence."""
+    return (
+        isinstance(cls, type)
+        # Check direct inheritance from `tuple` rather than `issubclass(cls, tuple)`
+        and cls.__bases__ == (tuple,)
+        # Check PyStructSequence members
+        and isinstance(getattr(cls, "n_fields", None), int)
+        and isinstance(getattr(cls, "n_sequence_fields", None), int)
+        and isinstance(getattr(cls, "n_unnamed_fields", None), int)
+        # Check the type does not allow subclassing
+        and not bool(cls.__flags__ & Py_TPFLAGS_BASETYPE)  # only works for CPython
+    )
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_structseq_instance(obj: object) -> bool:
+    """Return whether the object is an instance of PyStructSequence."""
+    return is_structseq_class(type(obj))
 
 
 def _tuple_flatten(d: tuple[T, ...]) -> tuple[list[T], Context]:
@@ -767,37 +972,72 @@ _private_register_pytree_node(
 )
 
 
-STANDARD_DICT_TYPES: frozenset[type] = frozenset(
-    {dict, OrderedDict, defaultdict},
-)
+STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
 BUILTIN_TYPES: frozenset[type] = frozenset(
-    {tuple, list, dict, namedtuple, OrderedDict, defaultdict, deque},  # type: ignore[arg-type]
+    {
+        tuple,
+        list,
+        dict,
+        namedtuple,  # type: ignore[arg-type]
+        OrderedDict,
+        defaultdict,
+        deque,
+    },
 )
 
 
-# h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
+@deprecated(
+    "torch.utils._pytree._is_namedtuple_instance is private and will be removed in a future release. "
+    "Please use torch.utils._pytree.is_namedtuple_instance instead.",
+    category=FutureWarning,
+)
 def _is_namedtuple_instance(tree: Any) -> bool:
-    typ = type(tree)
-    bases = typ.__bases__
-    if len(bases) != 1 or bases[0] != tuple:
-        return False
-    fields = getattr(typ, "_fields", None)
-    if not isinstance(fields, tuple):
-        return False
-    return all(type(entry) == str for entry in fields)
+    return is_namedtuple_instance(tree)
 
 
 def _get_node_type(tree: Any) -> Any:
-    if _is_namedtuple_instance(tree):
+    node_type = type(tree)
+    # All namedtuple types are implicitly registered as pytree nodes.
+    # XXX: Other parts of the codebase expect namedtuple types always return
+    #      `namedtuple` instead of the actual namedtuple type. Even if the type
+    #      is explicitly registered.
+    if is_namedtuple_class(node_type):
         return namedtuple
-    return type(tree)
+    return node_type
 
 
 # A leaf is defined as anything that is not a Node.
+def tree_is_leaf(
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> bool:
+    """Check if a pytree is a leaf.
+
+    >>> tree_is_leaf(1)
+    True
+    >>> tree_is_leaf(None)
+    True
+    >>> tree_is_leaf([1, 2, 3])
+    False
+    >>> tree_is_leaf((1, 2, 3), is_leaf=lambda x: isinstance(x, tuple))
+    True
+    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': 3})
+    False
+    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': None})
+    False
+    """
+    if is_leaf is not None and is_leaf(tree):
+        return True
+    return _get_node_type(tree) not in SUPPORTED_NODES
+
+
+@deprecated(
+    "torch.utils._pytree._is_leaf is private and will be removed in a future release. "
+    "Please use torch.utils._pytree.tree_is_leaf instead.",
+    category=FutureWarning,
+)
 def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -> bool:
-    return (is_leaf is not None and is_leaf(tree)) or _get_node_type(
-        tree
-    ) not in SUPPORTED_NODES
+    return tree_is_leaf(tree, is_leaf=is_leaf)
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
@@ -964,11 +1204,20 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
 
+# NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
+# this class with `dataclasses.fields`, etc., while having a simplified
+# constructor that takes no argument, we wrap with `dataclass(init=True, ...)`
+# again, with fields that have `init=False`.
+@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
 class LeafSpec(TreeSpec):
-    def __init__(self) -> None:
-        super().__init__(None, None, [])
+    type: Any = dataclasses.field(default=None, init=False)
+    context: Context = dataclasses.field(default=None, init=False)
+    children_specs: list["TreeSpec"] = dataclasses.field(
+        default_factory=list, init=False
+    )
 
     def __post_init__(self) -> None:
+        # Override `__post_init__` for `num_leaves` derivation.
         object.__setattr__(self, "num_nodes", 1)
         object.__setattr__(self, "num_leaves", 1)
         object.__setattr__(self, "num_children", 0)
@@ -991,7 +1240,7 @@ def tree_flatten(
     """
 
     def helper(node: PyTree, leaves: list[Any]) -> TreeSpec:
-        if _is_leaf(node, is_leaf=is_leaf):
+        if tree_is_leaf(node, is_leaf=is_leaf):
             leaves.append(node)
             return _LEAF_SPEC
 
@@ -1025,7 +1274,7 @@ def tree_iter(
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Iterable[Any]:
     """Get an iterator over the leaves of a pytree."""
-    if _is_leaf(tree, is_leaf=is_leaf):
+    if tree_is_leaf(tree, is_leaf=is_leaf):
         yield tree
     else:
         node_type = _get_node_type(tree)
@@ -1471,7 +1720,7 @@ def _broadcast_to_and_flatten(
 ) -> Optional[list[Any]]:
     assert isinstance(treespec, TreeSpec)
 
-    if _is_leaf(tree, is_leaf=is_leaf):
+    if tree_is_leaf(tree, is_leaf=is_leaf):
         return [tree] * treespec.num_leaves
     if treespec.is_leaf():
         return None

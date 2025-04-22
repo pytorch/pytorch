@@ -806,8 +806,8 @@ class DefaultHandler(OpsHandler[Any]):
                 assert self_arg == "self"
                 code.write(
                     f"""
-                    def {target}(self, {', '.join(args)}):
-                        return self._default({target!r}, ({', '.join(args)}, ), {{}})
+                    def {target}(self, {", ".join(args)}):
+                        return self._default({target!r}, ({", ".join(args)}, ), {{}})
                     """.strip()
                 )
                 code.write("\n\n")
@@ -994,8 +994,9 @@ class KernelFormatterHandler(DefaultHandler):
                 )
                 formatter._output.writeline(f"{lhs} = {name}")
 
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
+        with (
+            V.set_ops_handler(formatter),
+            patch.object(FlexibleLayout, "allow_indexing", True),
         ):
             result = ir_fn(*args)
             return formatter.getvalue(result)

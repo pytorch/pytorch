@@ -104,10 +104,6 @@ Tensor _cudnn_init_dropout_state(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-      pin_memory);
-
   TORCH_CHECK(
       false, "_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
@@ -1287,7 +1283,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
 #else
   return get_num_weights(handle, rnn_desc, flat_buf_datatype);
 #endif
-};
+}
 
 } // namespace native
 

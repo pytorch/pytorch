@@ -243,9 +243,9 @@ def _init_inter_node_process_group(
         if local_rank == my_local_rank:
             inter_node_pg = grp
 
-    assert (
-        inter_node_pg is not None
-    ), f"{my_local_rank} expected to assign inter-node pg, but did not"
+    assert inter_node_pg is not None, (
+        f"{my_local_rank} expected to assign inter-node pg, but did not"
+    )
     return inter_node_pg
 
 

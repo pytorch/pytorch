@@ -141,7 +141,7 @@ class _MinimizerBase:
         callable_nodes = {
             node for node in self.module.graph.nodes if node.op in CALLABLE_NODE_OPS
         }
-        ShapeProp(self.module).propagate(*self.sample_input)
+        self.run_shape_prop()
         self.fusions = FxNetAccFusionsFinder(self.module, callable_nodes)()
 
         # Check if number of input in sample_input matches the number of placeholders
@@ -154,6 +154,13 @@ class _MinimizerBase:
         for i, name in enumerate(placeholders):
             self.a_outputs[name] = sample_input[i]
             self.b_outputs[name] = sample_input[i]
+
+    def run_shape_prop(self) -> None:
+        """
+        Helper function to run shape propagation on module. Can be overridden by
+        subclasses for custom shape propagation logic.
+        """
+        ShapeProp(self.module).propagate(*self.sample_input)
 
     def run_a(
         self, mod: torch.fx.GraphModule, inputs: Tensors, report_idx: int = -1

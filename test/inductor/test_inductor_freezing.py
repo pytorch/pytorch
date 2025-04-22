@@ -28,7 +28,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 importlib.import_module("functorch")
@@ -968,7 +968,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class FreezingGpuTests(TestCase):
         common = check_model_gpu

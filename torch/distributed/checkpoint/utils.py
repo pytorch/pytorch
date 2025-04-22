@@ -32,7 +32,7 @@ R = TypeVar("R")
 
 
 def _get_failure_dict(
-    results: list[Union[T, WRAPPED_EXCEPTION]]
+    results: list[Union[T, WRAPPED_EXCEPTION]],
 ) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
         dict[int, WRAPPED_EXCEPTION],
@@ -92,9 +92,15 @@ class _DistWrapper:
         self.use_dist = use_dist
         self.coordinator_rank = coordinator_rank
         if self.use_dist:
+            self.global_coordinator_rank = (
+                dist.get_global_rank(group, coordinator_rank)
+                if group is not None
+                else coordinator_rank
+            )
             self.rank = dist.get_rank(group)
             self.is_coordinator = self.rank == coordinator_rank
         else:
+            self.global_coordinator_rank = 0
             self.rank = 0
             self.is_coordinator = True
 
@@ -129,7 +135,7 @@ class _DistWrapper:
             dist.gather_object(
                 obj=object,
                 object_gather_list=gather_objs if self.is_coordinator else None,
-                dst=self.coordinator_rank,
+                dst=self.global_coordinator_rank,
                 group=self.group,
             )
             result = gather_objs
@@ -156,7 +162,7 @@ class _DistWrapper:
             dist.scatter_object_list(
                 scatter_object_output_list=gather_result,
                 scatter_object_input_list=object_list if self.is_coordinator else None,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
                 group=self.group,
             )
 
@@ -300,6 +306,16 @@ class _DistWrapper:
         if isinstance(final_result, CheckpointException):
             raise final_result
         return cast(T, final_result)
+
+    def barrier(self) -> None:
+        """
+        Add a synchronization point across all processes when using distributed.
+        If torch.distributed is initialized, this function will invoke a barrier across the global process group.
+        If torch.distributed is not initialized, this function is a no-op.
+        """
+        if not self.use_dist:
+            return
+        dist.barrier(group=self.group)
 
 
 def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:

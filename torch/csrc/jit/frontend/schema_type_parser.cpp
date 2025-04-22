@@ -194,11 +194,11 @@ std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       const std::string& num = L.expect(TK_NUMBER).text();
       try {
         device_idx = static_cast<c10::DeviceIndex>(std::stoi(num));
-      } catch (const std::invalid_argument& e) {
+      } catch (const std::invalid_argument&) {
         throw(
             ErrorReport(L.cur())
             << "Device index cannot be converted to integer");
-      } catch (const std::out_of_range& e) {
+      } catch (const std::out_of_range&) {
         throw(ErrorReport(L.cur()) << "Device index is too long");
       }
     }
@@ -217,11 +217,11 @@ std::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   const std::string& num = L.expect(TK_NUMBER).text();
   try {
     return (bool)std::stoi(num);
-  } catch (const std::invalid_argument& e) {
+  } catch (const std::invalid_argument&) {
     throw(
         ErrorReport(L.cur())
         << "Field requires_grad cannot be converted to integer");
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     throw(ErrorReport(L.cur()) << "Field requires_grad is too long");
   }
 }
@@ -277,11 +277,11 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           try {
             auto stride = std::stoll(num);
             strides.push_back(stride);
-          } catch (const std::invalid_argument& e) {
+          } catch (const std::invalid_argument&) {
             throw(
                 ErrorReport(L.cur())
                 << "The stride value cannot be converted to int");
-          } catch (const std::out_of_range& e) {
+          } catch (const std::out_of_range&) {
             throw(ErrorReport(L.cur()) << "The stride is too big");
           }
         });
@@ -317,9 +317,9 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     int64_t dim = 0;
     try {
       dim = std::stoll(num);
-    } catch (const std::invalid_argument& e) {
+    } catch (const std::invalid_argument&) {
       throw(ErrorReport(L.cur()) << "The number can't be converted to int");
-    } catch (const std::out_of_range& e) {
+    } catch (const std::out_of_range&) {
       throw(ErrorReport(L.cur()) << "Number is too big");
     }
     if (shape_symbol) {

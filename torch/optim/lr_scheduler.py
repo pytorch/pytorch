@@ -21,7 +21,7 @@ from weakref import ref
 
 from torch import inf, Tensor
 
-from .optimizer import Optimizer
+from .optimizer import _to_scalar, Optimizer
 
 
 __all__ = [
@@ -53,18 +53,6 @@ EPOCH_DEPRECATION_WARNING = (
 )
 
 
-def _check_verbose_deprecated_warning(verbose):
-    """Raise a warning when verbose is not the default value."""
-    if verbose != "deprecated":
-        warnings.warn(
-            "The verbose parameter is deprecated. Please use get_last_lr() "
-            "to access the learning rate.",
-            UserWarning,
-        )
-        return verbose
-    return False
-
-
 def _format_param(name: str, optimizer: Optimizer, param):
     """Return correctly formatted lr/momentum for each param group."""
 
@@ -92,7 +80,6 @@ class LRScheduler:
         self,
         optimizer: Optimizer,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
@@ -142,7 +129,6 @@ class LRScheduler:
             opt.step = wrap_step(opt.step)  # type: ignore[method-assign]
 
         patch_track_step_called(self.optimizer)
-        self.verbose = _check_verbose_deprecated_warning(verbose)
         self._initial_step()
 
     def _initial_step(self):
@@ -176,34 +162,6 @@ class LRScheduler:
     def get_lr(self) -> list[float]:
         """Compute learning rate using chainable form of the scheduler."""
         raise NotImplementedError
-
-    def print_lr(
-        self,
-        is_verbose: bool,
-        group: dict[str, Any],
-        lr: float,
-        epoch: Optional[int] = None,
-    ):
-        """Display the current learning rate.
-
-        .. deprecated:: 2.4
-            ``print_lr()`` is deprecated. Please use ``get_last_lr()`` to access the
-            learning rate.
-        """
-        warnings.warn(
-            "`LRScheduler.print_lr()` is being deprecated. To fetch the learning rate, "
-            "please use `get_last_lr()` instead. For more details, "
-            "see https://github.com/pytorch/pytorch/issues/99270.",
-            UserWarning,
-        )
-        if is_verbose:
-            if epoch is None:
-                print(f"Adjusting learning rate of group {group} to {lr:.4e}.")
-            else:
-                epoch_str = ("%.2f" if isinstance(epoch, float) else "%.5d") % epoch
-                print(
-                    f"Epoch {epoch_str}: adjusting learning rate of group {group} to {lr:.4e}."
-                )
 
     def step(self, epoch: Optional[int] = None):
         """Perform a step."""
@@ -246,7 +204,7 @@ class LRScheduler:
 
         for param_group, lr in zip(self.optimizer.param_groups, values):
             if isinstance(param_group["lr"], Tensor):
-                param_group["lr"].fill_(lr)
+                param_group["lr"].fill_(_to_scalar(lr))
             else:
                 param_group["lr"] = lr
 
@@ -295,23 +253,27 @@ class LambdaLR(LRScheduler):
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
         >>> # Assuming optimizer has two groups.
+        >>> num_epochs = 100
         >>> lambda1 = lambda epoch: epoch // 30
         >>> lambda2 = lambda epoch: 0.95 ** epoch
         >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
-        >>> for epoch in range(100):
+        >>> for epoch in range(num_epochs):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+        >>>
+        >>> # Alternatively, you can use a single lambda function for all groups.
+        >>> scheduler = LambdaLR(opt, lr_lambda=lambda epoch: epoch // 30)
+        >>> for epoch in range(num_epochs):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/LambdaLR.png
     """
 
     def __init__(
@@ -319,7 +281,6 @@ class LambdaLR(LRScheduler):
         optimizer: Optimizer,
         lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         self.optimizer = optimizer
 
@@ -332,7 +293,7 @@ class LambdaLR(LRScheduler):
                     f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}"
                 )
             self.lr_lambdas = list(lr_lambda)
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def state_dict(self):
         """Return the state of the scheduler as a :class:`dict`.
@@ -397,12 +358,6 @@ class MultiplicativeLR(LRScheduler):
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -412,6 +367,8 @@ class MultiplicativeLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/MultiplicativeLR.png
     """
 
     def __init__(
@@ -419,7 +376,6 @@ class MultiplicativeLR(LRScheduler):
         optimizer: Optimizer,
         lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         self.optimizer = optimizer
 
@@ -432,7 +388,7 @@ class MultiplicativeLR(LRScheduler):
                     f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}"
                 )
             self.lr_lambdas = list(lr_lambda)
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def state_dict(self):
         """Return the state of the scheduler as a :class:`dict`.
@@ -497,12 +453,6 @@ class StepLR(LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -516,6 +466,8 @@ class StepLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/StepLR.png
     """
 
     def __init__(
@@ -524,11 +476,10 @@ class StepLR(LRScheduler):
         step_size: int,
         gamma: float = 0.1,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         self.step_size = step_size
         self.gamma = gamma
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Compute the learning rate of each parameter group."""
@@ -557,12 +508,6 @@ class MultiStepLR(LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -575,6 +520,8 @@ class MultiStepLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/MultiStepLR.png
     """
 
     def __init__(
@@ -583,11 +530,10 @@ class MultiStepLR(LRScheduler):
         milestones: Iterable[int],
         gamma: float = 0.1,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         self.milestones = Counter(milestones)
         self.gamma = gamma
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Compute the learning rate of each parameter group."""
@@ -622,12 +568,6 @@ class ConstantLR(LRScheduler):
         total_iters (int): The number of steps that the scheduler multiplies the learning rate by the factor.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -636,12 +576,15 @@ class ConstantLR(LRScheduler):
         >>> # lr = 0.025   if epoch == 1
         >>> # lr = 0.025   if epoch == 2
         >>> # lr = 0.025   if epoch == 3
-        >>> # lr = 0.05    if epoch >= 4
-        >>> scheduler = ConstantLR(optimizer, factor=0.5, total_iters=4)
+        >>> # ...
+        >>> # lr = 0.05    if epoch >= 40
+        >>> scheduler = ConstantLR(optimizer, factor=0.5, total_iters=40)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/ConstantLR.png
     """
 
     def __init__(
@@ -650,7 +593,6 @@ class ConstantLR(LRScheduler):
         factor: float = 1.0 / 3,
         total_iters: int = 5,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         if factor > 1.0 or factor < 0:
             raise ValueError(
@@ -659,7 +601,7 @@ class ConstantLR(LRScheduler):
 
         self.factor = factor
         self.total_iters = total_iters
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Compute the learning rate of each parameter group."""
@@ -700,26 +642,23 @@ class LinearLR(LRScheduler):
         total_iters (int): The number of iterations that multiplicative factor reaches to 1.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
         >>> # Assuming optimizer uses lr = 0.05 for all groups
-        >>> # lr = 0.025    if epoch == 0
-        >>> # lr = 0.03125  if epoch == 1
-        >>> # lr = 0.0375   if epoch == 2
-        >>> # lr = 0.04375  if epoch == 3
-        >>> # lr = 0.05    if epoch >= 4
-        >>> scheduler = LinearLR(optimizer, start_factor=0.5, total_iters=4)
+        >>> # lr = 0.003687  if epoch == 0
+        >>> # lr = 0.004875  if epoch == 1
+        >>> # lr = 0.006062  if epoch == 2
+        >>> # lr = 0.00725   if epoch == 3
+        >>> # ...
+        >>> # lr = 0.05      if epoch >= 40
+        >>> scheduler = LinearLR(optimizer, start_factor=0.05, total_iters=40)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/LinearLR.png
     """
 
     def __init__(
@@ -729,7 +668,6 @@ class LinearLR(LRScheduler):
         end_factor: float = 1.0,
         total_iters: int = 5,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         if start_factor > 1.0 or start_factor <= 0:
             raise ValueError(
@@ -744,7 +682,7 @@ class LinearLR(LRScheduler):
         self.start_factor = start_factor
         self.end_factor = end_factor
         self.total_iters = total_iters
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Compute the learning rate."""
@@ -793,12 +731,16 @@ class ExponentialLR(LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         gamma (float): Multiplicative factor of learning rate decay.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
 
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> scheduler = ExponentialLR(optimizer, gamma=0.95)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/ExponentialLR.png
     """
 
     def __init__(
@@ -806,10 +748,9 @@ class ExponentialLR(LRScheduler):
         optimizer: Optimizer,
         gamma: float,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         self.gamma = gamma
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Compute the learning rate of each parameter group."""
@@ -834,27 +775,26 @@ class SequentialLR(LRScheduler):
         schedulers (list): List of chained schedulers.
         milestones (list): List of integers that reflects milestone points.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): Does nothing.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> # Assuming optimizer uses lr = 1. for all groups
-        >>> # lr = 0.1     if epoch == 0
-        >>> # lr = 0.1     if epoch == 1
-        >>> # lr = 0.9     if epoch == 2
-        >>> # lr = 0.81    if epoch == 3
-        >>> # lr = 0.729   if epoch == 4
-        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.005     if epoch == 0
+        >>> # lr = 0.005     if epoch == 1
+        >>> # lr = 0.005     if epoch == 2
+        >>> # ...
+        >>> # lr = 0.05      if epoch == 20
+        >>> # lr = 0.045     if epoch == 21
+        >>> # lr = 0.0405    if epoch == 22
+        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=20)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
-        >>> scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[2])
+        >>> scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[20])
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/SequentialLR.png
     """
 
     def __init__(
@@ -863,7 +803,6 @@ class SequentialLR(LRScheduler):
         schedulers: list[LRScheduler],
         milestones: list[int],
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         if len(schedulers) < 1:
             raise ValueError(
@@ -894,7 +833,6 @@ class SequentialLR(LRScheduler):
                 f"than the number of milestone points, but got number of schedulers {len(schedulers)} and the "
                 f"number of milestones to be equal to {len(milestones)}"
             )
-        _check_verbose_deprecated_warning(verbose)
         self._schedulers = schedulers
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
@@ -982,26 +920,22 @@ class PolynomialLR(LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         total_iters (int): The number of steps that the scheduler decays the learning rate. Default: 5.
         power (float): The power of the polynomial. Default: 1.0.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP("undefined vars")
-        >>> # Assuming optimizer uses lr = 0.001 for all groups
-        >>> # lr = 0.001     if epoch == 0
-        >>> # lr = 0.00075   if epoch == 1
-        >>> # lr = 0.00050   if epoch == 2
-        >>> # lr = 0.00025   if epoch == 3
-        >>> # lr = 0.0       if epoch >= 4
-        >>> scheduler = PolynomialLR(optimizer, total_iters=4, power=1.0)
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.0490   if epoch == 0
+        >>> # lr = 0.0481   if epoch == 1
+        >>> # lr = 0.0472   if epoch == 2
+        >>> # ...
+        >>> # lr = 0.0      if epoch >= 50
+        >>> scheduler = PolynomialLR(optimizer, total_iters=50, power=0.9)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/PolynomialLR.png
     """
 
     def __init__(
@@ -1010,11 +944,10 @@ class PolynomialLR(LRScheduler):
         total_iters: int = 5,
         power: float = 1.0,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         self.total_iters = total_iters
         self.power = power
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Compute the learning rate."""
@@ -1074,15 +1007,20 @@ class CosineAnnealingLR(LRScheduler):
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> num_epochs = 100
+        >>> scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
+        >>> for epoch in range(num_epochs):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/CosineAnnealingLR.png
     """
 
     def __init__(
@@ -1091,11 +1029,10 @@ class CosineAnnealingLR(LRScheduler):
         T_max: int,
         eta_min: float = 0.0,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         self.T_max = T_max
         self.eta_min = eta_min
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Retrieve the learning rate of each parameter group."""
@@ -1147,19 +1084,23 @@ class ChainedScheduler(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> # Assuming optimizer uses lr = 1. for all groups
-        >>> # lr = 0.09     if epoch == 0
-        >>> # lr = 0.081    if epoch == 1
-        >>> # lr = 0.729    if epoch == 2
-        >>> # lr = 0.6561   if epoch == 3
-        >>> # lr = 0.59049  if epoch >= 4
-        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.05      if epoch == 0
+        >>> # lr = 0.0450    if epoch == 1
+        >>> # lr = 0.0405    if epoch == 2
+        >>> # ...
+        >>> # lr = 0.00675   if epoch == 19
+        >>> # lr = 0.06078   if epoch == 20
+        >>> # lr = 0.05470   if epoch == 21
+        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=20)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
         >>> scheduler = ChainedScheduler([scheduler1, scheduler2], optimizer=optimizer)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/ChainedScheduler.png
     """
 
     def __init__(
@@ -1281,12 +1222,6 @@ class ReduceLROnPlateau(LRScheduler):
         eps (float): Minimal decay applied to lr. If the difference
             between new and old lr is smaller than eps, the update is
             ignored. Default: 1e-8.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1297,6 +1232,8 @@ class ReduceLROnPlateau(LRScheduler):
         >>>     val_loss = validate(...)
         >>>     # Note that step should be called after validate()
         >>>     scheduler.step(val_loss)
+
+    .. image:: ../scripts/lr_scheduler_images/ReduceLROnPlateau.png
     """
 
     def __init__(
@@ -1310,7 +1247,6 @@ class ReduceLROnPlateau(LRScheduler):
         cooldown: int = 0,
         min_lr: Union[list[float], float] = 0,
         eps: float = 1e-8,
-        verbose="deprecated",
     ):  # noqa: D107
         if factor >= 1.0:
             raise ValueError("Factor should be < 1.0.")
@@ -1333,16 +1269,7 @@ class ReduceLROnPlateau(LRScheduler):
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
         self.patience = patience
-
-        self.verbose = _check_verbose_deprecated_warning(verbose)
         self.cooldown = cooldown
-        self.cooldown_counter = 0
-        self.mode = mode
-        self.threshold = threshold
-        self.threshold_mode = threshold_mode
-        self.best: float
-        self.num_bad_epochs: int
-        self.mode_worse: float  # the worse value for the chosen mode
         self.eps = eps
         self.last_epoch = 0
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
@@ -1430,6 +1357,7 @@ class ReduceLROnPlateau(LRScheduler):
         if threshold_mode not in {"rel", "abs"}:
             raise ValueError("threshold mode " + threshold_mode + " is unknown!")
 
+        # the worse value for the chosen mode
         if mode == "min":
             self.mode_worse = inf
         else:  # mode == 'max':
@@ -1438,11 +1366,6 @@ class ReduceLROnPlateau(LRScheduler):
         self.mode = mode
         self.threshold = threshold
         self.threshold_mode = threshold_mode
-
-    def state_dict(self):  # noqa: D102
-        return {
-            key: value for key, value in self.__dict__.items() if key != "optimizer"
-        }
 
     def load_state_dict(self, state_dict):
         """Load the scheduler's state."""
@@ -1529,23 +1452,18 @@ class CyclicLR(LRScheduler):
             number of *batches* computed, not the total number of epochs computed.
             When last_epoch=-1, the schedule is started from the beginning.
             Default: -1
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.01, max_lr=0.1)
+        >>> scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.01, max_lr=0.1, step_size_up=10)
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
         >>>         train_batch(...)
         >>>         scheduler.step()
 
+    .. image:: ../scripts/lr_scheduler_images/CyclicLR.png
 
     .. _Cyclical Learning Rates for Training Neural Networks: https://arxiv.org/abs/1506.01186
     .. _bckenstler/CLR: https://github.com/bckenstler/CLR
@@ -1566,7 +1484,6 @@ class CyclicLR(LRScheduler):
         base_momentum: float = 0.8,
         max_momentum: float = 0.9,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
@@ -1628,7 +1545,7 @@ class CyclicLR(LRScheduler):
                     group["max_momentum"] = m_momentum
                     group["base_momentum"] = b_momentum
 
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
         self.base_lrs = base_lrs
 
     def _init_scale_fn(self):
@@ -1756,15 +1673,20 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         T_mult (int, optional): A factor by which :math:`T_{i}` increases after a restart. Default: 1.
         eta_min (float, optional): Minimum learning rate. Default: 0.
         last_epoch (int, optional): The index of the last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.05)
+        >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/CosineAnnealingWarmRestarts.png
     """
 
     def __init__(
@@ -1774,7 +1696,6 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         T_mult: int = 1,
         eta_min: float = 0.0,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError(f"Expected positive integer T_0, but got {T_0}")
@@ -1789,7 +1710,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         self.T_mult = T_mult
         self.eta_min = eta_min
         self.T_cur = last_epoch
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
         """Compute the initial learning rate."""
@@ -1959,12 +1880,6 @@ class OneCycleLR(LRScheduler):
             number of *batches* computed, not the total number of epochs computed.
             When last_epoch=-1, the schedule is started from the beginning.
             Default: -1
-        verbose (bool | str): If ``True``, prints a message to stdout for
-            each update. Default: ``False``.
-
-            .. deprecated:: 2.2
-                ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
-                learning rate.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1977,6 +1892,7 @@ class OneCycleLR(LRScheduler):
         >>>         optimizer.step()
         >>>         scheduler.step()
 
+    .. image:: ../scripts/lr_scheduler_images/OneCycleLR.png
 
     .. _Super-Convergence\: Very Fast Training of Neural Networks Using Large Learning Rates:
         https://arxiv.org/abs/1708.07120
@@ -1998,7 +1914,6 @@ class OneCycleLR(LRScheduler):
         final_div_factor: float = 1e4,
         three_phase: bool = False,
         last_epoch: int = -1,
-        verbose="deprecated",
     ):  # noqa: D107
         # Validate optimizer
         if not isinstance(optimizer, Optimizer):
@@ -2114,7 +2029,7 @@ class OneCycleLR(LRScheduler):
                     group["max_momentum"] = m_momentum
                     group["base_momentum"] = b_momentum
 
-        super().__init__(optimizer, last_epoch, verbose)
+        super().__init__(optimizer, last_epoch)
 
     def _anneal_func(self, *args, **kwargs):
         if hasattr(self, "_anneal_func_type"):
@@ -2148,7 +2063,7 @@ class OneCycleLR(LRScheduler):
 
         if step_num > self.total_steps:
             raise ValueError(
-                f"Tried to step {step_num} times. The specified number of total steps is {self.total_steps}"  # noqa: UP032
+                f"Tried to step {step_num} times. The specified number of total steps is {self.total_steps}"
             )
 
         for group in self.optimizer.param_groups:

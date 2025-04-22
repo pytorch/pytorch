@@ -10,7 +10,7 @@ seamlessly optimize PyTorch programs, including those using modern Python featur
 
 import torch
 
-from . import convert_frame, eval_frame, resume_execution
+from . import config, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
@@ -26,6 +26,7 @@ from .decorators import (
     mark_static,
     mark_static_address,
     maybe_mark_dynamic,
+    nonstrict_trace,
     run,
     set_stance,
     substitute_in_graph,
@@ -63,6 +64,7 @@ __all__ = [
     "maybe_mark_dynamic",
     "mark_static",
     "mark_static_address",
+    "nonstrict_trace",
     "optimize",
     "optimize_assert",
     "export",
@@ -77,6 +79,7 @@ __all__ = [
     "register_backend",
     "list_backends",
     "lookup_backend",
+    "config",
 ]
 
 # allowlist this for weights_only load of NJTs

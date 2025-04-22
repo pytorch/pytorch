@@ -169,8 +169,6 @@ Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
 
-\* We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
-
 An example of environment setup is shown below:
 
 * Linux:
@@ -223,7 +221,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 #### Get the PyTorch Source
 ```bash
-git clone --recursive https://github.com/pytorch/pytorch
+git clone https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
@@ -274,13 +272,6 @@ conda install -c conda-forge libuv=1.39
 #### Install PyTorch
 **On Linux**
 
-If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
-```bash
-export _GLIBCXX_USE_CXX11_ABI=1
-```
-
-Please **note** that starting from PyTorch 2.5, the PyTorch build with XPU supports both new and old C++ ABIs. Previously, XPU only supported the new C++ ABI. If you want to compile with Intel GPU support, please follow [Intel GPU Support](#intel-gpu-support).
-
 If you're compiling for AMD ROCm then first run this command:
 ```bash
 # Only run this if you're compiling for ROCm
@@ -305,7 +296,7 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 
 **CPU-only builds**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
 python setup.py develop
@@ -351,6 +342,28 @@ set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC
 
 python setup.py develop
 
+```
+
+**Intel GPU builds**
+
+In this mode PyTorch with Intel GPU support will be built.
+
+Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed and the environment variables are configured prior to starting the build. For build tool support, `Visual Studio 2022` is required.
+
+Then PyTorch can be built with the command:
+
+```cmd
+:: CMD Commands:
+:: Set the CMAKE_PREFIX_PATH to help find corresponding packages
+:: %CONDA_PREFIX% only works after `conda activate custom_env`
+
+if defined CMAKE_PREFIX_PATH (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library;%CMAKE_PREFIX_PATH%"
+) else (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
+)
+
+python setup.py develop
 ```
 
 ##### Adjust Build Options (Optional)

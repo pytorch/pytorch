@@ -18,7 +18,12 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
-from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
+from .utils import (
+    cache_on_self,
+    reduction_num_outputs,
+    sympy_index_symbol_with_prefix,
+    sympy_subs,
+)
 from .virtualized import ops, V
 
 
@@ -194,11 +199,12 @@ class LoopBody:
         # There is indeed an issue due to symbol name conflicting.
         # y0 maybe reused for the y dimension later.
         (
-            iter_vars,
-            reduce_vars,
-        ), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_sizes, reduce_sizes, prefix="t"
-        )
+            (
+                iter_vars,
+                reduce_vars,
+            ),
+            var_ranges,
+        ) = dependencies.index_vars_no_squeeze(iter_sizes, reduce_sizes, prefix="t")
         new_body = LoopBody(
             old_body,
             [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
@@ -234,14 +240,15 @@ class LoopBody:
         new_sizes = (new_iter_size, reduce_size)
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="t"  # type: ignore[arg-type]
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}
         inverse_order = [inverse_order[i] for i in range(len(new_order))]
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
-            index = list(itertools.chain(*indices))
+            index = [*itertools.chain.from_iterable(indices)]
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
@@ -254,7 +261,8 @@ class LoopBody:
 
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="p"  # type: ignore[arg-type]
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
         )
         new_body = LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -385,9 +393,9 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(
-            v not in self.var_ranges for v in index
-        ), f"{self.var_ranges=}, {indices=}"
+        assert all(v not in self.var_ranges for v in index), (
+            f"{self.var_ranges=}, {indices=}"
+        )
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
@@ -440,6 +448,7 @@ class LoopBodyBlock:
 
     def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
         self.body = body
+
         tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
 
@@ -550,8 +559,9 @@ class CaptureIndexing(WrapperHandler):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
-        if "welford" in reduction_type:
-            return tuple(result[i] for i in range(3))
+        num_outputs = reduction_num_outputs(reduction_type)
+        if num_outputs > 1:
+            return tuple(result[i] for i in range(num_outputs))
         return result
 
     def index_expr(self, index, dtype):

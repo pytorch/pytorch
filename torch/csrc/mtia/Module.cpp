@@ -3,41 +3,19 @@
 #include <c10/core/Stream.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
+#include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
-#ifndef WIN32
-#include <pthread.h>
-#endif
 
 namespace torch::mtia {
-
-static bool in_bad_fork = false; // True for children forked after mtia init
-
-#ifndef WIN32
-// Called in the forked child if mtia has already been initialized
-static void forked_child() {
-  in_bad_fork = true;
-  torch::utils::set_requires_device_init(at::kMTIA, true);
-}
-#endif
-
-// Should be called before the first mtia call.
-// Note: This is distinct from initExtension because a stub mtia implementation
-// has some working functions (e.g. device_count) but cannot fully initialize.
-static void poison_fork() {
-#ifndef WIN32
-  static auto result [[maybe_unused]] =
-      pthread_atfork(nullptr, nullptr, forked_child);
-#endif
-}
 
 void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   m.def("_mtia_init", []() {
-    TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
-    poison_fork();
+    TORCH_INTERNAL_ASSERT(!torch::utils::is_device_in_bad_fork(at::kMTIA));
+    torch::utils::register_fork_handler_for_device_init(at::kMTIA);
     at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
   });
 
@@ -46,17 +24,38 @@ void initModule(PyObject* module) {
     return at::detail::isMTIAHooksBuilt();
   });
 
-  m.def("_mtia_isInBadFork", []() { return in_bad_fork; });
+  m.def("_mtia_isInBadFork", []() {
+    return torch::utils::is_device_in_bad_fork(at::kMTIA);
+  });
 
   m.def("_mtia_getCurrentStream", [](c10::DeviceIndex device_index) {
     torch::utils::device_lazy_init(at::kMTIA);
     return at::detail::getMTIAHooks().getCurrentStream(device_index);
   });
 
+  m.def("_mtia_getCurrentRawStream", [](c10::DeviceIndex device_index) {
+    torch::utils::device_lazy_init(at::kMTIA);
+    return at::detail::getMTIAHooks().getCurrentRawStream(device_index);
+  });
+
   m.def("_mtia_deviceSynchronize", []() {
     torch::utils::device_lazy_init(at::kMTIA);
     at::detail::getMTIAHooks().deviceSynchronize(
         at::detail::getMTIAHooks().getCurrentDevice());
+  });
+
+  m.def("_mtia_exchangeDevice", [](c10::DeviceIndex device_index) {
+    if (device_index < 0) {
+      return static_cast<c10::DeviceIndex>(-1);
+    }
+    return at::detail::getMTIAHooks().exchangeDevice(device_index);
+  });
+
+  m.def("_mtia_maybeExchangeDevice", [](c10::DeviceIndex device_index) {
+    if (device_index < 0) {
+      return static_cast<c10::DeviceIndex>(-1);
+    }
+    return at::detail::getMTIAHooks().maybeExchangeDevice(device_index);
   });
 
   m.def("_mtia_getDefaultStream", [](c10::DeviceIndex device_index) {

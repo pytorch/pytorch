@@ -498,7 +498,11 @@ class HipblasltGemmOp : public Callable<ParamsT> {
             mat_c, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_c, sizeof(stride_c)));
       }
 
-      HipBlasLtMatmulDescriptor matmul(HIPBLAS_COMPUTE_32F, HIP_R_32F);
+      hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+      if (at::globalContext().allowTF32CuBLAS()) {
+        computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
+      }
+      HipBlasLtMatmulDescriptor matmul(computeType, HIP_R_32F);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, opa);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, opb);
 
@@ -611,6 +615,11 @@ auto GetHipBlasLtTypeStringAndOps() {
   auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
 
+  hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
+  if (at::globalContext().allowTF32CuBLAS()) {
+    computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
+  }
+
   hipblasLtHandle_t handle;
   TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
   TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
@@ -621,7 +630,7 @@ auto GetHipBlasLtTypeStringAndOps() {
         b_datatype,
         in_out_datatype,
         in_out_datatype,
-        HIPBLAS_COMPUTE_32F,
+        computeType,
         heuristic_result));
   TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
@@ -631,7 +640,7 @@ auto GetHipBlasLtTypeStringAndOps() {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
-    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
+    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%d", algo_index);
     ret.emplace_back(type_string, std::move(callable));
   }
 

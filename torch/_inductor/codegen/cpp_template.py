@@ -44,11 +44,14 @@ class CppTemplate(KernelTemplate):
 
     def generate(self, **kwargs):
         kernel_name = f"cpp_{self.name}"
-        with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
-        ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
-            kernel_name=kernel_name, num_threads=self.num_threads
-        ) as kernel:
+        with (
+            patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
+            patch.object(ir.FlexibleLayout, "allow_indexing", True),
+            V.graph.set_current_device(self.layout.device),
+            CppTemplateKernel(
+                kernel_name=kernel_name, num_threads=self.num_threads
+            ) as kernel,
+        ):
             code = kernel.render(self, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
