@@ -204,6 +204,7 @@ def aot_dispatch_base(
     ) = functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
+    assert isinstance(fw_module, GraphModule)
 
     if aot_config.enable_log:
         trace_structured(
@@ -235,7 +236,6 @@ def aot_dispatch_base(
         with TracingContext.report_output_strides() as fwd_output_strides:
             fake_mode = detect_fake_mode()
             if fake_mode is not None and fake_mode.shape_env is not None:
-                assert isinstance(fw_module, GraphModule)
                 tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
 
@@ -275,6 +275,7 @@ def aot_dispatch_base(
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
                 guards_expr=guards_expr,
+                lazy_backward_info=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -903,13 +904,29 @@ def aot_dispatch_autograd(
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
-            symint_outs_saved_for_bw = [
-                n for n in fw_outs_saved_for_bw if is_sym_node(n)
-            ]
+            symint_outs_saved_for_bw = []
+            for idx, node in enumerate(fw_outs_saved_for_bw):
+                if is_sym_node(node):
+                    symint_outs_saved_for_bw.append(node)
+                elif (
+                    isinstance(node, torch.fx.Node)
+                    and "val" in getattr(node, "meta", {})
+                    and isinstance(node.meta["val"], FakeTensor)
+                ):
+                    # record dynamic tensor activations
+                    dynamic_dims: set[int] = {
+                        dim
+                        for dim, size in enumerate(node.meta["val"].shape)
+                        if not isinstance(size, int)
+                    }
+                    if dynamic_dims:
+                        fw_metadata.dynamic_tensors_saved_for_backward[
+                            idx
+                        ] = dynamic_dims
+
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,
@@ -1286,8 +1303,17 @@ def aot_dispatch_autograd(
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
-            compiled_bw_func, _fw_metadata, aot_config
+            compiled_bw_func, lazy_backward_info, _fw_metadata, aot_config
         ):
+            # class AutogradLazyBackwardCompileInfo:
+            #     bw_module: Callable
+            #     placeholder_list: list[Any]
+            #     saved_context: Optional[TracingContext]
+            #     saved_compile_context: Optional[CompileContext]
+            lazy_backward_info.placeholder_list = []
+            lazy_backward_info.saved_context = None
+            lazy_backward_info.saved_compile_context = None
+
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             fw_debug_lines = getattr(
                 compiled_fw_func, "_fx_graph_cache_debug_lines", []
@@ -1333,13 +1359,16 @@ def aot_dispatch_autograd(
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
                     guards_expr=guards_expr,
+                    lazy_backward_info=lazy_backward_info,
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
+            try_save_cache_entry(
+                compiled_bw_func, lazy_backward_info, fw_metadata, aot_config
+            )
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(

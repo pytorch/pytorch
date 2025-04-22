@@ -52,6 +52,7 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
+    AutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
@@ -507,6 +508,9 @@ class AOTAutogradCacheEntry:
 
     guards_expr: Optional[str]
 
+    # # Used by compiled autograd
+    lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo]
+
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
@@ -652,7 +656,7 @@ class AOTAutogradCacheEntry:
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                None,  # lazy_backward_info
+                self.lazy_backward_info,
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,

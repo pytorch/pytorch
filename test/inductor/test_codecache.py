@@ -605,7 +605,7 @@ class TestFxGraphCache(TestCase):
         compiled_fn = torch.compile(fn, dynamic=dynamic)
 
         mod = MyModelConv2d().to(device=device, dtype=dtype)
-        inp = torch.randn(2, 3, 16, 16, device=device, dtype=dtype)
+        inp = torch.randn(2, 3, 16, 32, device=device, dtype=dtype)
 
         # The first call should see all cache misses.
         counters.clear()
