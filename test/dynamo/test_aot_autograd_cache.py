@@ -74,7 +74,7 @@ class AOTAutogradCacheTests(InductorTestCase):
             "autotune_local_cache": True,
         }
     )
-    def test_my_cache_hot_load(self):
+    def test_cache_lazy_backward_for_compiled_autograd(self):
         device = "cpu"
         dtype = torch.float32
         dynamic = True
@@ -99,7 +99,9 @@ class AOTAutogradCacheTests(InductorTestCase):
             # A first call should miss in the cache.
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
-            with torch._dynamo.compiled_autograd._enable(torch.compile(dynamic=dynamic)):
+            with torch._dynamo.compiled_autograd._enable(
+                torch.compile(dynamic=dynamic)
+            ):
                 compiled_result.sum().backward()
             if hasattr(a, "_dynamo_weak_dynamic_indices"):
                 del a._dynamo_weak_dynamic_indices
@@ -129,27 +131,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         # Clean triton kernels
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-        # We did not load anything so dont hit yet
-        # with fresh_inductor_cache():
-        #     eager_result = fn(a, b)
-        #     compiled_result = compiled_fn(a, b)
-        #     self.assertEqual(eager_result, compiled_result)
-        #     with torch._dynamo.compiled_autograd._enable(torch.compile(dynamic=dynamic)):
-        #         compiled_result.sum().backward()
-        #     if hasattr(a, "_dynamo_weak_dynamic_indices"):
-        #         del a._dynamo_weak_dynamic_indices
-        #     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 6)
-        #     self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-        #     self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
-        #     self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-        #     self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        #     self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
-
-        # self._clear_all_caches()
-
-        # # Clean triton kernels
-        # shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
-
         # Hot load and hit
         with fresh_inductor_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
@@ -161,7 +142,9 @@ class AOTAutogradCacheTests(InductorTestCase):
 
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
-            with torch._dynamo.compiled_autograd._enable(torch.compile(dynamic=dynamic)):
+            with torch._dynamo.compiled_autograd._enable(
+                torch.compile(dynamic=dynamic)
+            ):
                 compiled_result.sum().backward()
             if hasattr(a, "_dynamo_weak_dynamic_indices"):
                 del a._dynamo_weak_dynamic_indices
