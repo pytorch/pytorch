@@ -97,12 +97,12 @@ public:
 };
 static TensorAssign tensor_assign;
 
-template <bool is_scatter_like = true>
+template <bool is_scatter_like, typename index_t>
 struct _cpu_scatter_gather_dim_loop {
   template <typename scalar_t, typename func_t>
   void operator()(
     at::opmath_type<scalar_t>* self_data, int64_t self_dim_stride,
-    int64_t* index_data, int64_t index_dim_stride,
+    index_t* index_data, int64_t index_dim_stride,
     scalar_t* src_data, int64_t src_dim_stride,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
@@ -129,7 +129,7 @@ struct _cpu_scatter_gather_dim_loop {
   template <typename scalar_t, typename func_t>
   void operator()(
     at::opmath_type<scalar_t>* self_data, int64_t self_dim_stride,
-    int64_t* index_data, int64_t index_dim_stride,
+    index_t* index_data, int64_t index_dim_stride,
     Scalar value,
     int64_t dim, int64_t index_dim_size,
     int64_t index_upper_bound,
@@ -210,50 +210,52 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
         using opmath_t = at::opmath_type<scalar_t>;
-        _cpu_scatter_gather_dim_loop<is_scatter_like> loop_func;
-        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-          auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
-          auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
-          // we change the order of TensorIterator-dim loop
-          // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension
-          if (dim== buffer.dim() - 1) {
-            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-              // dim loop is a separate code block
-              // for better performance
-              loop_func.template operator()<scalar_t, func_t>(
-                (opmath_t*)self_data_bytes, self_dim_stride,
-                (int64_t*)index_data_bytes, index_dim_stride,
-                value, dim, index_dim_size, index_upper_bound,
-                kernel_func);
-
-              self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
-              index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-            }
-          }
-          else {
-            for (const auto i : c10::irange(index_dim_size)) {
-              auto* self_data = self_data_bytes;
-              auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_gather_tensor_cpu", [&] () {
+          _cpu_scatter_gather_dim_loop<is_scatter_like, index_t> loop_func;
+          auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+            auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
+            auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
+            // we change the order of TensorIterator-dim loop
+            // vs dim-TensorIterator loop order depending on
+            // whether dim is the last dimension
+            if (dim== buffer.dim() - 1) {
               for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-                int64_t idx_dim = *(int64_t*)index_data;
-                // we are not putting idx_dim in the error message because it disables
-                // loop optimization in clang-7
-                TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
-                            "index ", *(int64_t*)index_data,
-                            " is out of bounds for dimension ", dim,
-                            " with size ", index_upper_bound);
+                // dim loop is a separate code block
+                // for better performance
+                loop_func.template operator()<scalar_t, func_t>(
+                  (opmath_t*)self_data_bytes, self_dim_stride,
+                  (index_t*)index_data_bytes, index_dim_stride,
+                  value, dim, index_dim_size, index_upper_bound,
+                  kernel_func);
 
-                auto temp = value.to<scalar_t>();
-                kernel_func((opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride, &temp);
-
-                self_data += strides[SELF_ITER_STRIDE_IDX];
-                index_data += strides[INDEX_ITER_STRIDE_IDX];
+                self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
+                index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
               }
             }
-          }
-        };
-        iter.for_each(loop, grain_size);
+            else {
+              for (const auto i : c10::irange(index_dim_size)) {
+                auto* self_data = self_data_bytes;
+                auto* index_data = (char*)((index_t*)index_data_bytes + i * index_dim_stride);
+                for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
+                  int64_t idx_dim = *(index_t*)index_data;
+                  // we are not putting idx_dim in the error message because it disables
+                  // loop optimization in clang-7
+                  TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+                              "index ", *(index_t*)index_data,
+                              " is out of bounds for dimension ", dim,
+                              " with size ", index_upper_bound);
+
+                  auto temp = value.to<scalar_t>();
+                  kernel_func((opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride, &temp);
+
+                  self_data += strides[SELF_ITER_STRIDE_IDX];
+                  index_data += strides[INDEX_ITER_STRIDE_IDX];
+                }
+              }
+            }
+          };
+          iter.for_each(loop, grain_size);
+    });
       }
     );
     if (need_acc) {
@@ -299,57 +301,59 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
         using opmath_t = at::opmath_type<scalar_t>;
-        _cpu_scatter_gather_dim_loop<is_scatter_like> loop_func;
-        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-          auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
-          auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
-          auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
-          // we change the order of TensorIterator-dim loop
-          // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension
-          if (dim== buffer.dim() - 1) {
-            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-              // dim loop is a separate code block
-              // for better performance
-              loop_func.template operator()<scalar_t, func_t>(
-                 (opmath_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
-
-              self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
-              index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
-            }
-          }
-          else {
-            for (const auto i : c10::irange(index_dim_size)) {
-              auto* self_data = self_data_bytes;
-              auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              auto* src_data = src_data_bytes;
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_gather_tensor_cpu", [&] () {
+          _cpu_scatter_gather_dim_loop<is_scatter_like, index_t> loop_func;
+          auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+            auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
+            auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
+            auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
+            // we change the order of TensorIterator-dim loop
+            // vs dim-TensorIterator loop order depending on
+            // whether dim is the last dimension
+            if (dim== buffer.dim() - 1) {
               for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-                int64_t idx_dim = *(int64_t*)index_data;
-                // we are not putting idx_dim in the error message because it disables
-                // loop optimization in clang-7
-                TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
-                            "index ", *(int64_t*)index_data,
-                            " is out of bounds for dimension ", dim,
-                            " with size ", index_upper_bound);
+                // dim loop is a separate code block
+                // for better performance
+                loop_func.template operator()<scalar_t, func_t>(
+                   (opmath_t*)self_data_bytes, self_dim_stride,
+                   (index_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
-                kernel_func(
-                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
-
-                self_data += strides[SELF_ITER_STRIDE_IDX];
-                index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
+                index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
               }
             }
-          }
-        };
-        iter.for_each(loop, grain_size);
+            else {
+              for (const auto i : c10::irange(index_dim_size)) {
+                auto* self_data = self_data_bytes;
+                auto* index_data = (char*)((index_t*)index_data_bytes + i * index_dim_stride);
+                auto* src_data = src_data_bytes;
+                for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
+                  int64_t idx_dim = *(index_t*)index_data;
+                  // we are not putting idx_dim in the error message because it disables
+                  // loop optimization in clang-7
+                  TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+                              "index ", *(index_t*)index_data,
+                              " is out of bounds for dimension ", dim,
+                              " with size ", index_upper_bound);
+
+                  kernel_func(
+                    (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                    (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+
+                  self_data += strides[SELF_ITER_STRIDE_IDX];
+                  index_data += strides[INDEX_ITER_STRIDE_IDX];
+                  src_data += strides[SRC_ITER_STRIDE_IDX];
+                }
+              }
+            }
+          };
+          iter.for_each(loop, grain_size);
+    });
       }
     );
     if (need_acc) {
@@ -394,57 +398,59 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
         using opmath_t = at::opmath_type<scalar_t>;
-        _cpu_scatter_gather_dim_loop<is_scatter_like> loop_func;
-        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-          auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
-          auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
-          auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
-          // we change the order of TensorIterator-dim loop
-          // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension
-          if (dim== buffer.dim() - 1) {
-            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-              // dim loop is a separate code block
-              // for better performance
-              loop_func.template operator()<scalar_t, ReduceMean>(
-                 (opmath_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
-
-              self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
-              index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
-            }
-          }
-          else {
-            for (const auto i : c10::irange(index_dim_size)) {
-              auto* self_data = self_data_bytes;
-              auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              auto* src_data = src_data_bytes;
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_gather_tensor_cpu_reduce_mean", [&] () {
+          _cpu_scatter_gather_dim_loop<is_scatter_like, index_t> loop_func;
+          auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+            auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
+            auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
+            auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
+            // we change the order of TensorIterator-dim loop
+            // vs dim-TensorIterator loop order depending on
+            // whether dim is the last dimension
+            if (dim== buffer.dim() - 1) {
               for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-                int64_t idx_dim = *(int64_t*)index_data;
-                // we are not putting idx_dim in the error message because it disables
-                // loop optimization in clang-7
-                TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
-                            "index ", *(int64_t*)index_data,
-                            " is out of bounds for dimension ", dim,
-                            " with size ", index_upper_bound);
+                // dim loop is a separate code block
+                // for better performance
+                loop_func.template operator()<scalar_t, ReduceMean>(
+                   (opmath_t*)self_data_bytes, self_dim_stride,
+                   (index_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
-                kernel_func(
-                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
-
-                self_data += strides[SELF_ITER_STRIDE_IDX];
-                index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
+                index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
               }
             }
-          }
-        };
-        iter.for_each(loop, grain_size);
+            else {
+              for (const auto i : c10::irange(index_dim_size)) {
+                auto* self_data = self_data_bytes;
+                auto* index_data = (char*)((index_t*)index_data_bytes + i * index_dim_stride);
+                auto* src_data = src_data_bytes;
+                for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
+                  int64_t idx_dim = *(index_t*)index_data;
+                  // we are not putting idx_dim in the error message because it disables
+                  // loop optimization in clang-7
+                  TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+                              "index ", *(index_t*)index_data,
+                              " is out of bounds for dimension ", dim,
+                              " with size ", index_upper_bound);
+
+                  kernel_func(
+                    (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                    (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+
+                  self_data += strides[SELF_ITER_STRIDE_IDX];
+                  index_data += strides[INDEX_ITER_STRIDE_IDX];
+                  src_data += strides[SRC_ITER_STRIDE_IDX];
+                }
+              }
+            }
+          };
+          iter.for_each(loop, grain_size);
+    });
       }
     );
     if (need_acc) {
@@ -488,57 +494,59 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
         using opmath_t = at::opmath_type<scalar_t>;
-        _cpu_scatter_gather_dim_loop<is_scatter_like> loop_func;
-        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-          auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
-          auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
-          auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
-          // we change the order of TensorIterator-dim loop
-          // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension
-          if (dim== buffer.dim() - 1) {
-            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-              // dim loop is a separate code block
-              // for better performance
-              loop_func.template operator()<scalar_t, ReduceMaximum>(
-                 (opmath_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
-
-              self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
-              index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
-            }
-          }
-          else {
-            for (const auto i : c10::irange(index_dim_size)) {
-              auto* self_data = self_data_bytes;
-              auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              auto* src_data = src_data_bytes;
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_gather_tensor_cpu_reduce_amax", [&] () {
+          _cpu_scatter_gather_dim_loop<is_scatter_like, index_t> loop_func;
+          auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+            auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
+            auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
+            auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
+            // we change the order of TensorIterator-dim loop
+            // vs dim-TensorIterator loop order depending on
+            // whether dim is the last dimension
+            if (dim== buffer.dim() - 1) {
               for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-                int64_t idx_dim = *(int64_t*)index_data;
-                // we are not putting idx_dim in the error message because it disables
-                // loop optimization in clang-7
-                TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
-                            "index ", *(int64_t*)index_data,
-                            " is out of bounds for dimension ", dim,
-                            " with size ", index_upper_bound);
+                // dim loop is a separate code block
+                // for better performance
+                loop_func.template operator()<scalar_t, ReduceMaximum>(
+                   (opmath_t*)self_data_bytes, self_dim_stride,
+                   (index_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
-                kernel_func(
-                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
-
-                self_data += strides[SELF_ITER_STRIDE_IDX];
-                index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
+                index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
               }
             }
-          }
-        };
-        iter.for_each(loop, grain_size);
+            else {
+              for (const auto i : c10::irange(index_dim_size)) {
+                auto* self_data = self_data_bytes;
+                auto* index_data = (char*)((index_t*)index_data_bytes + i * index_dim_stride);
+                auto* src_data = src_data_bytes;
+                for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
+                  int64_t idx_dim = *(index_t*)index_data;
+                  // we are not putting idx_dim in the error message because it disables
+                  // loop optimization in clang-7
+                  TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+                              "index ", *(index_t*)index_data,
+                              " is out of bounds for dimension ", dim,
+                              " with size ", index_upper_bound);
+
+                  kernel_func(
+                    (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                    (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+
+                  self_data += strides[SELF_ITER_STRIDE_IDX];
+                  index_data += strides[INDEX_ITER_STRIDE_IDX];
+                  src_data += strides[SRC_ITER_STRIDE_IDX];
+                }
+              }
+            }
+          };
+          iter.for_each(loop, grain_size);
+    });
       }
     );
     if (need_acc) {
@@ -583,57 +591,59 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
         using opmath_t = at::opmath_type<scalar_t>;
-        _cpu_scatter_gather_dim_loop<is_scatter_like> loop_func;
-        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-          auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
-          auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
-          auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
-          // we change the order of TensorIterator-dim loop
-          // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension
-          if (dim== buffer.dim() - 1) {
-            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-              // dim loop is a separate code block
-              // for better performance
-              loop_func.template operator()<scalar_t, ReduceMinimum>(
-                 (opmath_t*)self_data_bytes, self_dim_stride,
-                 (int64_t*)index_data_bytes, index_dim_stride,
-                 (scalar_t*)src_data_bytes, src_dim_stride,
-                 dim, index_dim_size, index_upper_bound,
-                 kernel_func
-               );
-
-              self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
-              index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
-              src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
-            }
-          }
-          else {
-            for (const auto i : c10::irange(index_dim_size)) {
-              auto* self_data = self_data_bytes;
-              auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              auto* src_data = src_data_bytes;
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_gather_tensor_cpu", [&] () {
+          _cpu_scatter_gather_dim_loop<is_scatter_like, index_t> loop_func;
+          auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+            auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
+            auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
+            auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
+            // we change the order of TensorIterator-dim loop
+            // vs dim-TensorIterator loop order depending on
+            // whether dim is the last dimension
+            if (dim== buffer.dim() - 1) {
               for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
-                int64_t idx_dim = *(int64_t*)index_data;
-                // we are not putting idx_dim in the error message because it disables
-                // loop optimization in clang-7
-                TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
-                            "index ", *(int64_t*)index_data,
-                            " is out of bounds for dimension ", dim,
-                            " with size ", index_upper_bound);
+                // dim loop is a separate code block
+                // for better performance
+                loop_func.template operator()<scalar_t, ReduceMinimum>(
+                   (opmath_t*)self_data_bytes, self_dim_stride,
+                   (index_t*)index_data_bytes, index_dim_stride,
+                   (scalar_t*)src_data_bytes, src_dim_stride,
+                   dim, index_dim_size, index_upper_bound,
+                   kernel_func
+                 );
 
-                kernel_func(
-                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
-                  (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
-
-                self_data += strides[SELF_ITER_STRIDE_IDX];
-                index_data += strides[INDEX_ITER_STRIDE_IDX];
-                src_data += strides[SRC_ITER_STRIDE_IDX];
+                self_data_bytes += strides[SELF_ITER_STRIDE_IDX];
+                index_data_bytes += strides[INDEX_ITER_STRIDE_IDX];
+                src_data_bytes += strides[SRC_ITER_STRIDE_IDX];
               }
             }
-          }
-        };
-        iter.for_each(loop, grain_size);
+            else {
+              for (const auto i : c10::irange(index_dim_size)) {
+                auto* self_data = self_data_bytes;
+                auto* index_data = (char*)((index_t*)index_data_bytes + i * index_dim_stride);
+                auto* src_data = src_data_bytes;
+                for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
+                  int64_t idx_dim = *(index_t*)index_data;
+                  // we are not putting idx_dim in the error message because it disables
+                  // loop optimization in clang-7
+                  TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+                              "index ", *(index_t*)index_data,
+                              " is out of bounds for dimension ", dim,
+                              " with size ", index_upper_bound);
+
+                  kernel_func(
+                    (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                    (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
+
+                  self_data += strides[SELF_ITER_STRIDE_IDX];
+                  index_data += strides[INDEX_ITER_STRIDE_IDX];
+                  src_data += strides[SRC_ITER_STRIDE_IDX];
+                }
+              }
+            }
+          };
+          iter.for_each(loop, grain_size);
+    });
       }
     );
     if (need_acc) {
@@ -684,9 +694,9 @@ std::pair<K*, V*> radix_sort_parallel(
 //   step 2: spmm reduce, parallel on M and vectorize on K
 //
 
-template <typename scalar_t, ReductionType reduce>
+template <typename scalar_t, ReductionType reduce, typename index_t>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
+  const index_t* index_data = index.const_data_ptr<index_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
   const scalar_t* src_data = src.const_data_ptr<scalar_t>();
 
@@ -809,9 +819,9 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   });
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t>
 void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
+  const index_t* index_data = index.const_data_ptr<index_t>();
   scalar_t* result_data = result.data_ptr<scalar_t>();
   const scalar_t* self_data = self.const_data_ptr<scalar_t>();
 
@@ -850,7 +860,9 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index,
 void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "scatter_add_expanded_index", [&] {
-      cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM>(self, index, src, /*include_self*/true);
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_reduce_expanded_index", [&] () {
+        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM, index_t>(self, index, src, /*include_self*/true);
+      });
   });
 }
 
@@ -860,7 +872,9 @@ void scatter_reduce_expanded_index_kernel(
   AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "scatter_reduce_expanded_index", [&] {
     AT_DISPATCH_REDUCTION_TYPES(reduction, [&]() {
-      cpu_scatter_reduce_expanded_index<scalar_t, reduce>(self, index, src, include_self);
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_reduce_expanded_index", [&] () {
+        cpu_scatter_reduce_expanded_index<scalar_t, reduce, index_t>(self, index, src, include_self);
+      });
     });
   });
 }
@@ -868,7 +882,9 @@ void scatter_reduce_expanded_index_kernel(
 void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "gather_expanded_index", [&] {
-      cpu_gather_expanded_index_kernel<scalar_t>(result, index, self);
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "gather_expanded_index", [&] () {
+        cpu_gather_expanded_index_kernel<scalar_t, index_t>(result, index, self);
+      });
   });
 }
 
