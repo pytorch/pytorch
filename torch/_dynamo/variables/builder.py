@@ -100,7 +100,10 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_global_source,
+    is_from_nonlocal_source,
     is_from_optimizer_source,
+    is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
     NumpyTensorSource,
@@ -551,9 +554,9 @@ class VariableBuilder:
             source_key = k
 
             source_value = GetItemSource(self.get_source(), source_key)
-            value = LazyVariableTracker.create(v, source_value)
+            res_value = LazyVariableTracker.create(v, source_value)
 
-            return key, value
+            return key, res_value
 
         items = dict(build_key_value(k, v) for k, v in value.items())
 
@@ -695,17 +698,17 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
+                base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
                     source_key = k
                 else:
-                    source_key = ConstDictKeySource(self.get_source(), i)
+                    source_key = ConstDictKeySource(base, i)
                     key = LazyVariableTracker.create(k, source_key)
+                source_value = DictGetItemSource(base, source_key)
+                res_value = LazyVariableTracker.create(v, source_value)
 
-                source_value = DictGetItemSource(self.get_source(), source_key)
-                value = LazyVariableTracker.create(v, source_value)
-
-                return key, value
+                return key, res_value
 
             # Ensure that we call dict.keys and not value.keys (which can call
             # overridden keys method). In the C++ guards, we relied on
@@ -1334,13 +1337,14 @@ class VariableBuilder:
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
             def build_key_value(i, k, v):
-                source_key = ConstDictKeySource(self.get_source(), i)
+                base = self.get_source()
+                source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = DictGetItemSource(self.get_source(), source_key)
-                value = LazyVariableTracker.create(v, source_value)
+                source_value = DictGetItemSource(base, source_key)
+                res_value = LazyVariableTracker.create(v, source_value)
 
-                return key, value
+                return key, res_value
 
             # Ensure that we call dict.keys and not value.keys (which can call
             # overridden keys method). In the C++ guards, we relied on
@@ -1764,16 +1768,14 @@ class VariableBuilder:
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
 
-        # Install any tensors which are not:
-        should_install_graph_params = config.install_params_as_graph_attr and not (
-            # Either explicit input
-            (isinstance(source, LocalSource) and source.is_input)
-            # One level nested such as list or dict should not be installed
-            or (
-                isinstance(source, GetItemSource)
-                and isinstance(source.base, LocalSource)
-                and source.base.is_input
-            )
+        # Install any tensors which are:
+        # 1. Globals
+        # 2. NonLocals
+        # 3. tensors that are attributes of nn module
+        should_install_graph_params = config.install_params_as_graph_attr and (
+            is_from_global_source(source)
+            or is_from_nonlocal_source(source)
+            or is_from_unspecialized_nn_module_source(source)
         )
 
         make_graph_attribute = is_static_input and (
@@ -2395,9 +2397,8 @@ def _dataclasses_fields_lambda(obj):
     for field in dataclasses.fields(value):
         source = None
         if obj.source:
-            source = DictGetItemSource(
-                AttrSource(obj.source, "__dataclass_fields__"), field.name
-            )
+            base_src = AttrSource(obj.source, "__dataclass_fields__")
+            source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
     return TupleVariable(items)
 
