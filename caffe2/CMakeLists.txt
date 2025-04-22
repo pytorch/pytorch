@@ -1420,62 +1420,12 @@ if(USE_ROCM)
     set(ROCM_SOURCE_DIR "/opt/rocm")
   endif()
   message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
-  find_package(rocthrust)
-  if(rocthrust_FOUND)
-    message(STATUS "rocthrust found")
- else() #If rocthrust not found
-    message(FATAL_ERROR "rocthrust not found !!! Install rocthrust to proceed ...")
- endif(rocthrust_FOUND)
-
- find_package(aotriton)
-  if(aotriton_FOUND)
-    message(STATUS "aotriton found")
-    set(AOTRITON_INCLUDE_DIR ${INTERFACE_INCLUDE_DIRECTORIES})
- else() #If aotriton not found
-    message(FATAL_ERROR "aotriton not found !!! Install aotriton to proceed ...")
- endif(aotriton_FOUND)
-
- find_package(rocprim)
-  if(rocprim_FOUND)
-    message(STATUS "rocprim found")
- else() #If rocprim not found
-    message(FATAL_ERROR "rocprim not found !!! Install rocprim to proceed ...")
- endif(rocprim_FOUND)
-
- find_package(hipcub)
-  if(hipcub_FOUND)
-    message(STATUS "hipcub found")
- else() #If hipcub not found
-    message(FATAL_ERROR "hipcub not found !!! Install hipcub to proceed ...")
- endif(hipcub_FOUND)
-
- find_package(rocrand)
-  if(rocrand_FOUND)
-    message(STATUS "rocrand found")
- else() #If rocrand not found
-    message(FATAL_ERROR "rocrand not found !!! Install rocrand to proceed ...")
- endif(rocrand_FOUND)
-
- find_package(composable_kernel)
-  if(composable_kernel_FOUND)
-    message(STATUS "composable-kernel found")
-    set(CK_INCLUDE_DIR ${INTERFACE_INCLUDE_DIRECTORIES})
- else() #If composable-kernel not found
-    message(FATAL_ERROR "composable-kernel not found !!! Install composable-kernel to proceed ...")
- endif(composable-kernel_FOUND)
-
   target_include_directories(torch_hip PRIVATE
     ${ROCM_SOURCE_DIR}/include
     ${ROCM_SOURCE_DIR}/hcc/include
     ${ROCM_SOURCE_DIR}/rocblas/include
     ${ROCM_SOURCE_DIR}/hipsparse/include
     ${ROCM_SOURCE_DIR}/include/rccl/
-    ${AOTRITON_INCLUDE_DIR}
-    ${ROCTHRUST_INCLUDE_DIR}
-    ${ROCPRIM_INCLUDE_DIR}
-    ${ROCRAND_INCLUDE_DIR}
-    ${HIPCUB_INCLUDE_DIR}
-    ${CK_INCLUDE_DIR}
     )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE
