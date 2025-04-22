@@ -2943,23 +2943,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("compile", [True, False])
     def test_fully_masked_out_rows_0_check(self, device, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         query = torch.randn(
             (B, H, S, D),
             dtype=torch.float32,
             device=device,
-            requires_grad=not self.test_inference_only,
+            requires_grad=requires_grad,
         )
         key = torch.randn(
             (B, H, S, D),
             dtype=torch.float32,
             device=device,
-            requires_grad=not self.test_inference_only,
+            requires_grad=requires_grad,
         )
         value = torch.randn(
             (B, H, S, D),
             dtype=torch.float32,
             device=device,
-            requires_grad=not self.test_inference_only,
+            requires_grad=requires_grad,
         )
 
         M = S // 2
@@ -2972,7 +2973,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex = (
             torch.compile(flex_attention, dynamic=False) if compile else flex_attention
         )
-        if not self.test_inference_only:
+        if requires_grad:
             out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
             self.assertEqual(out[:, :, M:, :].sum(), 0)
             self.assertTrue((lse[:, :, M:] == -float("inf")).all())
