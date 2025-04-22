@@ -152,7 +152,7 @@ us to use the current accelerator as the default device for relevant concepts su
 Stream device_type, FSDP, etc.
 
 As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
-:doc:`"XPU" <xpu>`, :doc:`"MPS" <mps>`, "HPU", and PrivateUse1 (many device not in the PyTorch repo itself).
+:doc:`"XPU" <xpu>`, :doc:`"MPS" <mps>`, "HPU", "HIP", and PrivateUse1 (many device not in the PyTorch repo itself).
 
 Many tools in the PyTorch Ecosystem use fork to create subprocesses (for example dataloading
 or intra-op parallelism), it is thus important to delay as much as possible any
