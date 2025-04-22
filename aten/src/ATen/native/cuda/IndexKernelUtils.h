@@ -6,7 +6,7 @@
 namespace at::native {
 
 template<int alignment>
-inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const out_ptr, char * const in_ptr, const size_t index_stride, const size_t element_size) {
+inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const out_ptr, char * const in_ptr, const size_t index_stride_bytes, const size_t element_size) {
   using at::native::memory::get_alignment;
   const auto index_element_size = iter.element_size(2);
   //TensorIterator strides and sizes are ordered fastest moving to slowest moving,
@@ -17,7 +17,7 @@ inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const
   return iter.ndim() == 2 && iter.strides(2)[0]==0 && iter.strides(2)[1]==index_element_size && static_cast<size_t>(iter.strides(0)[0])==element_size &&
           static_cast<size_t>(iter.strides(1)[0])==element_size && get_alignment(out_ptr) == alignment && get_alignment(in_ptr) == alignment &&
           get_alignment(static_cast<size_t>(iter.shape()[0] * element_size)) == alignment &&
-          get_alignment(static_cast<size_t>(index_stride * element_size)) == alignment &&
+          get_alignment(static_cast<size_t>(index_stride_bytes)) == alignment &&
           get_alignment(static_cast<size_t>(iter.strides(0)[1])) == alignment;
 }
 

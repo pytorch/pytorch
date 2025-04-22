@@ -140,7 +140,7 @@ struct _cuda_scatter_gather_internal_kernel {
       // the dst and src are contiguous and all the dims and pts are multiple of 16
       constexpr size_t element_size = sizeof(scalar_t);
       constexpr size_t alignment = 16;
-      if (at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride, element_size)) {
+      if (at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
         auto ind_dim_size = index_size;
