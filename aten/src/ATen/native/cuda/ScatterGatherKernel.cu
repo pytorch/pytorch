@@ -264,9 +264,9 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
-              _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
-                iter, index_size, index_stride, self.numel(), f
-              );
+          _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
+            iter, index_size, index_stride, self.numel(), f
+          );
         });
       }
     );
@@ -402,11 +402,11 @@ struct cuda_scatter_gather_base_kernel {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
-       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
-         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
-           iter, index_size, index_stride, self.numel(), f
-         );
-       });
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_gather_base_kernel_func", [&] () {
+          _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype, index_t>()(
+            iter, index_size, index_stride, self.numel(), f
+          );
+        });
       }
     );
   }
@@ -495,11 +495,11 @@ struct cuda_scatter_fill_base_kernel {
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
 
-    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_func", [&] () {
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_func", [&] () {
           _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
             iter, src_val, index_size, index_stride, self.numel(), f
           );
-    });
+        });
       }
     );
   }
@@ -540,11 +540,11 @@ struct cuda_scatter_fill_base_kernel {
         auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
 
-    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_reduce_multiply", [&] () {
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_reduce_multiply", [&] () {
           _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
             iter, src_val, index_size, index_stride, self.numel(), f
           );
-    });
+        });
       }
     );
   }
