@@ -12,6 +12,7 @@ from typing import (
     cast,
     TypeVar,
     Union,
+    Optional,
 )
 from collections.abc import Iterator, Sequence
 
@@ -19,7 +20,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel import (
@@ -325,6 +325,14 @@ class DTensorTestBase(MultiProcessTestCase):
         return NUM_DEVICES
 
     @property
+    def device_type(self) -> str:
+        # if enough GPU we can use GPU, otherwise we fallback to CPU
+        if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
+            return "cpu"
+        else:
+            return DEVICE_TYPE
+
+    @property
     def backend(self) -> str:
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
@@ -356,13 +364,15 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id=device_id,
         )
 
-    def destroy_pg(self) -> None:
+    def destroy_pg(self, device_id: Optional[int] = None) -> None:
         # Wait for all ranks to reach here before starting shutdown.
         # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
         # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
-        dist.barrier()
+        if device_id is None:
+            device_id = torch.cuda.current_device() if self.device_type == "cuda" else self.rank
+        dist.barrier(device_ids=[device_id])
         dist.destroy_process_group()
 
     def setUp(self) -> None:
@@ -395,11 +405,6 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
         def wrapper(
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
-            # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
-                self.device_type = "cpu"
-            else:
-                self.device_type = DEVICE_TYPE
 
             self.init_pg(eager_init)
 
