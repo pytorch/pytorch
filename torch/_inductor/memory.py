@@ -94,7 +94,7 @@ def get_freeable_input_buf(
     for node in nodes:
         for dep in node.read_writes.reads:
             if dep.name in graph_inputs and not dep.name.startswith(
-                ("primals_", "arg")
+                ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
             ):
                 dep_name_to_succ_nodes[dep.name].add(node)
                 dep_name_to_size[dep.name] = _dep_size_hint(dep)
@@ -267,9 +267,9 @@ def estimate_peak_memory(
 
     # get the execution step of each node, this will be used to determine
     # the end_step of buffers
-    node_to_step: dict[BaseSchedulerNode, int] = dict()
-    for step, node in enumerate(nodes):
-        node_to_step[node] = step
+    node_to_step: dict[BaseSchedulerNode, int] = {
+        node: step for step, node in enumerate(nodes)
+    }
 
     # get buffers' size and liveliness information
     buf_info_list: list[BufferInfo] = []

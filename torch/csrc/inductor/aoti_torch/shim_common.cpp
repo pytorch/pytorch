@@ -1298,6 +1298,128 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   });
 }
 
+static StableIValue from_ivalue(
+    const c10::TypePtr& type,
+    const c10::IValue& ivalue) {
+  switch (type->kind()) {
+    case c10::TypeKind::TensorType: {
+      AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
+          std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
+      return from(ath);
+    }
+    case c10::TypeKind::IntType: {
+      return from(ivalue.toInt());
+    }
+    case c10::TypeKind::FloatType: {
+      return from(ivalue.toDouble());
+    }
+    case c10::TypeKind::BoolType: {
+      return from(ivalue.toBool());
+    }
+    case c10::TypeKind::ScalarTypeType: {
+      return from(ivalue.toScalarType());
+    }
+    case c10::TypeKind::DeviceObjType: {
+      return from(ivalue.toDevice());
+    }
+    case c10::TypeKind::LayoutType: {
+      return from(ivalue.toLayout());
+    }
+    case c10::TypeKind::MemoryFormatType: {
+      return from(ivalue.toMemoryFormat());
+    }
+    case c10::TypeKind::OptionalType: {
+      auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
+
+      // ideally, if we had the C++ type corresponding to inner_type, which we
+      // will denote as inner_type::t (does not actually exist), we would be
+      // able to follow the patterned semantic of every other case here in one
+      // line:
+      //
+      // return from<std::optional<inner_type::t>>(ivalue.toInnerTypeT()));
+      //
+      // BUT we do NOT have that type inner_type::t readily available, so we
+      // will manually unwrap and recursively call. This implementation MUST
+      // be kept in sync with from<std::optional<T>> function in
+      // torch/csrc/stable/library.h
+      if (ivalue.isNone()) {
+        return from(std::nullopt);
+      }
+      StableIValue* sivp = new StableIValue(from_ivalue(inner_type, ivalue));
+      return from(sivp);
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Not yet supported conversion from IValue to StableIValue for schema type: ",
+          type->str());
+    }
+  }
+}
+
+static c10::IValue to_ivalue(
+    const c10::TypePtr& type,
+    const StableIValue stable_ivalue) {
+  switch (type->kind()) {
+    case c10::TypeKind::TensorType: {
+      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
+          to<AtenTensorHandle>(stable_ivalue));
+      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+          ret_raiiath.get());
+      return (c10::IValue(arg));
+    }
+    case c10::TypeKind::IntType: {
+      return c10::IValue(to<int64_t>(stable_ivalue));
+    }
+    case c10::TypeKind::FloatType: {
+      return c10::IValue(to<double>(stable_ivalue));
+    }
+    case c10::TypeKind::BoolType: {
+      return c10::IValue(to<bool>(stable_ivalue));
+    }
+    case c10::TypeKind::ScalarTypeType: {
+      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
+    }
+    case c10::TypeKind::DeviceObjType: {
+      return c10::IValue(to<c10::Device>(stable_ivalue));
+    }
+    case c10::TypeKind::LayoutType: {
+      return c10::IValue(to<c10::Layout>(stable_ivalue));
+    }
+    case c10::TypeKind::MemoryFormatType: {
+      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+    }
+    case c10::TypeKind::OptionalType: {
+      auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
+
+      // ideally, if we had the C++ type corresponding to inner_type, which we
+      // will denote as inner_type::t (does not actually exist), we would be
+      // able to follow the patterned semantic of every other case here in one
+      // line:
+      //
+      // return c10::IValue(to<std::optional<inner_type::t>>(stable_ivalue));
+      //
+      // BUT we do NOT have that type inner_type::t readily available, so we
+      // will manually unwrap and recursively call. This implementation MUST
+      // be kept in sync with the to<T> function in
+      // torch/csrc/stable/library.h
+      if (stable_ivalue == from(std::nullopt)) {
+        return c10::IValue();
+      }
+      auto sivp = to<StableIValue*>(stable_ivalue);
+      auto ival = to_ivalue(inner_type, *sivp);
+      delete sivp;
+      return ival;
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Not yet supported conversion from StableIValue to IValue for schema type: ",
+          type->str());
+    }
+  }
+}
+
 class StableIValueBoxedKernel : public c10::OperatorKernel {
  public:
   StableIValueBoxedKernel(void (*fn)(StableIValue*, uint64_t, uint64_t))
@@ -1314,23 +1436,9 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
 
     for (const auto idx : c10::irange(num_arguments)) {
-      const c10::IValue& arg = torch::jit::pop(stack);
       const auto ministack_idx = num_arguments - idx - 1;
-      if (arg.isInt()) {
-        ministack[ministack_idx] = from(arg.toInt());
-      } else if (arg.isDouble()) {
-        ministack[ministack_idx] = from(arg.toDouble());
-      } else if (arg.isBool()) {
-        ministack[ministack_idx] = from(arg.toBool());
-      } else if (arg.isNone()) {
-        ministack[ministack_idx] = from(nullptr);
-      } else if (arg.isTensor()) {
-        AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
-            std::move(const_cast<at::Tensor&>(arg.toTensor())));
-        ministack[ministack_idx] = from(ath);
-      } else {
-        TORCH_CHECK(false, "Other types of IValues not yet handled!");
-      }
+      const c10::TypePtr& arg_type = schema.arguments()[ministack_idx].type();
+      ministack[ministack_idx] = from_ivalue(arg_type, torch::jit::pop(stack));
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
@@ -1341,15 +1449,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
-      if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
-        auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-            to<AtenTensorHandle>(ministack[idx]));
-        at::Tensor out = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
-            ret_raiiath.get());
-        torch::jit::push(stack, c10::IValue(out));
-      } else {
-        TORCH_CHECK(false, "Only Tensor return types are currently supported!");
-      }
+      torch::jit::push(stack, to_ivalue(ret_type, ministack[idx]));
     }
   }
 
@@ -1430,50 +1530,13 @@ aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
       { delete reinterpret_cast<torch::Library*>(tlh); });
 }
 
-static c10::IValue to_ivalue(
-    const c10::TypePtr& arg_type,
-    const StableIValue stable_ivalue) {
-  switch (arg_type->kind()) {
-    case c10::TypeKind::TensorType: {
-      // stable_ivalue must be an ATH
-      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          to<AtenTensorHandle>(stable_ivalue));
-      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
-          ret_raiiath.get());
-      return (c10::IValue(arg));
-    }
-    case c10::TypeKind::IntType: {
-      return c10::IValue(to<int64_t>(stable_ivalue));
-    }
-    case c10::TypeKind::FloatType: {
-      return c10::IValue(to<double>(stable_ivalue));
-    }
-    case c10::TypeKind::BoolType: {
-      return c10::IValue(to<bool>(stable_ivalue));
-    }
-    case c10::TypeKind::ScalarTypeType: {
-      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
-    }
-    case c10::TypeKind::LayoutType: {
-      return c10::IValue(to<c10::Layout>(stable_ivalue));
-    }
-    case c10::TypeKind::MemoryFormatType: {
-      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
-    }
-    default: {
-      TORCH_CHECK(false, "Not yet supported argument type: ", arg_type->str());
-    }
-  }
-}
-
 AOTITorchError aoti_torch_call_dispatcher(
     const char* opName,
     const char* overloadName,
     StableIValue* stack) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    static auto op =
+    const auto op =
         c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
-
     const auto& schema = op.schema();
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
@@ -1494,23 +1557,9 @@ AOTITorchError aoti_torch_call_dispatcher(
     // there should then be num_returns IValues on the stack, which
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
-      const c10::IValue& ret = torch::jit::pop(ivalue_stack);
       const auto stack_idx = num_returns - idx - 1;
-      if (ret.isInt()) {
-        stack[stack_idx] = from(ret.toInt());
-      } else if (ret.isDouble()) {
-        stack[stack_idx] = from(ret.toDouble());
-      } else if (ret.isBool()) {
-        stack[stack_idx] = from(ret.toBool());
-      } else if (ret.isNone()) {
-        stack[stack_idx] = from(nullptr);
-      } else if (ret.isTensor()) {
-        AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
-            std::move(const_cast<at::Tensor&>(ret.toTensor())));
-        stack[stack_idx] = from(ath);
-      } else {
-        TORCH_CHECK(false, "Other types of IValue returns not yet handled!");
-      }
+      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      stack[stack_idx] = from_ivalue(ret_type, torch::jit::pop(ivalue_stack));
     }
   });
 }

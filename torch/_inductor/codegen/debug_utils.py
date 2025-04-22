@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 from torch import dtype as torch_dtype
@@ -23,6 +23,9 @@ def _print_debugging_tensor_value_info(msg, arg):
     # at jit inductor level codegen
     max_numel_to_print = 64
     print(msg)
+    if not isinstance(arg, torch.Tensor):
+        print("Value: ", arg)
+        return
     numel = arg.float().numel()
     # print the debug printing stats
     if numel <= max_numel_to_print:
@@ -54,6 +57,7 @@ class DebugPrinterManager:
         self,
         debug_printer_level,
         use_array_ref: bool,
+        writeline: Optional[Callable[..., None]] = None,
         args_to_print_or_save: Optional[list[str]] = None,
         kernel_name: str = "",
         kernel=None,

@@ -115,7 +115,17 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
 # Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches: bool = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+    default=False,
+)
+
+# Unsafe way to skip dynamic shape guards to get faster cache load
+unsafe_skip_cache_dynamic_shape_guards: bool = False
+
+# Unsafe way to mark function as cacheable
+unsafe_marked_cacheable_functions: list[str] = []
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
@@ -139,6 +149,11 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# Controls automatic precompiling of common include files for codecache.CppCodeCache
+# (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
+# controlled by a separate flag.
+cpp_cache_precompile_headers: bool = True
+
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
 # dead code elimination
@@ -151,6 +166,12 @@ static_weight_shapes = True
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
+
+# Disable by default in fbcode
+alignment_asserts = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")
+    == "1"
+)
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -166,6 +187,9 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+
+# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
+bfloat16_atomic_adds_enabled = True
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
@@ -400,7 +424,7 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # NOTE: This feature is deprecated and will be defauled to False in the future.
 # Whether we fall back to ATen or hard error when no matches are found during autotuning
 autotune_fallback_to_aten = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "0") == "1"
 )
 
 # the value used as a fallback for the unbacked SymInts
@@ -417,12 +441,12 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # The following three timeouts are applicable if autotune_in_subproc is True:
 
-# Max time that a a valid benchmark result may take during autotuning
+# Max time that a valid benchmark result may take during autotuning
 max_autotune_subproc_result_timeout_seconds = 60.0
-# Additional time we allow subprocesses to terminate gracefully after the timeout until we send a SIGTERM
-max_autotune_subproc_graceful_timeout_seconds = 1.0
-# Additional time that we grant after a SIGTERM until we do a hard SIGKILL of subprocesses
-max_autotune_subproc_terminate_timeout_seconds = 2.0
+# DEPRECATED. This setting is ignored.
+max_autotune_subproc_graceful_timeout_seconds = 0.0
+# DEPRECATED. This setting is ignored.
+max_autotune_subproc_terminate_timeout_seconds = 0.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
@@ -495,6 +519,9 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
+assume_unaligned_fallback_output = (
+    os.environ.get("TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT") == "1"
+)
 
 # fuse even in cases without common reads
 aggressive_fusion = False
@@ -719,6 +746,17 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# Whether or not to enable statically launching CUDA kernels
+# compiled by triton (instead of using triton's own launcher)
+use_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
+# Raise error if we bypass the launcher
+strict_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: Optional[str]
 if is_fbcode():
@@ -911,9 +949,9 @@ class cpp:
     vec_isa_ok: Optional[bool] = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = int(
@@ -1052,6 +1090,11 @@ class triton:
     # Setting to None means uninitialized
     autotune_at_compile_time: Optional[bool] = None
 
+    # We use random tensors for autotune by default. Setting this as true will let us
+    # use inputs from sample inputs to autotune user defined triton kernels.
+    # Side effect for this option is increased memory footprint during first pass compilation.
+    autotune_with_sample_inputs: bool = False
+
     # Allows tiling reductions into multiple dimensions.
     # For best results, this should be used with prefer_nd_tiling.
     tile_reductions: bool = False
@@ -1078,13 +1121,12 @@ class triton:
     )
 
     # should we put op names in kernel names
-    # False: No special names (just triton__1, triton__2, etc.)
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # use alternate codegen for smaller reductions
     persistent_reductions = (
@@ -1108,7 +1150,7 @@ class triton:
     )  # type: ignore[assignment]
 
     # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
+    divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
@@ -1245,6 +1287,9 @@ class aot_inductor:
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
+    # Experimental.  Controls automatic precompiling of common AOTI include files.
+    precompile_headers: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -1334,6 +1379,11 @@ class cuda:
     cutlass_instantiation_level: str = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
     )
+
+    # Experimental. Only for H100 for now. Flag to control whether to use presets.
+    # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
+    # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
+    cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
 
 
 class rocm:
@@ -1531,6 +1581,7 @@ class test_configs:
     max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
+    static_cpp_dtype_assert = False
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
