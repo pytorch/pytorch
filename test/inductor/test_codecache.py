@@ -1448,7 +1448,7 @@ class TestStandaloneCompile(TestCase):
         torch._dynamo.reset()
         clear_inductor_caches()
 
-    def capture(self, fn):
+    def capture(self, fn, dynamic=None):
         def inner(*args):
             gm = None
             actual_args = None
@@ -1463,7 +1463,9 @@ class TestStandaloneCompile(TestCase):
                 kwargs = kwargs_
                 return gm
 
-            _ = torch.compile(fn, fullgraph=True, backend=backend)(*args)
+            _ = torch.compile(fn, fullgraph=True, backend=backend, dynamic=dynamic)(
+                *args
+            )
             return gm, actual_args, kwargs
 
         return inner
@@ -1471,11 +1473,15 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("format", ("binary", "unpacked"))
     @parametrize("dynamic", (False, True))
-    def test_basic(self, format: str, dynamic: bool) -> None:
-        mod = torch.nn.Linear(1, 3)
-        x = torch.randn(4, 1)
+    def test_basic(self, device: str, format: str, dynamic: bool) -> None:
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        mod = torch.nn.Linear(1, 3, device=device)
+        x = torch.randn(4, 1, device=device)
         if dynamic:
             torch._dynamo.mark_dynamic(x, 0)
 
@@ -1502,7 +1508,13 @@ class TestStandaloneCompile(TestCase):
 
             with fresh_inductor_cache():
                 loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
-                compiled_out = loaded(*args)
+                if dynamic:
+                    concrete_args = [
+                        4 if isinstance(a, torch.SymInt) else a for a in args
+                    ]
+                else:
+                    concrete_args = args
+                compiled_out = loaded(*concrete_args)
                 self.assertEqual(eager_out, compiled_out)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -1536,7 +1548,6 @@ class TestStandaloneCompile(TestCase):
     def test_save_in_new_path(self) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
-        torch._dynamo.mark_dynamic(x, 0)
 
         def f(x):
             with torch.no_grad():
@@ -1561,6 +1572,65 @@ class TestStandaloneCompile(TestCase):
                 )
                 compiled_out = loaded(*args)[0]
                 self.assertEqual(eager_out, compiled_out)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_modify_unpacked_file(self, device: str) -> None:
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        x = torch.ones(4, device=device)
+
+        def f(x):
+            with torch.no_grad():
+                return 2 * x, x.sin()
+
+        eager_out = f(x)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with fresh_inductor_cache():
+                gm, args, kwargs = self.capture(f)(x)
+                assert not kwargs
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                compiled_out = compiled_artifact(*args)
+                self.assertEqual(eager_out, compiled_out)
+
+                compiled_artifact.save(path=temp_dir, format="unpacked")
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            with fresh_inductor_cache():
+                # Now modify the output file and expect to see the changes
+                for subdir in os.listdir(temp_dir):
+                    if subdir in ["aotautograd", "fxgraph"]:
+                        continue
+                    subdir_path = os.path.join(temp_dir, subdir)
+                    for file in os.listdir(subdir_path):
+                        file_path = os.path.join(subdir_path, file)
+                        assert os.path.isfile(file_path)
+                        with open(file_path) as f:
+                            file_contents = f.read()
+                        if device == GPU_TYPE:
+                            file_contents = file_contents.replace(
+                                "tmp1 = 2.0", "tmp1 = 8.0"
+                            )
+                        else:
+                            assert device == "cpu"
+                            file_contents = file_contents.replace(
+                                "auto tmp1 = static_cast<float>(2.0);",
+                                "auto tmp1 = static_cast<float>(8.0);",
+                            )
+                        with open(file_path, "w") as f:
+                            f.write(file_contents)
+
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=temp_dir, format="unpacked"
+                )
+                compiled_out = loaded(*args)
+                self.assertEqual(4 * eager_out[0], compiled_out[0])
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
@@ -1611,6 +1681,152 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                         + e.output.decode("utf-8")
                     )
                 )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_dynamic_shapes_from_graph(self):
+        def f(x):
+            return x.shape[0] * x
+
+        x = torch.ones(3)
+        torch._dynamo.mark_dynamic(x, 0)
+        with fresh_inductor_cache():
+            # captured graph is lambda s0, x: x * s0
+            gm, args, kwargs = self.capture(f)(x)
+            assert not kwargs
+
+        compiled_artifact = torch._inductor.standalone_compile(
+            gm, args, dynamic_shapes="from_graph"
+        )
+        x = torch.ones(4)
+        (result,) = compiled_artifact(4, x)
+        self.assertEqual(result, x * 4)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_dynamic_shapes_from_example_inputs(self):
+        def f(x):
+            return x.shape[0] * x
+
+        x = torch.ones(3)
+        torch._dynamo.mark_dynamic(x, 0)
+        with fresh_inductor_cache():
+            # captured graph is lambda s0, x: x * s0
+            gm, args, kwargs = self.capture(f)(x)
+            assert not kwargs
+
+        # specialized on example inputs
+        compiled_artifact = torch._inductor.standalone_compile(
+            gm, (5, torch.ones(4)), dynamic_shapes="from_example_inputs"
+        )
+        x = torch.ones(4)
+        (result,) = compiled_artifact(3, x)
+        # int 5 was baked in!
+        self.assertEqual(result, x * 5)
+
+        # size 4 was baked in
+        with self.assertRaisesRegex(AssertionError, "expected size 5==4"):
+            x = torch.randn(5)
+            (result,) = compiled_artifact(4, x)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("dynamic_shapes", ["from_graph", "from_example_inputs"])
+    def test_static_shapes(self, dynamic_shapes):
+        def f(x):
+            return x.shape[0] * x
+
+        static_x = torch.randn(3)
+        with fresh_inductor_cache():
+            # static_gm is lambda x: x * 3
+            static_gm, args, kwargs = self.capture(f, dynamic=False)(static_x)
+            assert not kwargs
+        compiled_artifact = torch._inductor.standalone_compile(
+            static_gm, [static_x], dynamic_shapes=dynamic_shapes
+        )
+        x = torch.randn(3)
+        (result,) = compiled_artifact(x)
+        self.assertEqual(result, x * 3)
+        with self.assertRaisesRegex(AssertionError, "expected size 4==3"):
+            x = torch.randn(4)
+            (result,) = compiled_artifact(x)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("dynamic_shapes", ["from_tracing_context", "from_graph"])
+    def test_backend(self, dynamic_shapes):
+        def f(x):
+            return x.shape[0] * x
+
+        x = torch.randn(3)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def backend(gm, args, **kwargs):
+            compiled_artifact = torch._inductor.standalone_compile(
+                gm, args, dynamic_shapes=dynamic_shapes
+            )
+            y = torch.randn(4)
+            (result,) = compiled_artifact(4, y)
+            self.assertEqual(result, y * 4)
+            return compiled_artifact
+
+        torch._dynamo.reset()
+        _ = torch.compile(f, backend=backend)(x)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_backend_dynamic_shapes_from_example_inputs(self):
+        def f(x):
+            return x.shape[0] * x
+
+        x = torch.ones(4)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def backend(gm, args, **kwargs):
+            compiled_artifact = torch._inductor.standalone_compile(
+                gm, [5, torch.ones(4)], dynamic_shapes="from_example_inputs"
+            )
+            y = torch.ones(4)
+            (result,) = compiled_artifact(4, y)
+            # 5 was baked in
+            self.assertEqual(result, y * 5)
+
+            # shape of y was baked in
+            with self.assertRaisesRegex(AssertionError, "expected size 5==4"):
+                y = torch.ones(5)
+                (result,) = compiled_artifact(4, y)
+
+            return compiled_artifact
+
+        torch._dynamo.reset()
+        _ = torch.compile(f, backend=backend)(x)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize(
+        "dynamic_shapes", ["from_tracing_context", "from_graph", "from_example_inputs"]
+    )
+    def test_backend_static_shapes(self, dynamic_shapes):
+        # on static_x, all of these options should produce a static graph,
+        # but it's a bit hard to tell, so these are just smoke tests.
+        static_x = torch.randn(3)
+
+        def f(x):
+            return x.shape[0] * x
+
+        def backend(gm, args, **kwargs):
+            return torch._inductor.standalone_compile(
+                gm, args, dynamic_shapes=dynamic_shapes
+            )
+
+        result = torch.compile(f, backend=backend)(static_x)
+        self.assertEqual(result, static_x * 3)
 
 
 class TestFxGraphCacheHashing(TestCase):
