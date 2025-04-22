@@ -411,7 +411,7 @@ def dynamo_timed_cudagraph(
         log_pt2_compile_event=True,
         compile_id=compile_id,
         is_backward=mode == CompilationMode.BACKWARD,
-        dynamo_compile_runtime_column_us="runtime_cudagraphify_time_us"
+        dynamo_compile_column_us="runtime_cudagraphify_time_us"
         if dynamo_compile
         else None,
     ):
