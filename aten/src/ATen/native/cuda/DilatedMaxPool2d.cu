@@ -143,8 +143,8 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
 #define MAXw 3
 #define MAXc 1
       // Prefetch if conditions met...
-      if (kernel_h/dilation_h<=MAXh &&
-          kernel_w/dilation_w<=MAXw &&
+      if (kernel_h<=MAXh &&
+          kernel_w<=MAXw &&
           channels<=MAXc*(blockDim.x*kernel_stride_C)) {
         scalar_t val [MAXh][MAXw][MAXc];
         for (int ih = 0; ih < MAXh; ih++) {
