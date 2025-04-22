@@ -315,7 +315,7 @@ std::string getArrayRefString(const IntArrayRef s) {
 
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
   std::string str;
-  // The key format per tensor would look like ":Float32[1,1,1,10]:"
+  // The key format per tensor would look like ":Float32[1,1,1,10,]:"
   for (const Tensor& tensor : tensors) {
     str += ":";
     if (tensor.defined()) {
@@ -328,7 +328,7 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
           str += "-1";
         } else {
           str +=
-              std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
+              getArrayRefString(tensor.sizes());
         }
       }
       str += "]";
