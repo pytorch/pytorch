@@ -2,8 +2,8 @@
 
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
+#include <ATen/core/CachingAllocator.h>
 #include <ATen/mps/MPSAllocator.h>
-#include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 
 #include <iostream>
@@ -833,6 +833,38 @@ MPSAllocator& _getPrivateAllocator() {
   static MPSAllocator s_mps_private_alloc(HeapAllocator::UsageFlags::PRIVATE);
   return s_mps_private_alloc;
 }
+
+// A wrapper for MPSAllocator to be used in `getHostAllocator(kMPS)` API
+struct MPSHostAllocator final : public at::HostAllocator {
+ public:
+  at::DataPtr allocate(size_t size) override {
+    return _getSharedAllocator().allocate(size);
+  }
+
+  DeleterFnPtr raw_deleter() const override {
+    return &Delete;
+  }
+
+  void copy_data(void* dst, const void* src, std::size_t count) const override {
+    _getSharedAllocator().copy_data(dst, src, count);
+  }
+
+  void empty_cache() override {
+    _getSharedAllocator().emptyCache();
+  }
+
+ private:
+  static void Delete(void* ptr) {
+    _getSharedAllocator().free(ptr);
+  }
+};
+
+MPSHostAllocator mps_host_allocator;
+
+REGISTER_HOST_ALLOCATOR(kMPS, &mps_host_allocator);
+
+} // namespace
+
 } // anonymous namespace
 
 IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
@@ -851,7 +883,7 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
 bool isMPSPinnedPtr(const void* data) {
-  return at::mps::_getSharedAllocator().isSharedBuffer(data);
+  return _getSharedAllocator().isSharedBuffer(data);
 }
 
 } // namespace at::mps
