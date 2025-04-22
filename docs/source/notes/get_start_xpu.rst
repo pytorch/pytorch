@@ -27,13 +27,13 @@ For Intel Client GPU
 || Windows 11 & Ubuntu 24.10          || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                               |
 ||                                    || Intel® Arc B-Series Graphics (CodeName: Battlemage)                                              |
 ||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                |
-||                                    || Intel® Core™ Ultra Series 2 Mobile Processors with Intel® Arc™ Graphics (CodeName: Lunar Lake)   |
-||                                    || Intel® Core™ Ultra Series 2 Desktop Processors with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
+||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
+||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
 +-------------------------------------+---------------------------------------------------------------------------------------------------+
 || Ubuntu 24.04 & WSL2 (Ubuntu 24.04) || Intel® Arc A-Series Graphics (CodeName: Alchemist)                                               |
 ||                                    || Intel® Core™ Ultra Processors with Intel® Arc™ Graphics (CodeName: Meteor Lake-H)                |
-||                                    || Intel® Core™ Ultra Series 2 Mobile Processors with Intel® Arc™ Graphics (CodeName: Lunar Lake)   |
-||                                    || Intel® Core™ Ultra Series 2 Desktop Processors with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
+||                                    || Intel® Core™ Ultra Desktop Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Lunar Lake) |
+||                                    || Intel® Core™ Ultra Mobile Processors (Series 2) with Intel® Arc™ Graphics (CodeName: Arrow Lake-H)|
 +-------------------------------------+---------------------------------------------------------------------------------------------------+
 
 Intel GPUs support (Prototype) is ready from PyTorch* 2.5 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
