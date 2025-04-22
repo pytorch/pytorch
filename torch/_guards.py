@@ -12,6 +12,7 @@ import traceback
 import unittest.mock
 import weakref
 from abc import abstractmethod
+from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import (
@@ -560,7 +561,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 
     _supported_global_states = {
         "grad_enabled",
-        "torch_function_enabled",
         "autocast_enabled",
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
@@ -655,10 +655,10 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
-    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str): ...
 
     @abstractmethod
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]: ...
 
     @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable): ...
@@ -683,14 +683,14 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
-        self.dynamo_identifiers: dict[str, str] = {}
+        self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
 
-    def add_dynamo_identifier(self, cache_key: str, identifier: str):
-        self.dynamo_identifiers[cache_key] = identifier
+    def add_dynamo_installed_submodule(self, fn_id: int, identifier: str):
+        self.dynamo_installed_submodules[fn_id].append(identifier)
 
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
-        return self.dynamo_identifiers.get(cache_key, None)
+    def get_dynamo_installed_submodules(self, fn_id: int) -> list[str]:
+        return self.dynamo_installed_submodules.get(fn_id, [])
 
     def add_autograd_key_entry(self, identifier: str, key: Callable):
         self.autograd_cache[identifier] = key

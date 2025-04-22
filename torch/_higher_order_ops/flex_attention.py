@@ -709,6 +709,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         return grad_query, grad_key, grad_value, *none_grads, *grad_score_mod_captured
 
 
+# TODO: Rework DispatchKey.Autograd to py_autograd_impl
 @flex_attention.py_impl(DispatchKey.Autograd)
 def flex_attention_autograd(
     query: torch.Tensor,
@@ -1190,6 +1191,6 @@ def flex_attention_backward_fake_tensor_mode(
         return grad_query, grad_key, grad_value, grad_score_mod_captured
 
 
-flex_attention_backward.py_impl(DispatchKey.Autograd)(
+flex_attention_backward.py_autograd_impl(
     autograd_not_implemented(flex_attention_backward, deferred_error=True)
 )

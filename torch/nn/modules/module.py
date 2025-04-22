@@ -1436,10 +1436,14 @@ class Module:
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
-        The hook will be called every time the gradients with respect to a module
-        are computed, i.e. the hook will execute if and only if the gradients with
-        respect to module outputs are computed. The hook should have the following
-        signature::
+        The hook will be called every time the gradients with respect to a module are computed, and its firing rules are as follows:
+
+            1. Ordinarily, the hook fires when the gradients are computed with respect to the module inputs.
+            2. If none of the module inputs require gradients, the hook will fire when the gradients are computed
+               with respect to module outputs.
+            3. If none of the module outputs require gradients, then the hooks will not fire.
+
+        The hook should have the following signature::
 
             hook(module, grad_input, grad_output) -> tuple(Tensor) or None
 

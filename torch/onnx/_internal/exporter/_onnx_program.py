@@ -30,9 +30,8 @@ if TYPE_CHECKING:
     import onnxruntime as ort
 
 _LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
-_NP_UNSUPPORTED_DTYPES = frozenset(
+_NP_UNSUPPORTED_DTYPES_8BIT = frozenset(
     {
-        torch.bfloat16,
         torch.float8_e4m3fn,
         torch.float8_e4m3fnuz,
         torch.float8_e5m2,
@@ -124,13 +123,23 @@ def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
 
     from torch.onnx._internal.exporter import _core
 
-    if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
-        # This requires ONNX Runtime 1.21 or newer
-        if tensor.dtype in _NP_UNSUPPORTED_DTYPES:
+    if tensor.dtype == torch.bfloat16 or tensor.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
+        if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
+            # This requires ONNX Runtime 1.21 or newer
+            if tensor.dtype == torch.bfloat16:
+                uint_type = torch.uint16
+            else:
+                uint_type = torch.uint8
             onnx_type = _core.torch_dtype_to_onnx_dtype(tensor.dtype)
+            # Make tensor contiguous to ensure view() works
+            tensor = tensor.contiguous()
             return ort.OrtValue.ortvalue_from_numpy_with_onnx_type(
-                tensor.numpy(force=True), onnx_element_type=onnx_type
+                tensor.view(uint_type).numpy(force=True), onnx_element_type=onnx_type
             )
+        raise RuntimeError(
+            f"Failed to convert tensor of type '{tensor.dtype}' to OrtValue. "
+            "Please ensure that ONNX Runtime is built with DLPack support or is the latest version"
+        )
     # TODO(#151064): Use dlpack when ORT properly supports it
     return ort.OrtValue.ortvalue_from_numpy(tensor.numpy(force=True))
 
@@ -272,20 +281,21 @@ ONNXProgram(
         the weights are saved as external data in a separate file.
 
         Initializer (model weights) serialization behaviors:
+
         * ``include_initializers=True``, ``keep_initializers_as_inputs=False`` (default):
-        The initializers are included in the saved model.
+          The initializers are included in the saved model.
         * ``include_initializers=True``, ``keep_initializers_as_inputs=True``:
-        The initializers are included in the saved model and kept as model inputs.
-        Choose this option if you want the ability to override the model weights
-        during inference.
+          The initializers are included in the saved model and kept as model inputs.
+          Choose this option if you want the ability to override the model weights
+          during inference.
         * ``include_initializers=False``, ``keep_initializers_as_inputs=False``:
-        The initializers are not included in the saved model and are not listed
-        as model inputs. Choose this option if you want to attach the initializers
-        to the ONNX model in a separate, post-processing, step.
+          The initializers are not included in the saved model and are not listed
+          as model inputs. Choose this option if you want to attach the initializers
+          to the ONNX model in a separate, post-processing, step.
         * ``include_initializers=False``, ``keep_initializers_as_inputs=True``:
-        The initializers are not included in the saved model but are listed as model
-        inputs. Choose this option if you want to supply the initializers during
-        inference and want to minimize the size of the saved model.
+          The initializers are not included in the saved model but are listed as model
+          inputs. Choose this option if you want to supply the initializers during
+          inference and want to minimize the size of the saved model.
 
         Args:
             destination: The path to save the ONNX model to.
@@ -307,21 +317,22 @@ ONNXProgram(
         if keep_initializers_as_inputs:
             self.model.graph.inputs.extend(original_initializers.values())  # type: ignore[arg-type]
 
-        # Save the model to disk
-        if (
-            external_data
-            or _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD
-        ):
-            onnxscript_apis.save_model_with_external_data(self.model, destination)
-        else:
-            ir.save(self.model, destination)
-
-        # Revert the changes to the model
-        if not include_initializers:
-            self.model.graph.initializers.update(original_initializers)
-        if keep_initializers_as_inputs:
-            self.model.graph.inputs.clear()
-            self.model.graph.inputs.extend(original_inputs)
+        try:
+            # Save the model to disk
+            if (
+                external_data
+                or _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD
+            ):
+                onnxscript_apis.save_model_with_external_data(self.model, destination)
+            else:
+                ir.save(self.model, destination)
+        finally:
+            # Revert the changes to the model
+            if not include_initializers:
+                self.model.graph.initializers.update(original_initializers)
+            if keep_initializers_as_inputs:
+                self.model.graph.inputs.clear()
+                self.model.graph.inputs.extend(original_inputs)
 
     def apply_weights(self, state_dict: dict[str, torch.Tensor]) -> None:
         """Apply the weights from the specified state dict to the ONNX model.
