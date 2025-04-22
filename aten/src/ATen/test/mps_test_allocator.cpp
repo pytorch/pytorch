@@ -3,7 +3,6 @@
 #include <ATen/core/CachingHostAllocator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 
-
 namespace replay {
 std::function<void()> callback_action;
 
@@ -50,7 +49,14 @@ TEST(MPSAllocator, MPSAllocatorCallbacks) {
 TEST(MPSAllocator, MPSHostAllocator) {
     // fail if mps isn't available
     ASSERT_TRUE(torch::mps::is_available());
+    at::mps::getIMPSAllocator(true)->emptyCache();
+    auto size = at::mps::getIMPSAllocator(true)->getCurrentAllocatedMemory();
+    {
+        at::DataPtr data = at::getHostAllocator(at::kMPS)->allocate(1000);
+        ASSERT_TRUE(at::mps::isMPSPinnedPtr(data.get()));
+        ASSERT_TRUE(at::mps::getIMPSAllocator(true)->getCurrentAllocatedMemory() > size);
+    }
 
-    at::DataPtr data = at::getHostAllocator(at::kMPS)->allocate(1000);
-    ASSERT_TRUE(at::mps::isMPSPinnedPtr(data.get()));
+    at::getHostAllocator(at::kMPS)->empty_cache();
+    ASSERT_TRUE(at::mps::getIMPSAllocator(true)->getCurrentAllocatedMemory() == size);
 }
