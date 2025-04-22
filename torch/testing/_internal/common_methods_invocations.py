@@ -2739,13 +2739,6 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                      error_regex="Expected self.dtype to be equal to src.dtype")
 
-    # Index dtype must be long
-    src = make_tensor((2, 5), device=device, dtype=torch.float32)
-    idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.int32)
-    dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
-                     error_regex="Expected dtype int64 for index")
-
     # Index and destination must have the same number of dimensions
     src = make_tensor((2, 5), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.long)
@@ -7138,6 +7131,7 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
     zero = torch.tensor(0, dtype=torch.long, device=device)
     test_cases = (
         (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S, S)))),
+        (_tensor((M, S)), (0, _gather((S, S), 1, M).to(torch.int32), _tensor((S, S)))),
         (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S, S)))),
         (_tensor((M, S)), (-1, _gather((S, S), 0, S), _tensor((S, S)))),
         (_tensor((M, S)), (0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))),
