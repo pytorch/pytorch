@@ -62,10 +62,10 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_mps import mps_ops_modifier
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    MACOS_VERSION,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -97,6 +97,8 @@ PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 FALLBACK_REGEX = "There is a performance drop"
 
 if torch.backends.mps.is_available():
+    from torch.testing._internal.common_mps import mps_ops_modifier
+
     mps_ops_modifier(
         op_db,
         device_type="mps",
@@ -4444,7 +4446,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "clamp", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
-                xfail("complex", device_type="mps"),
+                xfailIf("complex", device_type="mps", fail_fn=MACOS_VERSION < 14),
                 xfail(
                     "copysign", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
@@ -4901,7 +4903,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "clamp", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
-                xfail("complex", device_type="mps"),
+                xfailIf("complex", device_type="mps", fail_fn=MACOS_VERSION < 14),
                 xfail(
                     "copysign", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
