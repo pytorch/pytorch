@@ -1130,9 +1130,17 @@ class _InProcessFxCompile(FxCompile):
                         colored=True,
                     ),
                 )
-                inductor_post_grad_graph_str = gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                )
+
+                # We're printing the graph to be used as a cache key - so a
+                # printer which is a little less readable but faster is
+                # appropriate.
+                def fast_repr(expr: torch.types.PySymType) -> str:
+                    return torch._inductor.utils.sympy_str(expr.node.expr)
+
+                with torch.fx.graph._override_sym_repr(fast_repr):
+                    inductor_post_grad_graph_str = gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    )
                 trace_structured(
                     "inductor_post_grad_graph",
                     payload_fn=lambda: inductor_post_grad_graph_str,
