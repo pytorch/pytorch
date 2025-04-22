@@ -6295,9 +6295,9 @@ def logcumsumexp(x, dim):
 
 @register_lowering(aten.cummax, type_promotion_kind=None)
 def cummax(x, axis=None):
-    if len(x.get_size()) == 0:
+    if x.get_numel() <= 1:
         assert axis in [0, -1]
-        return clone(x), empty_like(x, dtype=torch.int64)
+        return clone(x), zeros_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -6315,9 +6315,9 @@ def cummax(x, axis=None):
 
 @register_lowering(aten.cummin, type_promotion_kind=None)
 def cummin(x, axis=None):
-    if len(x.get_size()) == 0:
+    if x.get_numel() <= 1:
         assert axis in [0, -1]
-        return clone(x), empty_like(x, dtype=torch.int64)
+        return clone(x), zeros_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
