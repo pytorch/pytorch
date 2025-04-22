@@ -704,7 +704,7 @@ struct CachingHostAllocatorInterface : public HostAllocator {
   void deleter(void* ptr);                                          \
   struct name final                                                 \
       : public at::CachingHostAllocatorInterface<impl, deleter> {}; \
-  static name instance;                                                    \
+  static name instance;                                             \
   void deleter(void* ptr) {                                         \
     instance.free(ptr);                                             \
   }
