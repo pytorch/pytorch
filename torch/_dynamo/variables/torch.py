@@ -1473,6 +1473,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             tx.output.example_value_from_input_node(data.as_proxy().node)
         )
         result = VariableTracker.build(tx, example_value, source)
+        # Realize the VT because we will delete the guards on it in the next line.
+        result.realize()
         # No need to guard on this since we already guarded on `data`.
         # These guards would fail since varname doesn't exist until after the function starts
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
