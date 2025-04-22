@@ -38,4 +38,3 @@ done < <(
 )
 
 exit $status
-
