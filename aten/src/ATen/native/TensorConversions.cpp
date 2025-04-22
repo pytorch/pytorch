@@ -806,7 +806,7 @@ Tensor sparse_compressed_to_dense(
 
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
-inline SymDimVector compute_strides_for_view_dtype_downsize(
+static inline SymDimVector compute_strides_for_view_dtype_downsize(
     SymIntArrayRef old_strides,
     int64_t size_ratio,
     ScalarType old_dtype,
@@ -832,7 +832,7 @@ inline SymDimVector compute_strides_for_view_dtype_downsize(
 
 // Computes the strides for view_dtype output when the view dtype is
 // larger than the original dtype
-inline SymDimVector compute_strides_for_view_dtype_upsize(
+static inline SymDimVector compute_strides_for_view_dtype_upsize(
     SymIntArrayRef old_strides,
     int64_t size_ratio,
     ScalarType old_dtype,
@@ -1023,22 +1023,9 @@ static Tensor _mask_to_indices(const Tensor& mask) {
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
-    Tensor not_zero_mask,
-    ScalarType index_dtype,
-    Device index_device) {
-  auto col_indices =
-      at::native::arange(
-          not_zero_mask.size(-1), index_dtype, kStrided, index_device)
-          .view({1, not_zero_mask.size(-1)})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  auto row_indices =
-      at::native::arange(
-          not_zero_mask.size(-2), index_dtype, kStrided, index_device)
-          .view({not_zero_mask.size(-2), 1})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  return std::pair<Tensor, Tensor>(col_indices, row_indices);
+    Tensor not_zero_mask) {
+  auto nz = not_zero_mask.nonzero();
+  return {nz.select(1, 1), nz.select(1, 0)};
 }
 
 // Sparse layout conversions Start
@@ -1319,8 +1306,8 @@ static Tensor dense_to_sparse_compressed(
   Tensor col_indices;
   Tensor compressed_indices;
   if (compressed_rows_layout) {
-    std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask, at::kLong, not_zero_mask.device());
+    std::tie(col_indices, row_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask);
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         row_indices, not_zero_mask.size(0), false /*out_int32*/);
     {
@@ -1328,8 +1315,8 @@ static Tensor dense_to_sparse_compressed(
       values = values.flatten(0, 1).index_select(0, mask_indices);
     }
   } else {
-    std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
+    std::tie(row_indices, col_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask.transpose(1, 0));
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         col_indices, not_zero_mask.size(-1), false /*out_int32*/);
     {
@@ -1989,7 +1976,7 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
  * Modified to ensure sorted BSR column indices.
  */
 template <class index_t, class scalar_t, bool compressed_rows>
-void _compressed_to_block_compressed_cpu_kernel(
+static void _compressed_to_block_compressed_cpu_kernel(
     const index_t n_compressed, // Tensor size along compressed dimension
     const index_t n_plain, // Tensor size along plain dimension
     const index_t C, // Block size along compressed dimensions
@@ -2086,7 +2073,7 @@ void _compressed_to_block_compressed_cpu_kernel(
  * https://github.com/scipy/scipy/blob/8a64c938ddf1ae4c02a08d2c5e38daeb8d061d38/scipy/sparse/sparsetools/csr.h
  */
 template <class index_t>
-index_t compressed_count_blocks(
+static index_t compressed_count_blocks(
     const index_t n_compressed, // Tensor size along compressed dimension
     const index_t n_plain, // Tensor size along plain dimension
     const index_t C, // Block size along compressed dimensions
@@ -2110,7 +2097,7 @@ index_t compressed_count_blocks(
 }
 
 template <Layout target_layout>
-Tensor _compressed_to_block_compressed_cpu(
+static Tensor _compressed_to_block_compressed_cpu(
     const Tensor& self,
     IntArrayRef blocksize) {
   static_assert(

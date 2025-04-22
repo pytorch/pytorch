@@ -7003,17 +7003,26 @@ class MockFXGraphCache:
         key, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
         if key not in self.cache:
             self.cache[key] = gm
-        gm, _ = self.load_with_key(key, [], inputs, None, None, None, None)
+        gm, _ = self.load_with_key(key, [], inputs, None, None, None, None, None)
         return gm
 
     def load_with_key(
-        self, key, debug_lines, inputs, local, remote_cache, is_backward, constants
+        self,
+        key,
+        debug_lines,
+        inputs,
+        local,
+        remote_cache,
+        is_backward,
+        constants,
+        evaluate_guards,
     ):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
             gm = MockFXGraphCacheOutput(gm)
-            gm._fx_graph_cache_key = key
+            gm._fx_graph_cache_key = key  # (cache_key, debug lines)
+            gm._fx_graph_cache_debug_lines = []
             gm._time_taken_ns = 0
         return gm, {}
 

@@ -4440,9 +4440,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "amin", device_type="mps"
                 ),  # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
                 xfail("argsort", device_type="mps"),
-                xfail(
-                    "bitwise_not", device_type="mps"
-                ),  # Inplace bitwise_not has issues
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail(
                     "cat",
@@ -4906,9 +4903,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "amin", device_type="mps"
                 ),  # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
                 xfail("argsort", device_type="mps"),
-                xfail(
-                    "bitwise_not", device_type="mps"
-                ),  # Inplace bitwise_not has issues
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail(
                     "cat",
@@ -5204,7 +5198,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             "polygamma",
             "pow",
             "remainder",
-            "scatter_add",
             "scatter",
             "square",
             "sub",
