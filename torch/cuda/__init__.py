@@ -1858,6 +1858,10 @@ def _compile_kernel(
     if nvcc_options:
         for option in nvcc_options:
             options.append(option.encode('utf-8'))
+
+            # TODO: Should we refactor flags into a common place?
+            from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
+            options.extend(COMMON_NVCC_FLAGS)
     
     # Convert options to C array
     num_options = len(options)
