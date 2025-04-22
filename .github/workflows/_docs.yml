@@ -54,7 +54,7 @@ on:
 
 jobs:
   check-urls:
-    name: Check URLs
+    name: check-urls
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PyTorch
@@ -65,8 +65,8 @@ jobs:
       - name: Run URL linter
         run: bash ./scripts/check_urls.sh
 
-  check-links:
-    name: Check Links
+  check-xrefs:
+    name: check-xrefs
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PyTorch
@@ -74,8 +74,8 @@ jobs:
         with:
           submodules: false
           fetch-depth: -1
-      - name: Run link linter
-        run: bash ./scripts/check_links.sh
+      - name: Run xref linter
+        run: bash ./scripts/check_xrefs.sh
 
   build-docs:
     # Don't run on forked repos.
