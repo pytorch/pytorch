@@ -913,7 +913,6 @@ class GraphSignature:
 class AOTAutogradCacheInfo:
     cache_key: str
     start_time_ns: int
-    forward_symints: list[torch.SymInt]
 
 
 @dataclass

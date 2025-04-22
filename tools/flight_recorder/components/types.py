@@ -194,7 +194,6 @@ COLLECTIVES = {
     "all_reduce",
     "_all_gather_base",
     "all_gather_into_tensor_coalesced",
-    "reduce_scatter",
     "reduce_scatter_tensor_coalesced",
     "_reduce_scatter_base",
     "gather",
@@ -203,7 +202,7 @@ COLLECTIVES = {
     "all_reduce_barrier",
     "allreduce_coalesced",
     "ALLGATHER_coalesced",
-    "REDUCE_SCATTER_coalesced",
+    "REDUCESCATTER_coalesced",
 }
 
 P2P = {
@@ -553,6 +552,7 @@ class Op:
                 "all_gather",
                 "all_gather_base",
                 "all_gather_into_tensor_coalesced",
+                "ALLGATHER_coalesced",
             ] and not (
                 math.prod(other.output_sizes[0])
                 == math.prod(self.input_sizes[0]) * self.pg_size
@@ -566,6 +566,7 @@ class Op:
                 "reduce_scatter",
                 "_reduce_scatter_base",
                 "reduce_scatter_tensor_coalesced",
+                "REDUCESCATTER_coalesced",
             ] and not (
                 math.prod(other.input_sizes[0])
                 == math.prod(self.output_sizes[0]) * self.pg_size
@@ -575,14 +576,10 @@ class Op:
                     f"Found input numel '{math.prod(other.input_sizes[0])}' does not match output numel "
                     f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
                 )
-        elif self.type in [
-            "coalesced",
-            "ALLGATHER_coalesced",
-            "REDUCE_SCATTER_coalesced",
-        ]:
+        elif self.type == "coalesced":
             return (
                 MatchInfo(MatchState.FULLY_MATCHED)
-                if (other.type == self.type)
+                if (other.type == "coalesced")
                 else MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH)
             )
         return MatchInfo(MatchState.FULLY_MATCHED)

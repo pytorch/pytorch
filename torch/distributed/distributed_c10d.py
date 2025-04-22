@@ -1153,15 +1153,12 @@ def _canonicalize_group_rank(
     if group_rank is not None:
         if global_rank is not None:
             raise ValueError("Can't specify both group_rank and global_rank")
-        if return_global:
-            return get_global_rank(group, group_rank)
+        global_rank = get_global_rank(group, group_rank)
     else:
         if global_rank is None:
             raise ValueError("Must specify global_rank or group_rank")
-        if return_global:
-            return global_rank
         group_rank = get_group_rank(group, global_rank)
-    return group_rank
+    return global_rank if return_global else group_rank
 
 
 def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):

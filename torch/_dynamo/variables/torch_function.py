@@ -629,7 +629,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # Handle non-overriden attributes inherited from `torch.Tensor`.
         attr_is_overriden = _is_attr_overidden(tx, self, name)
         if hasattr(torch.Tensor, name) and not attr_is_overriden:
-            if tx.symbolic_torch_function_state.torch_function_subclass_enabled:
+            if tx.output.torch_function_enabled:
                 if self.source:
                     install_guard(
                         AttrSource(
@@ -705,7 +705,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
-        if tx.symbolic_torch_function_state.torch_function_subclass_enabled:
+        if tx.output.torch_function_enabled:
             import torch
 
             if _is_attr_overidden(tx, self, name):

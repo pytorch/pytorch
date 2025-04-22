@@ -696,30 +696,6 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureCppSerDes  # Cpp serder seems to fail parsing complicated guards
-    def test_export_statically_known_true(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                shape = y.shape[0] ** 2 - 3 * y.shape[0]
-                end = shape
-                return x[:, :end]
-
-        dynamic_shapes = (
-            (torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC),
-            (torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC),
-        )
-
-        ep = export(
-            Foo(),
-            (torch.randn(4, 4), torch.randn(4, 4)),
-            dynamic_shapes=dynamic_shapes,
-            strict=False,
-        )
-        FileCheck().check_count("torch.ops.aten.slice.Tensor", 2, exactly=True).run(
-            str(ep.graph)
-        )
-        FileCheck().check_count("operator.sub", 1, exactly=True).run(str(ep.graph))
-
     def test_colon_parameter(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -2395,7 +2371,7 @@ graph():
         }
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"Not all values of dy .* in the specified range are valid because dy was inferred to be a constant",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
@@ -4005,7 +3981,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->5, 4->5, 3->4
             bad_args=(torch.randn(5), [torch.randn(5)], {"k": torch.randn(4)}),
             run_time_msg="Expected input.*to be equal to 3, but got 4",
-            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            compile_time_msg=r"Constraints violated.*\n.*was inferred to be a constant \(3\)",
         )
 
     def test_mismatched_dynamic_shapes(self):
@@ -4576,7 +4552,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp ser/der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -4601,7 +4576,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             torch.rand((1, 1, 32, 32)),
         )
 
-        dim = torch.export.Dim.AUTO
+        dim = torch.export.Dim("Dim", min=16, max=64)
         dynamic_shapes = {"x": {2: dim, 3: dim}, "y": {2: dim, 3: dim}}
 
         exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
@@ -4813,33 +4788,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kw_func = Module()
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
-
-    @testing.expectedFailureCppRuntime
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
-    def test_export_module(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
-                self.p2 = torch.nn.Parameter(
-                    CustomTensorPlainOut(
-                        torch.ones(3, 4),
-                        torch.ones(3, 4),
-                    )
-                )
-
-            def forward(self, x):
-                a = (2 * self.p1 + self.p2).sum()
-                return x + a
-
-        model = Foo()
-        example_inputs = (torch.randn(3, 4),)
-        ep = export(model, example_inputs, strict=False)
-        before = list(ep.state_dict.keys())
-        ep.run_decompositions()
-        after = list(ep.state_dict.keys())
-        self.assertEqual(before, after)
 
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
@@ -5348,7 +5296,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.(.*\n)*.*"
+                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "batch was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = 10"
             ),
@@ -5514,7 +5463,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO(.*\n)*"
+                "Constraints violated \\(K1\\)!(.*\n)*.*"
+                "K1 was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "K1 = 3"
             ),
@@ -10029,7 +9979,7 @@ graph():
         inp = (3, torch.randn(4, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
         ):
             ep = export(
                 M(),
@@ -13244,7 +13194,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
         ):
             ep = export(
                 Specialize(),

@@ -732,7 +732,6 @@ def _compile(
         )
 
         try:
-            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -768,6 +767,13 @@ def _compile(
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> ConvertFrameReturn:
         with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                dynamo_timed(
+                    "_compile.compile_inner",
+                    phase_name="entire_frame_compile",
+                    dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+                )
+            )
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
@@ -806,10 +812,7 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                with dynamo_timed(
-                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
-                ):
-                    out_code = transform_code_object(code, transform)
+                out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
@@ -954,11 +957,7 @@ def _compile(
         ),
         _WaitCounter("pytorch.wait_counter.entire_forward_compile").guard(),
         metrics_context,
-        dynamo_timed(
-            "_compile.compile_inner",
-            phase_name="entire_frame_compile",
-            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-        ),
+        _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
@@ -1230,6 +1229,7 @@ class ConvertFrame:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> ConvertFrameReturn:
+        input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1388,6 +1388,8 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
+
+        input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
         if sys.version_info >= (3, 13):
