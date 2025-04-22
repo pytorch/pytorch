@@ -1305,12 +1305,7 @@ def aot_dispatch_autograd(
         def try_save_cache_entry(  # noqa: F811
             compiled_bw_func, lazy_backward_info, _fw_metadata, aot_config
         ):
-            # class AutogradLazyBackwardCompileInfo:
-            #     bw_module: Callable
-            #     placeholder_list: list[Any]
-            #     saved_context: Optional[TracingContext]
-            #     saved_compile_context: Optional[CompileContext]
-            lazy_backward_info.placeholder_list = []
+            # We shouldn't reuse contexts across cache hits
             lazy_backward_info.saved_context = None
             lazy_backward_info.saved_compile_context = None
 
