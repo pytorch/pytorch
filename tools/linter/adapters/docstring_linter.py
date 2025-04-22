@@ -34,10 +34,15 @@ MAX_LINES = {"class": 100, "def": 80}
 
 MIN_DOCSTRING = 50  # docstrings shorter than this are too short
 
-ERROR_FMT = "Every {type} with more than {length} lines needs a docstring"
+DESCRIPTION = """
+`docstring_linter` reports on long functions, methods or classes without docstrings
+""".strip()
 
-DESCRIPTION = """`docstring_linter` reports on long functions, methods or classes
-without docstrings"""
+METHOD_OVERRIDE_HINT = (
+    "If the method overrides a method on a parent class, adding the"
+    " `@typing_extensions.override` decorator will make this error"
+    " go away."
+)
 
 
 @total_ordering
@@ -173,26 +178,27 @@ _IGNORE = {token.COMMENT, token.DEDENT, token.INDENT, token.NL}
 
 
 def _get_decorators(tokens: Sequence[TokenInfo], start: int) -> list[str]:
-    decorators: list[str] = []
+    # We work backward through lines before start of the the block until we find one
+    # that can't be part of a decorator.
 
-    # We work backward through lines before the block until we find one that
-    # can't be part of a decorator.
-    nls = (i for i in reversed(range(start)) if tokens[i].type == token.NEWLINE)
-    nls = itertools.chain(nls, [-1])  # The first line has no NEWLINE!
-    it = iter(nls)
+    def decorators() -> Iterator[str]:
+        rev = reversed(range(start))
+        nls = (i for i in rev if tokens[i].type == token.NEWLINE)
+        nls = itertools.chain(nls, [-1])
 
-    end = next(it, -1)
-    for begin in it:
-        for i in range(begin + 1, end):
-            tok = tokens[i]
-            if tok.type == token.OP and tok.string == "@":
-                decorators.insert(0, _join_tokens(tokens[i:end]))
-                break
-            elif tok.type not in _IGNORE:
-                return decorators
-        end = begin
+        it = iter(nls)
+        end = next(it, -1)
+        for begin in it:
+            for i in range(begin + 1, end):
+                t = tokens[i]
+                if t.type == token.OP and t.string == "@":
+                    yield _join_tokens(tokens[i:end])
+                    break
+                elif t.type not in _IGNORE:
+                    return
+            end = begin
 
-    return decorators
+    return list(decorators())[::-1]
 
 
 class DocstringFile(_linter.PythonFile):
@@ -384,7 +390,9 @@ class DocstringLinter(_linter.FileLinter[DocstringFile]):
             needed = f"needed {self.args.min_docstring}"
             msg = f"{msg} was too short ({len(b.docstring)} character{s}, {needed})"
         else:
-            msg = "No " + msg
+            msg = f"No {msg}"
+            if b.is_method:
+                msg = f"{msg}. {METHOD_OVERRIDE_HINT}"
         return _linter.LintResult(msg, *df.tokens[b.begin].start)
 
     def _display(

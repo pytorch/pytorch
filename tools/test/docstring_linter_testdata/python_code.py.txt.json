@@ -26,7 +26,7 @@
     "code": "DOCSTRING_LINTER",
     "description": null,
     "line": 71,
-    "name": "No docstring found for function 'needs_docs' (12 lines)",
+    "name": "No docstring found for function 'needs_docs' (12 lines). If the method overrides a method on a parent class, adding the `@typing_extensions.override` decorator will make this error go away.",
     "original": null,
     "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
     "replacement": null,
