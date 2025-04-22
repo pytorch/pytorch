@@ -503,8 +503,16 @@ class RingFlexAttentionTest(DTensorTestBase):
             mesh_dim_names=("cp",),
         )
 
+        # shard the QKV tensors
+        sharding = Shard(2)
+        q_local = distribute_tensor(q, device_mesh, [sharding]).to_local()
+        k_local = distribute_tensor(k, device_mesh, [sharding]).to_local()
+        v_local = distribute_tensor(v, device_mesh, [sharding]).to_local()
+
+        # TODO: flex_attention checks block_mask shape and input shape before
+        # calling into flex_attention_hop.
         with CPMode(device_mesh):
-            out = flex_attention(q, k, v, block_mask=block_mask)
+            out = flex_attention(q_local, k_local, v_local, block_mask=block_mask)
 
         # all-gather the output
         assert isinstance(out, torch.Tensor)
@@ -584,9 +592,9 @@ def cp_flex_attention_cast_to_dtensor(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     print("cp_flex_attention_cast_to_dtensor")
     sharding = Shard(2)
-    q_dist = distribute_tensor(query, mode.device_mesh, [sharding])
-    k_dist = distribute_tensor(key, mode.device_mesh, [sharding])
-    v_dist = distribute_tensor(value, mode.device_mesh, [sharding])
+    q_dist = DTensor.from_local(query, mode.device_mesh, [sharding])
+    k_dist = DTensor.from_local(key, mode.device_mesh, [sharding])
+    v_dist = DTensor.from_local(value, mode.device_mesh, [sharding])
 
     out, lse = flex_attention_hop(
         q_dist,
@@ -615,6 +623,7 @@ def cp_flex_attention(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[DTensor, DTensor]:
+    print("cp_flex_attention")
     q_local = query.to_local()
     k_local = key.full_tensor()
     v_local = value.full_tensor()
