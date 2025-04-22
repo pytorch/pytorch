@@ -99,6 +99,8 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  C10_DEPRECATED_MESSAGE(
+    "getMPSHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kMPS)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override {
     return false;
   }
