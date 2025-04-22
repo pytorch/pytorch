@@ -54,6 +54,7 @@ on:
 
 jobs:
   check-urls:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     name: check-urls
     runs-on: ubuntu-latest
     steps:
