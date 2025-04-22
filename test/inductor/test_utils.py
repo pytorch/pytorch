@@ -4,7 +4,7 @@ from sympy import Symbol, sympify
 
 import torch
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import sympy_subs, sympy_str
+from torch._inductor.utils import sympy_str, sympy_subs
 
 
 class TestUtils(TestCase):

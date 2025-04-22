@@ -790,7 +790,9 @@ def sympy_str(expr: sympy.Expr) -> str:
     """
 
     def is_neg_lead(expr: sympy.Expr) -> bool:
-        return isinstance(expr, sympy.Mul) and len(expr.args) == 2 and expr.args[0] == -1
+        return (
+            isinstance(expr, sympy.Mul) and len(expr.args) == 2 and expr.args[0] == -1
+        )
 
     def sympy_str_add(expr: sympy.Expr) -> str:
         if isinstance(expr, sympy.Add):
