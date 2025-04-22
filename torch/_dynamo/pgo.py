@@ -35,7 +35,6 @@ from torch._dynamo.utils import (
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
 
 if TYPE_CHECKING:
@@ -591,6 +590,8 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
 
+    from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+
     # Attempt local
     path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
@@ -711,6 +712,8 @@ def put_local_code_state(cache_key: str) -> None:
         assert _CODE_STATE is not None
 
         pickled_code = pickle.dumps(_CODE_STATE)
+
+        from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
         CacheArtifactManager.record_artifact(
             CacheArtifactType.PGO, cache_key, pickled_code
