@@ -1508,7 +1508,13 @@ class TestStandaloneCompile(TestCase):
 
             with fresh_inductor_cache():
                 loaded = torch._inductor.CompiledArtifact.load(path=path, format=format)
-                compiled_out = loaded(*args)
+                if dynamic:
+                    concrete_args = [
+                        4 if isinstance(a, torch.SymInt) else a for a in args
+                    ]
+                else:
+                    concrete_args = args
+                compiled_out = loaded(*concrete_args)
                 self.assertEqual(eager_out, compiled_out)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -1542,7 +1548,6 @@ class TestStandaloneCompile(TestCase):
     def test_save_in_new_path(self) -> None:
         mod = torch.nn.Linear(1, 3)
         x = torch.randn(4, 1)
-        torch._dynamo.mark_dynamic(x, 0)
 
         def f(x):
             with torch.no_grad():
