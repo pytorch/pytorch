@@ -2,7 +2,7 @@
 
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
-#include <ATen/core/CachingAllocator.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Storage.h>
 
