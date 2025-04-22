@@ -275,7 +275,7 @@ def pre_grad_passes(
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
-                    "name": "before apply group_batch_fusion_pre_grad",
+                    "name": "before_apply_group_batch_fusion_pre_grad",
                     "encoding": "string",
                 },
                 payload_fn=lambda: gm.print_readable(
@@ -290,7 +290,7 @@ def pre_grad_passes(
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
-                    "name": "after apply group_batch_fusion_pre_grad",
+                    "name": "after_apply_group_batch_fusion_pre_grad",
                     "encoding": "string",
                 },
                 payload_fn=lambda: gm.print_readable(
@@ -305,7 +305,7 @@ def pre_grad_passes(
                 trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
-                        "name": f"before apply {pattern_matcher_pass.pass_name}_pre_grad",
+                        "name": f"before_apply_{pattern_matcher_pass.pass_name}_pre_grad",
                         "encoding": "string",
                     },
                     payload_fn=lambda: gm.print_readable(
@@ -319,7 +319,7 @@ def pre_grad_passes(
                 trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
-                        "name": f"after apply {pattern_matcher_pass.pass_name}_pre_grad",
+                        "name": f"after_apply_{pattern_matcher_pass.pass_name}_pre_grad",
                         "encoding": "string",
                     },
                     payload_fn=lambda: gm.print_readable(

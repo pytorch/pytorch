@@ -117,7 +117,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "before apply group_batch_fusion_post_grad",
+                "name": "before_apply_group_batch_fusion_post_grad",
                 "encoding": "string",
             },
             payload_fn=lambda: gm.print_readable(
@@ -130,7 +130,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "after apply group_batch_fusion_post_grad",
+                "name": "after_apply_group_batch_fusion_post_grad",
                 "encoding": "string",
             },
             payload_fn=lambda: gm.print_readable(
@@ -153,7 +153,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
-                    "name": f"before apply {pattern_matcher_pass.pass_name}_post_grad",
+                    "name": f"before_apply_{pattern_matcher_pass.pass_name}_post_grad",
                     "encoding": "string",
                 },
                 payload_fn=lambda: gm.print_readable(
@@ -166,7 +166,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
-                    "name": f"after apply {pattern_matcher_pass.pass_name}_post_grad",
+                    "name": f"after_apply_{pattern_matcher_pass.pass_name}_post_grad",
                     "encoding": "string",
                 },
                 payload_fn=lambda: gm.print_readable(
