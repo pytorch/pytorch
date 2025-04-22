@@ -5969,7 +5969,6 @@ class TestCudaAutocast(TestAutocast):
 
 
 class TestCompileKernel(TestCase):
-    @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
         # Simple vector addition kernel
         kernel_source = """
@@ -6002,7 +6001,7 @@ class TestCompileKernel(TestCase):
         
         # Verify results
         expected = a + b
-        torch.testing.assert_close(c, expected)
+        self.assertEqual(c, expected)
         
         # Test with different tensor types
         a_int = torch.randint(0, 100, (N,), device="cuda", dtype=torch.int32)

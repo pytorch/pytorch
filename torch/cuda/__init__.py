@@ -1708,13 +1708,10 @@ def compile_kernel(
     """
     Compiles a CUDA kernel using NVRTC and returns a callable function.
     
-    This function is a wrapper for NVRTC that enables runtime compilation of CUDA kernels
-    to be used with PyTorch tensors. It handles the compilation process and creates a Python
-    callable that can be used to invoke the kernel with PyTorch tensors as arguments.
-    
-    Limitations:
-    1. Cannot do heavy templating or use thrust for reductions
-    2. Cannot import any host includes other than those explicitly provided
+    This function is a wrapper for NVRTC that enables runtime compilation of CUDA kernels.
+    Note that this returns a raw CUDA kernel that operates on raw memory pointers.
+    To use this kernel as a proper PyTorch operator, you should wrap it following the guide at:
+    pytorch.org/tutorials/advanced/python_custom_ops.html
     
     Args:
         kernel_source (str): The CUDA kernel source code as a string
