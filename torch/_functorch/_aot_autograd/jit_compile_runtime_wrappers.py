@@ -1301,7 +1301,7 @@ def aot_dispatch_autograd(
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
-            compiled_bw_func, _fw_metadata, aot_config
+            compiled_bw_func, lazy_backward_info, _fw_metadata, aot_config
         ):
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             fw_debug_lines = getattr(
@@ -1345,13 +1345,25 @@ def aot_dispatch_autograd(
                     forward_time_taken_ns,
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
+                    lazy_backward_info=lazy_backward_info,
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
+
+            # class AutogradLazyBackwardCompileInfo:
+            #     bw_module: Callable
+            #     placeholder_list: list[Any]
+            #     saved_context: Optional[TracingContext]
+            #     saved_compile_context: Optional[CompileContext]
+
+            lazy_backward_info.placeholder_list = []
+            lazy_backward_info.saved_context = None
+            lazy_backward_info.saved_compile_context = None
+
+            try_save_cache_entry(compiled_bw_func, lazy_backward_info, fw_metadata, aot_config)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(

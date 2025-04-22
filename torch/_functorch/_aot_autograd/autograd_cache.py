@@ -47,6 +47,7 @@ from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
+    AutogradLazyBackwardCompileInfo,
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
     CompilerWrapper,
@@ -491,6 +492,9 @@ class AOTAutogradCacheEntry:
     # Used by standalone_compile
     sanitized_aot_config: AOTConfig
 
+    # # Used by compiled autograd
+    lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo]
+
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
@@ -637,7 +641,7 @@ class AOTAutogradCacheEntry:
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                None,  # lazy_backward_info
+                self.lazy_backward_info,
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
