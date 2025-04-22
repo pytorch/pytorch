@@ -17,7 +17,7 @@ import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -1068,7 +1068,24 @@ def _jinja2_env():
         return None
 
 
+class GenerateAndLoadResult(NamedTuple):
+    """
+    Return type of TritonTemplate.generate_and_load.
+    """
+
+    mod: ModuleType
+    extra: str
+    input_call_args: tuple[str, ...]
+    prologue_supported_inputs: OrderedSet[str]
+    kernel_args_sizevars_keys: tuple[sympy.Expr]
+    kernel_options: dict[str, Any]
+
+
 class TritonTemplate(KernelTemplate):
+    """
+    A Triton template is a template that can be used to generate a Triton kernel.
+    """
+
     # Allow subclasses to override the kernel type
     kernel_type: type[Any] = TritonTemplateKernel
     index_counter = itertools.count()
@@ -1097,17 +1114,7 @@ class TritonTemplate(KernelTemplate):
         num_buffers_warp_spec: int,
         layout: ir.Layout,
         kwargs: dict[str, Any],
-    ) -> Optional[
-        tuple[
-            ModuleType,
-            str,
-            tuple[str, ...],
-            OrderedSet[str],
-            tuple[sympy.Expr],
-            dict[str, Any],
-        ]
-    ]:
-        # breakpoint()
+    ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
 
         assert self.template, "requires jinja2"
@@ -1214,7 +1221,7 @@ class TritonTemplate(KernelTemplate):
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
-        return (
+        return GenerateAndLoadResult(
             mod,
             extra,
             input_call_args,
@@ -1282,27 +1289,24 @@ class TritonTemplate(KernelTemplate):
             kwargs,
         )
 
+        # May happen as result of dev by 0.
         if result is None:
             return None
-        (
-            mod,
-            extra,
-            input_call_args,
-            prologue_supported_inputs,
-            args_sizevars_keys,
-            kernel_options,
-        ) = result
 
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
-        assert input_call_args[: len(expected_input_args)] == expected_input_args, (
-            input_call_args,
+        assert (
+            result.input_call_args[: len(expected_input_args)] == expected_input_args
+        ), (
+            result.input_call_args,
             expected_input_args,
         )
 
-        full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
+        full_input_nodes = tuple(
+            [V.graph.get_buffer(k) for k in result.input_call_args]
+        )
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, tuple(args_sizevars_keys)),
+            map(sympy.expand, result.kernel_args_sizevars_keys),
             fallback=config.unbacked_symint_fallback,
         )
 
@@ -1314,7 +1318,7 @@ class TritonTemplate(KernelTemplate):
                 output_node=out_node,
                 workspace_arg=workspace_arg,
                 use_jit=False,
-                **kernel_options,
+                **result.kernel_options,
             )
             render = functools.partial(
                 kernel.render,
@@ -1324,7 +1328,7 @@ class TritonTemplate(KernelTemplate):
             return kernel, render
 
         # create the BenchmarkRequest
-        assert mod.__file__ is not None
+        assert result.mod.__file__ is not None
         grid = self.grid(
             *V.graph.sizevars.size_hints(
                 call_sizes,
@@ -1338,8 +1342,8 @@ class TritonTemplate(KernelTemplate):
         else:
             bmreq_cls = TritonGPUBenchmarkRequest
         bmreq = bmreq_cls(
-            module_path=mod.__file__,
-            module_cache_key=mod.key,
+            module_path=result.mod.__file__,
+            module_cache_key=result.mod.key,
             kernel_name=f"triton_{self.name}",
             extra_args=[*extra_args, *grid],
             num_stages=num_stages,
@@ -1359,7 +1363,7 @@ class TritonTemplate(KernelTemplate):
             full_input_nodes,
             layout,
             make_kernel_render,
-            extra.strip("-").replace("-", ", "),
+            result.extra.strip("-").replace("-", ", "),
             bmreq,
             log_info={
                 "tile_shape": str(
@@ -1377,7 +1381,7 @@ class TritonTemplate(KernelTemplate):
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
-            allowed_prologue_inps=prologue_supported_inputs,
+            allowed_prologue_inps=result.prologue_supported_inputs,
         )
 
 
