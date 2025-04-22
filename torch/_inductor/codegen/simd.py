@@ -19,6 +19,7 @@ import sympy
 import torch
 import torch._logging
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -58,6 +59,7 @@ from .multi_kernel import MultiKernel
 from .simd_kernel_features import (
     DisableReduction,
     EnableReduction,
+    NodeScheduleEntry,
     NodeScheduleMarker,
     SIMDKernelFeatures,
 )
@@ -65,6 +67,8 @@ from .simd_kernel_features import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
+
+    from torch._inductor.tiling_utils import CoalesceVarAnalysis
 
 
 log = logging.getLogger(__name__)
@@ -1332,13 +1336,14 @@ class SIMDScheduling(BaseScheduling):
 
         nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
+        coalesce_analysis = analyze_memory_coalescing(node)
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
         schedule_log.debug("Schedule:\n %s", node_schedule)
 
         return self.codegen_node_schedule(
-            SIMDKernelFeatures(node_schedule, numel, rnumel)
+            SIMDKernelFeatures(node_schedule, numel, rnumel, coalesce_analysis)
         )
 
     @staticmethod
@@ -1371,11 +1376,17 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         node_schedule = kernel_features.node_schedule
-        tiling = self.select_tiling(
-            node_schedule, kernel_features.numel, kernel_features.reduction_numel
+
+        tiling, tiling_score = self.get_tiling_and_scores(
+            node_schedule,
+            kernel_features.numel,
+            kernel_features.reduction_numel,
+            kernel_features.coalesce_analysis,
         )
         kernels = self.create_kernel_choices(
-            kernel_features, [tiling], {"features": kernel_features}
+            kernel_features,
+            [tiling],
+            {"features": kernel_features, "tiling_scores": tiling_score},
         )
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
@@ -1984,9 +1995,214 @@ class SIMDScheduling(BaseScheduling):
         return ranked_tilings
 
     @classmethod
+    def compute_tiling_strategy(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+        pointwise_numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        coalesce_analysis: CoalesceVarAnalysis,
+    ) -> tuple[dict[str, sympy.Expr], Optional[dict[str, sympy.Expr]]]:
+        """
+        Generates a tiling, and a score of each tile according to each tiles coalesced memory accesses.
+        """
+        tilings = []
+        tiling_var: Optional[sympy.Expr] = (
+            None
+            if not coalesce_analysis.suggested_split
+            else coalesce_analysis.suggested_split.var
+        )
+        all_red_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+        all_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+        ranges = {}
+        for node in node_schedule:
+            if isinstance(node, scheduler.SchedulerNode):
+                all_red_vars |= node._body.reduce_vars
+                all_iter_vars |= node._body.iter_vars
+                ranges.update(node._body.var_ranges)
+
+        # TODO - need to sort the iter/red vars to correspond to node pointwise/reduction numel?
+        all_iter_vars -= all_red_vars
+
+        pw_ranges = [ranges[v] for v in all_iter_vars]
+        red_ranges = [ranges[v] for v in all_red_vars]
+
+        assert sympy_product(pw_ranges) == pointwise_numel
+        assert sympy_product(red_ranges) == reduction_numel
+
+        # score of a pointwise or reduction split
+        scored_sub_split: dict[Any, tuple[list[int], list[int]]] = {}
+
+        score_split: list[
+            tuple[tuple[list[int], list[int]], tuple[list[int], list[int]]]
+        ] = []
+
+        def process_node_vars(
+            vars_to_use: tuple[sympy.Expr, ...] = (),
+            use_split_var: bool = False,
+            is_pointwise: bool = False,
+        ) -> tuple[list[int], list[int]]:
+            """
+            Generate a tiling, and a tiling score, given vars to use as splits.
+            """
+
+            ranges = pw_ranges if is_pointwise else red_ranges
+            if not ranges:
+                return ([], [])
+
+            key = (repr(vars_to_use), use_split_var, is_pointwise)
+            if out := scored_sub_split.get(key, None):
+                return out
+
+            splitting_vars = all_iter_vars if is_pointwise else all_red_vars
+
+            splits = []
+            split_scores = []
+            prod = 1
+            prev_var_coalesced_score = 0
+
+            for v, v_range in zip(splitting_vars, ranges):
+                prod *= v_range
+                if v not in vars_to_use:
+                    prev_var_coalesced_score = coalesce_analysis.coalesced_by_var.get(
+                        v, 0
+                    )
+                    continue
+
+                # If this is the split variable and we're using it as such
+                if use_split_var and v == tiling_var:
+                    var_tiling = coalesce_analysis.suggested_split
+                    assert var_tiling is not None
+                    # Add the original range up to this point
+                    if prod > 1:
+                        splits.append(prod // var_tiling.tiling_factor)
+                        split_scores.append(var_tiling.score)
+
+                    prod = var_tiling.tiling_factor  # Remaining size
+                    # if we end up splitting on this, v will be coalesced as well
+                    prev_var_coalesced_score = coalesce_analysis.coalesced_by_var.get(
+                        v, 0
+                    )
+
+                else:
+                    # splitting on this var
+                    splits.append(prod)
+                    split_scores.append(coalesce_analysis.coalesced_by_var.get(v, 0))
+                    prod = 1
+
+            if prod != 1:
+                splits.append(prod)
+                split_scores.append(prev_var_coalesced_score)
+
+            scored_sub_split[key] = (splits, split_scores)
+            return (splits, split_scores)
+
+        # add the default tiling
+        score_split.append(
+            (
+                process_node_vars(is_pointwise=True),
+                process_node_vars(is_pointwise=False),
+            )
+        )
+
+        if tiling_var:
+            score_split.append(
+                (
+                    process_node_vars(
+                        (tiling_var,), use_split_var=True, is_pointwise=True
+                    ),
+                    process_node_vars(is_pointwise=False),
+                )
+            )
+
+        # TODO, add tests, reduction splits if config.triton.tile_reductions
+        overlapping_iter_vars = (
+            all_iter_vars & coalesce_analysis.coalesced_by_var.keys()
+        )
+        for v in overlapping_iter_vars:
+            score_split.append(
+                (
+                    process_node_vars((v,), is_pointwise=True),
+                    process_node_vars(is_pointwise=False),
+                )
+            )
+
+        tilings: list[tuple[CandidateTiling, dict[str, sympy.Expr]]] = []
+        for (pw_split, pw_score), (red_split, red_score) in score_split:
+            candidate = CandidateTiling(
+                cls.create_tiling(pw_split, red_split),
+                score=sum(pw_score) + sum(red_score),
+            )
+            tiling_score = cls.create_tiling(pw_score, red_score)
+            tilings.append((candidate, tiling_score))
+
+        for cand, tiling_score in sorted(tilings, key=lambda t: -t[0].score):
+            if cls.tiling_is_compatible(
+                node_schedule, pointwise_numel, reduction_numel, cand.tiling
+            ):
+                if len(cand.tiling) > torch._inductor.config.triton.max_tiles:
+                    perf_hint_log.info(
+                        "Found optimal tiling with %s tiles but torch._inductor.config.triton.max_tiles "
+                        "set to %s. Consider increasing",
+                        len(cand.tiling),
+                        torch._inductor.config.triton.max_tiles,
+                    )
+                    continue
+
+                return cand.tiling, tiling_score
+
+        raise RuntimeError("One tiling should have been compatible")
+
+    @classmethod
+    def tiling_is_compatible(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+        numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        tiling: dict[str, sympy.Expr],
+    ):
+        assert isinstance(tiling, dict)
+        return all(
+            SIMDKernel.is_compatible(
+                tiling.values(), node.get_ranges(), reduction_numel=reduction_numel
+            )
+            for node in node_schedule
+            if isinstance(node, scheduler.SchedulerNode)
+        )
+
+    @classmethod
+    def get_first_compatible_tiling(
+        cls,
+        node_schedule: list[NodeScheduleEntry],
+        numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        ranked_tilings: list[dict[str, sympy.Expr]],
+    ):
+        for tiling in ranked_tilings:
+            if cls.tiling_is_compatible(node_schedule, numel, reduction_numel, tiling):
+                return tiling
+
+        return None
+
+    @classmethod
     def select_tiling(
-        cls, node_schedule, numel, reduction_numel=sympy.S.One
+        cls,
+        node_schedule,
+        numel,
+        reduction_numel=sympy.S.One,
+        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
     ) -> dict[str, sympy.Expr]:
+        return cls.get_tiling_and_scores(
+            node_schedule, numel, reduction_numel, coalesce_analysis
+        )[0]
+
+    @classmethod
+    def get_tiling_and_scores(
+        cls,
+        node_schedule,
+        numel,
+        reduction_numel=sympy.S.One,
+        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
+    ) -> tuple[dict[str, sympy.Expr], Optional[dict[str, sympy.Expr]]]:
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
@@ -2000,6 +2216,16 @@ class SIMDScheduling(BaseScheduling):
 
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
+
+        # TODO: enable by default
+        if (
+            torch._inductor.config.test_configs.global_tiling_analysis
+            and coalesce_analysis
+        ):
+            return cls.compute_tiling_strategy(
+                node_schedule, numel, reduction_numel, coalesce_analysis
+            )
+
         if (
             not is_pointwise and not config.triton.tile_reductions
         ) or config.triton.max_tiles <= 1:
@@ -2019,7 +2245,8 @@ class SIMDScheduling(BaseScheduling):
                             )
                         )
                         break
-            return default_tiling
+
+            return default_tiling, None
 
         seen_names = OrderedSet[str]()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
@@ -2089,18 +2316,12 @@ class SIMDScheduling(BaseScheduling):
                 + ranked_tilings
             )
 
-        for tiling in ranked_tilings:
-            assert isinstance(tiling, dict)
-            if all(
-                SIMDKernel.is_compatible(
-                    tiling.values(), node.get_ranges(), reduction_numel=reduction_numel
-                )
-                for node in node_schedule
-                if isinstance(node, scheduler.SchedulerNode)
-            ):
-                return tiling
+        if tiling := cls.get_first_compatible_tiling(
+            node_schedule, numel, reduction_numel, ranked_tilings
+        ):
+            return tiling, None
 
-        return default_tiling
+        return default_tiling, None
 
     def flush(self):
         pass

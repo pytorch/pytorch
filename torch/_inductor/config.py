@@ -1073,7 +1073,7 @@ class triton:
     #   - max_tiles=2 is the default
     #   - max_tiles=3 is experimental and may have bugs
     # higher values are unsupported
-    max_tiles = 2
+    max_tiles = 3
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
     # it easier to identify block pointers.
@@ -1589,6 +1589,9 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    # TODO - temporary config before enabled by default
+    global_tiling_analysis: bool = True
 
 
 if TYPE_CHECKING:
