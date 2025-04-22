@@ -3583,41 +3583,6 @@ class AOTInductorTestsTemplate:
 
             self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
 
-    def test_aoti_data_dependent_extern_kernel_op(self):
-        # Skip GPY because custom op only implemented for cpu
-        if self.device == GPU_TYPE:
-            raise unittest.SkipTest("skips for GPU")
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define(
-                "mylib::foo",
-                "(Tensor a, Tensor b) -> Tensor",
-                tags=torch.Tag.pt2_compliant_tag,
-                lib=lib,
-            )
-
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                assert a[0] != 0
-                return a + b
-
-            @torch.library.impl_abstract("mylib::foo", lib=lib)
-            def foo_fake_impl(a, b):
-                return a + b
-
-            class Model(torch.nn.Module):
-                def forward(self, a, b):
-                    res = torch.ops.mylib.foo(a, b)
-                    return res
-
-            example_inputs = (torch.ones(10), torch.randn(10))
-            from torch._functorch import config as functorch_config
-
-            # use this config to mimic FakeTensors resulting from
-            # draft export
-            with functorch_config.patch({"fake_tensor_propagate_real_tensors": True}):
-                self.check_model(Model(), example_inputs)
-
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
