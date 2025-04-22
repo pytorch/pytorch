@@ -311,7 +311,12 @@ std::string getMPSShapeString(MPSShape* shape) {
 std::string getArrayRefString(const IntArrayRef s) {
   std::stringstream ss;
   std::copy(s.begin(), s.end(), std::ostream_iterator<int>(ss, ","));
-  return ss.str();
+
+  // Remove spurious "," at the end from osstream_iterator.
+  auto refstring = ss.str();
+  refstring.pop_back();
+
+  return refstring;
 }
 
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
@@ -329,7 +334,7 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
           str += "-1";
         } else {
           str +=
-              std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
+              getArrayRefString(tensor.sizes());
         }
       }
       str += "]";
