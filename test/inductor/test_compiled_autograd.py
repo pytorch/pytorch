@@ -837,10 +837,10 @@ main()
                 placeholders = get_placeholders(gm_)
                 if is_bwd:
                     # boxed inputs
-                    assert isinstance(placeholders[0].meta['example_value'], list)
+                    assert isinstance(placeholders[0].meta["example_value"], list)
                 else:
                     # not boxed inputs
-                    assert not isinstance(placeholders[0].meta['example_value'], list)
+                    assert not isinstance(placeholders[0].meta["example_value"], list)
 
                 return gm_
 
