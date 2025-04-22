@@ -79,7 +79,6 @@ def xfailIf(condition):
             return func
     return wrapper
 
-
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
     print('MPS not available, skipping tests', file=sys.stderr)
@@ -11782,6 +11781,9 @@ class TestConsistency(TestCaseMPS):
         'norm', 'masked.normalize',
         'arange', 'linspace',
         'special.xlog1py',
+
+        # CPU accumulates sequantially, but GPU does in in parallel
+        '_unsafe_masked_index_put_accumulate',
     }
 
     FP32_LOW_PRECISION_LIST = {
@@ -11799,7 +11801,7 @@ class TestConsistency(TestCaseMPS):
             return (1e-4, 3e-5)
 
         if op.name in self.FP16_LOW_PRECISION_LIST and dtype in [torch.float16, torch.bfloat16]:
-            return (1e-2, 1e-2) if dtype == torch.float16 else (5e-2, 5e-2)
+            return (2e-2, 1e-2) if dtype == torch.float16 else (5e-2, 5e-2)
 
         if op.name in self.BF16_LOW_PRECISION_LIST and dtype == torch.bfloat16:
             return (5e-2, 5e-2)
@@ -11862,6 +11864,12 @@ class TestConsistency(TestCaseMPS):
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
+            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
+            # not normalized
+            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
+                mps_args[3] = F.normalize(mps_args[3])
+                cpu_args[3] = F.normalize(cpu_args[3])
+
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
                 cpu_out = op(*cpu_args, **cpu_kwargs)
@@ -11880,6 +11888,7 @@ class TestConsistency(TestCaseMPS):
             if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
@@ -11900,7 +11909,6 @@ class TestConsistency(TestCaseMPS):
             #
             # Forward check
             #
-            forward_failed = False
             mps_sample = transform_opinfo_sample_to_mps(cpu_sample)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
@@ -11911,6 +11919,12 @@ class TestConsistency(TestCaseMPS):
             # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
+
+            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
+            # not normalized
+            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
+                mps_args[3] = F.normalize(mps_args[3])
+                cpu_args[3] = F.normalize(cpu_args[3])
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
@@ -11930,11 +11944,6 @@ class TestConsistency(TestCaseMPS):
             #
             # Backward check
             #
-            if forward_failed:
-                # We would've failed immediately anyway, but this error is clearer
-                # We error instead of continuing so that all_backward_pass would not be True
-                raise RuntimeError("Forward pass already failed")
-
             cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
             mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
 
@@ -11967,6 +11976,10 @@ class TestConsistency(TestCaseMPS):
             ):
                 atol = 1e-5
                 rtol = 1.5e-3
+            # Order of ops in unsafe_masked_index backward is not guaranteed
+            # which leads to larger errors
+            if op.name == "_unsafe_masked_index" and dtype == torch.float16:
+                atol, rtol = 3e-3, 3e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
@@ -12205,6 +12218,28 @@ class TestMetalLibrary(TestCaseMPS):
         max_err = (y - x_sum).abs().max().item()
         self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
                         f"results are {y}, but all elements should have been {x_sum.item()}")
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
+    def test_atomic_add(self, dtype):
+        if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("bfloat requires MacOS-14+")
+        from torch._inductor.codegen.mps import DTYPE_TO_METAL
+        mdtype = DTYPE_TO_METAL[dtype]
+        lib = torch.mps.compile_shader(f"""
+            #include <c10/metal/atomic.h>
+            using namespace c10::metal;
+            kernel void atomic_add(device AtomicType<{mdtype}>::type* out,
+                                  constant {mdtype}* inc,
+                                  uint idx [[thread_position_in_grid]]) {{
+                AtomicType<{mdtype}>::atomic_add(out, idx & 1 ? 3 : 4, inc[idx]);
+            }}
+
+        """)
+        x = torch.arange(16, device="mps", dtype=dtype)
+        y = torch.arange(16, device="mps", dtype=dtype)
+        lib.atomic_add(x, y)
+        self.assertEqual(x[3], 67)
+        self.assertEqual(x[4], 60)
 
     def test_argument_buffers(self):
         lib = torch.mps.compile_shader("""

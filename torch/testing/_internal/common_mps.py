@@ -597,10 +597,8 @@ if torch.backends.mps.is_available():
                 torch.bool,
                 torch.int8,
                 torch.uint8,
-                torch.float16,
                 torch.int16,
                 torch.int64,
-                torch.bfloat16,
             ],
         }
 
@@ -703,8 +701,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
                 torch.int64,
-                torch.float16,
-                torch.bfloat16,
             ],
             # zero to negative integer powers are undefined
             "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
@@ -867,7 +863,6 @@ if torch.backends.mps.is_available():
             "special.polygammaspecial_polygamma_n_0": [torch.float16],
             "polygammapolygamma_n_0": [torch.float16],
             # Unimplemented ops
-            "__getitem__": [torch.float16],
             "_segment_reduce": [torch.float16, torch.float32],
             "_chunk_cat": [torch.float16, torch.float32],
             "_upsample_bilinear2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
@@ -941,9 +936,6 @@ if torch.backends.mps.is_available():
             "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
-            # atomic operation in backward pass
-            "_unsafe_masked_index": [torch.float16],
-            "_unsafe_masked_index_put_accumulate": [torch.float16],
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
