@@ -2842,6 +2842,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (1, 0, 2, 3),  # Reverse order
             (0, 2, 1, 3),  # Mixed order
             (2, 0, 1, 3),  # Another mixed order
+            (0, 1, 3, 2),  # Non contiguous last dim
         ],
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
@@ -2890,12 +2891,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("mode", ["eager", "inductor"])
     @common_utils.parametrize(
         "permute_order",
-        [
-            (0, 1, 2, 3),
-            (1, 0, 2, 3),
-            (0, 2, 1, 3),
-            (2, 0, 1, 3),
-        ],
+        [(0, 1, 2, 3), (1, 0, 2, 3), (0, 2, 1, 3), (2, 0, 1, 3), (0, 1, 3, 2)],
     )
     @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_backward_stride_ordering(
@@ -2940,26 +2936,90 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
     @supported_platform
+    def test_non_contiguous_last_dim(self, device):
+        """Test flex_attention with tensors having non contiguous last dimension."""
+        B, H, D = 4, 8, 64
+        dtype = torch.float16 if device == "cuda" else torch.float32
+        for S in [16, 64]:
+
+            def column_major_tensor():
+                tensor = torch.randn(
+                    (B, H, S, D),
+                    dtype=dtype,
+                    device=device,
+                )
+                # Column major in last 2 dims
+                return tensor.transpose(-1, -2).contiguous().transpose(-1, -2)
+
+            q = column_major_tensor()
+            k = column_major_tensor()
+            v = column_major_tensor()
+
+            requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
+            if requires_grad:
+                q.requires_grad_(True)
+                k.requires_grad_(True)
+                v.requires_grad_(True)
+
+            self.assertNotEqual(q.stride()[-1], 1)
+            self.assertNotEqual(k.stride()[-1], 1)
+            self.assertNotEqual(v.stride()[-1], 1)
+
+            q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+            q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+            golden_out = flex_attention(q_gold, k_gold, v_gold)
+            ref_out = flex_attention(q_ref, k_ref, v_ref)
+
+            flex_compiled = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+            compiled_out = flex_compiled(q, k, v)
+
+            self._check_out(golden_out, ref_out, compiled_out)
+
+            if requires_grad:
+                backward_grad = torch.randn_like(ref_out)
+
+                golden_out.backward(backward_grad.to(torch.float64))
+                ref_out.backward(backward_grad)
+                compiled_out.backward(backward_grad)
+
+                self._check_out_and_grad(
+                    golden_out,
+                    ref_out,
+                    compiled_out,
+                    q_gold,
+                    q_ref,
+                    q,
+                    k_gold,
+                    k_ref,
+                    k,
+                    v_gold,
+                    v_ref,
+                    v,
+                )
+
+    @supported_platform
     @common_utils.parametrize("compile", [True, False])
     def test_fully_masked_out_rows_0_check(self, device, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         query = torch.randn(
             (B, H, S, D),
             dtype=torch.float32,
             device=device,
-            requires_grad=not self.test_inference_only,
+            requires_grad=requires_grad,
         )
         key = torch.randn(
             (B, H, S, D),
             dtype=torch.float32,
             device=device,
-            requires_grad=not self.test_inference_only,
+            requires_grad=requires_grad,
         )
         value = torch.randn(
             (B, H, S, D),
             dtype=torch.float32,
             device=device,
-            requires_grad=not self.test_inference_only,
+            requires_grad=requires_grad,
         )
 
         M = S // 2
@@ -2972,7 +3032,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex = (
             torch.compile(flex_attention, dynamic=False) if compile else flex_attention
         )
-        if not self.test_inference_only:
+        if requires_grad:
             out, lse = flex(query, key, value, block_mask=block_mask, return_lse=True)
             self.assertEqual(out[:, :, M:, :].sum(), 0)
             self.assertTrue((lse[:, :, M:] == -float("inf")).all())
