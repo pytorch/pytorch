@@ -96,9 +96,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
       "/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         res.set_content(
-            R"BODY(<h1>torch.distributed.WorkerServer</h1>
-<a href="/handler/">Handler names</a>
-)BODY",
+            "<h1>torch.distributed.WorkerServer</h1>\n"
+            "<a href=\"/handler/\">Handler names</a>\n",
             "text/html");
       });
   server_.Get(
