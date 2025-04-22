@@ -104,7 +104,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -117,7 +116,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -131,7 +129,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -145,7 +142,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -159,7 +155,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -172,7 +167,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -186,7 +180,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -200,7 +193,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -214,7 +206,6 @@ case "$image" in
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -225,7 +216,6 @@ case "$image" in
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
-    PROTOBUF=yes
     VISION=yes
     CONDA_CMAKE=yes
     ONNX=yes
@@ -233,7 +223,6 @@ case "$image" in
   pytorch-linux-focal-py3.9-clang10)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
-    PROTOBUF=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -241,7 +230,6 @@ case "$image" in
   pytorch-linux-focal-py3.11-clang10)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=10
-    PROTOBUF=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -249,7 +237,6 @@ case "$image" in
   pytorch-linux-focal-py3.9-gcc9)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
-    PROTOBUF=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -257,7 +244,6 @@ case "$image" in
   pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     ROCM_VERSION=6.2.4
     NINJA_VERSION=1.9.0
@@ -271,7 +257,6 @@ case "$image" in
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
@@ -285,7 +270,6 @@ case "$image" in
   pytorch-linux-jammy-xpu-2024.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     XPU_VERSION=0.5
     NINJA_VERSION=1.9.0
@@ -295,7 +279,6 @@ case "$image" in
   pytorch-linux-jammy-xpu-2025.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
@@ -305,7 +288,6 @@ case "$image" in
     pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -318,14 +300,12 @@ case "$image" in
     CUDA_VERSION=11.8
     CUDNN_VERSION=9
     CLANG_VERSION=12
-    PROTOBUF=yes
     VISION=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang12-asan)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=12
-    PROTOBUF=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -345,7 +325,6 @@ case "$image" in
   pytorch-linux-jammy-py3.9-gcc11)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
-    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -390,7 +369,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     ACL=yes
-    PROTOBUF=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -401,7 +379,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     ACL=yes
-    PROTOBUF=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -411,7 +388,6 @@ case "$image" in
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
-    PROTOBUF=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
@@ -473,7 +449,6 @@ docker build \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
-       --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "VISION=${VISION:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
