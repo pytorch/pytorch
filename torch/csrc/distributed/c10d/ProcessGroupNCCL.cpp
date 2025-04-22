@@ -990,7 +990,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
   waitTimeoutDumpInMilSec_ =
-      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000 /*15 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
@@ -1602,6 +1602,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
+  // This will log counter for how long dumpDebuggingInfo actually takes.
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
+
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
@@ -1664,6 +1667,10 @@ std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutExitMsg(
       "Terminating the process after attempting to dump debug info, due to ",
       exitReason,
       ".");
+}
+
+void ProcessGroupNCCL::setEnableNanCheck(bool enableNanCheck) {
+  enableNanCheck_ = enableNanCheck;
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
@@ -1856,6 +1863,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         LOG(INFO)
             << logPrefix()
             << "Finished flight recorder successfully. Output can be analyzed using the fr_trace script.";
+        if (i > 0) {
+          debugLog.strings["exception_msg"] = "Dump with stack trace failed.";
+        }
         break;
       }
       // If we failed to dump, try dumping without stack trace in the 2nd
@@ -2375,7 +2385,7 @@ void ProcessGroupNCCL::watchdogHandler() {
           // short period of time, in this case, 60 seconds, which is also the
           // maximum time we leave for FR dump.
           std::this_thread::sleep_for(
-              std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+              std::chrono::milliseconds(waitTimeoutDumpInMilSec_ * 4));
         }
 
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {

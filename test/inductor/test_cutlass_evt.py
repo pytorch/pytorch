@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import unittest
 
+import torch
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -13,54 +14,111 @@ if try_import_cutlass():
     LayoutType = cutlass_lib.LayoutType
     DataType = cutlass_lib.DataType
     from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
+        _render_argument_type,
+        _trace,
         CutlassTensor,
         trace,
     )
 
+    BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
+        F = accum + C + aux
+        E = relu(F) + bias
+        D = E + F
+        return D, F"""
+
+    TYPE_C = DataType.f32
+    M = 4224
+    N = 2048
+    BIAS = CutlassTensor(shape=(M, 1), element=TYPE_C, layout_tag=LayoutType.RowMajor)
+
+    EXAMPLE_TENSORS = {
+        "accum": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "bias": BIAS,
+        # "beta": 0.5, TODO: mlazos support scalars
+        # "alpha": 0.5, TODO: mlazos support scalars
+        "D": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "C": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "F": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+        "aux": CutlassTensor(
+            element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+        ),
+    }
+
     class MockTileDescription:
         threadblock_shape = (128, 128, 8)
+
+    def _create_mock_buffer_name_map(example_tensors):
+        class MockNode:
+            def __init__(self, name, stride, dtype):
+                self.name = name
+                self.dtype = dtype
+                self.stride = stride
+
+            def get_layout(self):
+                class MockLayout:
+                    def __init__(self, stride, dtype):
+                        self.dtype = dtype
+                        self.stride = stride
+
+                return MockLayout(self.stride, self.dtype)
+
+            def get_name(self):
+                return self.name
+
+        name_to_buffer = {}
+        for name, tensor in example_tensors.items():
+            if isinstance(tensor, CutlassTensor):
+                name_to_buffer[name] = MockNode(name, tensor.stride, torch.float32)
+
+        return name_to_buffer
 
 
 class TestCutlassEVT(TestCase):
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
-    def test_evt_codegen(self):
-        bias_code = """def example_epilogue(accum, alpha, C, beta, aux, bias):
-    F = alpha * accum + (beta * C + aux)
-    E = relu(F + 1) + bias
-    D = E + F
-    return D, F"""
+    def test_evt_argument_codegen(self):
+        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS)
 
-        type_C = DataType.f32
-        m = 4224
-        n = 2048
-        bias = CutlassTensor(
-            shape=(m, 1), element=type_C, layout_tag=LayoutType.RowMajor
+        self.assertExpectedInline(
+            _render_argument_type(
+                epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
+            ),
+            """\
+{{
+    { /* thread */
+        { /* F */
+            { /* compute_1 */
+                { /* compute_0 */
+                    {}, /* accum */
+                    {}, /* C */
+                    {}, /* compute_0 */
+                },
+                {/* ptr_aux */ aux.get(), /* null_default */ float, /* dAux */ {2048, _1{}, _0{}}}, /* aux */
+                {}, /* compute_1 */
+            },
+            {/* ptr_aux */ F.get(), /* dAux */ {2048, _1{}, _0{}}}, /* F */
+        },
+        {/* ptr_col */ bias.get(), /* null_default */ float, /* dCol */ {}}, /* bias */
+        {}, /* compute_2 */
+        {}, /* compute_3 */
+        {}, /* compute_4 */
+    },
+}};
+""",
         )
 
-        examples_tensors = {
-            "accum": CutlassTensor(
-                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-            ),
-            "bias": bias,
-            "beta": 0.5,
-            "alpha": 0.5,
-            "D": CutlassTensor(
-                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-            ),
-            "C": CutlassTensor(
-                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-            ),
-            "F": CutlassTensor(
-                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-            ),
-            "aux": CutlassTensor(
-                element=DataType.f32, shape=(m, n), layout_tag=LayoutType.RowMajor
-            ),
-        }
-
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_evt_codegen(self):
         _, code = trace(
-            bias_code,
-            examples_tensors,
+            BIAS_CODE,
+            EXAMPLE_TENSORS,
             DataType.f32,
             DataType.f32,
             MockTileDescription(),
@@ -82,20 +140,13 @@ using TensorC = cutlass::epilogue::fusion::Sm90SrcFetch<float>;
 
 using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
-using Alpha = cutlass::epilogue::fusion::Sm90ScalarBroadcast<
-    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, cutlass::multiplies
->;
-
-using AuxDescriptor = cutlass::epilogue::collective::detail::AuxLoadDescriptor\
-<EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float>;
+using AuxDescriptor = cutlass::epilogue::collective::detail::AuxLoadDescriptor<EpilogueDescriptor, \
+cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float>;
 
 using Aux = cutlass::epilogue::fusion::Sm90AuxLoad<
     AuxDescriptor::Stages, typename AuxDescriptor::EpilogueTile, float,
-    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename AuxDescriptor::SmemLayoutAtom, typename AuxDescriptor::CopyOpS2R
->;
-
-using Beta = cutlass::epilogue::fusion::Sm90ScalarBroadcast<
-    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, cutlass::multiplies
+    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename AuxDescriptor::SmemLayoutAtom, \
+typename AuxDescriptor::CopyOpS2R
 >;
 
 using Bias = cutlass::epilogue::fusion::Sm90ColBroadcast<
@@ -104,44 +155,24 @@ using Bias = cutlass::epilogue::fusion::Sm90ColBroadcast<
 >;
 
 using Compute0 = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::multiplies, float, float,
+    cutlass::plus, float, float,
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
 using EVTCompute0 = cutlass::epilogue::fusion::Sm90EVT<
     Compute0,
-    Alpha,
-    Accum>;
+    Accum,
+    TensorC>;
 
 using Compute1 = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::multiplies, float, float,
+    cutlass::plus, float, float,
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
 using EVTCompute1 = cutlass::epilogue::fusion::Sm90EVT<
     Compute1,
-    Beta,
-    TensorC>;
-
-using Compute2 = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using EVTCompute2 = cutlass::epilogue::fusion::Sm90EVT<
-    Compute2,
-    EVTCompute1,
-    Aux>;
-
-using Compute3 = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using EVTCompute3 = cutlass::epilogue::fusion::Sm90EVT<
-    Compute3,
     EVTCompute0,
-    EVTCompute2>;
+    Aux>;
 
 using FDescriptor = cutlass::epilogue::collective::detail::AuxStoreDescriptor<
     EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float
@@ -149,17 +180,23 @@ using FDescriptor = cutlass::epilogue::collective::detail::AuxStoreDescriptor<
 
 using F = cutlass::epilogue::fusion::Sm90AuxStore<
     FDescriptor::Stages, typename FDescriptor::EpilogueTile, float,
-    cutlass::FloatRoundStyle::round_to_nearest, \
-cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename FDescriptor::SmemLayoutAtom,
+    cutlass::FloatRoundStyle::round_to_nearest, cute::Stride<int64_t, cute::Int<1>, \
+cute::Int<0>>, typename FDescriptor::SmemLayoutAtom,
     typename FDescriptor::CopyOpR2S
 >;
 
 using EVTF = cutlass::epilogue::fusion::Sm90EVT<
     F,
-    EVTCompute3>;
+    EVTCompute1>;
 
-using Imm10 = cutlass::epilogue::fusion::Sm90ScalarBroadcast<
-    float, cute::Stride<cute::Int<0>, cute::Int<0>, cute::Int<0>>, 1, cutlass::multiplies
+using Compute2 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::epilogue::thread::ReLu, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using Compute3 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
 >;
 
 using Compute4 = cutlass::epilogue::fusion::Sm90Compute<
@@ -167,39 +204,20 @@ using Compute4 = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
-using Compute5 = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::epilogue::thread::ReLu, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using Compute6 = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using Compute7 = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::plus, float, float,
-    cutlass::FloatRoundStyle::round_to_nearest
->;
-
-using DagCompute7 = cutlass::epilogue::fusion::Sm90TopologicalVisitor<
+using DagCompute4 = cutlass::epilogue::fusion::Sm90TopologicalVisitor<
     float,
     cute::tuple<
         cute::seq<>,
         cute::seq<>,
-        cute::seq<>,
-        cute::seq<0, 2>,
-        cute::seq<3>,
-        cute::seq<4, 1>,
-        cute::seq<5, 0>,
+        cute::seq<0>,
+        cute::seq<2, 1>,
+        cute::seq<3, 0>,
     >,
     EVTF,
     Bias,
-    Imm10,
-    Compute4,
-    Compute5,
-    Compute6,
-    Compute7
+    Compute2,
+    Compute3,
+    Compute4
 >;
 
 using ElementD = float;
