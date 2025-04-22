@@ -109,7 +109,7 @@ jobs:
           path: ${{ needs.release.outputs.pt_release_name }}
 
   publish_rc_source:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
     permissions:
       id-token: write
       contents: read
