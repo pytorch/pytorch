@@ -12190,6 +12190,44 @@ def forward(self, x, y):
 
         export(Foo(), args=(torch.tensor(1),))
 
+    def test_custom_pytree(self):
+        class Foo:
+            def __init__(self, attr1, attr2):
+                if attr1 is None:
+                    raise ValueError("Shouldn't be None")
+                self.attr1 = attr1
+                self.attr2 = attr2
+
+        class FooModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_attr = Foo(torch.ones(4, 4), torch.ones(4, 4))
+
+            def forward(self, foo):
+                return foo.attr1.sum() + foo.attr2.sum() + self.foo_attr.attr1.sum()
+
+        def flat(foo):
+            return torch.utils._pytree._list_flatten([foo.attr1, foo.attr2])
+
+        def flat_with_keys(foo):
+            return torch.utils._pytree._list_flatten_with_keys([foo.attr1, foo.attr2])
+
+        def unflat(val, context):
+            l = torch.utils._pytree._list_unflatten(val, context)
+            return Foo(l[0], l[1])
+
+        torch.utils._pytree.register_pytree_node(
+            Foo,
+            flat,
+            unflat,
+            flatten_with_keys_fn=flat_with_keys,
+            serialized_type_name=f"{Foo.__module__}.{Foo.__name__}",
+        )
+
+        torch.export.export(
+            FooModel(), (Foo(torch.ones(4, 4), torch.ones(4, 4)),), strict=False
+        )
+
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
         class Foo(torch.nn.Module):

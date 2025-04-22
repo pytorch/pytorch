@@ -1868,6 +1868,7 @@ def compile_fx(
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
+    ignore_shape_env: bool = False,
 ) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2279,6 +2280,7 @@ def compile_fx(
                     keep_inference_input_mutations=True,
                     cudagraphs=cudagraphs,
                     boxed_forward_device_index=forward_device,
+                    ignore_shape_env=ignore_shape_env,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
