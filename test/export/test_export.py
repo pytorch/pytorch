@@ -4,6 +4,7 @@
 import copy
 import dataclasses
 import logging
+import math
 import operator
 import re
 import unittest
@@ -1669,13 +1670,7 @@ graph():
         # as input, runtime assertion should fail. This is because we would create
         # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
         # assertion.
-        if is_non_strict_test(self._testMethodName) and not is_non_strict_legacy_test(
-            self._testMethodName
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
-                ep.module()(x, x)
-        else:
-            self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
     def test_draft_export_checks_mutation_with_nan(self):
@@ -2395,7 +2390,7 @@ graph():
         }
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"Not all values of dy .* in the specified range are valid because dy was inferred to be a constant",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
@@ -4005,7 +4000,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->5, 4->5, 3->4
             bad_args=(torch.randn(5), [torch.randn(5)], {"k": torch.randn(4)}),
             run_time_msg="Expected input.*to be equal to 3, but got 4",
-            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            compile_time_msg=r"Constraints violated.*\n.*was inferred to be a constant \(3\)",
         )
 
     def test_mismatched_dynamic_shapes(self):
@@ -4589,6 +4584,146 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         exported_program = export(model, inputs, dynamic_shapes=dynamic_shapes)
         self.assertEqual(exported_program.module()(*inputs), model(*inputs))
+
+    def test_export_max_onnx_reported(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                s1 = max(x.shape[0], y.shape[0])
+                s2 = max(x.shape[1], y.shape[1])
+                z = torch.zeros((s1, s2), dtype=x.dtype)
+                z[: x.shape[0], : x.shape[1]] = x
+                z[: y.shape[0], : y.shape[1]] += y
+                return z
+
+        model = Model()
+        x = torch.arange(6).reshape((2, 3))
+        y = torch.arange(6).reshape((3, 2)) * 10
+        DYN = torch.export.Dim.DYNAMIC
+
+        ep = export(
+            model,
+            (x, y),
+            dynamic_shapes=({0: DYN, 1: DYN}, {0: DYN, 1: DYN}),
+            strict=True,
+        )
+        self.assertTrue(torch.allclose(ep.module()(x, y), model(x, y)))
+        x2 = torch.arange(4).reshape((2, 2))
+        y2 = torch.arange(9).reshape((3, 3))
+        self.assertTrue(torch.allclose(ep.module()(x2, y2), model(x2, y2)))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Some small change due to unbacked values getting regenerated
+    @testing.expectedFailureLegacyExportStrict  # Some small change due to unbacked values getting regenerated
+    def test_export_max_nonstrict(self):
+        class FooMax(torch.nn.Module):
+            def forward(self, x):
+                return torch.ones(max(x.item(), 1024))
+
+        ep_non_strict_foo_max_symint = export(
+            FooMax(), (torch.tensor(4),), strict=False
+        ).graph
+        FileCheck().check_count("torch.sym_max", count=1, exactly=True).run(
+            str(ep_non_strict_foo_max_symint)
+        )
+
+        class FooMaxTensors(torch.nn.Module):
+            def forward(self, x):
+                return torch.ones(max(x, x)) + torch.ones(min(x, x))
+
+        ep_non_strict_foo_max_symint = export(
+            FooMaxTensors(), (torch.tensor(4),), strict=False
+        ).graph
+        FileCheck().check_count(
+            "torch.ops.aten.maximum.default", count=1, exactly=True
+        ).run(str(ep_non_strict_foo_max_symint))
+        FileCheck().check_count(
+            "torch.ops.aten.minimum.default", count=1, exactly=True
+        ).run(str(ep_non_strict_foo_max_symint))
+
+        class FooMaxTensorsIter(torch.nn.Module):
+            def forward(self, x):
+                return max([x, x]) + min([x, x]) + max(x, 5) + min(x, 3)
+
+        ep_non_strict_foo_max_symint = export(
+            FooMaxTensorsIter(), (torch.tensor(4),), strict=False
+        ).graph
+        FileCheck().check_count(
+            "torch.ops.aten.maximum.default", count=1, exactly=True
+        ).run(str(ep_non_strict_foo_max_symint))
+        FileCheck().check_count(
+            "torch.ops.aten.minimum.default", count=1, exactly=True
+        ).run(str(ep_non_strict_foo_max_symint))
+        FileCheck().check_count(
+            "torch.ops.aten.clamp.default", count=2, exactly=True
+        ).run(str(ep_non_strict_foo_max_symint))
+
+        class FooMaxTensorsSymInt(torch.nn.Module):
+            def forward(self, x, y):
+                return max([x.shape[0], y.shape[0], x.shape[0]]) + min(
+                    [x.shape[0], y.shape[0], x.shape[0]]
+                )
+
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.AUTO},
+            "y": {0: torch.export.Dim.AUTO},
+        }
+
+        ep_non_strict_foo_max_symint = export(
+            FooMaxTensorsSymInt(),
+            (torch.randn(4, 4), torch.randn(4, 4)),
+            dynamic_shapes=dynamic_shapes,
+            strict=False,
+        ).graph
+        FileCheck().check_count("torch.sym_max", count=1, exactly=True).run(
+            str(ep_non_strict_foo_max_symint)
+        )
+        FileCheck().check_count("torch.sym_min", count=1, exactly=True).run(
+            str(ep_non_strict_foo_max_symint)
+        )
+
+        class FooMaxTensorsSymShape(torch.nn.Module):
+            def forward(self, x):
+                return max(x, x.shape[0])
+
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.AUTO},
+        }
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Dynamo failed to run FX node with fake tensors"
+        ):
+            _ = export(
+                FooMaxTensorsSymShape(),
+                (torch.randn(4, 4),),
+                dynamic_shapes=dynamic_shapes,
+                strict=True,
+            ).graph
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Boolean value of Tensor with more than one value is ambiguous",
+        ):
+            _t = export(
+                FooMaxTensorsSymShape(),
+                (torch.randn(4, 4),),
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+            ).graph
+
+    def test_math_pow(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                b = x.item()
+                p = min(b, 10)
+                p = math.pow(p, 10)
+                return y * p
+
+        ep = export(M(), (torch.tensor(5), torch.randn(5)), strict=False)
+        FileCheck().check_count("torch.sym_min", count=1, exactly=True).run(
+            str(ep.graph)
+        )
+        FileCheck().check_count("operator.pow", count=1, exactly=True).run(
+            str(ep.graph)
+        )
 
     def test_export_mod_constraints(self):
         class BasicDynamiShapeModel(torch.nn.Module):
@@ -5331,7 +5466,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.(.*\n)*.*"
+                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "batch was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = 10"
             ),
@@ -5497,7 +5633,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO(.*\n)*"
+                "Constraints violated \\(K1\\)!(.*\n)*.*"
+                "K1 was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "K1 = 3"
             ),
@@ -10012,7 +10149,7 @@ graph():
         inp = (3, torch.randn(4, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
         ):
             ep = export(
                 M(),
@@ -13265,7 +13402,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
         ):
             ep = export(
                 Specialize(),
