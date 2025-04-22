@@ -9,7 +9,7 @@ using Block = HostBlock<XPUStream>;
 
 struct XPUCachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<XPUStream, XPUEvent> {
-  bool is_pinned(void* ptr) override {
+  bool is_pinned(const void* ptr) override {
     if (!at::xpu::is_available()) {
       return false;
     }

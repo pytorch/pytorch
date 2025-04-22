@@ -447,7 +447,7 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  virtual bool is_pinned(void* ptr) {
+  virtual bool is_pinned(const void* ptr) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for is_pinned");
   }
 
@@ -648,7 +648,7 @@ struct TORCH_API HostAllocator : public at::Allocator {
   virtual void reset_peak_stats() = 0;
 
   // Checks if the given pointer is a pinned memory allocation
-  virtual bool is_pinned(void* ptr) = 0;
+  virtual bool is_pinned(const void* ptr) = 0;
 };
 
 template <typename T, c10::DeleterFnPtr deleteFunc>
@@ -693,7 +693,7 @@ struct CachingHostAllocatorInterface : public HostAllocator {
     impl_->resetPeakStats();
   }
 
-  bool is_pinned(void* ptr) override {
+  bool is_pinned(const void* ptr) override {
     return impl_->is_pinned(ptr);
   }
 
