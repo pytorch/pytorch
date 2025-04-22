@@ -1,8 +1,8 @@
-ARG CENTOS_VERSION
-
-FROM centos:${CENTOS_VERSION}
 
 ARG CENTOS_VERSION
+
+FROM quay.io/centos/centos:stream${CENTOS_VERSION}
+
 
 # Set AMD gpu targets to build for
 ARG PYTORCH_ROCM_ARCH
@@ -11,22 +11,24 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 # Install required packages to build Caffe2
 
 # Install common dependencies (so that this step can be cached separately)
+ARG EC2
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
+
+#Install langpack
+RUN yum install -y glibc-langpack-en
 
 # Update CentOS git version
 RUN yum -y remove git
 RUN yum -y remove git-*
-RUN yum -y install https://packages.endpoint.com/rhel/7/os/x86_64/endpoint-repo-1.9-1.x86_64.rpm || \
-    (yum -y install https://packages.endpointdev.com/rhel/7/os/x86_64/endpoint-repo-1.9-1.x86_64.rpm && \
-    sed -i "s/packages.endpoint/packages.endpointdev/" /etc/yum.repos.d/endpoint.repo)
 RUN yum install -y git
 
 # Install devtoolset
-ARG DEVTOOLSET_VERSION
-COPY ./common/install_devtoolset.sh install_devtoolset.sh
-RUN bash ./install_devtoolset.sh && rm install_devtoolset.sh
+RUN dnf install -y rpmdevtools
 ENV BASH_ENV "/etc/profile"
+
+# Install ninja
+RUN dnf --enablerepo=crb install -y ninja-build
 
 # (optional) Install non-default glibc version
 ARG GLIBC_VERSION
@@ -41,6 +43,7 @@ RUN bash ./install_user.sh && rm install_user.sh
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
 ARG CONDA_CMAKE
+ARG BUILD_ENVIRONMENT
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
@@ -55,7 +58,14 @@ RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
 RUN rm install_protobuf.sh
 ENV INSTALLED_PROTOBUF ${PROTOBUF}
 
-# (optional) Install vision packages like OpenCV
+# (optional) Install database packages like LMDB and LevelDB
+ARG DB
+COPY ./common/install_db.sh install_db.sh
+RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
+RUN rm install_db.sh
+ENV INSTALLED_DB ${DB}
+
+# (optional) Install vision packages like OpenCV and ffmpeg
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
@@ -68,11 +78,10 @@ COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
+RUN bash ./install_rocm_magma.sh
 RUN rm install_rocm_magma.sh
-COPY ./common/install_amdsmi.sh install_amdsmi.sh
-RUN bash ./install_amdsmi.sh
-RUN rm install_amdsmi.sh
+
+ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
