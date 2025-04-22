@@ -834,7 +834,7 @@ MPSAllocator& _getPrivateAllocator() {
   return s_mps_private_alloc;
 }
 
-// A wrapper for MPSAllocator to be used in `getHostAllocator(kMPS)` API
+// A wrapper for MPSAllocator to be used in `getHostAllocator(at::kMPS)` API
 struct MPSHostAllocator final : public at::HostAllocator {
  public:
   at::DataPtr allocate(size_t size) override {
@@ -863,8 +863,6 @@ MPSHostAllocator mps_host_allocator;
 
 REGISTER_HOST_ALLOCATOR(kMPS, &mps_host_allocator);
 
-} // namespace
-
 } // anonymous namespace
 
 IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
@@ -883,7 +881,7 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
 bool isMPSPinnedPtr(const void* data) {
-  return _getSharedAllocator().isSharedBuffer(data);
+  return at::mps::_getSharedAllocator().isSharedBuffer(data);
 }
 
 } // namespace at::mps
