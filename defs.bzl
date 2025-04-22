@@ -45,7 +45,7 @@ default_compiler_flags = [
     # includes <pthread.h> - a header not available on Windows.
     "DEFAULT": ["-DUSE_XNNPACK"],
     "ovr_config//os:windows": [],
-}) + (["-O1"] if native.read_config("fbcode", "build_mode_test_label", "") == "dev-nosan" else [])
+})
 
 compiler_specific_flags = {
     "clang": [
