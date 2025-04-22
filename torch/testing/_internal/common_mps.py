@@ -458,7 +458,6 @@ if torch.backends.mps.is_available():
             "sparse.mmreduce": None,
             "special.airy_ai": None,
             "special.erfcx": None,
-            "special.hermite_polynomial_he": None,
             "special.laguerre_polynomial_l": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
@@ -536,6 +535,14 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             "special.hermite_polynomial_h": [
+                torch.bool,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.int8,
+            ],
+            "special.hermite_polynomial_he": [
                 torch.bool,
                 torch.int16,
                 torch.int32,
@@ -727,8 +734,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.bfloat16,
             ],
-            # float output for float16 input on MPS
-            "logit": [torch.float16, torch.bfloat16],
         }
 
         ON_MPS_XFAILLIST = {
@@ -861,7 +866,6 @@ if torch.backends.mps.is_available():
             # precision issues
             "special.polygammaspecial_polygamma_n_0": [torch.float16],
             "polygammapolygamma_n_0": [torch.float16],
-            "nn.functional.binary_cross_entropy": [torch.float16],
             # Unimplemented ops
             "__getitem__": [torch.float16],
             "_segment_reduce": [torch.float16, torch.float32],
