@@ -131,7 +131,13 @@ class FSDPState(_State):
                 current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type in ["cuda", "hpu", "xpu", "mtia"]:
+            if self._device.type in [
+                "cuda",
+                "hpu",
+                "xpu",
+                "mtia",
+                torch._C._get_privateuse1_backend_name(),
+            ]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
