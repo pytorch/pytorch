@@ -279,25 +279,31 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm120 = SMVersion<12, 0>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
-  auto stream = at::cuda::getCurrentCUDAStream().stream();
-  if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
-      auto dprops = at::cuda::getCurrentDeviceProperties();
-      if (debug) {
-          TORCH_WARN(
-                  "Mem Efficient attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
-      }
-      return false;
-  }
-#if AOTRITON_VERSION_MINOR >= 9
-  if (aotriton::isArchExperimentallySupported(stream)) {
-    static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
-    if (!enable_experimental) {
-      TORCH_WARN_ONCE("Mem Efficient attention on Current AMD GPU is still experimental."
-          " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
-      return false;
+  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
+    // User explicitly set CK as the flash attention backend. Return true for now
+    // TODO: Flesh out sanity checks
+    return true;
+  } else {
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
+        auto dprops = at::cuda::getCurrentDeviceProperties();
+        if (debug) {
+            TORCH_WARN(
+                    "Mem Efficient attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
+        }
+        return false;
     }
-  }
+#if AOTRITON_VERSION_MINOR >= 9
+    if (aotriton::isArchExperimentallySupported(stream)) {
+      static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+      if (!enable_experimental) {
+        TORCH_WARN_ONCE("Mem Efficient attention on Current AMD GPU is still experimental."
+            " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+        return false;
+      }
+    }
 #endif
+  }
 #else
   return false;
 #endif
@@ -406,7 +412,13 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     }
     return false;
   }
-  constexpr auto head_dim_limit = 128;
+  auto head_dim_limit = 128;
+  if (cudnn_version >= 90501) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if ((dprops->major == 9 || dprops->major == 10) && !dprops->minor) {
+      head_dim_limit = 256;
+    }
+  }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
     if (debug) {
       TORCH_WARN("head_dim should be no more than ", head_dim_limit);
@@ -541,9 +553,10 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
       TORCH_WARN("Experimental cuDNN SDPA nested tensor support is not enabled.");
     }
     return false;
-  } else if (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad()) {
+  } else if (has_for_nested_inputs(params) && (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad())) {
     if (debug) {
       TORCH_WARN("Experimental cuDNN SDPA nested tensor support does not support backward.");
+      return false;
     }
   }
 
@@ -632,7 +645,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   }
   constexpr auto dense_constraints =
       c10::array_of<bool (*)(sdp_params const&, bool)>(
-      check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>
+      check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>,
+      check_batch_size_and_num_heads_dense<true /*enable_gqa*/, false /*requires_same_num_heads*/>
   );
 
   if (has_only_dense_inputs(params)) {
@@ -716,6 +730,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifdef USE_ROCM
   constexpr auto aotriton_mem_efficient_dtypes =
       c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto ck_mem_efficient_dtypes =
+      c10::array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
 #else
   constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
       c10::array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
@@ -774,6 +790,9 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       TORCH_WARN("Efficient attention on ROCM requires attn_mask be boolean, or has the same datatype as of q,k,v");
       return false;
     }
+  }
+  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
+    return check_tensor_dtype(params, ck_mem_efficient_dtypes, debug);
   }
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
 #else

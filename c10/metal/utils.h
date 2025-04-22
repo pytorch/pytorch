@@ -1,5 +1,6 @@
 // Metal helper functions
 #pragma once
+#include <c10/metal/common.h>
 #include <metal_stdlib>
 
 namespace c10 {
@@ -91,9 +92,10 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::max(a, b);
 }
 
-template <typename T>
-::metal::enable_if_t<::metal::is_integral_v<T>, T> max(T a, T b) {
-  return ::metal::max(a, b);
+template <typename T, typename U>
+::metal::enable_if_t<::metal::is_integral_v<T>&& ::metal::is_integral_v<U>, T>
+max(T a, U b) {
+  return ::metal::max(a, static_cast<T>(b));
 }
 
 template <typename T>
@@ -101,9 +103,10 @@ template <typename T>
   return ::metal::isunordered(a, b) ? NAN : ::metal::min(a, b);
 }
 
-template <typename T>
-::metal::enable_if_t<::metal::is_integral_v<T>, T> min(T a, T b) {
-  return ::metal::min(a, b);
+template <typename T, typename U>
+::metal::enable_if_t<::metal::is_integral_v<T>&& ::metal::is_integral_v<U>, T>
+min(T a, U b) {
+  return ::metal::min(a, static_cast<T>(b));
 }
 
 #if __METAL_VERSION__ >= 310
@@ -144,6 +147,22 @@ constexpr constant bool is_scalar_floating_point_v =
 template <typename T>
 constexpr constant bool is_scalar_integral_v =
     ::metal::is_integral_v<T> && ::metal::is_scalar_v<T>;
+
+template <typename T, typename U>
+inline ::metal::enable_if_t<::metal::is_same_v<U, T>, T> cast_to(const U from) {
+  return from;
+}
+
+template <typename T, typename U>
+inline ::metal::enable_if_t<is_complex_v<T>, T> cast_to(const U from) {
+  return T(float(from), 0.0);
+}
+
+template <typename T, typename U>
+inline ::metal::enable_if_t<!::metal::is_same_v<U, T> && !is_complex_v<T>, T>
+cast_to(const U from) {
+  return static_cast<T>(from);
+}
 
 } // namespace metal
 } // namespace c10

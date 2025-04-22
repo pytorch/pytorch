@@ -33,10 +33,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
     ) -> torch.nn.Module:
         # resetting dynamo cache
         torch._dynamo.reset()
-        model = export_for_training(
-            model,
-            example_inputs,
-        ).module()
+        model = export_for_training(model, example_inputs, strict=True).module()
         model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)

@@ -12,7 +12,7 @@ from .. import config, ir
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, TritonTemplate
+from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate
 from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
@@ -30,6 +30,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
+@SymbolicGridFn
 def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)
@@ -521,6 +522,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
+
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
     for BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
@@ -538,6 +543,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("num_warps", num_warps)
         cur_kernel_options.setdefault("num_stages", num_stages)
+
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
 
         flex_decoding_template.maybe_append_choice(
             choices=choices,

@@ -125,9 +125,8 @@ void quantized_matmul(
       attr);
 
   size_t dims = result.dim();
-  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
   at::Tensor m2 = is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();

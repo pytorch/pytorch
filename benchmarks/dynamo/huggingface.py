@@ -369,7 +369,10 @@ class HuggingfaceRunner(BenchmarkRunner):
         return self._skip["control_flow"]
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
-        return name in ["ElectraForQuestionAnswering"]
+        return name in [
+            "ElectraForQuestionAnswering",
+            "MegatronBertForQuestionAnswering",
+        ]
 
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
@@ -533,7 +536,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
-            return collect_results(mod, pred, loss, cloned_inputs)
+            return collect_results(mod, None, loss, cloned_inputs)
         return None
 
 

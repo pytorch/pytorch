@@ -326,20 +326,47 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
 }
 
 at::BlasBackend Context::blasPreferredBackend() {
+  // Rather than put logic for interpreting what Default means at every
+  // call site for blasPreferredBackend(), we set it to an actual value.
+  if (blas_preferred_backend == at::BlasBackend::Default) {
+    blas_preferred_backend = at::BlasBackend::Cublas;
 #ifdef USE_ROCM
+    // AMD Instinct targets prefer hipblaslt
+    static const bool hipblaslt_preferred = []() {
+      static const std::vector<std::string> archs = {
+          "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60500
+          "gfx950"
+#endif
+      };
+      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
+        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
+          return false;
+        }
+      }
+      return true;
+    }();
+    if (hipblaslt_preferred) {
+      blas_preferred_backend = at::BlasBackend::Cublaslt;
+    }
+#endif
+  }
+
+#ifdef USE_ROCM
+  // hipblaslt support for all archs is not as complete as hipblas
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 60500
           "gfx950"
 #endif
       };
-      for (auto index: c10::irange(getNumGPUs())) {
-        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
+        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           TORCH_WARN_ONCE(
             "Attempting to use hipBLASLt on an unsupported architecture! "
             "Overriding blas backend to hipblas");
@@ -365,7 +392,7 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
   TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
       "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
-  if (b != at::BlasBackend::Cublas) {
+  if (b != at::BlasBackend::Default && b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "
       "If you see any error or unexpected behavior when this flag is set "
@@ -391,8 +418,8 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
       static const std::vector<std::string> archs = {
           "gfx90a",  "gfx942"
       };
-      for (auto index: c10::irange(getNumGPUs())) {
-        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+      for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
+        if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           TORCH_WARN_ONCE(
             "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
           return true;
@@ -588,7 +615,7 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overridden and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
-thread_local bool override_allow_tf32_flag = false;
+thread_local static bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {
   if (!override_allow_tf32_flag) {
@@ -611,7 +638,7 @@ bool NoTF32Guard::should_disable_tf32() {
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool rocm_is_backward_pass;
+thread_local static bool rocm_is_backward_pass;
 
 ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
   rocm_is_backward_pass = true;

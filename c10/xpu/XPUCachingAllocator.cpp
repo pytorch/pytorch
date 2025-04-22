@@ -510,7 +510,7 @@ class DeviceCachingAllocator {
   }
 };
 
-void local_raw_delete(void* ptr);
+static void local_raw_delete(void* ptr);
 
 class XPUAllocator : public Allocator {
  private:

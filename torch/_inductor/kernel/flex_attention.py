@@ -46,7 +46,12 @@ from ..lowering import (
     register_lowering,
     to_dtype,
 )
-from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
+from ..select_algorithm import (
+    autotune_select_algorithm,
+    realize_inputs,
+    SymbolicGridFn,
+    TritonTemplate,
+)
 
 
 log = logging.getLogger(__name__)
@@ -91,15 +96,14 @@ def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
     return construct_strides(size, fill_order)
 
 
-def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
+@SymbolicGridFn
+def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
     We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
     Each block is responsible for iterating over blocks of keys and values calculating
     the final attention output.
     """
-    import triton
-
-    return (triton.cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
+    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
 
 
 def create_placeholder(
@@ -1477,6 +1481,9 @@ def flex_attention(
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
     original_kernel_options = kernel_options.copy()
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             if len(configs) == 1:
@@ -1498,6 +1505,12 @@ def flex_attention(
                 cur_kernel_options.pop(k)
         cur_kernel_options.setdefault("num_stages", num_stages)
         cur_kernel_options.setdefault("num_warps", num_warps)
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
+
         cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
@@ -1553,7 +1566,13 @@ def flex_attention(
         autotune_select_algorithm(
             "flex_attention",
             choices,
-            inputs_for_autotuning,
+            # Need to filter out symbols since there is an invariant
+            # that all input_nodes are of type IRNode
+            [
+                x
+                for x in inputs_for_autotuning
+                if isinstance(x, torch._inductor.ir.IRNode)
+            ],
             layout,
             input_gen_fns=input_gen_fns,
         ),
@@ -2547,8 +2566,11 @@ def flex_attention_backward(*args, **kwargs):
     choices: list[Any] = []
     configs: list[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
     if config.max_autotune:
         num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]
+
         configs.extend(
             [
                 (BLOCK1, BLOCK2, w, s)
@@ -2560,7 +2582,12 @@ def flex_attention_backward(*args, **kwargs):
             ]
         )
     original_kernel_options = kernel_options.copy()
-    for BLOCK1, BLOCK2, num_warps, num_stages in configs:
+    for (
+        BLOCK1,
+        BLOCK2,
+        num_warps,
+        num_stages,
+    ) in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
             or SPARSE_Q_BLOCK_SIZE % BLOCK1 != 0
@@ -2581,6 +2608,12 @@ def flex_attention_backward(*args, **kwargs):
                 cur_kernel_options.pop(k)
         cur_kernel_options.setdefault("num_warps", num_warps)
         cur_kernel_options.setdefault("num_stages", num_stages)
+
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
 
         cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
         cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
@@ -2662,7 +2695,7 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
-        inputs_for_autotuning,
+        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
         layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]

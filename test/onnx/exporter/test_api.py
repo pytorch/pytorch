@@ -246,6 +246,31 @@ class TestExportAPIDynamo(common_utils.TestCase):
             )
         )
 
+    def test_upgraded_torchlib_impl(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, input):
+                # Use GELU activation function
+                return torch.nn.functional.gelu(input, approximate="tanh")
+
+        input = torch.randn(1, 3, 4, 4)
+        onnx_program_op18 = torch.onnx.export(
+            GeluModel(),
+            input,
+            dynamo=True,
+        )
+        all_nodes_op18 = [n.op_type for n in onnx_program_op18.model.graph]
+        self.assertIn("Tanh", all_nodes_op18)
+        self.assertNotIn("Gelu", all_nodes_op18)
+
+        onnx_program_op20 = torch.onnx.export(
+            GeluModel(),
+            input,
+            opset_version=20,
+            dynamo=True,
+        )
+        all_nodes_op20 = [n.op_type for n in onnx_program_op20.model.graph]
+        self.assertIn("Gelu", all_nodes_op20)
+
     def test_refine_dynamic_shapes_with_onnx_export(self):
         # NOTE: From test/export/test_export.py
 
@@ -459,6 +484,26 @@ class TestFakeTensorExport(common_utils.TestCase):
         np.testing.assert_allclose(
             onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
         )
+
+    def test_is_in_onnx_export(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                def f(x):
+                    return x.sin() if torch.onnx.is_in_onnx_export() else x.cos()
+
+                return f(x)
+
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+        onnx_program = torch.onnx.export(
+            Mod(),
+            (torch.randn(3, 4),),
+            dynamo=True,
+            fallback=False,
+        )
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+
+        node_names = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sin", node_names)
 
 
 if __name__ == "__main__":

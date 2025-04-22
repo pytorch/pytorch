@@ -59,7 +59,7 @@ TEST(irange, empty_reverse_range_one_input) {
   ASSERT_EQ(test_vec, correct);
 }
 
-constexpr std::array<int, 3> toy_iota() {
+static constexpr std::array<int, 3> toy_iota() {
   std::array<int, 3> result = {0};
   for (const auto i : c10::irange(3)) {
     result[i] = i;
@@ -67,7 +67,7 @@ constexpr std::array<int, 3> toy_iota() {
   return result;
 }
 
-constexpr std::array<int, 3> toy_iota_with_start(int start) {
+static constexpr std::array<int, 3> toy_iota_with_start(int start) {
   std::array<int, 3> result = {0};
   for (const auto i : c10::irange(start, start + 3)) {
     result[i - start] = i;
