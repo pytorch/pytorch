@@ -77,6 +77,11 @@ class TestOpenReg(TestCase):
         self.assertEqual(generator.device.type, "openreg")
         self.assertEqual(generator.device.index, 1)
 
+    # TODO(FFFrog): Add more check for rng_state
+    def test_rng_state(self):
+        state = torch.openreg.get_rng_state(0)
+        torch.openreg.set_rng_state(state, 0)
+
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
