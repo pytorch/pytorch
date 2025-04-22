@@ -272,7 +272,6 @@ class WrapperBackend:
                 return self.candidate
 
             raise RuntimeError(f"incorrect results of backend {self}")
-            return self.gm.forward
 
         except Exception:
             log.exception("error in verify_correctness")
