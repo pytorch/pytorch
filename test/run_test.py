@@ -18,10 +18,9 @@ from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
+from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any, cast, NamedTuple, Optional, Union
-
-import pkg_resources
 
 import torch
 import torch.distributed as dist
@@ -1875,11 +1874,11 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pkg_resources.working_set]
-    for package in packages:
-        if package not in installed_packages:
+    installed_packages = {dist.metadata["Name"] for dist in distributions()}
+    for pkg in packages:
+        if pkg not in installed_packages:
             print_to_stderr(
-                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+                f"Missing pip dependency: {pkg}, please run `pip install -r .ci/docker/requirements-ci.txt`"
             )
             sys.exit(1)
 
