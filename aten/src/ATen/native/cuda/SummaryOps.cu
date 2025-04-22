@@ -1,4 +1,3 @@
-#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -405,10 +404,8 @@ Tensor _histc_cuda(
     TORCH_CHECK(false, "HalfTensor is not supported");
   }
   // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic for floating types because of atomicAdd usage
-  if (at::isFloatingType(self.scalar_type())){
-    globalContext().alertNotDeterministic("_histc_cuda");
-  }
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_histc_cuda");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
     using bounds_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
     return _histc_cuda_template<scalar_t>(
