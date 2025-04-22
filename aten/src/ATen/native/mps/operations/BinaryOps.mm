@@ -267,10 +267,11 @@ static void add_sub_lerp_template(const Tensor& self,
   const bool alpha_has_value = alpha.toDouble() != 1.0;
   auto self_complex = c10::isComplexType(self.scalar_type());
   auto other_complex = c10::isComplexType(other.scalar_type());
+  auto commonDtype = at::result_type(self, other);
   if (alpha_has_value) {
-    auto commonDtype = at::result_type(self, other);
     at::native::alpha_check(commonDtype, alpha);
-  } else if (self.is_mps() && other.is_mps() && (self_complex == other_complex)) {
+  } else if (self.is_mps() && other.is_mps() && (self_complex == other_complex) &&
+             output.scalar_type() == commonDtype) {
     mps::binary_op_kernel(op_name, self, other, output);
     return;
   }
