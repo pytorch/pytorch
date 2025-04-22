@@ -261,11 +261,27 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
     with a new number post fix.
     """
 
+    existing_keys = OrderedSet(
+        [name for name, val in mod.named_parameters(remove_duplicate=False)]
+    )
+    existing_keys.update(
+        OrderedSet([name for name, val in mod.named_buffers(remove_duplicate=False)])
+    )
+
     def find_smallest_i(graph: fx.Graph, prefix: str) -> int:
         i = 0
         for node in graph.nodes:
             if node.op == "get_attr" and node.target.startswith(prefix):
-                i = max(i, int(node.target.split(prefix)[-1]))
+                if len(node.target) > len(prefix):
+                    post_fix = node.target.split(prefix)[-1]
+                    if post_fix.isdigit():
+                        i = max(i, int(post_fix))
+        for key in existing_keys:
+            if key.startswith(prefix):
+                if len(key) > len(prefix):
+                    post_fix = key.split(prefix)[-1]
+                    if post_fix.isdigit():
+                        i = max(i, int(post_fix))
         return i + 1
 
     for node in gm.graph.nodes:
@@ -295,6 +311,7 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
             new_target_name = f"{prefix}{new_id}"
             node.target = new_target_name
             setattr(gm, new_target_name, gm_target)
+            existing_keys.add(new_target_name)
 
 
 def _unlift_graph(
