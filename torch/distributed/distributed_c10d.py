@@ -4998,7 +4998,6 @@ def split_group(
     if (
         not parent_backend
         or not parent_backend.supports_splitting
-        or not isinstance(parent_backend, ProcessGroupNCCL)
     ):
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
@@ -5016,11 +5015,7 @@ def split_group(
     backend = Backend(parent_backend_str)
     backend_config = BackendConfig(backend)
 
-    if pg_options is not None:
-        assert isinstance(pg_options, ProcessGroupNCCL.Options), (
-            "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-        )
-    else:
+    if pg_options is None:
         # default pg_options same as the parent process group
         pg_options = parent_backend.options
 
@@ -5064,18 +5059,32 @@ def split_group(
         group_rank,
         len(my_group),
     )
-    backend_type = ProcessGroup.BackendType.NCCL
     pg.bound_device_id = device_id
-    pg._set_default_backend(backend_type)
-
     pg_options._timeout = timeout
     pg_options.split_from = parent_backend
     pg_options.split_color = _process_group_color(my_group)
     pg_options.global_ranks_in_group = global_ranks_in_my_group
     pg_options.group_name = group_name
-    backend_class = ProcessGroupNCCL(
-        prefix_store, group_rank, len(my_group), pg_options
-    )
+
+    if parent_backend_str == Backend.NCCL:
+        backend_type = ProcessGroup.BackendType.NCCL
+        backend_class = ProcessGroupNCCL(prefix_store, group_rank, len(my_group), pg_options)
+    else:
+        assert parent_backend_str.upper() in Backend._plugins, (
+                f"Unknown c10d backend type {parent_backend_str.upper()}"
+            )
+        backend_plugin = Backend._plugins[parent_backend_str.upper()]
+        creator_fn = backend_plugin.creator_fn
+        extended_api = backend_plugin.extended_api
+        backend_type = ProcessGroup.BackendType.CUSTOM
+        assert (extended_api, "Only plugins with extended backend apis are supported with split_group")
+        dist_backend_opts = _DistributedBackendOptions()
+        dist_backend_opts.store = prefix_store
+        dist_backend_opts.group_rank = group_rank
+        dist_backend_opts.group_size = len(my_group)
+        backend_class = creator_fn(dist_backend_opts, pg_options)
+    
+    pg._set_default_backend(backend_type)
     backend_class._set_sequence_number_for_group()
 
     pg._register_backend(torch.device("cuda"), backend_type, backend_class)
