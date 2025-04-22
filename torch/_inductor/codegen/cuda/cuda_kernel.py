@@ -261,7 +261,9 @@ class CUDATemplateKernel(CUDAKernel):
         for epilogue_input in epilogue_inputs:
             if epilogue_input is not None:
                 self.named_nodes[epilogue_input.get_name()] = epilogue_input
-                self.args.input_buffers[epilogue_input.get_name()] = epilogue_input.get_name()
+                self.args.input_buffers[epilogue_input.get_name()] = (
+                    epilogue_input.get_name()
+                )
 
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
@@ -271,7 +273,9 @@ class CUDATemplateKernel(CUDAKernel):
         for epilogue_output in epilogue_outputs:
             if epilogue_output is not None:
                 self.named_nodes[epilogue_output.get_name()] = epilogue_output
-                self.args.output_buffers[epilogue_output.get_name()] = epilogue_output.get_name()
+                self.args.output_buffers[epilogue_output.get_name()] = (
+                    epilogue_output.get_name()
+                )
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
