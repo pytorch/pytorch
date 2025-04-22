@@ -3,8 +3,9 @@ from collections.abc import Sequence
 from typing import Optional
 
 import torch
-from torch.testing._internal.common_utils import MACOS_VERSION
-from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
+
+from .common_utils import MACOS_VERSION
+from .opinfo.core import DecorateInfo, OpInfo
 
 
 def mps_ops_modifier(
@@ -735,8 +736,7 @@ def mps_ops_modifier(
         if device_type is not None:
             d.device_type = device_type
 
-        op.decorators = list(op.decorators) if op.decorators is not None else []
-        op.decorators.append(d)
+        op.decorators = op.decorators + (d,)
 
     for op in ops:
         key = op.name + op.variant_test_name
@@ -945,8 +945,7 @@ def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
     }
 
     def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
-        op.decorators = list(op.decorators) if op.decorators is not None else []
-        op.decorators.append(d)
+        op.decorators = op.decorators + (d,)
 
     for op in ops:
         key = op.name + op.variant_test_name
@@ -1016,12 +1015,9 @@ def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
     }
 
     def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
-        op.decorators = list(op.decorators) if op.decorators is not None else []
-        op.decorators.append(d)
+        op.decorators = op.decorators + (d,)
 
     for op in ops:
-        if op.error_inputs_func is None:
-            continue
         key = op.name + op.variant_test_name
         if key in XFAILLIST:
             addDecorator(op, DecorateInfo(unittest.expectedFailure))
