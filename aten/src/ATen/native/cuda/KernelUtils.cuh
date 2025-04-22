@@ -256,8 +256,8 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
 
         __half* target_addr = reinterpret_cast<__half*>(self_ptr + index);
         bool low_byte = (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
-        bool canCombnUp = (bool)(__activemask()&(1<<(threadIdx.x+1))) && 
-                                 (low_byte && index < (numel - 1)) && 
+        bool canCombnUp = (bool)(__activemask()&(1<<(threadIdx.x+1))) &&
+                                 (low_byte && index < (numel - 1)) &&
                                  (ill_oneUpDst.il - reinterpret_cast<int64_t>(dst) == sizeof(scalar_t));
         bool canCombnDn = (__builtin_amdgcn_mov_dpp(canCombnUp, 0x138, 0xf, 0xf, 0));
 
