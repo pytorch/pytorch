@@ -49,16 +49,39 @@ struct SDPALogicalParams {
         "Only FP16/BF16/FP32 datatypes are currently supported");
     const dims scalar_shape = {1};
     std::vector<logical_tensor> inputLogicalTensors;
+
+    at::Tensor reshaped_query = query_;
+    at::Tensor reshaped_key = key_;
+    at::Tensor reshaped_value = value_;
+    at::Tensor reshaped_output = output_;
+    at::Tensor reshaped_attn_mask = attn_mask_.value_or(at::Tensor());
+    if (at::native::onednn::is_broadcast(reshaped_query)) {
+      at::native::onednn::undo_broadcast(reshaped_query);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_key)) {
+      at::native::onednn::undo_broadcast(reshaped_key);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_value)) {
+      at::native::onednn::undo_broadcast(reshaped_value);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_output)) {
+      at::native::onednn::undo_broadcast(reshaped_output);
+    }
+    if (attn_mask_.has_value() &&
+        at::native::onednn::is_broadcast(reshaped_attn_mask)) {
+      at::native::onednn::undo_broadcast(reshaped_attn_mask);
+    }
+
     query = {
         static_cast<size_t>(TensorID::query),
         dtype,
-        query_.sizes().vec(),
-        query_.strides().vec()};
+        reshaped_query.sizes().vec(),
+        reshaped_query.strides().vec()};
     key = {
         static_cast<size_t>(TensorID::key),
         dtype,
-        key_.sizes().vec(),
-        key_.strides().vec()};
+        reshaped_key.sizes().vec(),
+        reshaped_key.strides().vec()};
     scale = {
         static_cast<size_t>(TensorID::scale),
         dtype,
@@ -77,19 +100,19 @@ struct SDPALogicalParams {
       attn_mask = {
           static_cast<size_t>(TensorID::attn_mask),
           dtype,
-          attn_mask_->sizes().vec(),
-          attn_mask_->strides().vec()};
+          reshaped_attn_mask.sizes().vec(),
+          reshaped_attn_mask.strides().vec()};
     }
     value = {
         static_cast<size_t>(TensorID::value),
         dtype,
-        value_.sizes().vec(),
-        value_.strides().vec()};
+        reshaped_value.sizes().vec(),
+        reshaped_value.strides().vec()};
     output = {
         static_cast<size_t>(TensorID::output),
         dtype,
-        output_.sizes().vec(),
-        output_.strides().vec()};
+        reshaped_output.sizes().vec(),
+        reshaped_output.strides().vec()};
   }
   std::vector<logical_tensor> get_input() const {
     std::vector<logical_tensor> input = {query, key, scale};
