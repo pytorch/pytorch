@@ -331,7 +331,17 @@ inline __device__ void gpuAtomicAddNoReturn(bool *address, bool val) { gpuAtomic
 inline __device__ void gpuAtomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
 inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
 
-/* Special case fp32 atomic. */
+/* Note [HIP unsafeAtomicAdd]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Use unsafeAtomicAdd instead of atomicAdd for fp32 and fp64.
+ * On HIP, atomicAdd is always correct but is a slow CAS loop.
+ * unsafeAtomicAdd will use HW instructions and is much faster,
+ * but the caller must guarantee the pointer is GPU memory.
+ * If the pointer is system memory, the result is a silent no-op.
+ * This guarantee is upheld by all PyTorch uses of unsafeAtomicAdd.
+ * AMD HIP atomic header file is named amd_hip_atomic.h and is
+ * under the LLVM compiler directory.
+ */
 #if defined(USE_ROCM)
 inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
 #if defined(__gfx908__)
