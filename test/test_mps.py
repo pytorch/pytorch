@@ -156,10 +156,6 @@ def mps_ops_grad_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
-
-        # atomic operation in backward pass
-        '_unsafe_masked_index': [torch.float16],
-        '_unsafe_masked_index_put_accumulate': [torch.float16],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
@@ -12737,9 +12733,9 @@ class TestConsistency(TestCaseMPS):
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
-            # Order of ops in index_put is not guaranteed, which can lead to large erros if inputs are
+            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
             # not normalized
-            if op.name == "_unsafe_masked_index_put_accumulate" and dtype == torch.bfloat16:
+            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
                 mps_args[3] = F.normalize(mps_args[3])
                 cpu_args[3] = F.normalize(cpu_args[3])
 
@@ -12782,7 +12778,6 @@ class TestConsistency(TestCaseMPS):
             #
             # Forward check
             #
-            forward_failed = False
             mps_sample = transform_opinfo_sample_to_mps(cpu_sample)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
@@ -12793,6 +12788,12 @@ class TestConsistency(TestCaseMPS):
             # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
             if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
+
+            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
+            # not normalized
+            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
+                mps_args[3] = F.normalize(mps_args[3])
+                cpu_args[3] = F.normalize(cpu_args[3])
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
@@ -12812,11 +12813,6 @@ class TestConsistency(TestCaseMPS):
             #
             # Backward check
             #
-            if forward_failed:
-                # We would've failed immediately anyway, but this error is clearer
-                # We error instead of continuing so that all_backward_pass would not be True
-                raise RuntimeError("Forward pass already failed")
-
             cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
             mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
 
@@ -12849,6 +12845,10 @@ class TestConsistency(TestCaseMPS):
             ):
                 atol = 1e-5
                 rtol = 1.5e-3
+            # Order of ops in unsafe_masked_index backward is not guaranteed
+            # which leads to larger errors
+            if op.name == "_unsafe_masked_index" and dtype == torch.float16:
+                atol, rtol = 3e-3, 3e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
@@ -13085,7 +13085,7 @@ class TestMetalLibrary(TestCaseMPS):
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
-        if dtype == torch.int64 and MACOS_VERSION < 14.0:
+        if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("bfloat requires MacOS-14+")
         from torch._inductor.codegen.mps import DTYPE_TO_METAL
         mdtype = DTYPE_TO_METAL[dtype]
