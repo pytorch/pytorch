@@ -3903,8 +3903,8 @@ class GraphModule(torch.nn.Module):
         keyword_args = {
             "kernel_options": {
                 "num_warps": 4,
-                "num_consumer_groups": 2,
-                "num_buffers_warp_spec": 3,
+                "num_consumer_groups": 0,
+                "num_buffers_warp_spec": 0,
             }
         }
 

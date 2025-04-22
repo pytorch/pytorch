@@ -1669,10 +1669,6 @@ std::string ProcessGroupNCCL::getNCCLWatchdogTimeoutExitMsg(
       ".");
 }
 
-void ProcessGroupNCCL::setEnableNanCheck(bool enableNanCheck) {
-  enableNanCheck_ = enableNanCheck;
-}
-
 void ProcessGroupNCCL::heartbeatMonitor() {
   c10::setThreadName("pt_nccl_heartbt");
 

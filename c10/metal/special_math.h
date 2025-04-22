@@ -1753,36 +1753,5 @@ inline float hermite_polynomial_h_forward(T x, int64_t n) {
   return r;
 } // hermite_polynomial_h_forward(T x, int64_t n)
 
-template <typename T>
-inline float hermite_polynomial_he_forward(T x, int64_t n) {
-  if (n < 0) {
-    return 0.0;
-  }
-
-  if (n == 0) {
-    return 1.0;
-  }
-
-  if (n == 1) {
-    return x;
-  }
-
-  if (n > getHermitianLimit<T>()) {
-    return NAN;
-  }
-
-  float p = 1.0;
-  float q = x;
-  float r;
-
-  for (int64_t k = 1; k < n; k++) {
-    r = x * q - k * p;
-    p = q;
-    q = r;
-  }
-
-  return r;
-} // hermite_polynomial_he_forward(T x, int64_t n)
-
 } // namespace metal
 } // namespace c10
