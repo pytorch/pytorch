@@ -2598,15 +2598,10 @@ def is_stride_order_storage_and_layout(
 
 
 def is_unaligned(node: IRNode) -> bool:
-    if isinstance(node, TensorBox):
-        return is_unaligned(node.data)
-
-    if isinstance(node, StorageBox):
+    if isinstance(node, (TensorBox, StorageBox)):
         return is_unaligned(node.data)
 
     if isinstance(node, ReinterpretView):
-        has_unaligned_layout = False
-
         layout = node.layout
         has_unaligned_layout = not statically_known_true(
             layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
