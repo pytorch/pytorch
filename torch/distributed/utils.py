@@ -118,7 +118,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                 with stream:
                     output = obj.to(target_device)
                 # synchronize with the copy stream
-                with target_device:
+                with torch.accelerator.device_index(target_device.index):
                     current_stream = torch.accelerator.current_stream()
                     # Sync the current stream with the copy stream
                     current_stream.wait_stream(stream)

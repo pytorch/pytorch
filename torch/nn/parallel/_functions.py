@@ -103,7 +103,7 @@ class Scatter(Function):
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
-                with torch.device(target_gpus[i]):
+                with torch.accelerator.device_index(target_gpus[i]):
                     main_stream = torch.accelerator.current_stream()
                     main_stream.wait_stream(streams[i])
                     output.record_stream(main_stream)
