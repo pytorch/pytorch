@@ -5,6 +5,7 @@
 #include <ATen/core/CachingHostAllocator.h>
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Storage.h>
+#include <c10/core/Stream.h>
 
 #include <iostream>
 
@@ -851,6 +852,29 @@ struct MPSHostAllocator final : public at::HostAllocator {
 
   void empty_cache() override {
     _getSharedAllocator().emptyCache();
+  }
+
+  bool record_event(void* ptr, [[maybe_unused]] void* ctx, [[maybe_unused]] c10::Stream stream) override {
+    return _getSharedAllocator().recordEvents({ptr});
+  }
+
+  at::HostStats get_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "get_stats is not supported on MPS");
+  }
+
+  void reset_accumulated_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "reset_accumulated_stats is not supported on MPS");
+  }
+
+  void reset_peak_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "reset_peak_stats is not supported on MPS");
+  }
+
+  bool is_pinned(const void* data) override {
+    if (!at::mps::is_available()) {
+      return false;
+    }
+    return at::mps::_getSharedAllocator().isSharedBuffer(data);
   }
 
  private:

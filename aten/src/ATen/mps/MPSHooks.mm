@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
@@ -146,7 +147,7 @@ double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event
 }
 
 bool MPSHooks::isPinnedPtr(const void* data) const {
-  return at::mps::isMPSPinnedPtr(data);
+  return at::getHostAllocator(at::kMPS)->is_pinned(data);
 }
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
