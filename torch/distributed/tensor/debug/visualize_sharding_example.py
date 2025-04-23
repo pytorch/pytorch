@@ -1,16 +1,16 @@
-# OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 torch/distributed/tensor/debug/visualize_sharding_example.py
+# OMP_NUM_THREADS=1 torchrun --nproc_per_node=4 visualize_sharding_example.py
 import contextlib
 import importlib.util
 import os
 
 import numpy as np
-
 import torch
 import torch.distributed as dist
 import torch.distributed.elastic.multiprocessing.errors
 import torch.distributed.tensor as dt
 from torch._prims_common import ShapeType
-from torch.distributed.tensor.debug import visualize_sharding
+
+from _visualize_sharding import visualize_sharding
 
 
 @contextlib.contextmanager

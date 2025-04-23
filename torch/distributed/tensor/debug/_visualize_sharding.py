@@ -1,19 +1,18 @@
 # mypy: allow-untyped-defs
+import importlib.util
 from collections.abc import Sequence
 
 import numpy as np
-
 from torch._prims_common import ShapeType
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.placement_types import Placement, Shard
-
 
 __all__ = ["visualize_sharding"]
 
 Color = tuple[float, float, float] | str
 
 
-def _device_coords_in_mesh(mesh: dt.DeviceMesh) -> dict[int, tuple[int, ...]]:
+def _device_coords_in_mesh(mesh: DeviceMesh) -> dict[int, tuple[int, ...]]:
     """Given a device mesh, returns a dict from device index to coordinate."""
     return {
         device_index: coord for coord, device_index in np.ndenumerate(np.array(mesh.mesh.tolist()))
@@ -22,8 +21,8 @@ def _device_coords_in_mesh(mesh: dt.DeviceMesh) -> dict[int, tuple[int, ...]]:
 
 def _shard_info(
     global_shape: ShapeType,
-    mesh: dt.DeviceMesh,
-    placements: tuple[dt.Placement],
+    mesh: DeviceMesh,
+    placements: tuple[Placement],
     device_coords: dict[int, tuple[int, ...]],
     device_index: int,
 ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
@@ -34,7 +33,7 @@ def _shard_info(
 
     for idx, placement in enumerate(placements):
         mesh_dim_size = mesh.size(idx)
-        if isinstance(placement, dt.Shard):
+        if isinstance(placement, Shard):
             shard_dim = placement.dim
             local_offset = [0] * len(global_shape)
             assert shard_dim < len(
