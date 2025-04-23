@@ -9,8 +9,6 @@
 struct TORCH_API THPDevice {
   PyObject_HEAD
   at::Device device;
-  // Used to switch device context management, initialized lazily.
-  PyObject* context;
 };
 
 TORCH_API extern PyTypeObject THPDeviceType;
