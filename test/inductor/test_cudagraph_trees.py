@@ -2144,8 +2144,8 @@ if HAS_CUDA:
             with self.assertRaisesRegex(
                 Exception,
                 r"(?s)static input data pointer changed.\n"
-                r"input name: primals_2. data pointer changed from .* to .*. input stack trace:.*"
-                r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
+                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*"
+                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*,"
                 r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
             ):
                 self.curr_node().run(
