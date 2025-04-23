@@ -8,7 +8,7 @@ document.addEventListener("DOMContentLoaded", function () {
   script.setAttribute("version", "stable");
   script.setAttribute("crossorigin", "true");
   script.setAttribute("runllm-keyboard-shortcut", "Mod+j");
-  script.setAttribute("runllm-name", "PyTorch Docs");
+  script.setAttribute("runllm-name", "PyTorch");
   script.setAttribute("runllm-position", "BOTTOM_RIGHT");
   script.setAttribute("runllm-assistant-id", "834");
 
