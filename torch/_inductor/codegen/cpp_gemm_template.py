@@ -836,6 +836,9 @@ class CppGemmTemplate(CppTemplate):
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         act_mapping: Optional[dict[int, ir.IRNode]] = None,
     ):
+        """
+        Add choices for the GEMM template.
+        """
         # Fast path to save the epilogue calculation when x_scale/x_zp/w_scale are constant
         use_int8_fast_epilogue_path = _is_int8_gemm(input_nodes) and all(
             (
@@ -985,6 +988,7 @@ class CppGemmTemplate(CppTemplate):
                     micro_gemm,
                     pre_block_weights,
                     use_int8_fast_epilogue_path,
+                    skip_int8_compensate=True,
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -1031,6 +1035,7 @@ class CppGemmTemplate(CppTemplate):
         micro_gemm: CppMicroGemm,
         should_block_weight: bool,
         use_int8_fast_epilogue_path: bool = False,
+        skip_int8_compensate: bool = False,
     ):
         """
         NOTE Weight prep consists of 2 separate steps:
@@ -1075,7 +1080,7 @@ class CppGemmTemplate(CppTemplate):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
 
-        if _is_int8_gemm(new_inputs):
+        if _is_int8_gemm(new_inputs) and not skip_int8_compensate:
             BCompensate = None
             x_w_scale = None
             if use_int8_fast_epilogue_path:
