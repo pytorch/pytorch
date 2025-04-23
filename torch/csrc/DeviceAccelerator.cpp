@@ -74,4 +74,16 @@ void initModule(PyObject* module) {
   });
 }
 
+m.def("_accelerator_exchangeDevice", [](c10::DeviceIndex device_index) {
+  const auto device_type = at::accelerator::getAccelerator(true).value();
+  torch::utils::maybe_initialize_device(device_type);
+  return at::accelerator::exchangeDevice(device_index);
+});
+
+m.def("_accelerator_maybeExchangeDevice", [](c10::DeviceIndex device_index) {
+  const auto device_type = at::accelerator::getAccelerator(true).value();
+  torch::utils::maybe_initialize_device(device_type);
+  return at::accelerator::maybeExchangeDevice(device_index);
+});
+
 } // namespace torch::accelerator

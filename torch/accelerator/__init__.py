@@ -194,15 +194,12 @@ def synchronize(device: _device_t = None, /) -> None:
 
 class device_index:
     r"""Context manager to set the current device index for current accelerator.
-
     Temporarily changes the current device index to the specified value for the duration
     of the context, and automatically restores the previous device index when exiting
     the context.
-
     Args:
         device (Optional[int]): a given device index to temporarily set. If None,
             no device index switching occurs.
-
     Examples:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # Set device 0 as the current device temporarily
@@ -210,7 +207,6 @@ class device_index:
         ...     # Code here runs with device 0 as the current device
         ...     pass
         >>> # Original device is now restored
-
         >>> # No-op when None is passed
         >>> with torch.accelerator.device_index(None):
         ...     # No device switching occurs
