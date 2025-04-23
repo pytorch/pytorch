@@ -1101,15 +1101,12 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            with dynamo_timed(
-                "additional_fake_tensor_prop", log_pt2_compile_event=True
-            ):
-                # It is safe to run FakeTensorProp under no_grad because by the time
-                # we're in inductor, we assume that AOTAutograd has already "taken care"
-                # of autograd, so there should be no more autograd-related API's in the
-                # graph.
-                with torch.no_grad():
-                    fake_mode = fake_tensor_prop(gm, example_inputs)
+            # It is safe to run FakeTensorProp under no_grad because by the time
+            # we're in inductor, we assume that AOTAutograd has already "taken care"
+            # of autograd, so there should be no more autograd-related API's in the
+            # graph.
+            with torch.no_grad():
+                fake_mode = fake_tensor_prop(gm, example_inputs)
 
             record_original_output_strides(gm)
 
@@ -1173,7 +1170,7 @@ class _InProcessFxCompile(FxCompile):
                                 "pt2_configs": str(get_patched_config_dict())
                             }
                         )
-                    except ValueError:
+                    except Exception:
                         # TODO(T216453900): need to work around for now to support vllm
                         # See details in vllm/compilation/pass_manager.py.
                         log.warning("failed to log pt2_configs")
@@ -2138,17 +2135,13 @@ def compile_fx(
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
             )
-
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return min_cut_rematerialization_partition(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
+            return min_cut_rematerialization_partition(
+                gm,
+                joint_inputs,
+                compiler="inductor",
+                static_lifetime_input_indices=static_lifetime_input_indices,
+                **kwargs,
+            )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
