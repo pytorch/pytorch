@@ -1854,7 +1854,6 @@ class CommonTemplate:
             ),
         )
 
-    @xfail_if_mps
     def test__unsafe_masked_index_put_accumulate(self):
         def fn(a, mask, idx, values):
             return aten._unsafe_masked_index_put_accumulate(a, mask, idx, values)
@@ -4217,7 +4216,6 @@ class CommonTemplate:
             ),
         )
 
-    @xfail_if_mps
     def test_device_assert(self):
         def fn(x, y):
             x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
@@ -4225,7 +4223,8 @@ class CommonTemplate:
 
         x1 = torch.randn(30, device=self.device)
         x2 = torch.randn(36, device=self.device)
-        y = torch.ones(1, dtype=torch.float64, device=self.device)
+        dtype = torch.float64 if self.device != "mps" else torch.float32
+        y = torch.ones(1, dtype=dtype, device=self.device)
 
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
         self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
@@ -5775,7 +5774,6 @@ class CommonTemplate:
             a = torch.rand((1, 1000000), device=self.device)
             self.common(f, (a,))
 
-    @xfail_if_mps  # 100% results are wrong
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -5991,7 +5989,6 @@ class CommonTemplate:
             )
 
     @xfail_if_triton_cpu
-    @xfail_if_mps  # float64 is not MPS type
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
@@ -7942,7 +7939,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
-    @xfail_if_mps  # 100% entries are wrong
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)
@@ -8015,7 +8011,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
-    @xfail_if_mps_unimplemented  # RuntimeError: Expected scalar_type == ScalarType::Float
     def test_index_put_fallback1(self):
         def fn(a, b, c, d):
             a = a.clone()
@@ -8042,7 +8037,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
-    @xfail_if_mps_unimplemented  # RuntimeError: Expected scalar_type == ScalarType::Float
     def test_index_put_fallback2(self):
         def fn(a, b, c, d, e):
             a = a.clone()
@@ -8388,7 +8382,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps
     def test_scatter2(self):
         if self.device == "cuda":
             raise unittest.SkipTest("unstable on sm86")
@@ -8411,7 +8404,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
-    @xfail_if_mps
     def test_scatter3(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b, reduce="add")
@@ -8456,7 +8448,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     check_lowp=check_lowp,
                 )
 
-    @xfail_if_mps
     def test_scatter5(self):
         def fn(a, dim, index, b, reduce):
             a = a.clone()
@@ -8526,7 +8517,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
-    @xfail_if_mps  # All elements are wrong
     def test_scatter_add2(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -8546,7 +8536,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
-    @xfail_if_mps
     def test_scatter_add3(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -8571,7 +8560,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     check_lowp=check_lowp,
                 )
 
-    @xfail_if_mps
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum")
@@ -8591,7 +8579,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
-    @xfail_if_mps  # 50% of elements are wrong
     def test_scatter_reduce2(self):
         def fn(a, dim, index, b, reduce):
             return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
@@ -8613,7 +8600,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=check_lowp,
             )
 
-    @xfail_if_mps
     def test_scatter_reduce3(self):
         def fn(a, dim, index, b, reduce):
             a = a.clone()
@@ -10529,7 +10515,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps  # float64 is not MPS type
     def test_rsqrt_dynamic_shapes(self):
         # From HF hf_BigBird model.
         @torch.compile(dynamic=True)
@@ -12127,16 +12112,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(called)
 
     @skip_if_gpu_halide  # cuda error
-    @xfail_if_mps  # float64 is not MPS type
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
             out = tensor.index_add(0, index, source, alpha=2.0) / 2
             return out
 
         device = "cpu"
-        tensor = torch.rand((1,), dtype=torch.double, device=device)
+        dtype = torch.double if self.device != "mps" else torch.float32
+        tensor = torch.rand((1,), dtype=dtype, device=device)
         index = torch.tensor([0], dtype=torch.long, device=device)
-        source = torch.rand((1,), dtype=torch.double, device=device)
+        source = torch.rand((1,), dtype=dtype, device=device)
         self.common(
             fn,
             (
