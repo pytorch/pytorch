@@ -10266,6 +10266,47 @@ graph():
                 strict=strict,
             )
 
+    @testing.expectedFailureCppRuntime
+    def test_symint_input_additional_inputs(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        additional_inputs = torch.export.AdditionalInputs()
+        additional_inputs.add((5, 5))
+        additional_inputs.add((3, 5))
+        additional_inputs.add((5, 4))
+        ep = torch.export.export(
+            M(), (6, 7), dynamic_shapes=additional_inputs, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 5), 10)
+        self.assertEqual(ep.module()(3, 5), 8)
+        self.assertEqual(ep.module()(5, 4), 9)
+
+    @testing.expectedFailureCppRuntime
+    def test_symint_input_shapes_collection(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        import torch.utils._pytree as pytree
+        from torch.export.dynamic_shapes import _IntWrapper
+
+        args = (_IntWrapper(5), _IntWrapper(5))
+        shapes_collection = torch.export.ShapesCollection()
+        shapes_collection[args[0]] = Dim.DYNAMIC
+        shapes_collection[args[1]] = Dim.DYNAMIC
+        ep = torch.export.export(
+            M(), args, dynamic_shapes=shapes_collection, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 5), 10)
+        self.assertEqual(ep.module()(3, 5), 8)
+        self.assertEqual(ep.module()(5, 4), 9)
+
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
             def __init__(self):
@@ -12215,6 +12256,44 @@ def forward(self, x, y):
                 return torch.full((80, 2), val, dtype=torch.float32)
 
         export(Foo(), args=(torch.tensor(1),))
+
+    def test_custom_pytree(self):
+        class Foo:
+            def __init__(self, attr1, attr2):
+                if attr1 is None:
+                    raise ValueError("Shouldn't be None")
+                self.attr1 = attr1
+                self.attr2 = attr2
+
+        class FooModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo_attr = Foo(torch.ones(4, 4), torch.ones(4, 4))
+
+            def forward(self, foo):
+                return foo.attr1.sum() + foo.attr2.sum() + self.foo_attr.attr1.sum()
+
+        def flat(foo):
+            return torch.utils._pytree._list_flatten([foo.attr1, foo.attr2])
+
+        def flat_with_keys(foo):
+            return torch.utils._pytree._list_flatten_with_keys([foo.attr1, foo.attr2])
+
+        def unflat(val, context):
+            l = torch.utils._pytree._list_unflatten(val, context)
+            return Foo(l[0], l[1])
+
+        torch.utils._pytree.register_pytree_node(
+            Foo,
+            flat,
+            unflat,
+            flatten_with_keys_fn=flat_with_keys,
+            serialized_type_name=f"{Foo.__module__}.{Foo.__name__}",
+        )
+
+        torch.export.export(
+            FooModel(), (Foo(torch.ones(4, 4), torch.ones(4, 4)),), strict=False
+        )
 
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
