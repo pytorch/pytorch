@@ -90,7 +90,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def _init_params(self, param_sizes: list[torch.Size]) -> list[nn.Parameter]:
         torch.manual_seed(42)
         orig_params = [
-            nn.Parameter(torch.randn(size, device=self.device)) for size in param_sizes
+            nn.Parameter(torch.randn(size, device=torch.device(device_type.type))) for size in param_sizes
         ]
         # Since seed is per process, not per thread, we broadcast to ensure the
         # same original parameters across ranks
@@ -444,12 +444,13 @@ class TestFullyShardCommunication(FSDPTest):
 
     def _test_set_reshard_after_forward_by_communication_count(
         self,
+        device,
         set_reshard_after_forward: bool,
         recurse: bool,
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
-        model = Transformer(model_args)
+        model = Transformer(model_args).to(device)
         fully_shard_fn = functools.partial(
             fully_shard, reshard_after_forward=not set_reshard_after_forward
         )
