@@ -2538,10 +2538,10 @@ class CommonTemplate:
         for i in inps:
             self.common(fn, (i,), check_lowp=False)
 
-    @xfail_if_mps
     def test_sum_dtype(self):
+        sum_dtype = torch.double if self.device != "mps" else torch.float32
         def fn(x):
-            return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
+            return x * x.sum(-1, dtype=sum_dtype) + x.sum(dtype=sum_dtype)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
