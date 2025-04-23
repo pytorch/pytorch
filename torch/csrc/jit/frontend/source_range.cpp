@@ -17,6 +17,7 @@ StringCordView::StringCordView(
     std::vector<std::string_view> inputs,
     std::vector<std::shared_ptr<std::string>> ownerships)
     : pieces_(std::move(inputs)), owned_strings_(std::move(ownerships)) {
+  accumulated_sizes_.reserve(pieces_.size() + 1);
   accumulated_sizes_.push_back(0);
   size_t running_sum = 0;
   for (auto& s : pieces_) {
