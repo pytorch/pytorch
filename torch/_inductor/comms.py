@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+def sink_waits(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
     """
@@ -42,7 +42,7 @@ def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     )
 
 
-def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+def raise_comms(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNode]:
     """
     Greedily schedules comms as early as possible.
     """
@@ -53,6 +53,7 @@ def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
 
 def reorder_compute_for_overlap(
     snodes: list[BaseSchedulerNode],
+    *args,
 ) -> list[BaseSchedulerNode]:
     """
     This achieves the following overall scheduling procedure:
@@ -262,7 +263,7 @@ def node_summary(snode):
     snodes = snode.get_nodes()
     if len(snodes) == 1:
         detail = ""
-        if isinstance(snode.node, ir.ExternKernelOut, ir._CollectiveKernel):
+        if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
             detail = f" ({snode.node.python_kernel_name})"
         out_tensor_info = ""
         layout = snode.node.get_output_spec()
@@ -281,7 +282,11 @@ def node_summary(snode):
 def visualize_overlap(order):
     total_est_runtime: float = 0.0
     cur_comm_node = None
-    for snode in order:
+
+    def step_log(step, msg):
+        overlap_log.debug(f"{step:>6}: {msg}")  # noqa: G004
+
+    for step, snode in enumerate(order):
         if cur_comm_node is None:
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
@@ -292,7 +297,7 @@ def visualize_overlap(order):
                 )
             else:  # exposed compute op
                 total_est_runtime += estimate_op_runtime(snode)
-            overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+            step_log(step, f"{node_summary(snode)}")
         else:  # cur_comm_node is not None
             if contains_collective(snode):
                 raise AssertionError(
@@ -300,10 +305,10 @@ def visualize_overlap(order):
                     "`visualize_overlap` needs to be updated to handle this case"
                 )
             elif is_wait(snode.node):  # end of this comm op
-                overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+                step_log(step, f"{node_summary(snode)}")
                 cur_comm_node = None
             else:  # overlapped compute op
-                overlap_log.debug(f"| {node_summary(snode)}")  # noqa: G004
+                step_log(step, f"| {node_summary(snode)}")
     overlap_log.debug(
         f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"  # noqa: G004
     )
@@ -311,6 +316,8 @@ def visualize_overlap(order):
 
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
+    graph_inputs: OrderedSet[str],
+    graph_outputs: OrderedSet[str],
 ) -> list[BaseSchedulerNode]:
     order = snodes
     for p in config.reorder_for_compute_comm_overlap_passes:

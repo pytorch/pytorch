@@ -2096,7 +2096,11 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
-            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+            self.nodes = comms.reorder_compute_and_comm_for_overlap(
+                self.nodes,
+                OrderedSet(V.graph.graph_inputs.keys()),
+                OrderedSet(V.graph.get_output_names()),
+            )
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:

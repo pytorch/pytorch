@@ -4,6 +4,7 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
+import torch.utils._ordered_set
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
@@ -334,7 +335,14 @@ reorder_for_compute_comm_overlap_passes: list[
     Union[
         str,
         Callable[
-            [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+            [
+                # Input schedule nodes
+                list["torch._inductor.scheduler.BaseSchedulerNode"],
+                # Graph Inputs
+                torch.utils._ordered_set.OrderedSet[str],
+                # Graph Outputs
+                torch.utils._ordered_set.OrderedSet[str],
+            ],
             list["torch._inductor.scheduler.BaseSchedulerNode"],
         ],
     ]
