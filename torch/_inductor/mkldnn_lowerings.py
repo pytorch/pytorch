@@ -660,30 +660,38 @@ def register_onednn_fusion_ops():
                     use_fast_path = False
                     if (
                         isinstance(x_scale, ir.TensorBox)
-                        and isinstance(x_scale.data.data, ir.ConstantBuffer)
+                        and x_scale.get_name() in V.graph.constants
                         and isinstance(w_scale, ir.TensorBox)
-                        and isinstance(w_scale.data.data, ir.ConstantBuffer)
+                        and w_scale.get_name() in V.graph.constants
                     ):
                         use_fast_path = True
-                        x_w_scale_tensor = V.graph.constants[x_scale.get_name()] * V.graph.constants[w_scale.get_name()]
+                        x_w_scale_tensor = (
+                            V.graph.constants[x_scale.get_name()]
+                            * V.graph.constants[w_scale.get_name()]
+                        )
                         x_w_scale = V.graph.add_tensor_constant(
                             x_w_scale_tensor,
                             name=packed_weight.get_name() + "_x_w_compens",
                         )
-                        weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
+                        weight_compens_tensor = torch.sum(
+                            W_tensor.to(torch.float), dim=0
+                        )
                         x_zp_tensor = V.graph.constants[x_zp.get_name()]
-                        weight_compens_tensor = weight_compens_tensor * x_w_scale_tensor * x_zp_tensor
+                        weight_compens_tensor = (
+                            weight_compens_tensor * x_w_scale_tensor * x_zp_tensor
+                        )
                         weight_compens = V.graph.add_tensor_constant(
                             weight_compens_tensor,
                             name=packed_weight.get_name() + "_BMatrixCompens",
                         )
                     else:
-                        weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
+                        weight_compens_tensor = torch.sum(
+                            W_tensor.to(torch.float), dim=0
+                        )
                         weight_compens = V.graph.add_tensor_constant(
                             weight_compens_tensor,
                             name=packed_weight.get_name() + "_BMatrixCompens",
                         )
-                    # use_fast_path = False
 
                     def epilogue_creator(input_buffer):
                         # Epilogue to convert from s32 to f32 for u8s8f32
@@ -695,7 +703,9 @@ def register_onednn_fusion_ops():
                         ]
                         input_loader = input_buffer.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
-                        x_w_scale_loader = None if not use_fast_path else x_w_scale.make_loader()
+                        x_w_scale_loader = (
+                            None if not use_fast_path else x_w_scale.make_loader()
+                        )
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
                         x_zp_loader = x_zp.make_loader()
@@ -713,12 +723,18 @@ def register_onednn_fusion_ops():
                             weight_compens_index = (index[-1],)
                             _x_scale = None if use_fast_path else x_scale_loader(())
                             _x_zp = None if use_fast_path else x_zp_loader(())
-                            _w_scale = None if use_fast_path else w_scale_loader(weight_compens_index)
+                            _w_scale = (
+                                None
+                                if use_fast_path
+                                else w_scale_loader(weight_compens_index)
+                            )
                             _weight_compo = weight_compens_loader(weight_compens_index)
 
                             # Step 1: Compute s8s8->s32 or u8s8->s32 GEMM & then apply compensation
-
                             if use_fast_path:
+                                assert x_w_scale_loader is not None, (
+                                    "x_w_scale_loader is None"
+                                )
                                 _x_w_scale = x_w_scale_loader(weight_compens_index)
                                 temp = ops.mul(
                                     input,
@@ -1021,25 +1037,34 @@ def register_onednn_fusion_ops():
                     use_fast_path = False
                     if (
                         isinstance(x_scale, ir.TensorBox)
-                        and isinstance(x_scale.data.data, ir.ConstantBuffer)
+                        and x_scale.get_name() in V.graph.constants
                         and isinstance(w_scale, ir.TensorBox)
-                        and isinstance(w_scale.data.data, ir.ConstantBuffer)
+                        and w_scale.get_name() in V.graph.constants
                     ):
                         use_fast_path = True
-                        x_w_scale_tensor = V.graph.constants[x_scale.get_name()] * V.graph.constants[w_scale.get_name()]
+                        x_w_scale_tensor = (
+                            V.graph.constants[x_scale.get_name()]
+                            * V.graph.constants[w_scale.get_name()]
+                        )
                         x_w_scale = V.graph.add_tensor_constant(
                             x_w_scale_tensor,
                             name=packed_weight.get_name() + "_x_w_compens",
                         )
-                        weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
+                        weight_compens_tensor = torch.sum(
+                            W_tensor.to(torch.float), dim=0
+                        )
                         x_zp_tensor = V.graph.constants[x_zp.get_name()]
-                        weight_compens_tensor = weight_compens_tensor * x_w_scale_tensor * x_zp_tensor
+                        weight_compens_tensor = (
+                            weight_compens_tensor * x_w_scale_tensor * x_zp_tensor
+                        )
                         weight_compens = V.graph.add_tensor_constant(
                             weight_compens_tensor,
                             name=packed_weight.get_name() + "_BMatrixCompens",
                         )
                     else:
-                        weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
+                        weight_compens_tensor = torch.sum(
+                            W_tensor.to(torch.float), dim=0
+                        )
                         weight_compens = V.graph.add_tensor_constant(
                             weight_compens_tensor,
                             name=packed_weight.get_name() + "_BMatrixCompens",
@@ -1057,7 +1082,9 @@ def register_onednn_fusion_ops():
                         input_loader = input_buffer.make_loader()
                         x2_loader = x2.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
-                        x_w_scale_loader = None if not use_fast_path else x_w_scale.make_loader()
+                        x_w_scale_loader = (
+                            None if not use_fast_path else x_w_scale.make_loader()
+                        )
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
                         x_zp_loader = x_zp.make_loader()
@@ -1077,12 +1104,17 @@ def register_onednn_fusion_ops():
                             # cvt to FP32 before doing compensation
                             input = ops.to_dtype(input, torch.float32)
                             weight_compens_index = (index[-1],)
-                            _w_scale = None if use_fast_path else w_scale_loader(weight_compens_index)
-                            _weight_compo = weight_compens_loader(
-                                weight_compens_index
+                            _w_scale = (
+                                None
+                                if use_fast_path
+                                else w_scale_loader(weight_compens_index)
                             )
+                            _weight_compo = weight_compens_loader(weight_compens_index)
                             # Step 1: Doing compensation to cvt fp32
                             if use_fast_path:
+                                assert x_w_scale_loader is not None, (
+                                    "x_w_scale_loader is None"
+                                )
                                 _x_w_scale = x_w_scale_loader(weight_compens_index)
                                 temp = ops.mul(
                                     input,

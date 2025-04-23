@@ -318,6 +318,7 @@ GEMM_TEMPLATE = r"""
 }
 """
 
+
 def _is_int8_gemm(inputs):
     return (
         isinstance(inputs[0], ir.IRNode)
@@ -727,14 +728,6 @@ class CppGemmTemplate(CppTemplate):
             num_byte_A = get_num_byte(dtype_A)
             num_byte_B = get_num_byte(dtype_B)
 
-            dtype_C = self.output_node.get_dtype()
-            num_byte_C = get_num_byte(dtype_C)
-
-            # print("---- num_byte_A is: {}".format(num_byte_A), flush=True)
-            # print("---- num_byte_B is: {}".format(num_byte_B), flush=True)
-            # print("---- num_byte_C is: {}".format(num_byte_C), flush=True)
-
-
             if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
                 # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
                 # In this case, the choice of the micro-kernel being used can't be decoupled from
@@ -772,8 +765,6 @@ class CppGemmTemplate(CppTemplate):
             else:
                 # Strategy 2: Kt is too large to hold A (Mc x Kt) in L2, we reuse
                 # A (Mc x Kc) in L2 by B (Kc x Nc). C (Mc x Nc) resides in L2.
-                # print("---- hit the strategy 2", flush=True)
-                breakpoint()
                 Mc_blocks = Mt_blocks
                 Nc_blocks = min(math.ceil(Mc_blocks * Mr / Nr), Nt_blocks)
                 Nc_bytes = Nc_blocks * Nr * 4  # assume C or acc is float32/int32
@@ -845,15 +836,14 @@ class CppGemmTemplate(CppTemplate):
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         act_mapping: Optional[dict[int, ir.IRNode]] = None,
     ):
-        use_int8_fast_path = False
-        if _is_int8_gemm(input_nodes):
-            if (
-                isinstance(input_nodes[2], ir.TensorBox)
-                and isinstance(input_nodes[2].data.data, ir.ConstantBuffer)
-                and isinstance(input_nodes[4], ir.TensorBox)
-                and isinstance(input_nodes[4].data.data, ir.ConstantBuffer)
-            ):
-                use_int8_fast_path = True
+        # Fast path to save the epilogue calculation when x_scale/x_zp/w_scale are constant
+        use_int8_fast_epilogue_path = _is_int8_gemm(input_nodes) and all(
+            (
+                isinstance(input_nodes[idx], ir.TensorBox)
+                and isinstance(input_nodes[idx].data.data, ir.ConstantBuffer)
+            )
+            for idx in [1, 2, 4]
+        )
 
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -967,7 +957,11 @@ class CppGemmTemplate(CppTemplate):
             if only_one_input and isinstance(new_inputs[0], torch.Tensor):
                 return new_inputs[1:], new_layout
             return cls.prep_weight(
-                new_inputs, new_layout, micro_gemm, pre_block_weights, use_int8_fast_path
+                new_inputs,
+                new_layout,
+                micro_gemm,
+                pre_block_weights,
+                use_int8_fast_epilogue_path,
             )
 
         def postprocessor(output):
@@ -986,7 +980,11 @@ class CppGemmTemplate(CppTemplate):
                     *maybe_to_dense(new_input_nodes, layout)
                 )
                 new_input_nodes, _ = cls.prep_weight(
-                    new_input_nodes, new_layout, micro_gemm, pre_block_weights
+                    new_input_nodes,
+                    new_layout,
+                    micro_gemm,
+                    pre_block_weights,
+                    use_int8_fast_epilogue_path,
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -1032,7 +1030,7 @@ class CppGemmTemplate(CppTemplate):
         layout: ir.Layout,
         micro_gemm: CppMicroGemm,
         should_block_weight: bool,
-        use_int8_fast_path: bool = False,
+        use_int8_fast_epilogue_path: bool = False,
     ):
         """
         NOTE Weight prep consists of 2 separate steps:
@@ -1077,35 +1075,32 @@ class CppGemmTemplate(CppTemplate):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
 
-
         if _is_int8_gemm(new_inputs):
             BCompensate = None
-            if use_int8_fast_path:
+            x_w_scale = None
+            if use_int8_fast_epilogue_path:
                 x_scale = new_inputs[2]
-                w_scale = new_inputs[4]
                 x_zp = new_inputs[3]
+                w_scale = new_inputs[4]
                 if isinstance(W, ir.IRNode):
                     BCompensate = V.graph.add_tensor_constant(
                         V.graph.constants[W.get_name() + "_BMatrixCompens"],
                         W.get_name() + "_BMatrixCompens",
                     )
-                else:
-                    # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
-                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
-                    BCompensate = BCompensate * x_scale * w_scale * x_zp
-                
-                new_inputs.append(BCompensate)
-
-                x_w_scale = None
-                if isinstance(W, ir.IRNode):
                     x_w_scale = V.graph.add_tensor_constant(
                         V.graph.constants[W.get_name() + "_x_w_compens"],
                         W.get_name() + "_x_w_compens",
                     )
                 else:
-                    assert isinstance(x_scale, torch.Tensor)
-                    assert isinstance(w_scale, torch.Tensor)
+                    # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
+                    assert all(
+                        isinstance(item, torch.Tensor)
+                        for item in (x_scale, x_zp, w_scale)
+                    )
+                    BCompensate = BCompensate * x_scale * w_scale * x_zp
                     x_w_scale = x_scale * w_scale
+                new_inputs.append(BCompensate)
                 new_inputs.append(x_w_scale)
             else:
                 if isinstance(W, ir.IRNode):
