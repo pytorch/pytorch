@@ -38,6 +38,11 @@ on:
         required: false
         type: boolean
         default: true
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
 
 jobs:
   test:
@@ -166,6 +171,7 @@ jobs:
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         run: |
           # shellcheck disable=SC1090
           set -ex

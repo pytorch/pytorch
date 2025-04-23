@@ -224,7 +224,6 @@ at::Tensor async_input_mm_out(
       a.is_contiguous() && out.is_contiguous(),
       "async_input_mm: `a` and `out` must be in row-major layout");
 
-  bool is_b_row_major = b.is_contiguous();
   if (!b.is_contiguous()) {
     TORCH_CHECK(b.stride(1) == b.size(0));
     TORCH_CHECK(b.stride(0) == 1);
@@ -241,6 +240,7 @@ at::Tensor async_input_mm_out(
   TORCH_CHECK_EQ(out.sizes()[1], N);
 
 #if defined(BUILD_ASYNC_MM_KERNEL)
+  const bool is_b_row_major = b.is_contiguous();
   DISPATCH_LAYOUT_B(is_b_row_major, [&]() {
     // TODO(yifu): tuning
     async_input_mm_impl<LayoutB, Shape<_128, _256, _64>, Shape<_2, _1, _1>>(

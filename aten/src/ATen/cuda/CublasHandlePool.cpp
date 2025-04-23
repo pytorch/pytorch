@@ -83,6 +83,11 @@ static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, v
 
 #endif
 
+std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
+  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
+  return instance;
+}
+
 void createCublasHandle(cublasHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(cublasCreate(handle));
 }
@@ -104,11 +109,6 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 
 } // namespace
 
-std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
-  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
-  return instance;
-}
-
 void clearCublasWorkspaces() {
   cublas_handle_stream_to_workspace().clear();
 }
@@ -123,11 +123,9 @@ size_t parseChosenWorkspaceSize() {
     // for extra convenience
     val = getenv("ROCBLAS_WORKSPACE_CONFIG");
   }
-  /* 32MiB default, 128MiB for MI300 */
-  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  std::string device_arch = properties->gcnArchName;
-  const bool gfx94 = device_arch.find("gfx94") != std::string::npos;
-  const size_t default_size = gfx94 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
+  /* 32MiB default, 128MiB for gfx94x/gfx95x */
+  const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
+  const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
   /* :4096:2:16:8 default, 32MiB for Hopper */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
