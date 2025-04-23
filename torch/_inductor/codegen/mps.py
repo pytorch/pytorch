@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import math
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
+log = logging.getLogger(__name__)
 
 DTYPE_TO_METAL = {
     torch.bool: "bool",
@@ -155,6 +157,11 @@ class MetalOverrides(OpOverrides):
         src_dtype: Optional[torch.dtype] = None,
         use_compute_types: bool = True,
     ) -> str:
+        if dtype == torch.double:
+            log.warning(
+                "float64 cast requested, probably from tensorify_python_scalars"
+            )
+            return f"static_cast<float>({x})"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
