@@ -478,7 +478,7 @@ class CachingAutotuner(KernelInterface):
                 try:
                     launchers.append(result.make_launcher())
 
-                except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
+                except (OutOfResources, PTXASError) as e:
                     exc = e
         if len(launchers) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
@@ -1274,10 +1274,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
-        device = self.compile_meta.get("device", 0)
-        if device is None:
-            device = 0
-        self.kernel.load_kernel(device)
+        self.kernel.load_kernel(self.compile_meta.get("device", 0))
         scope = {
             "runner": self.kernel.run,
         }
