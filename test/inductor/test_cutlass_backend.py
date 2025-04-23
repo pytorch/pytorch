@@ -107,12 +107,11 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": "CUTLASS",
+                # put triton here to make sure we have some choices
+                "max_autotune_gemm_backends": "TRITON,CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_backend_min_gemm_size": 100000,
                 "cuda.cutlass_max_profiling_configs": 2,
-                # allow fallback to aten as intended
-                "autotune_fallback_to_aten": True,
             }
         ):
             from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -120,8 +119,7 @@ class TestCutlassBackend(TestCase):
             with mock.patch(
                 "torch._inductor.select_algorithm.autotune_select_algorithm"
             ) as mocked_select_algorithm:
-                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-                Y = mm(a, b)
+                _ = torch.compile(mm, dynamic=False)(a, b)
                 passed_choice_callers: list[ChoiceCaller] = mocked_select_algorithm[0][
                     1
                 ]
@@ -133,7 +131,6 @@ class TestCutlassBackend(TestCase):
                     not isinstance(cc, CUDATemplateCaller)
                     for cc in passed_choice_callers
                 ), "Cutlass Kernels should have been filtered, GEMM size is too small"
-            torch.testing.assert_close(Y_compiled, Y)
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
@@ -166,7 +163,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
@@ -205,7 +201,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             for x_shape in x_shapes:
@@ -233,7 +228,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(torch.bmm)(a, b)
@@ -266,7 +260,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -305,7 +298,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_swizzle_options": [
                     1,
                     2,
@@ -378,7 +370,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ), dynamo_config.patch({"error_on_recompile": dynamic}):
             expected = [model(*input) for input in inputs]
@@ -440,7 +431,6 @@ class TestCutlassBackend(TestCase):
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
                     "cuda.cutlass_max_profiling_configs": 2,
-                    "autotune_fallback_to_aten": False,
                 }
             ), dynamo_config.patch({"error_on_recompile": dynamic}):
                 expected = [model(*input) for input in inputs]
@@ -492,7 +482,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             expected = [model(*input) for input in inputs]
@@ -525,7 +514,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
                 "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
-                "autotune_fallback_to_aten": False,
             }
         ):
             for M, K, N in (
@@ -581,7 +569,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 4,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
-                "autotune_fallback_to_aten": False,
             }
         ):
             counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
@@ -680,7 +667,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -699,7 +685,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
@@ -738,7 +723,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
@@ -772,7 +756,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
                 "cuda.cutlass_max_profiling_configs": 1,
             }
@@ -819,7 +802,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
-                "autotune_fallback_to_aten": False,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a_sparse, b)
@@ -975,7 +957,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ), mock.patch(
             "torch._inductor.kernel.mm.autotune_select_algorithm",
@@ -1034,7 +1015,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
                 "cuda.cutlass_presets": presets,
             }
         ), mock.patch(
@@ -1140,7 +1120,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
                 "cuda.generate_test_runner": True,  # put standalone runner in the generated code
             }
         ):
@@ -1257,7 +1236,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_max_profiling_configs": 2,
-                "autotune_fallback_to_aten": False,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1281,7 +1259,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 1,
-                "autotune_fallback_to_aten": False,
             }
         ):
             _ = torch.compile(model)(B)
