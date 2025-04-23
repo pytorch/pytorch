@@ -16,6 +16,7 @@
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/ones_like_native.h>
+#include <ATen/ops/result_type.h>
 #include <ATen/ops/where_native.h>
 #endif
 
@@ -293,23 +294,22 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
     return;
   }
 
+  const auto common_type = at::result_type(elements, test_elements);
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
-  TORCH_CHECK(elements.dtype() == test_elements.dtype());
-  TORCH_CHECK(
-      !(!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) && !supportedFloatingType(elements.scalar_type())),
-      "isin_Tensor_Tensor_out only works on floating types on MPS for pre MacOS_14_0. Received dtype: ",
-      elements.scalar_type());
+  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) || supportedFloatingType(common_type),
+              "isin_Tensor_Tensor_out only works on floating types on MPS for pre MacOS_14_0. Received dtype: ",
+              common_type);
 
   @autoreleasepool {
-    string key =
-        op_name + getTensorsStringKey({elements}) + getTensorsStringKey({test_elements}) + std::to_string(invert);
+    string key = op_name + getTensorsStringKey({elements, test_elements}) + std::to_string(invert);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));
-      MPSGraphTensor* otherTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(test_elements.scalar_type()));
+      newCachedGraph->inputTensor_ = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));
+      newCachedGraph->otherTensor_ = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(test_elements.scalar_type()));
 
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
+      // Cast to common type
+      auto inputTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor_, common_type);
+      auto otherTensor = castMPSTensor(mpsGraph, newCachedGraph->otherTensor_, common_type);
 
       MPSShape* outputShape = getMPSShape(out);
 
