@@ -52,6 +52,7 @@ from ..select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
+from ..utils import get_tma_workspace_arg, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
@@ -375,6 +376,38 @@ compute_flex_attention = r"""
     off_zq = tl.program_id(1) // HQ
     off_hq = tl.program_id(1) % HQ
 
+
+    # Setting up the TMA descriptors for Q, K, V
+    desc_q = None
+    desc_k = None
+    if ENABLE_TMA:
+        TMA_SIZE = 128
+        workspace_base = ws_ptr + q_start * 2 * TMA_SIZE
+        desc_q = workspace_base
+        desc_k = workspace_base + TMA_SIZE
+
+
+        triton.language.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=desc_q,
+            global_address=Q,
+            load_size=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+            global_size=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
+            element_ty=Q.dtype.element_ty,
+        )
+
+        triton.language.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=desc_k,
+            global_address=K,
+            load_size=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+            global_size=[KV_LEN*ZKV*HQ, QK_HEAD_DIM],
+            element_ty=K.dtype.element_ty,
+        )
+
+
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc_q)
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc_k)
+
+
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
     off_zkv = off_zq % ZKV
@@ -413,16 +446,30 @@ compute_flex_attention = r"""
     sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq
     sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
+    K_block_ptr = None
+    V_block_ptr = None
+    Q_block_ptr = None
 
-    Q_block_ptr = tl.make_block_ptr(
-        base=Q,
-        shape=(Q_LEN, QK_HEAD_DIM),
-        strides=(stride_qm, stride_qk),
-        offsets=(q_start * BLOCK_M, 0),
-        block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
-        order=(1, 0)
-    )
-    q = load_checked_block(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    if not ENABLE_TMA:
+        Q_block_ptr = tl.make_block_ptr(
+            base=Q ,
+            shape=(Q_LEN, QK_HEAD_DIM),
+            strides=(stride_qm, stride_qk),
+            offsets=(q_start * BLOCK_M, 0),
+            block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
+            order=(1, 0)
+        )
+
+    if ENABLE_TMA:
+        q = tl._experimental_descriptor_load(  # load in row major
+            desc_q,
+            [(q_offset // stride_qm + q_start * BLOCK_M).to(tl.int32), 0],
+            [BLOCK_M, QK_HEAD_DIM_ROUNDED],
+            Q.dtype.element_ty,
+        )
+    else:
+        q = load_checked_block(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
     # both score_mod and mask_mod to it
@@ -431,14 +478,17 @@ compute_flex_attention = r"""
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
     block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
-    K_block_ptr = tl.make_block_ptr(
-        base=K,
-        shape=(QK_HEAD_DIM, KV_LEN),
-        strides=(stride_kk, stride_kn),
-        offsets=(0, kv_start),
-        block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
-        order=(0, 1)
-    )
+
+    if not ENABLE_TMA:
+        K_block_ptr = tl.make_block_ptr(
+            base=K,
+            shape=(QK_HEAD_DIM, KV_LEN),
+            strides=(stride_kk, stride_kn),
+            offsets=(0, kv_start),
+            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
+            order=(0, 1)
+        )
+
     V_block_ptr = tl.make_block_ptr(
         base=V,
         shape=(KV_LEN, V_HEAD_DIM),
@@ -447,13 +497,18 @@ compute_flex_attention = r"""
         block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
+
     offs_n = kv_start + tl.arange(0, BLOCK_N)
+
 
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+        q, K_block_ptr, V_block_ptr, desc_k,
+        Q_LEN, KV_LEN, Q,
         acc, l_i, m_i,
         off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+         k_offset,kv_start,
+        stride_kn, stride_vk,
         kv_indices, kv_num_blocks,
         0, block_n_end,
         MATMUL_PRECISION,
@@ -469,15 +524,15 @@ compute_flex_attention = r"""
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
         block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
-
-        K_block_ptr = tl.make_block_ptr(
-            base=K,
-            shape=(QK_HEAD_DIM, KV_LEN),
-            strides=(stride_kk, stride_kn),
-            offsets=(0, kv_start),
-            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
-            order=(0, 1)
-        )
+        if not ENABLE_TMA:
+            K_block_ptr = tl.make_block_ptr(
+                base=K,
+                shape=(QK_HEAD_DIM, KV_LEN),
+                strides=(stride_kk, stride_kn),
+                offsets=(0, kv_start),
+                block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
+                order=(0, 1)
+            )
         V_block_ptr = tl.make_block_ptr(
             base=V,
             shape=(KV_LEN, V_HEAD_DIM),
@@ -490,9 +545,12 @@ compute_flex_attention = r"""
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+            q, K_block_ptr, V_block_ptr, desc_k,
+            Q_LEN, KV_LEN, Q,
             acc, l_i, m_i,
             off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+            k_offset, kv_start,
+            stride_kn, stride_vk,
             kv_indices, kv_num_blocks,
             0, block_n_end,
             MATMUL_PRECISION,
@@ -530,12 +588,17 @@ compute_forward_inner = r"""
 @triton.jit
 def forward_inner(
     {{gen_argdefs()}},
-    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+    q, K_block_ptr, V_block_ptr,
+    desc_k, Q_LEN, KV_LEN,
+    Q,
     # accumulated values
     acc, l_i, m_i,
     # Offsets used as inputs to score_mod & mask_mod
     # of size [BLOCK_M, BLOCK_N] or scalar.
     off_z, off_h, offs_m, offs_n,
+    # Offsets needed for TMA loads
+    k_offset, kv_start,
+    stride_kn, stride_vk,
     # blocksparse data
     kv_indices, kv_num_blocks,
     # start kv and end kv block
@@ -554,14 +617,20 @@ def forward_inner(
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
+        # Here IS_DIVISIBLE acts are the start_n = tl.multiple_of(start_n, BLOCK_N) from triton_fused_attention.
         if IS_DIVISIBLE:
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
-                q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+                q, K_block_ptr, V_block_ptr, desc_k, Q_LEN, KV_LEN,
+                Q,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
+                # Offsets needed for TMA loads
+                k_offset, kv_start,
+                stride_kn, stride_vk,
+                start_n,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS,
             )
@@ -572,25 +641,32 @@ def forward_inner(
             # to the last block because it's faster a lot.
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
-                q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+                q, K_block_ptr, V_block_ptr,desc_k, Q_LEN, KV_LEN,
+                Q,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
+                # Offsets needed for TMA loads
+                k_offset, kv_start,
+                stride_kn, stride_vk,
+                start_n,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
 
-        # update pointers
+
+
         offset = get_offset_for_next_block(
             start_n, kv_indices, kv_num_blocks,
             SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS
         )
 
-        V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-        K_block_ptr = tl.advance(K_block_ptr, (0, offset))
-
         offs_n = offs_n + offset
+        V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+        if not ENABLE_TMA:
+            K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+
 
     return acc, l_i, m_i
 
@@ -601,11 +677,16 @@ compute_forward_block_mn = r"""
 @triton.jit
 def forward_block_mn(
     {{gen_argdefs()}},
-    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+    q, K_block_ptr, V_block_ptr, desc_k, Q_LEN, KV_LEN,
+    Q,
     # accumulated values
     acc, l_i, m_i,
     # Offsets
     off_z, off_h, offs_m, offs_n,
+    # Offsets needed for TMA loads
+    k_offset, kv_start,
+    stride_kn, stride_vk,
+    start_n,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
@@ -613,9 +694,21 @@ def forward_block_mn(
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
 
+    # ENABLE_TMA = True
     # -- load k --
     # NB reversed order to since K is transposed
-    k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
+    if ENABLE_TMA:
+        k = tl._experimental_descriptor_load(  # load in row major
+                desc_k,
+                [start_n.to(tl.int32) + (k_offset // stride_kn).to(tl.int32), kv_start],
+                [BLOCK_N, QK_HEAD_DIM_ROUNDED],
+                Q.dtype.element_ty,
+            )
+    else:
+        k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
+
+    if ENABLE_TMA:
+        k = tl.trans(k)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
@@ -679,6 +772,7 @@ def forward_block_mn(
     l_i = l_i * alpha + tl.sum(p, 1)
     # # -- scale and update acc --
     acc = acc * alpha[:, None]
+
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
@@ -1511,6 +1605,10 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
+        cur_kernel_options.setdefault("ENABLE_TMA", False)
+        if BLOCK_M % TMA_DESCRIPTOR_SIZE == 0 and BLOCK_N % TMA_DESCRIPTOR_SIZE == 0:
+            cur_kernel_options["ENABLE_TMA"] = True
+
         cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
@@ -1537,6 +1635,10 @@ def flex_attention(
             mutated_inputs=[
                 logsumexp,
             ],
+            workspace_arg=get_tma_workspace_arg(
+                num_tma_descriptors=2,
+                device=query.get_device(),
+            ),
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )

@@ -3988,6 +3988,39 @@ class GraphModule(torch.nn.Module):
             C1, C2, atol=1e-2, rtol=1e-2
         ), "Warp specialized kernel result differs from reference"
 
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_tma_with_customer_kernel_options(self):
+        make_tensor = functools.partial(
+            torch.empty,
+            (8, 8, 1024, 128),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query.uniform_(-0.1, 0.1)
+        key.uniform_(-0.1, 0.1)
+        value.uniform_(-0.1, 0.1)
+        kernel_options_1 = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "ENABLE_TMA": False,
+        }
+        kernel_options_2 = {"BLOCK_M": 128, "BLOCK_N": 128, "ENABLE_TMA": True}
+        out_eager = flex_attention(query, key, value, kernel_options=kernel_options_1)
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+        out_compiled = flex_compile(query, key, value, kernel_options=kernel_options_1)
+        out_tma_compiled = flex_compile(
+            query, key, value, kernel_options=kernel_options_2
+        )
+
+        # eager vs TMA compiled
+        torch.testing.assert_close(out_eager, out_tma_compiled, atol=3e-3, rtol=2e-3)
+
+        # vanilla compiled vs TMA compiled
+        torch.testing.assert_close(out_tma_compiled, out_compiled, atol=3e-3, rtol=2e-3)
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
