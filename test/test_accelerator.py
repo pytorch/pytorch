@@ -83,18 +83,16 @@ class TestAccelerator(TestCase):
 
     def test_device_context_manager(self):
         prev_device = torch.accelerator.current_device_index()
-        with torch.device("cpu"):
+        with torch.accelerator.device_index(None):
             self.assertEqual(torch.accelerator.current_device_index(), prev_device)
         self.assertEqual(torch.accelerator.current_device_index(), prev_device)
-        with torch.accelerator.current_accelerator():
-            self.assertEqual(torch.accelerator.current_device_index(), prev_device)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_multi_device_context_manager(self):
         src_device = 0
         dst_device = 1
         torch.accelerator.set_device_index(src_device)
-        with torch.device(dst_device):
+        with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.accelerator.current_device_index(), dst_device)
         self.assertEqual(torch.accelerator.current_device_index(), src_device)
 

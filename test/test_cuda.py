@@ -1096,7 +1096,7 @@ class TestCuda(TestCase):
 
     def test_device_context_manager(self):
         prev_device = torch.cuda.current_device()
-        with torch.device("cpu"):
+        with torch.accelerator.device_index(None):
             self.assertEqual(torch.cuda.current_device(), prev_device)
         self.assertEqual(torch.cuda.current_device(), prev_device)
         if not torch.cuda.device_count() > 1:
@@ -1104,7 +1104,7 @@ class TestCuda(TestCase):
         src_device = 0
         dst_device = 1
         torch.cuda.set_device(src_device)
-        with torch.device(dst_device):
+        with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.cuda.current_device(), 1)
         self.assertEqual(torch.cuda.set_device(), src_device)
 
