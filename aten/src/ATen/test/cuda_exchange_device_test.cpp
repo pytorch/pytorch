@@ -19,6 +19,7 @@ TEST(CudaExchangeDeviceTest, checkPrimaryContext) {
     at::cuda::ExchangeDevice(1);
     ASSERT_TRUE(at::cuda::hasPrimaryContext(1));
   }
+
   ASSERT_FALSE(at::cuda::hasPrimaryContext(0));
   at::cuda::MaybeExchangeDevice(0);
   ASSERT_FALSE(at::cuda::hasPrimaryContext(0));
