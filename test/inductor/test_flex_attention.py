@@ -353,7 +353,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-@large_tensor_test_class("2GB", device="cuda")
+@large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4610,7 +4610,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
 
-@large_tensor_test_class("2GB", device="cuda")
+@large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -5063,7 +5063,7 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
-@large_tensor_test_class("2GB", device="cuda")
+@large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
