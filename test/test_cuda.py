@@ -5024,7 +5024,7 @@ class TestMemPool(TestCase):
         self.assertEqual(called_dummy_free.value, 321)
 
     def test_mempool_limited_memory_with_allocator(self):
-        pool = torch.cuda.MemPool()
+        pool = torch.cuda.MemPool(useOnOOM=True)
 
         # MemPool doesn't have an allocator by default
         self.assertEqual(pool.allocator, None)
