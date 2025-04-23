@@ -804,12 +804,8 @@ class BuiltinVariable(VariableTracker):
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
             ):
-                if fn is AssertionError and not all(
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, str)
-                    for x in args
-                ):
-                    unimplemented("assert with non-string message")
+                if fn is AssertionError and not check_constant_args(args, kwargs):
+                    unimplemented("assert with non-constant message")
 
                 return variables.ExceptionVariable(fn, args, **kwargs)
 
@@ -1891,7 +1887,6 @@ class BuiltinVariable(VariableTracker):
                     "assertNotWarns",
                     "assertWarnsRegex",
                     "assertDictEqual",
-                    "assertSequenceEqual",
                     "assertWarns",
                 )
             ):
