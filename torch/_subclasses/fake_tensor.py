@@ -1728,6 +1728,8 @@ class FakeTensorMode(TorchDispatchMode):
         # For hops, lets look at the output tensor to find any unbacked symints.
         # If there are none, then we rely on the existing checks to validate
         # caching.
+        # NB: Note that the HOPs that sta alive till FakeTensor are functional,
+        # once they support mutations, we will have to revisit this logic.
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
