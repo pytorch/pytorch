@@ -727,7 +727,6 @@ class CppGemmTemplate(CppTemplate):
             dtype_B = self.input_nodes[1].get_dtype()
             num_byte_A = get_num_byte(dtype_A)
             num_byte_B = get_num_byte(dtype_B)
-
             if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
                 # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
                 # In this case, the choice of the micro-kernel being used can't be decoupled from
