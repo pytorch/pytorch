@@ -72,6 +72,9 @@ pass_patterns = [
 ]
 
 
+fake_tensor_updater = None
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -96,6 +99,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             reorder_for_locality
         )
 
+    global fake_tensor_updater
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
@@ -189,7 +193,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        reinplace_inplaceable_ops
+        reinplace_inplaceable_ops,
     )
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"

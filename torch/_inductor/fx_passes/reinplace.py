@@ -754,5 +754,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 def reinplace_inplaceable_ops(graph: torch.fx.Graph) -> None:
     with enable_python_dispatcher():
         canonicalize_view_scatter_ops(graph)
+        torch._inductor.fx_passes.post_grad.fake_tensor_updater.incremental_update()
         reinplace_inplaceable_ops_core(graph)
         decompose_generalized_scatter(graph)
