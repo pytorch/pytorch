@@ -607,7 +607,7 @@ struct ConvParams {
   // nInputPlane and nInputPlane == nOutputPlane (the latter due to the lack of
   // a depthwise multiplier)
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const  {
-    return (input.is_cuda() || input.is_xpu()) &&
+    return input.is_cuda() &&
            !transposed &&
            (input.ndimension() == 4 || input.ndimension() == 5) &&
            at::symint::size<T>(input, 1) == groups &&
@@ -1223,12 +1223,6 @@ static ConvBackend _select_conv_backend(
       return ConvBackend::Cudnn;
     } else if (params.use_miopen(input, weight, bias_sizes_opt.has_value())) {
       return ConvBackend::MiopenDepthwise;
-    } else if (params.use_mkldnn(input, weight)) {
-      if (params.transposed) {
-        return ConvBackend::MkldnnTranspose;
-      } else {
-        return ConvBackend::Mkldnn;
-      }
     } else {
       if (input.ndimension() == 4) {
         return ConvBackend::CudaDepthwise2d;
