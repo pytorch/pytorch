@@ -1225,6 +1225,16 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_float_32_scalar_tensor_item(self):
+        def f(y):
+            y_scalar = y.item()
+            return y_scalar
+
+        f_opt = torch.compile(f)
+
+        self.assertEqual(f(torch.tensor(3.0)), f_opt(torch.tensor(3.0)))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_arange_length_with_float32_dtype(self):
         @torch.compile(fullgraph=True)
         def f(x):
@@ -1607,7 +1617,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 4)
+        self.assertEqual(cnts.op_count, 3)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):

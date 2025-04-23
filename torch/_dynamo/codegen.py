@@ -280,28 +280,6 @@ class PyCodegen:
                 )
             )
             output.extend(create_call_function(2, False))
-        elif (
-            isinstance(value, SymNodeVariable)
-            and value.python_type() == float
-            and not self.tx.export
-        ):
-            # This is a little unusual; force the output convention to be a
-            # Tensor here.  Don't do this for export because this is
-            # apparently load bearing for export tests (but I am a bit
-            # doubtful it actually works in the real world)
-            # NB: It works to add_graph_output on a computed expression
-            # as_tensor here, because we memoize as_tensor calls on
-            # SymNodeVariable!
-            graph_outputs_key = self.add_graph_output(
-                value.as_tensor(self.tx, torch.float64)
-            )
-
-            def gen_fn():
-                self.load_graph_output(graph_outputs[graph_outputs_key].index)
-                output.append(self.create_load_attr("item"))
-
-            self.add_push_null(gen_fn)
-            output.extend(create_call_function(0, False))
         elif isinstance(
             value,
             (
