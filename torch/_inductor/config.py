@@ -347,11 +347,9 @@ reorder_for_compute_comm_overlap_passes: list[
         ],
     ]
 ] = [
-    # "sink_waits",
-    # "reorder_comms_preserving_peak_memory",
-    "raise_comms",
-    "sink_waits",
     "reorder_compute_for_overlap",
+    "sink_waits",
+    "raise_comms",
 ]
 
 # Maximum number of positions to advance a given collective, unlimited by default
