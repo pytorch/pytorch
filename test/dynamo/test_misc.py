@@ -10876,13 +10876,18 @@ fn
             torch._check_is_size(u0)
             torch._check_is_size(u1)
             torch._check(u0 + u1 == 20)
+
+            y = 0
             if guard_size_oblivious(torch.sym_max(1, u0 + u1) == 20):
-                return torch.tensor(True)
-            else:
-                return torch.tensor(False)
+                y += 1
+            if guard_size_oblivious(torch.sym_max(1, u0**2 + u1 + 2) != 1):
+                y += 1
+            if guard_size_oblivious(torch.sym_min(1, u0) == 1):
+                y += 1
+            return y
 
         # Previously would have thrown guard on data dependent
-        cf(torch.tensor([10, 10])).item()
+        self.assertEqual(cf(torch.tensor([10, 10])), 3)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
