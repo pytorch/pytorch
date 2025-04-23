@@ -1977,7 +1977,7 @@ def forward(self, l_x_):
         xs = torch.randn(0, 2)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Observed exception",
+            "zero-sized tensor",
         ):
             torch._dynamo.export(mod)(xs)
 

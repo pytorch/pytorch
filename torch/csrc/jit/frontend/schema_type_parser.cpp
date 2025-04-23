@@ -116,9 +116,9 @@ TypePtr SchemaTypeParser::parseBaseType() {
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
 std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
-  AliasInfo alias_info;
   if (L.nextIf('(')) {
     // optional 'alias set annotation'
+    AliasInfo alias_info;
     parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
       if (L.nextIf('*')) {
         alias_info.addBeforeSet(AliasInfo::wildcardSet());
@@ -153,15 +153,16 @@ std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
       }
     }
     L.expect(')');
+    return alias_info;
   } else if (L.nextIf('!')) {
+    AliasInfo alias_info;
     alias_info.addBeforeSet(
         Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
+    return alias_info;
   } else {
     return std::nullopt;
   }
-
-  return alias_info;
 }
 
 std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
