@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <ATen/DeviceAccelerator.h>
-#include <c10/cuda/CUDAFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
+
 
 TEST(CudaExchangeDeviceTest, checkPrimaryContext) {
   if (!at::cuda::is_available()) {
