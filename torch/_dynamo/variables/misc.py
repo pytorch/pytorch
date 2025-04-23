@@ -218,7 +218,7 @@ class SuperVariable(VariableTracker):
             inner_fn.__func__, types.FunctionType
         ):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source
+                inner_fn.__func__, self.typevar, source=source
             ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
@@ -297,14 +297,11 @@ class SuperVariable(VariableTracker):
                 key_str = hash_key_vt.vt.as_python_constant()
                 tf_kwargs[key_str] = value_vt
 
-            output_old = tx.output.torch_function_enabled
             tx_old = tx.symbolic_torch_function_state.torch_function_subclass_enabled
-            tx.output.torch_function_enabled = False
             tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
             try:
                 return func.call_function(tx, tf_args, tf_kwargs)
             finally:
-                tx.output.torch_function_enabled = output_old
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     tx_old
                 )
