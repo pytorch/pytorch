@@ -262,7 +262,7 @@ def node_summary(snode):
     snodes = snode.get_nodes()
     if len(snodes) == 1:
         detail = ""
-        if isinstance(snode.node, ir.ExternKernelOut, ir._CollectiveKernel):
+        if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
             detail = f" ({snode.node.python_kernel_name})"
         out_tensor_info = ""
         layout = snode.node.get_output_spec()
