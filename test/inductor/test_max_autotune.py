@@ -1127,7 +1127,7 @@ class TestMaxAutotune(TestCase):
             expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
-    
+
     @parametrize("dynamic", (True, False))
     @config.patch(
         max_autotune=True,
@@ -1152,7 +1152,9 @@ class TestMaxAutotune(TestCase):
 
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
-        torch.testing.assert_close(compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(
+            compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+        )
 
 
 @instantiate_parametrized_tests
