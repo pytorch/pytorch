@@ -183,3 +183,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         delattr(m, "a")
         self._test_check_fn(ref, loaded, {"m": m}, False)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
