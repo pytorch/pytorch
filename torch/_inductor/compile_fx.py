@@ -261,11 +261,27 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
     with a new number post fix.
     """
 
+    existing_keys = OrderedSet(
+        [name for name, val in mod.named_parameters(remove_duplicate=False)]
+    )
+    existing_keys.update(
+        OrderedSet([name for name, val in mod.named_buffers(remove_duplicate=False)])
+    )
+
     def find_smallest_i(graph: fx.Graph, prefix: str) -> int:
         i = 0
         for node in graph.nodes:
             if node.op == "get_attr" and node.target.startswith(prefix):
-                i = max(i, int(node.target.split(prefix)[-1]))
+                if len(node.target) > len(prefix):
+                    post_fix = node.target.split(prefix)[-1]
+                    if post_fix.isdigit():
+                        i = max(i, int(post_fix))
+        for key in existing_keys:
+            if key.startswith(prefix):
+                if len(key) > len(prefix):
+                    post_fix = key.split(prefix)[-1]
+                    if post_fix.isdigit():
+                        i = max(i, int(post_fix))
         return i + 1
 
     for node in gm.graph.nodes:
@@ -295,6 +311,7 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
             new_target_name = f"{prefix}{new_id}"
             node.target = new_target_name
             setattr(gm, new_target_name, gm_target)
+            existing_keys.add(new_target_name)
 
 
 def _unlift_graph(
@@ -1061,12 +1078,11 @@ class _InProcessFxCompile(FxCompile):
                 f"graph {graph_id}",
             )
 
-            def log_graph_runnable() -> str:
-                fd = io.StringIO()
-                torch._dynamo.repro.after_aot.save_graph_repro(
-                    fd, gm, example_inputs, "inductor", save_dir=None
-                )
-                return fd.getvalue()
+            fd = io.StringIO()
+            torch._dynamo.repro.after_aot.save_graph_repro(
+                fd, gm, example_inputs, "inductor", save_dir=None
+            )
+            runnable_graph_str = fd.getvalue()
 
             trace_structured(
                 "artifact",
@@ -1074,7 +1090,7 @@ class _InProcessFxCompile(FxCompile):
                     "name": "fx_graph_runnable",
                     "encoding": "string",
                 },
-                payload_fn=lambda: log_graph_runnable(),
+                payload_fn=lambda: runnable_graph_str,
             )
 
             V.debug.fx_graph(gm, example_inputs)
@@ -1102,15 +1118,12 @@ class _InProcessFxCompile(FxCompile):
             # .view() call.
             view_to_reshape(gm)
 
-            with dynamo_timed(
-                "additional_fake_tensor_prop", log_pt2_compile_event=True
-            ):
-                # It is safe to run FakeTensorProp under no_grad because by the time
-                # we're in inductor, we assume that AOTAutograd has already "taken care"
-                # of autograd, so there should be no more autograd-related API's in the
-                # graph.
-                with torch.no_grad():
-                    fake_mode = fake_tensor_prop(gm, example_inputs)
+            # It is safe to run FakeTensorProp under no_grad because by the time
+            # we're in inductor, we assume that AOTAutograd has already "taken care"
+            # of autograd, so there should be no more autograd-related API's in the
+            # graph.
+            with torch.no_grad():
+                fake_mode = fake_tensor_prop(gm, example_inputs)
 
             record_original_output_strides(gm)
 
@@ -1134,11 +1147,12 @@ class _InProcessFxCompile(FxCompile):
                         colored=True,
                     ),
                 )
+                inductor_post_grad_graph_str = gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
                 trace_structured(
                     "inductor_post_grad_graph",
-                    payload_fn=lambda: gm.print_readable(
-                        print_output=False, include_stride=True, include_device=True
-                    ),
+                    payload_fn=lambda: inductor_post_grad_graph_str,
                 )
                 if config.trace.enabled:
                     provenance_tracking_json = (
@@ -1173,7 +1187,7 @@ class _InProcessFxCompile(FxCompile):
                                 "pt2_configs": str(get_patched_config_dict())
                             }
                         )
-                    except ValueError:
+                    except Exception:
                         # TODO(T216453900): need to work around for now to support vllm
                         # See details in vllm/compilation/pass_manager.py.
                         log.warning("failed to log pt2_configs")
@@ -1400,6 +1414,8 @@ class _InProcessFxCompile(FxCompile):
                         static_input_idxs,
                         graph_kwargs,
                         inputs_to_check,
+                        runnable_graph_str,
+                        inductor_post_grad_graph_str,
                         recursively_apply_fns,
                     )
 
@@ -1852,6 +1868,7 @@ def compile_fx(
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
+    ignore_shape_env: bool = False,
 ) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2136,17 +2153,13 @@ def compile_fx(
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
             )
-
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return min_cut_rematerialization_partition(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
+            return min_cut_rematerialization_partition(
+                gm,
+                joint_inputs,
+                compiler="inductor",
+                static_lifetime_input_indices=static_lifetime_input_indices,
+                **kwargs,
+            )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
@@ -2267,6 +2280,7 @@ def compile_fx(
                     keep_inference_input_mutations=True,
                     cudagraphs=cudagraphs,
                     boxed_forward_device_index=forward_device,
+                    ignore_shape_env=ignore_shape_env,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
