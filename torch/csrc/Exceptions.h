@@ -75,6 +75,9 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(                                                       \
       NotImplementedError, PyExc_NotImplementedError, retstmnt)               \
   _CATCH_GENERIC_ERROR(SyntaxError, PyExc_SyntaxError, retstmnt)              \
+  _CATCH_GENERIC_ERROR(DeviceAssertError, PyExc_AssertionError, retstmnt)     \
+  _CATCH_GENERIC_ERROR(                                                       \
+      DeviceIllegalMemoryAccessError, PyExc_MemoryError, retstmnt)            \
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt)       \
   _CATCH_GENERIC_ERROR(                                                       \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)              \

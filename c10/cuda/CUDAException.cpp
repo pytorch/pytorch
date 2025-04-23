@@ -24,7 +24,6 @@ void c10_cuda_check_implementation(
   }
 
   [[maybe_unused]] auto error_unused = cudaGetLastError();
-  (void)error_unused;
 
   std::string check_message;
 #ifndef STRIP_ERROR_MESSAGES
@@ -39,6 +38,12 @@ void c10_cuda_check_implementation(
         "Device-side assertions were explicitly omitted for this error check; the error probably arose while initializing the DSA handlers.");
   }
 #endif
+  if (cuda_error == cudaErrorAssert) {
+    throw c10::DeviceAssertError(check_message);
+  }
+  if (cuda_error == cudaErrorIllegalAddress) {
+    throw c10::DeviceIllegalMemoryAccessError(check_message);
+  }
 
   TORCH_CHECK(false, check_message);
 }
