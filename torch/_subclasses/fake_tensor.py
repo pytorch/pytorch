@@ -3115,15 +3115,3 @@ def inferred_fake_kernel_from_real_out(
 
     fake_flat_out = [_infer_fake_from_real_tensor(mode, op, t) for t in real_flat_out]
     return pytree.tree_unflatten(fake_flat_out, spec)
-
-
-@contextlib.contextmanager
-def not_progapate_real_tensors(
-    fake_mode: FakeTensorMode,
-) -> Generator[None, None, None]:
-    original_value = fake_mode.propagate_real_tensors
-    fake_mode.propagate_real_tensors = False
-    try:
-        yield
-    finally:
-        fake_mode.propagate_real_tensors = original_value
