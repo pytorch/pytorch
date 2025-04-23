@@ -156,9 +156,9 @@ class CPythonTestCase(TestCase):
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]
-        py_ver = re.search(r"/([\d.]+)/", inspect.getfile(test_cls))
+        py_ver = re.search(r"/([\d_]+)/", inspect.getfile(test_cls))
         if py_ver:
-            py_ver = py_ver.group().strip(os.sep).replace(".", "")  # type: ignore[assignment]
+            py_ver = py_ver.group().strip(os.sep).replace("_", "")  # type: ignore[assignment]
         else:
             return suffix
         return f"CPython{py_ver}-{test_file}-{suffix}"
@@ -173,7 +173,7 @@ class CPythonTestCase(TestCase):
         # Skip test if python versions doesn't match
         try:
             test_py_ver = tuple(
-                map(int, inspect.getfile(cls).split(os.sep)[-2].split("."))
+                map(int, inspect.getfile(cls).split(os.sep)[-2].split("_"))
             )
             py_ver = sys.version_info[:2]
             if py_ver != test_py_ver:
