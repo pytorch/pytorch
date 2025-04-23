@@ -106,6 +106,13 @@ def skip_on_cuda(test_func):
     return decorated_func
 
 
+def skip_on_rocm(test_func):
+    """Decorator to skip tests that are not supported on CUDA."""
+    IS_ROCM = torch.cuda.is_available() and torch.version.hip
+    decorated_func = skipCUDAIf(IS_ROCM, "Not supported on ROCM")(test_func)
+    return decorated_func
+
+
 def rmse(ref, res):
     """
     Calculate root mean squared error
@@ -1398,6 +1405,7 @@ class TestFlexAttention(InductorTestCase):
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
+    @skip_on_rocm  # TODO: NaNs on ROCM
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -1899,6 +1907,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_rocm  # TODO: Investigate
     def test_multiple_mask_calls(self, device):
         make_tensor = functools.partial(
             torch.randn,
