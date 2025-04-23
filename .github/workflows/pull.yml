@@ -184,7 +184,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang10
       docker-image-name: pytorch-linux-focal-py3.9-clang10
       test-matrix: |
@@ -385,6 +385,9 @@ jobs:
     name: linux-focal-cpu-py3.10-gcc11-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-bazel-test
@@ -411,15 +414,15 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm6_3-py3_10-build:
+  linux-focal-rocm-py3_10-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm6.3-py3.10
+    name: linux-focal-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm6.3-py3.10
+      build-environment: linux-focal-rocm-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |

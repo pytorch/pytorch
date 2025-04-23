@@ -501,7 +501,6 @@ class TestCuda(TestCase):
         # restore the initial memory fraction
         torch.cuda.set_per_process_memory_fraction(init_fraction)
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "uuid attribute not yet available")
     def test_uuid(self):
         uuid = torch.cuda.get_device_properties(0).uuid
         self.assertEqual(len(str(uuid)), 36)  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -594,6 +593,65 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[3]._untyped_storage, torch.UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Does not work in fbcode yet")
+    @setBlasBackendsToDefaultFinally
+    def test_preferred_blas_library_settings(self):
+        def _check_default():
+            default = torch.backends.cuda.preferred_blas_library()
+            if torch.version.cuda:
+                # CUDA logic is easy, it's always cublas
+                self.assertTrue(default == torch._C._BlasBackend.Cublas)
+            else:
+                # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
+                gcn_arch = str(
+                    torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+                )
+                if gcn_arch in ["gfx90a", "gfx942", "gfx950"]:
+                    self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
+                else:
+                    self.assertTrue(default == torch._C._BlasBackend.Cublas)
+
+        _check_default()
+        # "Default" can be set but is immediately reset internally to the actual default value.
+        self.assertTrue(
+            torch.backends.cuda.preferred_blas_library("default")
+            != torch._C._BlasBackend.Default
+        )
+        _check_default()
+        self.assertTrue(
+            torch.backends.cuda.preferred_blas_library("cublas")
+            == torch._C._BlasBackend.Cublas
+        )
+        self.assertTrue(
+            torch.backends.cuda.preferred_blas_library("hipblas")
+            == torch._C._BlasBackend.Cublas
+        )
+        # check bad strings
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Unknown input value. Choose from: default, cublas, hipblas, cublaslt, hipblaslt, ck.",
+        ):
+            torch.backends.cuda.preferred_blas_library("unknown")
+        # check bad input type
+        with self.assertRaisesRegex(RuntimeError, "Unknown input value type."):
+            torch.backends.cuda.preferred_blas_library(1.0)
+        # check env var override
+        custom_envs = [
+            {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
+            {"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
+        ]
+        test_script = "import torch;print(torch.backends.cuda.preferred_blas_library())"
+        for env_config in custom_envs:
+            env = os.environ.copy()
+            for key, value in env_config.items():
+                env[key] = value
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script], env=env)
+                .decode("ascii")
+                .strip()
+            )
+            self.assertEqual("_BlasBackend.Cublaslt", r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
