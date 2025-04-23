@@ -738,7 +738,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
         if not self.only_subclass:
             tx.symbolic_torch_function_state.torch_function_mode_enabled = False
-        tx.output.set_torch_function_state(False)
 
     def module_name(self):
         return "torch._C"
