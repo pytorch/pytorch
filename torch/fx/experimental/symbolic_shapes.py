@@ -1187,6 +1187,17 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+    sloc, extra = a.node.shape_env._get_stack_summary(True)
+    log.info(
+        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        a,
+        assumed_value,
+        sloc,
+        extra,
+    )
+
+
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1195,43 +1206,42 @@ def compute_unbacked_bindings(
 #  (1) It's an optimization/additional check I do not want to fail for not performing it.
 #  (2) I am willing to deviate from the normal semantics when I have unbacked for the
 #      benefit of not failing.
-def guard_or_false(a: BoolLikeType) -> bool:
-    """
-    Try to guard a, if data dependent error encountered just return false.
-    """
+def _guard_or(a: BoolLikeType, default: bool) -> bool:
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
 
+    # if backed_size_oblivious is True we treat backed as unbacked here.
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval_sym_bool(a)
+        return result if result is not None else default
+
+    shape_env = getattr(a.node, "shape_env", None)
+
+    # xla symnode path.
+    if shape_env is None:
+        return guard_bool(a)
+
     with a.node.shape_env.dde_suppressed():
-        if torch.fx.experimental._config.backed_size_oblivious:
-            return statically_known_true(a)
-        else:
-            try:
-                return guard_bool(a)
-            except GuardOnDataDependentSymNode:
-                return False
+        try:
+            return guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            _log_suppressed_dde(a, default)
+            return default
+
+
+def guard_or_false(a: BoolLikeType) -> bool:
+    """
+    Try to guard a, if data dependent error encountered just return false.
+    """
+    return _guard_or(a, False)
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    if not isinstance(a, SymBool):
-        assert isinstance(a, bool)
-        return a
-
-    with a.node.shape_env.dde_suppressed():
-        if torch.fx.experimental._config.backed_size_oblivious:
-            result = _static_eval_sym_bool(a)
-            if result is not None:
-                return result
-            return True
-        else:
-            try:
-                return guard_bool(a)
-            except GuardOnDataDependentSymNode:
-                return True
+    return _guard_or(a, True)
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1279,8 +1289,11 @@ def definitely_false(a: BoolLikeType) -> bool:
 def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     assert isinstance(x, SymBool)
     expr = x.node.expr
-    shape_env = x.node.shape_env
+
     try:
+        # Shape env access is inside the try on purpose. xla symnode does not
+        # have it on its attributes.
+        shape_env = x.node.shape_env
         simplified = shape_env._maybe_evaluate_static(expr)
         if simplified is not None:
             return bool(simplified)
@@ -5158,9 +5171,8 @@ class ShapeEnv:
                         source, constraint
                     )
                     msg = (
-                        f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"Not all values of {var_with_range} are valid because "
+                        f"{self._debug_name(source)} was inferred to be a constant ({val})."
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg
