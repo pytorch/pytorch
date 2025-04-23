@@ -8,6 +8,7 @@ from typing import Callable, cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
+from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -45,7 +46,7 @@ def register_prop_rule(
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def wrapper(
-        impl: Callable[[OpSchema], OutputSharding]
+        impl: Callable[[OpSchema], OutputSharding],
     ) -> Callable[[OpSchema], OutputSharding]:
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
@@ -102,7 +103,7 @@ def register_op_strategy(
 
 
 def as_list(
-    x: Union[list[object], object]
+    x: Union[list[object], object],
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
 ) -> Union[list[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
@@ -118,7 +119,7 @@ def normalize_dim(dim: int, ndim: int) -> int:
     return dim if dim >= 0 else dim + ndim
 
 
-def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
+def normalize_dims(dims: DimsType, ndim: int) -> DimsSequenceType:
     """Normalize a dim or a sequence of dims, so that they are all positive."""
     if isinstance(dims, int):
         dims = (normalize_dim(dims, ndim),)
