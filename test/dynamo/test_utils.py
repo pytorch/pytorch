@@ -229,14 +229,21 @@ class TestDynamoTimed(TestCase):
  '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
  '_recursive_pre_grad_passes': [0.0],
+ 'additional_fake_tensor_prop': [0.0, 0.0],
+ 'aot_collect_metadata': [0.0],
+ 'aot_trace_joint_graph': [0.0],
  'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
+ 'build_guards': [0.0],
+ 'bytecode_tracing': [0.0],
+ 'compile_attempt_0': [0.0],
  'compile_file': [0.0, 0.0],
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
  'create_aot_dispatcher_function': [0.0],
- 'gc': [0.0]}""",  # noqa: B950
+ 'gc': [0.0],
+ 'min_cut_rematerialization_partition': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
