@@ -12,7 +12,7 @@ run_tests() {
     echo Running test_autograd.oy, test_nn.py, test_torch.py...
     cd test
 
-    CORE_TEST_LIST=("test_autograd.py" "test_nn.py" "test_torch.py")
+    CORE_TEST_LIST=("test_autograd.py" "test_torch.py" "test_nn.py")
 
     for t in "${CORE_TEST_LIST[@]}"; do
         echo "Running test: $t"
