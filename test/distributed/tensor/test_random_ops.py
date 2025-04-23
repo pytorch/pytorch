@@ -510,7 +510,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
                         (
                             shard_size,
                             shard_offset,
-                        ) = placement._local_shard_size_on_dim(
+                        ) = placement._local_shard_size_and_offset(
                             dtensor_shape[shard_dim],
                             mesh_dim_size,
                             shard_idx_on_dim,
