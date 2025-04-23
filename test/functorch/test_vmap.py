@@ -65,9 +65,11 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    MACOS_VERSION,
     markDynamoStrictTest,
     parametrize,
     run_tests,
+    skipIfMPS,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
@@ -93,6 +95,22 @@ def get_platform_specific_sdpa():
 PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
 
 FALLBACK_REGEX = "There is a performance drop"
+
+if torch.backends.mps.is_available():
+    from torch.testing._internal.common_mps import mps_ops_modifier
+
+    mps_ops_modifier(
+        op_db,
+        device_type="mps",
+        xfail_exclusion=[
+            # logspace batch rule does not invoke the mps logspace kernel which is not yet implemented and works as expected.
+            "logspace",
+            "masked.median",
+            "bincount",
+            "nanquantile",
+            "quantile",
+        ],
+    )
 
 
 class EnableVmapFallbackWarnings:
@@ -4070,6 +4088,18 @@ class TestVmapOperatorsOpInfo(TestCase):
             if check_shape_only:
                 self.assertEqual(vmap_out.shape, loop_out.shape)
                 continue
+
+            # print("=====outplace")
+            # print(
+            #    args,
+            #    args[0].is_contiguous(),
+            #    args[0].storage_offset(),
+            #    args[0].stride(),
+            #    in_dims,
+            #    func,
+            # )
+            # print("output!!!")
+            # print(vmap_out, "\n", loop_out)
             self.assertEqual(vmap_out, loop_out)
 
     def vmap_inplace_test(
@@ -4104,6 +4134,15 @@ class TestVmapOperatorsOpInfo(TestCase):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
                 vmap_out = postprocess_fn(vmap_out)
+            # print("=====inplace")
+            # print(
+            #    args,
+            #    args[0].is_contiguous(),
+            #    args[0].storage_offset(),
+            #    args[0].stride(),
+            # )
+            # print("output!!!")
+            # print(vmap_out, "\n", loop_out)
             self.assertEqual(vmap_out, loop_out)
 
     def opinfo_vmap_test(
@@ -4117,7 +4156,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     ):
         def test():
             # Error inputs check
-            if op.error_inputs_func is not None:
+            if op.error_inputs_func is not None and torch.device(device).type != "mps":
                 error_inputs = op.error_inputs(device)
                 for error_input in error_inputs:
                     sample_input = error_input.sample_input
@@ -4371,6 +4410,12 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
+                skip(
+                    "tril", device_type="mps"
+                ),  # we don't test error input on mps, so the xfail below doesn't work.
+                skip(
+                    "triu", device_type="mps"
+                ),  # we don't test error input on mps, so the xfail below doesn't work.
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
                 xfail("as_strided", "partial_views"),
@@ -4390,6 +4435,267 @@ class TestVmapOperatorsOpInfo(TestCase):
                     lambda sample: (
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
+                ),
+                # mps
+                xfail("SortGenVmapAutogradFunction", device_type="mps"),
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfail("scatter_add", device_type="mps"),
+                xfail("argsort", device_type="mps"),
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfail(
+                    "cat",
+                    device_type="mps",
+                ),
+                xfail(
+                    "clamp", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfailIf(
+                    "complex",
+                    device_type="mps",
+                    fail_fn=lambda sample: MACOS_VERSION < 14,
+                ),
+                xfail(
+                    "copysign", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "corrcoef", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "cov", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "digamma", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfail("empty_like", device_type="mps"),
+                xfail(
+                    "eq", device_type="mps"
+                ),  # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, mps:0 and cpu!
+                xfail(
+                    "ge",
+                    device_type="mps",
+                ),
+                xfail(
+                    "gt",
+                    device_type="mps",
+                ),
+                xfail(
+                    "imag",
+                    device_type="mps",
+                ),
+                xfail(
+                    "index_add",
+                    device_type="mps",
+                ),
+                xfail(
+                    "index_put",
+                    "functorch",
+                    device_type="mps",
+                ),
+                xfail(
+                    "isneginf",
+                    device_type="mps",
+                ),
+                xfail(
+                    "isposinf",
+                    device_type="mps",
+                ),
+                xfail(
+                    "le",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lt",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lerp",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lgamma",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.inv_ex",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.inv",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.solve_triangular",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.svd",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linspace",
+                    "tensor_overload",
+                    device_type="mps",
+                ),
+                xfail(
+                    "logit",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lu_unpack",
+                    device_type="mps",
+                ),
+                xfail(
+                    "msort",
+                    device_type="mps",
+                ),
+                xfail(
+                    "mvlgamma",
+                    "mvlgamma_p_1",
+                    device_type="mps",
+                ),
+                xfail(
+                    "mvlgamma",
+                    "mvlgamma_p_3",
+                    device_type="mps",
+                ),
+                xfail(
+                    "mvlgamma",
+                    "mvlgamma_p_5",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nan_to_num",
+                    device_type="mps",
+                ),
+                xfail(
+                    "ne",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.binary_cross_entropy",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.celu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.elu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.glu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.hardsigmoid",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.interpolate",
+                    "nearest",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.leaky_relu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.mish",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.prelu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.selu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.silu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.threshold",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.upsample_nearest",
+                    device_type="mps",
+                ),
+                xfailIf(
+                    "polar",
+                    lambda sample: MACOS_VERSION < 14,
+                    device_type="mps",
+                ),
+                xfail(
+                    "triangular_solve", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "amax",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "amin",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "mean",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "prod",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "sum",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "sort",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "special.polygamma", "special_polygamma_n_0", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "special.xlog1py", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "special.zeta", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "svd", device_type="mps"
+                ),  # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device.
+                xfail(
+                    "view_as_real", device_type="mps"
+                ),  # RuntimeError: repeat(): Not supported for complex yet!
+                xfail(
+                    "torch.ops.aten._safe_softmax.default",
+                    device_type="mps",
+                ),
+                xfail("linalg.tensorinv", device_type="mps"),
+                xfail("nn.functional.channel_shuffle", device_type="mps"),
+                xfail("nn.functional.smooth_l1_loss", device_type="mps"),
+                xfail("polygamma", "polygamma_n_0", device_type="mps"),
+                xfail("polygamma", "polygamma_n_1", device_type="mps"),
+                xfail("polygamma", "polygamma_n_2", device_type="mps"),
+                xfail("polygamma", "polygamma_n_3", device_type="mps"),
+                xfail("polygamma", "polygamma_n_4", device_type="mps"),
+                # NotImplementedError: The operator 'aten::_upsample_nearest_exact3d.out'
+                # is not currently implemented for the MPS device.
+                xfail("nn.functional.interpolate", "nearest-exact", device_type="mps"),
+                xfail(
+                    "chalf",
+                    device_type="mps",
                 ),
             }
         ),
@@ -4469,7 +4775,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "unbind_copy"
                 ),  # Batching rule not implemented for aten::unbind_copy.int.
-                xfail("__getitem__", ""),
+                xfail("__getitem__"),
                 xfail("count_nonzero"),
                 xfail(
                     "nn.functional.dropout"
@@ -4567,6 +4873,264 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+                # mps
+                xfail("SortGenVmapAutogradFunction", device_type="mps"),
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfail("scatter_add", device_type="mps"),
+                xfail("argsort", device_type="mps"),
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfail(
+                    "cat",
+                    device_type="mps",
+                ),
+                xfail(
+                    "clamp", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfailIf(
+                    "complex",
+                    device_type="mps",
+                    fail_fn=lambda sample: MACOS_VERSION < 14,
+                ),
+                xfail(
+                    "copysign", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "corrcoef", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "cov", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "digamma", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
+                xfail("empty_like", device_type="mps"),
+                xfail(
+                    "eq", device_type="mps"
+                ),  # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, mps:0 and cpu!
+                xfail(
+                    "ge",
+                    device_type="mps",
+                ),
+                xfail(
+                    "gt",
+                    device_type="mps",
+                ),
+                xfail(
+                    "imag",
+                    device_type="mps",
+                ),
+                xfail(
+                    "index_add",
+                    device_type="mps",
+                ),
+                xfail(
+                    "index_put",
+                    "functorch",
+                    device_type="mps",
+                ),
+                xfail(
+                    "isneginf",
+                    device_type="mps",
+                ),
+                xfail(
+                    "isposinf",
+                    device_type="mps",
+                ),
+                xfail(
+                    "le",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lt",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lerp",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lgamma",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.inv_ex",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.inv",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.solve_triangular",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linalg.svd",
+                    device_type="mps",
+                ),
+                xfail(
+                    "linspace",
+                    "tensor_overload",
+                    device_type="mps",
+                ),
+                xfail(
+                    "logit",
+                    device_type="mps",
+                ),
+                xfail(
+                    "lu_unpack",
+                    device_type="mps",
+                ),
+                xfail(
+                    "msort",
+                    device_type="mps",
+                ),
+                xfail(
+                    "mvlgamma",
+                    "mvlgamma_p_1",
+                    device_type="mps",
+                ),
+                xfail(
+                    "mvlgamma",
+                    "mvlgamma_p_3",
+                    device_type="mps",
+                ),
+                xfail(
+                    "mvlgamma",
+                    "mvlgamma_p_5",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nan_to_num",
+                    device_type="mps",
+                ),
+                xfail(
+                    "ne",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.binary_cross_entropy",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.celu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.elu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.glu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.hardsigmoid",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.interpolate",
+                    "nearest",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.leaky_relu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.mish",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.prelu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.rms_norm",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.selu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.silu",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.threshold",
+                    device_type="mps",
+                ),
+                xfail(
+                    "nn.functional.upsample_nearest",
+                    device_type="mps",
+                ),
+                xfailIf(
+                    "polar",
+                    lambda sample: MACOS_VERSION < 14,
+                    device_type="mps",
+                ),
+                xfail(
+                    "triangular_solve", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "amax",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "amin",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "mean",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "prod",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "scatter_reduce",
+                    "sum",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "sort",
+                    device_type="mps",
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "special.polygamma", "special_polygamma_n_0", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "special.xlog1py", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "special.zeta", device_type="mps"
+                ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "svd", device_type="mps"
+                ),  # The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device.
+                xfail(
+                    "view_as_real", device_type="mps"
+                ),  # RuntimeError: repeat(): Not supported for complex yet!
+                xfail(
+                    "torch.ops.aten._safe_softmax.default",
+                    device_type="mps",
+                ),
+                xfail("linalg.tensorinv", device_type="mps"),
+                xfail("nn.functional.channel_shuffle", device_type="mps"),
+                xfail("nn.functional.smooth_l1_loss", device_type="mps"),
+                xfail("polygamma", "polygamma_n_0", device_type="mps"),
+                xfail("polygamma", "polygamma_n_1", device_type="mps"),
+                xfail("polygamma", "polygamma_n_2", device_type="mps"),
+                xfail("polygamma", "polygamma_n_3", device_type="mps"),
+                xfail("polygamma", "polygamma_n_4", device_type="mps"),
             }
         ),
     )
@@ -4608,6 +5172,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             device, dtype, op, check_has_batch_rule=True, skip_inplace=inplace_failures
         )
 
+    @skipIfMPS  # Not implemented
     def test_linalg_svd(self, device):
         # linalg_svd returns a tuple of three tensors, (U, S, Vh).
         # Given the same input, it may return different tensors,
@@ -4634,6 +5199,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 postprocess_fn=compute_A,
             )
 
+    @skipIfMPS  # Not implemented
     def test_linalg_eigh(self, device):
         # linalg_svd returns two tensors, (Q, L).
         # Given the same input, it may return different tensors,
@@ -5040,6 +5606,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         test(self, op, tuple(inputs), in_dims=tuple(in_dims))
 
+    @skipIfMPS
     def test_torch_return_types_returns(self, device):
         t = torch.randn(3, 2, 2, device=device)
         self.assertTrue(
@@ -5176,6 +5743,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             skip("linalg.ldl_solve", ""),
         },
     )
+    @skipIfMPS
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             if sample.input.dim() != 2 or sample.input.shape[0] == 0:
@@ -6414,8 +6982,10 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             vmap(vmap(vmap(f)))(x)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "mps")
+instantiate_device_type_tests(
+    TestVmapOperatorsOpInfo, globals(), only_for=only_for, allow_mps=True
+)
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
