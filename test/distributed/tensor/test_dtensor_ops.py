@@ -573,18 +573,18 @@ class TestDTensorOps(DTensorOpTestBase):
         def to_replicate(e: object) -> object:
             return e.full_tensor() if isinstance(e, DTensor) else e
 
-        try:
-            # Suppress warnings, this doesn't matter for test_meta.py
-            # but it does matter if you want to use this decorator
-            # for cross-ref testing, as some tests may be looking at
-            # errors
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                # for every comb of sharding choices, we test if it works
-                for dtensor_args, dtensor_kwargs in to_dtensor:
-                    # Only attempt if we managed to convert all tensors to DTensor
-                    # (if any of them failed, we're in a mixed tensor situation and
-                    # this is not allowed in DTensor)
+        # Suppress warnings, this doesn't matter for test_meta.py
+        # but it does matter if you want to use this decorator
+        # for cross-ref testing, as some tests may be looking at
+        # errors
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # for every comb of sharding choices, we test if it works
+            for dtensor_args, dtensor_kwargs in to_dtensor:
+                # Only attempt if we managed to convert all tensors to DTensor
+                # (if any of them failed, we're in a mixed tensor situation and
+                # this is not allowed in DTensor)
+                try:
                     if to_dtensor.successful():
                         # Handle special cases first if there's any
                         # Suppress warnings, this doesn't matter for test_meta.py
@@ -625,11 +625,10 @@ class TestDTensorOps(DTensorOpTestBase):
                             f"failed to convert args to DTensor; "
                             f"originally (*{args}, **{kwargs})"
                         )
-        except Exception as e:
-            raise RuntimeError(
-                f"failed to run: {resolve_name(func)}, with (*{args}, **{kwargs})"
-            ) from e
-
+                except Exception as e:
+                    raise RuntimeError(
+                        f"failed to run: {resolve_name(func)}, with (*{dtensor_args}, **{dtensor_kwargs})"
+                    ) from e
         return rs
 
     def check_dtensor_func(self, test_func, opinfo, dry_run=False):
