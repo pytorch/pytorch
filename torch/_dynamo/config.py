@@ -414,10 +414,10 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
-# Install parameters and buffers from nn modules
+# Install free tensors (non-local, global, and nn module params)
 # as graph attributes.  This is useful for export, as it
 # produces a consitent number of inputs to the graph.
-install_params_as_graph_attr = False
+install_free_tensors = False
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
