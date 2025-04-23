@@ -316,7 +316,7 @@ class AutoFunctionalized(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized")
+        super().__init__("auto_functionalized", cacheable=True)
 
     def __call__(
         self,
@@ -345,7 +345,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized_v2")
+        super().__init__("auto_functionalized_v2", cacheable=True)
 
     def __call__(
         self,
@@ -423,6 +423,7 @@ def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
 
 
 def do_auto_functionalize(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
@@ -436,7 +437,7 @@ def do_auto_functionalize(
     """
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -512,13 +513,14 @@ def do_auto_functionalize(
 
 
 def do_auto_functionalize_v2(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.

@@ -20,6 +20,7 @@ from torch.distributed.checkpoint.metadata import (
 __all__ = [
     "WriteItemType",
     "LoadItemType",
+    "BytesIOWriteData",
     "TensorWriteData",
     "WriteItem",
     "ReadItem",
@@ -42,6 +43,11 @@ class LoadItemType(Enum):
 
 
 @dataclass(frozen=True)
+class BytesIOWriteData:
+    nbytes: int
+
+
+@dataclass(frozen=True)
 class TensorWriteData:
     chunk: ChunkStorageMetadata
     properties: TensorProperties
@@ -54,6 +60,9 @@ class WriteItem:
 
     index: MetadataIndex
     type: WriteItemType
+
+    # Size of bytesIO data to be written.
+    bytes_io_data: Optional[BytesIOWriteData] = None
 
     # Value present if it's a tensor write
     tensor_data: Optional[TensorWriteData] = None
@@ -97,6 +106,9 @@ class SavePlan:
     items: list[WriteItem]
     storage_data: Any = None
     planner_data: Any = None
+    # This is used to indicate that the ranks should
+    # use the cached plans to write data instead.
+    usable: bool = True
 
 
 @dataclass
@@ -148,7 +160,7 @@ class SavePlanner(abc.ABC):
     >>>         storage_meta: Optional[StorageMeta],
     >>>         is_coordinator: bool,
     >>>     ) -> None:
-    >>>         # prefix all keys with `foo_``
+    >>> # prefix all keys with `foo_``
     >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, storage_meta, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
@@ -172,8 +184,8 @@ class SavePlanner(abc.ABC):
     >>> from itertools import zip_longest
     >>> from dataclasses import replace
     >>> class DDPLoadBalancingPlanner(DefaultSavePlanner):
-    >>>     # This uses the default local plan behavior of having all non-sharded writes in rank 0
-    >>>     # This sample doesn't handle ShardedTensors
+    >>> # This uses the default local plan behavior of having all non-sharded writes in rank 0
+    >>> # This sample doesn't handle ShardedTensors
     >>>     def create_global_plan(self, all_plans):
     >>>         iters = [iter(all_plans[0].items)] * len(all_plans)
     >>>         items_per_rank = [
@@ -202,6 +214,27 @@ class SavePlanner(abc.ABC):
     >>>         metadata = replace(metadata, planner_data=merged_data)
     >>>         return global_plan, metadata
     """
+
+    # Save plan for the current rank as computed by `create_local_plan` API
+    # Cached on the local rank.
+    _cached_save_plan: dict[str, SavePlan] = {}
+    # Final save plan for the current rank.
+    # This is created by merging the plan created by `create_local_plan` API
+    # and the result of `create_global_plan` for the given rank.
+    # This is the final plan computed by the `finish_plan` API that gets
+    # sent to the `write_data`.
+    # Cached on the local rank.
+    _cached_final_save_plan: dict[str, SavePlan] = {}
+    # Collection of all the local plans from all the ranks.
+    # This is the input to the `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_all_plans: dict[str, list[SavePlan]] = {}
+    # Global checkpoint plan as computed by `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_global_plan: dict[str, list[SavePlan]] = {}
+    # Metadata for the global checkpoint plan as computed by `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_metadata: dict[str, Metadata] = {}
 
     @abc.abstractmethod
     def set_up_planner(
@@ -326,7 +359,7 @@ class LoadPlanner:
     >>>         self.is_coordinator = is_coordinator
     >>>
     >>>     def load_bytes(self, read_item, value):
-    >>>         # Remove the "foo_" prefix
+    >>> # Remove the "foo_" prefix
     >>>         self.original_state_dict[read_item.dest_index.fqn[4:]] = torch.load(value, weights_only=False)
 
 

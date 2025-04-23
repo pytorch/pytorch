@@ -8,6 +8,10 @@ from sympy import Expr, symbols
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
+
+if TYPE_CHECKING:
+    from .cuda_template import ArgInfo
+
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
@@ -82,8 +86,20 @@ class CUDAKernel(Kernel):
         matches = [
             arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
         ]
-        assert len(matches) <= 1, matches
-        return None if len(matches) == 0 else matches[0]
+        if len(matches) >= 1:
+            # Verify all matches have the same node, attribute, and dimension
+            # And if they come from the same node, whichever symbol we use is fine.
+            # if in runtime the logic changes, this would trigger guard
+            first_match = matches[0]
+            if not all(
+                match.node == first_match.node
+                and match.attr == first_match.attr
+                and match.dim == first_match.dim
+                for match in matches
+            ):
+                raise AssertionError("All matching layout args should be identical")
+            return first_match
+        return None
 
     def add_layout_arg(
         self, symbol: ValidLayoutSymbols, node: IRNode, attr: ValidLayoutAttrs, dim: int
@@ -153,7 +169,12 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name) -> None:
+    def __init__(
+        self,
+        kernel_name: str,
+        runtime_arg_info: list["ArgInfo"],
+        runtime_arg_values: list[Any],
+    ) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -162,6 +183,8 @@ class CUDATemplateKernel(CUDAKernel):
         """
         super().__init__()
         self.kernel_name = kernel_name
+        self.runtime_arg_info = runtime_arg_info
+        self.runtime_arg_values = runtime_arg_values
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -244,7 +267,13 @@ class CUDATemplateKernel(CUDAKernel):
             f"const int {s}" for s in ("M", "N", "K", "lda", "ldb", "ldc", "ldd")
         ]
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
+        runtime_arg_decls = ",".join(
+            [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
+        )
+        if runtime_arg_decls:
+            runtime_arg_decls += ", "
+
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -278,7 +307,11 @@ class CUDATemplateKernel(CUDAKernel):
 
         layout_args = self.get_layout_args()
         call_args.extend(layout_args)  # type: ignore[arg-type]
+        for arg in self.runtime_arg_values:
+            call_args.append(arg)
         arg_types.extend("int" for a in layout_args)
+        for arg in self.runtime_arg_info:
+            arg_types.append(arg.ty)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -320,7 +353,6 @@ class CUDATemplateKernel(CUDAKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
@@ -475,7 +507,9 @@ class CUDATemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[
+            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+        ],  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
