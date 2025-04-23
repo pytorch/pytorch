@@ -54,6 +54,7 @@ TEST(MPSAllocator, MPSHostAllocator) {
     {
         at::DataPtr data = at::getHostAllocator(at::kMPS)->allocate(1000);
         ASSERT_TRUE(at::mps::isMPSPinnedPtr(data.get()));
+        ASSERT_TRUE(at::getHostAllocator(at::kMPS)->is_pinned(data.get()));
         ASSERT_TRUE(at::mps::getIMPSAllocator(true)->getCurrentAllocatedMemory() > size);
     }
 
