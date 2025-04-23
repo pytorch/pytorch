@@ -48,7 +48,7 @@ class SimpleLinearModule(torch.nn.Module):
 
 class InstallParamsAsGraphAttrTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-    @torch._dynamo.config.patch(install_params_as_graph_attr=False)
+    @torch._dynamo.config.patch(install_free_tensors=False)
     def check_num_inputs_and_equality(
         self, original_fn, example_input, expected_num_inputs: int
     ) -> None:
