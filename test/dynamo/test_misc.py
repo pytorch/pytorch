@@ -1505,40 +1505,29 @@ utils_device.CURRENT_DEVICE == None""".split(
             statically_known_true,
         )
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def f(x):
             # At this point, this isn't statically known, only the hint says so.
-            if statically_known_true(x.shape[0] > 9):
-                x -= 1
-            else:
-                x += 1
+            assert not statically_known_true(x.shape[0] > 9)
             torch._check(x.shape[0] >= 10)
             # But now it is.
-            if statically_known_true(x.shape[0] > 9):
-                x += 1
-            else:
-                x -= 1
-            if has_static_value(x.shape[0]):
-                x -= 1
-            else:
-                x += 1
-            return x
+            assert statically_known_true(x.shape[0] > 9)
+            assert has_static_value(x.shape[0])
+            return x + 1
 
         x = torch.zeros(10)
         torch._dynamo.mark_dynamic(x, 0)
-        self.assertEqual(f(x).sum(), 30)
+        f(x)
 
-        @torch.compile(fullgraph=True, dynamic=True)
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
         def g(x, y):
             n = x.item()
             torch._check(n == 3)
-            if has_static_value(4.0) and has_static_value(n):
-                y += 1
-            return y
+            assert has_static_value(4.0)
+            assert has_static_value(n)
+            return y + 2
 
-        x = torch.tensor([3])
-        y = torch.zeros(1)
-        self.assertEqual(g(x, y).item(), 1)
+        g(torch.tensor([3]), torch.zeros(1))
 
     def test_dictcomp(self):
         def fn1(inputs):
