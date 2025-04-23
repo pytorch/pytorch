@@ -1,3 +1,4 @@
+warning: Selection `RUF030` has no effect because preview is not enabled.
 # Owner(s): ["module: tests"]
 
 import sys
@@ -85,6 +86,9 @@ class TestAccelerator(TestCase):
         prev_device = torch.accelerator.current_device_index()
         with torch.accelerator.device_index(None):
             self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.accelerator.current_device_index(), 0)
         self.assertEqual(torch.accelerator.current_device_index(), prev_device)
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")

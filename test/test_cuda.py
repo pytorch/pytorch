@@ -1,3 +1,4 @@
+warning: Selection `RUF030` has no effect because preview is not enabled.
 # Owner(s): ["module: cuda"]
 # ruff: noqa: F841
 
@@ -1099,8 +1100,12 @@ class TestCuda(TestCase):
         with torch.accelerator.device_index(None):
             self.assertEqual(torch.cuda.current_device(), prev_device)
         self.assertEqual(torch.cuda.current_device(), prev_device)
-        if not torch.cuda.device_count() > 1:
-            return
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.cuda.current_device(), 0)
+        self.assertEqual(torch.cuda.current_device(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_multi_device_context_manager(self):
         src_device = 0
         dst_device = 1
         torch.cuda.set_device(src_device)
