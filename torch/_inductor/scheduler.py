@@ -4291,8 +4291,10 @@ class Scheduler:
         relative order of two non_cudagraphable nodes.
         """
         node_to_indegree: dict[BaseSchedulerNode, int] = dict()
-        cudagraphable_nodes: list[BaseSchedulerNode] = []
-        non_cudagraphable_nodes: list[BaseSchedulerNode] = []
+        cudagraphable_nodes: collections.deque[BaseSchedulerNode] = collections.deque()
+        non_cudagraphable_nodes: collections.deque[BaseSchedulerNode] = (
+            collections.deque()
+        )
 
         def insert_pending_nodes(node: BaseSchedulerNode) -> None:
             if self.should_partition(node):
@@ -4318,12 +4320,12 @@ class Scheduler:
             non_cudagraphable_nodes or cudagraphable_nodes
         ):
             while non_cudagraphable_nodes:
-                node = non_cudagraphable_nodes.pop(0)
+                node = non_cudagraphable_nodes.popleft()
                 schedule.append(node)
                 update_indegree(node)
 
             while cudagraphable_nodes:
-                node = cudagraphable_nodes.pop(0)
+                node = cudagraphable_nodes.popleft()
                 schedule.append(node)
                 update_indegree(node)
 

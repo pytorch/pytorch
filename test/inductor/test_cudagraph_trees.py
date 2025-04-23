@@ -2647,8 +2647,8 @@ if HAS_CUDA:
                 loss.backward()
                 optimizer.step()
 
-            # 2 graph partitions lead to 2 fwd cudagraphs and 2 bwd cudagraphs
-            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+            # 2 graph partitions lead to 2 fwd cudagraphs and 1 bwd cudagraphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
