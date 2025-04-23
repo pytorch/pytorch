@@ -14,7 +14,15 @@ DISTRIBUTED = [
 ]
 
 register_log(
-    "cache", ("torch._inductor.remote_cache", "torch._inductor.fb.remote_cache")
+    "cache",
+    [
+        "torch.compiler._cache",
+        "torch._functorch.aot_autograd.autograd_cache",
+        "torch._inductor.codecache",
+        "torch._inductor.fb.remote_cache",
+        "torch._inductor.remote_cache",
+        "torch._inductor.runtime.autotune_cache",
+    ],
 )
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
 register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
