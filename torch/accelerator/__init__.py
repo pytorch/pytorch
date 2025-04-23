@@ -197,10 +197,13 @@ class device_index:
     Temporarily changes the current device index to the specified value for the duration
     of the context, and automatically restores the previous device index when exiting
     the context.
+
     Args:
         device (Optional[int]): a given device index to temporarily set. If None,
             no device index switching occurs.
+
     Examples:
+
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # Set device 0 as the current device temporarily
         >>> with torch.accelerator.device_index(0):
@@ -212,7 +215,6 @@ class device_index:
         ...     # No device switching occurs
         ...     pass
     """
-
     def __init__(self, device: Optional[int], /) -> None:
         self.idx = device
         self.prev_idx = -1
