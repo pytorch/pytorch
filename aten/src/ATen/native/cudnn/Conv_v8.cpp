@@ -264,13 +264,13 @@ static int getLRUCacheLimit() {
     }
     try {
       return std::stoi(val);
-    } catch (std::invalid_argument const& e) {
+    } catch (std::invalid_argument const&) {
       TORCH_WARN(
           "invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
           " using default LRU cache limit of ",
           DEFAULT_LIMIT,
           " entries.");
-    } catch (std::out_of_range const& e) {
+    } catch (std::out_of_range const&) {
       TORCH_WARN(
           "invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
           " using default LRU cache limit of ",
@@ -676,9 +676,9 @@ void generate_and_filter_plans(
       workspace_ptr =
           c10::cuda::CUDACachingAllocator::get()->allocate(max_workspace_size);
       break;
-    } catch (c10::OutOfMemoryError& e) {
+    } catch (c10::OutOfMemoryError&) {
       max_workspace_size /= 2;
-      (void)cudaGetLastError(); // clear CUDA error
+      std::ignore = cudaGetLastError(); // clear CUDA error
       remove_invalid = true;
     }
   }
@@ -876,10 +876,10 @@ void try_plans(
       run_conv_plan(handle, x, y, w, plan, operation);
       benchmark_cache.update(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(
@@ -900,10 +900,10 @@ void try_plans_fused(
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
       benchmark_cache_fused.update(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(
@@ -931,10 +931,10 @@ bool try_configs(
       run_conv_plan(handle, x, y, w, plan, operation);
       benchmark_cache.update(key, plan);
       return true;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -962,10 +962,10 @@ bool try_configs_fused(
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
       benchmark_cache_fused.update(key, plan);
       return true;
-    } catch (cudnn_frontend::cudnnException& e) {
-    } catch (CuDNNError& e) {
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (cudnn_frontend::cudnnException&) {
+    } catch (CuDNNError&) {
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -1001,8 +1001,8 @@ void run_single_conv(
     try {
       run_conv_plan(handle, x, y, w, *search, operation);
       return;
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {
@@ -1101,8 +1101,8 @@ void run_fused_conv(
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, *search);
       return;
-    } catch (c10::OutOfMemoryError& e) {
-      (void)cudaGetLastError(); // clear CUDA error
+    } catch (c10::OutOfMemoryError&) {
+      std::ignore = cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {

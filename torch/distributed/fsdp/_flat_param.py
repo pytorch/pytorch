@@ -273,7 +273,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             shard parameter info; see :class:`_ShardParamInfo` for details.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo` for details.
-        _modules (Set[nn.Module]): Modules that contain some original parameter
+        _modules (set[nn.Module]): Modules that contain some original parameter
             that is flattened into the flat parameter.
 
         _shard_numel_padded (int): Numel padded for this rank's sharded flat
@@ -586,7 +586,10 @@ class FlatParamHandle:
         )
         self._fsdp_extension = fsdp_extension
         self._init_flat_param_and_metadata(
-            params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
+            params,
+            fully_sharded_module,
+            self._aligned_numel,
+            use_orig_params,  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
 
@@ -978,9 +981,9 @@ class FlatParamHandle:
         shard_param_infos = self._get_shard_metadata(
             unsharded_start_idx, unsharded_end_idx
         )
-        assert (
-            len(shard_param_infos) == flat_param._num_params
-        ), f"Expects length {flat_param._num_params} but got {len(shard_param_infos)}"
+        assert len(shard_param_infos) == flat_param._num_params, (
+            f"Expects length {flat_param._num_params} but got {len(shard_param_infos)}"
+        )
         flat_param._shard_param_infos = shard_param_infos  # type: ignore[attr-defined]
         flat_param._shard_numel_padded = numel_padded  # type: ignore[attr-defined]
 
@@ -996,9 +999,9 @@ class FlatParamHandle:
         unsharded flat parameter specifying the shard.
         """
         flat_param_offsets = self._get_flat_param_offsets()
-        assert len(flat_param_offsets) == len(
-            self.flat_param._numels_with_padding
-        ), f"Expected {len(self.flat_param._numels_with_padding)} but got {len(flat_param_offsets)}"
+        assert len(flat_param_offsets) == len(self.flat_param._numels_with_padding), (
+            f"Expected {len(self.flat_param._numels_with_padding)} but got {len(flat_param_offsets)}"
+        )
         shard_param_infos: list[_ShardParamInfo] = []
         sharded_flat_param_numel = unsharded_end_idx - unsharded_start_idx + 1
         # `unsharded_param_start_idx` and `unsharded_param_end_idx` are indices
@@ -1075,9 +1078,9 @@ class FlatParamHandle:
         else:
             chunk = chunks[rank]
         numel_to_pad = chunks[0].numel() - chunk.numel()
-        assert (
-            numel_to_pad >= 0
-        ), "Chunk's size should be at most the first chunk's size"
+        assert numel_to_pad >= 0, (
+            "Chunk's size should be at most the first chunk's size"
+        )
         return chunk, numel_to_pad
 
     @staticmethod
@@ -1302,7 +1305,8 @@ class FlatParamHandle:
         self._check_low_precision_shard()
         flat_param = self.flat_param
         _alloc_storage(
-            flat_param._mp_shard, flat_param._local_shard.size()  # type: ignore[attr-defined]
+            flat_param._mp_shard,
+            flat_param._local_shard.size(),  # type: ignore[attr-defined]
         )
         # `copy_()` implicitly casts to the low precision
         flat_param._mp_shard.copy_(  # type: ignore[attr-defined]
@@ -1498,7 +1502,8 @@ class FlatParamHandle:
         # default stream suffices since the default stream waits for the
         # unshard stream.
         _no_dispatch_record_stream(
-            self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
+            self.flat_param._mp_shard,
+            self._device_handle.current_stream(),  # type: ignore[attr-defined]
         )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
@@ -1593,8 +1598,7 @@ class FlatParamHandle:
                 f"but got {flat_param.grad.device}",
             )
             prev_iter_synced_gradients = (
-                flat_param.grad.size()
-                == flat_param._local_shard.size()  # type: ignore[attr-defined]
+                flat_param.grad.size() == flat_param._local_shard.size()  # type: ignore[attr-defined]
             )
             if prev_iter_synced_gradients:
                 # TODO (awgu): Gradient accumulation outside `no_sync()`
@@ -1668,8 +1672,7 @@ class FlatParamHandle:
                     cast_grad_to_param_dtype_if_needed(flat_param)
         else:
             _p_assert(
-                not self.uses_sharded_strategy
-                or not flat_param._post_backward_called,  # type: ignore[attr-defined]
+                not self.uses_sharded_strategy or not flat_param._post_backward_called,  # type: ignore[attr-defined]
                 "All sharded parameters that received a gradient in the "
                 "post-backward should use `_saved_grad_shard`",
             )
@@ -2504,7 +2507,8 @@ class FlatParamHandle:
         """Return the FQNs of the parameters present in this rank's shard."""
         fqns_in_shard: list[str] = []
         for fqn, shard_param_info in zip(
-            self.flat_param._fqns, self.flat_param._shard_param_infos  # type: ignore[attr-defined]
+            self.flat_param._fqns,
+            self.flat_param._shard_param_infos,  # type: ignore[attr-defined]
         ):
             if shard_param_info.in_shard:
                 fqns_in_shard.append(fqn)
@@ -2694,7 +2698,7 @@ def _safe_setattr_tensor_or_param(
 
 
 def _convert_to_params(
-    tensors: list[Union[torch.Tensor, nn.Parameter]]
+    tensors: list[Union[torch.Tensor, nn.Parameter]],
 ) -> list[nn.Parameter]:
     return [t if isinstance(t, nn.Parameter) else nn.Parameter(t) for t in tensors]
 

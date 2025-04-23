@@ -136,6 +136,7 @@ class TestXpu(TestCase):
                 device_capability["architecture"],
             )
 
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             """\
@@ -158,6 +159,9 @@ if __name__ == "__main__":
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
 
+    @unittest.skipIf(
+        IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
+    )
     def test_lazy_init(self):
         """Validate that no XPU calls are made during `import torch` call"""
 
@@ -192,9 +196,11 @@ model = torch.nn.Sequential(
     torch.nn.ReLU(),
     torch.nn.MaxPool2d(2, 2),
 )
-test_multi_process(model, input)
-test_multi_process(model, input)
-print(torch.xpu.device_count())
+
+if __name__ == "__main__":
+    test_multi_process(model, input)
+    test_multi_process(model, input)
+    print(torch.xpu.device_count())
 """
         rc = check_output(test_script)
         self.assertEqual(rc, str(torch.xpu.device_count()))
@@ -252,6 +258,15 @@ print(torch.xpu.device_count())
                 "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
             ):
                 start_event.elapsed_time(end_event)
+
+        event = torch.xpu.Event(enable_timing=True)
+        self.assertEqual(event.sycl_event, 0)
+        self.assertEqual(event.event_id, 0)
+
+        event.record()
+        self.assertNotEqual(event.sycl_event, 0)
+        self.assertNotEqual(event.event_id, 0)
+        self.assertEqual(event.sycl_event, event.event_id)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")

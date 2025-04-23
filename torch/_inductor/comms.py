@@ -490,8 +490,7 @@ def _schedule_for_comm(
 
     for snode, deps in unmet_deps.items():
         assert len(deps) == 0, (
-            "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
+            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
         )
     return scheduled
 
@@ -531,30 +530,36 @@ def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
 
 
 def node_summary(snode):
-    detail = ""
-    if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
-        detail = f" ({snode.node.python_kernel_name})"
+    snodes = snode.get_nodes()
+    if len(snodes) == 1:
+        detail = ""
+        if isinstance(snode.node, ir.ExternKernelOut, ir._CollectiveKernel):
+            detail = f" ({snode.node.python_kernel_name})"
+        # out_tensor_info = ""
+        # layout = snode.node.get_output_spec()
+        # if isinstance(layout, ir.Layout):
+        #     out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
+        layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
+        out_tensor_info = ",".join(
+            [
+                f" (size={layout.size}, stride={layout.stride})"
+                if isinstance(layout, ir.Layout)
+                else ""
+                for layout in layouts
+            ]
+        )
+        try:
+            node_name = snode.node.maybe_get_name()
+        except AttributeError:
+            # TODO: node_summary was written without FusedSchedulerNode in mind, generally needs to be hardened
+            node_name = ""
+        return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name} ({snode.get_estimated_runtime():.0f} ns)"
 
-    # TODO(whc) does not work for FusedSchedulerNode, which has multiple child nodes and no snode.node value
-    # out_tensor_info = ""
-    # layout = snode.node.get_output_spec()
-    # if isinstance(layout, ir.Layout):
-    #     out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
-    layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
-    out_tensor_info = ",".join(
-        [
-            f" (size={layout.size}, stride={layout.stride})"
-            if isinstance(layout, ir.Layout)
-            else ""
-            for layout in layouts
-        ]
-    )
-    try:
-        node_name = snode.node.maybe_get_name()
-    except AttributeError:
-        # TODO: node_summary was written without FusedSchedulerNode in mind, generally needs to be hardened
-        node_name = ""
-    return f"{snode} {detail}{out_tensor_info} ({node_name}) ({snode.get_estimated_runtime():.0f} ns)"
+    # Flatten the summaries for Fused/Foreach/Grouped nodes
+    summaries = []
+    for child_snode in snodes:
+        summaries.append(node_summary(child_snode))
+    return f"{snode.__class__.__name__}: {', '.join(summaries)}"
 
 
 def visualize_overlap(order):
@@ -656,9 +661,7 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             node.op == "call_function"
             and node.target == torch.ops.inductor.resize_storage_bytes_.default
         ):
-            assert (
-                node.args[0].op == "placeholder"
-            ), f"""\
+            assert node.args[0].op == "placeholder", f"""\
 Resize can only operate on graph inputs, but got {node} which is resizing non-graph-input {node.args[0]}
 """
             graph_input = node.args[0]
@@ -710,9 +713,7 @@ Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that
         if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
             fsdp_copy_node = node
             unsharded_param = node.args[0]
-            assert (
-                unsharded_param.op == "placeholder"
-            ), f"""
+            assert unsharded_param.op == "placeholder", f"""
 Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!
 Offending node: {unsharded_param}. Graph: {graph}
 """
