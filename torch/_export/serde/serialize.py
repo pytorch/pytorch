@@ -1982,8 +1982,8 @@ class GraphModuleDeserializer(metaclass=Final):
         else:
             _additional_msg = (f"We failed to resolve {target} to an operator. "
                                + "If it's a custom op/custom triton op, this is usally because the custom op is not registered"
-                               + " when we call deserialize. Please import the custom op before deserializing."
-                               + " If the error persists, please file an issue on github.") if isinstance(target, str) else ""
+                               + " when deserializing. Please import the custom op to register it before deserializing."
+                               + " Otherwise, please file an issue on github.") if isinstance(target, str) else ""
             raise SerializeError(
                 _additional_msg + f" Unsupported target type for node {serialized_node}: {type(target)}."
             )
