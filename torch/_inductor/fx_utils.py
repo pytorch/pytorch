@@ -147,10 +147,13 @@ class FakeTensorUpdater:
             return node.op == "call_function" and (
                 isinstance(node.target, torch._ops.OpOverload)
                 or node.target == operator.getitem
+                or node.target == torch._inductor.fx_passes.reinplace._generalized_scatter
             )
 
         to_process = OrderedSet[int]()
         for node in self.graph.nodes:
+            if node.target == torch._inductor.fx_passes.reinplace._generalized_scatter:
+                breakpoint()
             if (
                 self.hash_node(node) in self.processed_hashes
                 and id(node) not in to_process
@@ -165,10 +168,10 @@ class FakeTensorUpdater:
                 continue
             with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
-            if "val" in node.meta and is_fake_tensor_same(
-                new_fake_tensor, node.meta["val"]
-            ):
-                continue
+            # if "val" in node.meta and is_fake_tensor_same(
+            #     new_fake_tensor, node.meta["val"]
+            # ):
+            #     continue
 
             rebind_unbacked(V.fake_mode.shape_env, node, new_fake_tensor)
 
