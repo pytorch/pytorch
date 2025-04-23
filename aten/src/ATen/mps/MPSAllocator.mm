@@ -858,15 +858,15 @@ struct MPSHostAllocator final : public at::HostAllocator {
   }
 
   at::HostStats get_stats() override {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSAllocator does not support get_stats() yet.");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSHostAllocator does not support get_stats() yet.");
   }
 
   void reset_accumulated_stats() override {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSAllocator does not support reset_accumulated_stats() yet.");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSHostAllocator does not support reset_accumulated_stats() yet.");
   }
 
   void reset_peak_stats() override {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSAllocator does not support reset_peak_stats() yet.");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSHostAllocator does not support reset_peak_stats() yet.");
   }
 
  private:
