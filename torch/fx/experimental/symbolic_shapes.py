@@ -1218,7 +1218,7 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
 
     shape_env = getattr(a.node, "shape_env", None)
 
-    # XLA symnode path.
+    # xla symnode path.
     if shape_env is None:
         return guard_bool(a)
 
@@ -1291,7 +1291,7 @@ def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     expr = x.node.expr
 
     try:
-        # Shape env access is inside the try on purpose. XLA symnode does not
+        # Shape env access is inside the try on purpose. xla symnode does not
         # have it on its attributes.
         shape_env = x.node.shape_env
         simplified = shape_env._maybe_evaluate_static(expr)
