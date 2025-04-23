@@ -424,10 +424,6 @@ def node_summary(snode):
         detail = ""
         if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
             detail = f" ({snode.node.python_kernel_name})"
-        # out_tensor_info = ""
-        # layout = snode.node.get_output_spec()
-        # if isinstance(layout, ir.Layout):
-        #     out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
         layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
         out_tensor_info = ",".join(
             [
