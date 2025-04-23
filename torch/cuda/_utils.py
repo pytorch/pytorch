@@ -103,10 +103,10 @@ def _get_nvrtc_library() -> ctypes.CDLL:
 def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: str | None = None,
+    compute_capability: Optional[str] = None,
     header_code: str = "",
-    cuda_include_dirs: list[str] | None = None,
-    nvcc_options: list[str] | None = None,
+    cuda_include_dirs: Optional[list] = None,
+    nvcc_options: Optional[list] = None,
 ) -> bytes:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
@@ -266,9 +266,9 @@ class _CudaKernel:
         self,
         grid: tuple[int, int, int] = (1, 1, 1),
         block: tuple[int, int, int] = (1, 1, 1),
-        args: list | None = None,
+        args: Optional[list] = None,
         shared_mem: int = 0,
-        stream: Any | None = None,
+        stream: Optional[Any] = None,
     ) -> None:
         """
         Call the compiled CUDA kernel
