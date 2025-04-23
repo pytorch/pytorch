@@ -601,7 +601,7 @@ def decomposeK(a, b, kPartitions):
     b_reshaped = b.reshape(B, kPartitions, n)
     result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
     reduced_buf = torch.sum(result, 0)
-    return (reduced_buf.to(a.dtype),)
+    return reduced_buf.to(a.dtype)
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)

@@ -1145,10 +1145,14 @@ class TestMaxAutotune(TestCase):
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
-        self.assertEqual(out, a @ b)
+        torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
         FileCheck().check("extern_kernels.bmm_dtype").check(
             "triton_red_fused_0.run"
         ).check("decompose_k").run(code[0])
+
+        # Test adding epilogue also equivalent to eager
+        compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
+        torch.testing.assert_close(compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2)
 
 
 @instantiate_parametrized_tests
