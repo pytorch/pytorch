@@ -2539,7 +2539,10 @@ class CommonTemplate:
             self.common(fn, (i,), check_lowp=False)
 
     def test_sum_dtype(self):
-        sum_dtype = torch.double if self.device != "mps" else torch.bfloat
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("bfloat unsupported on MacOS-13")
+
+        sum_dtype = torch.double if self.device != "mps" else torch.bfloat16
         def fn(x):
             return x * x.sum(-1, dtype=sum_dtype) + x.sum(dtype=sum_dtype)
 
