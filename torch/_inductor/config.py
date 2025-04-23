@@ -294,9 +294,7 @@ dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1")
 # but the mul gets fused with other pointwise ops instead.
 force_fuse_int_mm_with_mul = False
 
-# for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
-# enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
-# Autotune will compare perf with normal cast->then->mm option
+# DEPRECATED. This setting is ignored.
 use_mixed_mm = True
 
 # enable runtime numeric check for pre/post grad fx passes
@@ -311,19 +309,7 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# mixed_mm_choice can be used to control the behaviour for pattern torch.mm(a, b.to(dtype)) with cuda tensors.
-# The fallback aten implementation is normal cast->then->mm option.
-# If mixed_mm_choice is "default": this flag will be ignored.
-# If mixed_mm_choice is "triton":
-# - Always use torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
-# - Autotune will not compare with fallback.
-# If mixed_mm_choice is "aten": always use the fallback aten implementation.
-# If mixed_mm_choice is "heuristic":
-# - Enables the heuristic.
-# - If the heuristic decides to add a config, it will add the config as the first choice.
-# - If autotune is disabled, this config will always be chosen.
-# - If autotune is enabled, it will also compare with fallback aten implementation and fused kernel.
-# The use_mixed_mm flag will be ignored if mixed_mm_choice != "default".
+# DEPRECATED. This setting is ignored.
 mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
