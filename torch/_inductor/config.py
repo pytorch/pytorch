@@ -39,14 +39,6 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
     )
 
 
-def static_cuda_launcher_default() -> bool:
-    result = get_tristate_env(
-        "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", True if not is_fbcode() else False
-    )
-    assert result is not None
-    return result
-
-
 def prologue_fusion_enabled() -> bool:
     ENABLE_PROLOGUE_FUSION_VERSION = 0
 
@@ -756,7 +748,9 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
-use_static_cuda_launcher: bool = static_cuda_launcher_default()
+use_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
 
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
