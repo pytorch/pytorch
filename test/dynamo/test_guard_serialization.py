@@ -139,3 +139,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
