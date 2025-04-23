@@ -1227,7 +1227,7 @@ utils_device.CURRENT_DEVICE == None""".split(
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
-            b = x.item() 
+            b = x.item()
             torch._check_is_size(b)
             torch._check(b < y.shape[0])
             return y[:b]
