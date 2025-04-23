@@ -24,12 +24,13 @@ from typing import Optional, TYPE_CHECKING
 import torch
 import torch.fx
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
+    cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
@@ -153,10 +154,28 @@ class BaseListVariable(VariableTracker):
         elif name in cmp_name_to_op_mapping:
             left = self
             right = args[0]
-            if not isinstance(left, BaseListVariable) and not isinstance(
+            # TODO this type check logic mirrors the following
+            # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/object.c#L991-L1007
+            # But we should probably move it up the stack to so that we don't
+            # need to duplicate it for different VTs.
+            if not isinstance(left, BaseListVariable) or not isinstance(
                 right, BaseListVariable
             ):
-                return variables.ConstantVariable.create(NotImplemented)
+                if name == "__eq__":
+                    return variables.BuiltinVariable(operator.is_).call_function(
+                        tx, (left, right), {}
+                    )
+                elif name == "__ne__":
+                    return variables.BuiltinVariable(operator.is_not).call_function(
+                        tx, (left, right), {}
+                    )
+                else:
+                    op_str = cmp_name_to_op_str_mapping[name]
+                    left_ty = left.python_type_name()
+                    right_ty = right.python_type_name()
+                    msg = f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
+                    raise_observed_exception(TypeError, tx, args=[msg])
+
             return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
                 tx,
                 [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
@@ -164,12 +183,6 @@ class BaseListVariable(VariableTracker):
             )
 
         return super().call_method(tx, name, args, kwargs)
-
-    @staticmethod
-    def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
-            tx, [variables.BuiltinVariable(op), left, right], {}
-        )
 
 
 class RangeVariable(BaseListVariable):
@@ -360,9 +373,9 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             (arg,) = args
-            seq = arg.force_unpack_var_sequence(tx)
-            tx.output.side_effects.mutation(self)
-            self.items.extend(seq)
+            arg.force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "append", [item], {})
+            )
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             assert not kwargs
@@ -472,7 +485,28 @@ class ListVariable(CommonListMethodsVariable):
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
             if not all(k.is_python_constant() for k in keys):
-                unimplemented("sort with non-constant keys")
+                first_non_constant_key = None
+                for k in keys:
+                    if not k.is_python_constant():
+                        first_non_constant_key = k
+                assert first_non_constant_key is not None
+
+                try:
+                    python_type = first_non_constant_key.python_type()
+                except NotImplementedError:
+                    python_type = "unknown"
+
+                unimplemented_v2(
+                    gb_type="sort with non-constant keys",
+                    context=str(first_non_constant_key),
+                    explanation=(
+                        f"Cannot perform sort with non-constant key. "
+                        f"First non-constant key type: {python_type}. "
+                        f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
+                        f"sort ints."
+                    ),
+                    hints=["Use something else as the key."],
+                )
 
             tx.output.side_effects.mutation(self)
             sorted_items_with_keys = sorted(
@@ -524,9 +558,9 @@ class DequeVariable(CommonListMethodsVariable):
     def __init__(self, items, maxlen=None, **kwargs) -> None:
         if maxlen is None:
             maxlen = ConstantVariable.create(None)
-        assert (
-            maxlen.is_python_constant()
-        ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
+        assert maxlen.is_python_constant(), (
+            f"maxlen must be a constant, got: {maxlen.debug_repr()}"
+        )
         self.maxlen = maxlen
         items = list(items)
         if self.maxlen.as_python_constant() is not None:
@@ -550,7 +584,6 @@ class DequeVariable(CommonListMethodsVariable):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert "deque" not in codegen.tx.f_globals
         codegen.add_push_null(
             lambda: codegen.append_output(
                 codegen.create_load_python_module(collections.deque)
@@ -602,9 +635,11 @@ class DequeVariable(CommonListMethodsVariable):
         ):
             assert len(args) == 1
             assert not kwargs
-            prefix = args[0].force_unpack_var_sequence(tx)
-            tx.output.side_effects.mutation(self)
-            self.items[:] = [*reversed(prefix), *self.items]
+            # NOTE this is inefficient, but the alternative is to represent self.items
+            # as a deque, which is a more intrusive change.
+            args[0].force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "appendleft", [item], {})
+            )
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "popleft" and self.is_mutable():
@@ -972,7 +1007,15 @@ class SliceVariable(VariableTracker):
         if isinstance(start, variables.TensorVariable) or isinstance(
             stop, variables.TensorVariable
         ):
-            unimplemented("Dynamic slicing on data-dependent value is not supported")
+            unimplemented_v2(
+                gb_type="Dynamic slicing with Tensor arguments",
+                context=f"SliceVariable start: {start}, stop: {stop}, step: {step}",
+                explanation="Creating slices with Tensor arguments is not supported. "
+                "e.g. `l[:x]`, where `x` is a 1-element tensor.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
         self.items = (start, stop, step)
 
         super().__init__(**kwargs)

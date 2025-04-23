@@ -40,7 +40,6 @@ import torch
 import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
-from torch._C import default_generator
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -111,11 +110,13 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
 
     # TODO: factor this into a random utility
     if device_type == "cpu":
-        generator = default_generator
+        generator = torch._C.default_generator
     elif device_type == "cuda":
-        import torch.cuda
-
         generator = torch.cuda.default_generators[storage.device.index]
+    elif device_type == "mps":
+        generator = torch.mps._get_default_mps_generator()
+    elif device_type == "xpu":
+        generator = torch.xpu.default_generators[storage.device.index]
     else:
         raise AssertionError(f"unhandled device type {device_type}")
     state = generator.get_state()

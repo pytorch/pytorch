@@ -69,6 +69,7 @@ Communication collectives
     comm.broadcast
     comm.broadcast_coalesced
     comm.reduce_add
+    comm.reduce_add_coalesced
     comm.scatter
     comm.gather
 
@@ -107,6 +108,7 @@ Memory management
      list_gpu_processes
      mem_get_info
      memory_stats
+     host_memory_stats
      memory_summary
      memory_snapshot
      memory_allocated
@@ -119,6 +121,7 @@ Memory management
      max_memory_cached
      reset_max_memory_cached
      reset_peak_memory_stats
+     reset_peak_host_memory_stats
      caching_allocator_alloc
      caching_allocator_delete
      get_allocator_backend
