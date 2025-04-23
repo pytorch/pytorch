@@ -698,7 +698,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
                         make_fx_graph=make_fx(
                             functools.partial(decomposeK, kPartitions=kPart),
                             decompositions,
-                            tracing_mode="real",
                         ),
                     )
 
