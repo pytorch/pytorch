@@ -227,8 +227,8 @@ def standalone_compile(
         # compile_fx can mutate gm
         gm = copy.deepcopy(gm)
         compiled_fn = compile_fx(
-                gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
-            )
+            gm, example_inputs, ignore_shape_env=ignore_shape_env, **options
+        )
         assert callable(compiled_fn)
 
         artifacts = torch.compiler.save_cache_artifacts()
