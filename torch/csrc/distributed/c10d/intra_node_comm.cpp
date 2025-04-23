@@ -7,9 +7,6 @@
 
 namespace c10d::intra_node_comm {
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-bool isIntraNodeCommSupported();
-
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
 // Forces detectedTopology() to return Topology::FULLY_CONNECTED, so
@@ -61,7 +58,7 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   }
   LOG(INFO) << "IntraNodeComm: Topology::UNKNOWN";
   return Topology::UNKNOWN;
-};
+}
 
 IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,

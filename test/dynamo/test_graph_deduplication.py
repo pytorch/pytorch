@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa: B950
 import torch
 import torch.fx
 from torch._dynamo.graph_deduplication import _flatten_args_kwargs
+from torch._dynamo.graph_utils import _detect_cycles
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 
@@ -58,18 +60,15 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         l_x_ = L_x_
         l_y_ = L_y_
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, \
-'subgraph_0', (l_x_, l_y_));  invoke_subgraph = None
 
         o1: "f32[10, 20]" = torch.sin(l_y_)
 
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, \
-'subgraph_0', (l_x_, o1));  o1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_));  invoke_subgraph = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, o1));  o1 = None
 
         getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_0, \
-'subgraph_0', (l_x_, l_y_));  subgraph_0 = l_x_ = l_y_ = None
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_));  subgraph_0 = l_x_ = l_y_ = None
 
         getitem_2: "f32[]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
 
@@ -98,24 +97,24 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[10, 10]", primals_2: "f32[10, 20]"):
         sin: "f32[10, 20]" = torch.ops.aten.sin.default(primals_2)
 
-        repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
-'___forward_subgraph_0', (primals_1, sin));  repeated_subgraph0_1 = None
-        getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        repeated_subgraph0_2 = self.repeated_subgraph0
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_2, \
-'___forward_subgraph_0', (primals_1, primals_2));  repeated_subgraph0_2 = None
-        getitem_2: "f32[]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        ___forward_subgraph_0_post_graph = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph, '___forward_subgraph_0_post_graph', (primals_1, sin));  ___forward_subgraph_0_post_graph = sin = None
+        getitem_1: "f32[]" = invoke_subgraph_5[0];  invoke_subgraph_5 = None
+        ___forward_subgraph_0_post_graph_1 = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph_1, '___forward_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_subgraph_0_post_graph_1 = primals_1 = None
+        getitem_2: "f32[]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
 
         mul: "f32[]" = torch.ops.aten.mul.Tensor(getitem_2, getitem_2)
 
         mul_1: "f32[]" = torch.ops.aten.mul.Tensor(getitem_1, mul);  mul = None
-        return (mul_1, primals_1, primals_2, sin, getitem_1, getitem_2)
+        return (mul_1, primals_2, getitem_1, getitem_2)
 
-    class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
-            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(arg1_1, 2);  arg1_1 = None
+    class ___forward_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[10, 20]"):
+            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 1);  primals_0 = None
+
+            add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(primals_1, 2);  primals_1 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(add_1);  add_1 = None
             add_2: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
@@ -188,29 +187,29 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[10, 10]"):
         add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_1, 2);  primals_1 = None
 
-        repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, \
-'___forward_subgraph_0', (add,));  repeated_subgraph0 = None
-        getitem: "f32[10, 10]" = invoke_subgraph[0];  invoke_subgraph = None
+        ___forward_subgraph_0_post_graph = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph, '___forward_subgraph_0_post_graph', (add,));  ___forward_subgraph_0_post_graph = add = None
+        getitem: "f32[10, 10]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
 
         cos: "f32[10, 10]" = torch.ops.aten.cos.default(getitem)
 
-        repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
-'___forward_subgraph_0', (cos,));  repeated_subgraph0_1 = None
-        getitem_1: "f32[10, 10]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        ___forward_subgraph_0_post_graph_1 = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph_1, '___forward_subgraph_0_post_graph', (cos,));  ___forward_subgraph_0_post_graph_1 = cos = None
+        getitem_1: "f32[10, 10]" = invoke_subgraph_5[0];  invoke_subgraph_5 = None
 
         sin: "f32[10, 10]" = torch.ops.aten.sin.default(getitem_1)
         cos_1: "f32[10, 10]" = torch.ops.aten.cos.default(getitem_1);  getitem_1 = None
 
         sin_1: "f32[10, 10]" = torch.ops.aten.sin.default(getitem);  getitem = None
         neg: "f32[10, 10]" = torch.ops.aten.neg.default(sin_1);  sin_1 = None
-        return (sin, add, cos, cos_1, neg)
+        return (sin, cos_1, neg)
 
-    class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[10, 10]"):
-            mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(arg0_1, 7);  arg0_1 = None
+    class ___forward_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[10, 10]"):
+            mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(primals_0, 7);  primals_0 = None
+
             add: "f32[10, 10]" = torch.ops.aten.add.Tensor(mul, 1);  mul = None
+
             add_1: "f32[10, 10]" = torch.ops.aten.add.Tensor(add, 2);  add = None
             return (add_1,)
 """,
@@ -268,31 +267,27 @@ class GraphModule(torch.nn.Module):
 
         y0: "f32[10, 20]" = torch.sin(l_y_)
 
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', \
-(x0, y0));  invoke_subgraph_3 = None
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', \
-(l_x_, l_y_))
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_))
 
         getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
 
         o1: "f32[]" = torch.sin(getitem);  getitem = None
 
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', \
-(l_x_, y0))
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, y0))
 
         getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
-        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', \
-(x0, y0));  subgraph_1 = x0 = y0 = None
+        mul_2: "f32[]" = o1 * getitem_1;  o1 = getitem_1 = None
 
-        getitem_4: "f32[10, 10]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
-
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', \
-(l_x_, l_y_));  subgraph_0 = l_x_ = l_y_ = None
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', (l_x_, l_y_));  subgraph_0 = l_x_ = l_y_ = None
 
         getitem_2: "f32[]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
 
-        mul_2: "f32[]" = o1 * getitem_1;  o1 = getitem_1 = None
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', (x0, y0));  invoke_subgraph_3 = None
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', (x0, y0));  subgraph_1 = x0 = y0 = None
+
+        getitem_4: "f32[10, 10]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+
         mul_3: "f32[10, 10]" = mul_2 * getitem_4;  mul_2 = getitem_4 = None
         add_13: "f32[10, 10]" = mul_3 + getitem_2;  mul_3 = getitem_2 = None
         return (add_13,)
@@ -329,48 +324,53 @@ class GraphModule(torch.nn.Module):
 
         sin: "f32[10, 20]" = torch.ops.aten.sin.default(primals_2)
 
-        repeated_subgraph1 = self.repeated_subgraph1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, \
-'___forward_subgraph_0', (primals_1, primals_2));  repeated_subgraph1 = None
-        getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        ___forward_subgraph_0_post_graph = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_9 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph, '___forward_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_subgraph_0_post_graph = None
+        getitem: "f32[]" = invoke_subgraph_9[0];  invoke_subgraph_9 = None
 
-        sin_1: "f32[]" = torch.ops.aten.sin.default(getitem_1)
+        sin_1: "f32[]" = torch.ops.aten.sin.default(getitem)
 
-        repeated_subgraph1_1 = self.repeated_subgraph1
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1_1, \
-'___forward_subgraph_0', (primals_1, sin));  repeated_subgraph1_1 = None
-        getitem_2: "f32[]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
-        repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
-'___forward_subgraph_1', (cos, sin));  repeated_subgraph0_1 = None
-        getitem_3: "f32[10, 10]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
-        repeated_subgraph1_2 = self.repeated_subgraph1
-        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1_2, \
-'___forward_subgraph_0', (primals_1, primals_2));  repeated_subgraph1_2 = None
-        getitem_4: "f32[]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+        ___forward_subgraph_0_post_graph_1 = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_10 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph_1, '___forward_subgraph_0_post_graph', (primals_1, sin));  ___forward_subgraph_0_post_graph_1 = None
+        getitem_1: "f32[]" = invoke_subgraph_10[0];  invoke_subgraph_10 = None
 
-        mul: "f32[]" = torch.ops.aten.mul.Tensor(sin_1, getitem_2);  sin_1 = None
-        mul_1: "f32[10, 10]" = torch.ops.aten.mul.Tensor(mul, getitem_3);  mul = None
-        add: "f32[10, 10]" = torch.ops.aten.add.Tensor(mul_1, getitem_4);  mul_1 = getitem_4 = None
-        return (add, primals_1, primals_2, cos, sin, getitem_1, getitem_2, getitem_3)
+        mul: "f32[]" = torch.ops.aten.mul.Tensor(sin_1, getitem_1);  sin_1 = None
 
-    class repeated_subgraph1(torch.nn.Module):
-        def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
-            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(arg1_1, 2);  arg1_1 = None
+        ___forward_subgraph_0_post_graph_2 = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_11 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph_2, '___forward_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_subgraph_0_post_graph_2 = None
+        getitem_2: "f32[]" = invoke_subgraph_11[0];  invoke_subgraph_11 = None
+        ___forward_subgraph_1_post_graph = self.___forward_subgraph_1_post_graph
+        invoke_subgraph_12 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_1_post_graph, '___forward_subgraph_1_post_graph', (cos, sin));  ___forward_subgraph_1_post_graph = cos = sin = None
+        getitem_19: "f32[]" = invoke_subgraph_12[3]
+        getitem_18: "f32[10, 20]" = invoke_subgraph_12[2]
+        getitem_17: "f32[10, 10]" = invoke_subgraph_12[1]
+        getitem_4: "f32[10, 10]" = invoke_subgraph_12[0];  invoke_subgraph_12 = None
+
+        mul_1: "f32[10, 10]" = torch.ops.aten.mul.Tensor(mul, getitem_4);  mul = None
+        add: "f32[10, 10]" = torch.ops.aten.add.Tensor(mul_1, getitem_2);  mul_1 = getitem_2 = None
+        return (add, primals_1, primals_2, getitem, getitem_1, getitem_19, getitem_18, getitem_17, getitem_4)
+
+    class ___forward_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[10, 20]"):
+            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 1);  primals_0 = None
+
+            add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(primals_1, 2);  primals_1 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(add_1);  add_1 = None
             add_2: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
             return (add_2,)
 
-    class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
-            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(arg0_1, 2);  arg0_1 = None
-            add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(arg1_1, 3);  arg1_1 = None
+    class ___forward_subgraph_1_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[10, 20]"):
+            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 2)
+
+            add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(primals_1, 3)
+
             cos: "f32[10, 20]" = torch.ops.aten.cos.default(add_1);  add_1 = None
             sum_1: "f32[]" = torch.ops.aten.sum.default(cos);  cos = None
-            mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(add, sum_1);  add = sum_1 = None
-            return (mul,)
+            mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(add, sum_1);  add = None
+            return (mul, primals_0, primals_1, sum_1)
 """,
         )
 
@@ -408,26 +408,25 @@ class GraphModule(torch.nn.Module):
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
 
-        repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, \
-'___forward_subgraph_0', (primals_1, sum_1));  repeated_subgraph0 = None
-        getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
+        ___forward_subgraph_0_post_graph = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph, '___forward_subgraph_0_post_graph', (primals_1, sum_1));  ___forward_subgraph_0_post_graph = sum_1 = None
+        getitem: "f32[]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
 
         add_1: "f32[]" = torch.ops.aten.add.Tensor(getitem, 2);  getitem = None
 
         sum_2: "f32[]" = torch.ops.aten.sum.default(add_1);  add_1 = None
 
-        repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
-'___forward_subgraph_0', (primals_1, sum_2));  repeated_subgraph0_1 = None
-        getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_1, primals_1, sum_1, sum_2)
+        ___forward_subgraph_0_post_graph_1 = self.___forward_subgraph_0_post_graph
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(___forward_subgraph_0_post_graph_1, '___forward_subgraph_0_post_graph', (primals_1, sum_2));  ___forward_subgraph_0_post_graph_1 = primals_1 = sum_2 = None
+        getitem_1: "f32[]" = invoke_subgraph_5[0];  invoke_subgraph_5 = None
+        return (getitem_1,)
 
-    class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[]"):
-            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    class ___forward_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[10, 10]", primals_1: "f32[]"):
+            add: "f32[10, 10]" = torch.ops.aten.add.Tensor(primals_0, 1);  primals_0 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = None
-            add_1: "f32[]" = torch.ops.aten.add.Tensor(sum_1, arg1_1);  sum_1 = arg1_1 = None
+            add_1: "f32[]" = torch.ops.aten.add.Tensor(sum_1, primals_1);  sum_1 = primals_1 = None
             return (add_1,)
 """,
         )
@@ -481,12 +480,7 @@ class <lambda>(torch.nn.Module):
 
         add_3: "f32[10, 20]" = torch.ops.aten.add.Tensor(arg1_1, add_1);  add_1 = None
 
-        repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, \
-'subgraph_0', (add_2, add_3));  repeated_subgraph0 = None
-        getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
-
-        clone: "f32[10, 10]" = torch.ops.aten.clone.default(add_2);  add_2 = None
+        clone: "f32[10, 10]" = torch.ops.aten.clone.default(add_2)
         clone_1: "f32[10, 20]" = torch.ops.aten.clone.default(add_3)
 
         add_4: "f32[10, 10]" = torch.ops.aten.add.Tensor(clone, 1)
@@ -497,9 +491,11 @@ class <lambda>(torch.nn.Module):
 
         add_7: "f32[10, 20]" = torch.ops.aten.add.Tensor(clone_1, add_5);  clone_1 = add_5 = None
 
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', (add_2, add_3));  repeated_subgraph0 = add_2 = None
+        getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
         repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
-'subgraph_0', (add_6, add_7));  repeated_subgraph0_1 = add_6 = add_7 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', (add_6, add_7));  repeated_subgraph0_1 = add_6 = add_7 = None
         getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
         add_8: "f32[]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
@@ -557,18 +553,19 @@ class <lambda>(torch.nn.Module):
 
         view_3: "f32[10, 10]" = torch.ops.aten.view.default(view_2, [10, 10]);  view_2 = None
 
-        repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, \
-'subgraph_0', (arg0_1, arg1_1));  repeated_subgraph0 = None
-        getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
-        repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
-'subgraph_0', (arg0_1, arg1_1));  repeated_subgraph0_1 = arg0_1 = arg1_1 = None
-        getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-
         add: "f32[10, 10]" = torch.ops.aten.add.Tensor(view_1, view_3);  view_1 = view_3 = None
+
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', (arg0_1, arg1_1));  repeated_subgraph0 = None
+        getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
+
         sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
         add_1: "f32[10, 10]" = torch.ops.aten.add.Tensor(add, sum_1);  add = sum_1 = None
+
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', (arg0_1, arg1_1));  repeated_subgraph0_1 = arg0_1 = arg1_1 = None
+        getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
         sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
         add_2: "f32[10, 10]" = torch.ops.aten.add.Tensor(add_1, sum_2);  add_1 = sum_2 = None
         return (add_2,)
@@ -576,7 +573,9 @@ class <lambda>(torch.nn.Module):
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
             mul: "f32[10, 10]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+
             mul_1: "f32[10, 20]" = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+
             sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
             sum_2: "f32[]" = torch.ops.aten.sum.default(mul_1);  mul_1 = None
             add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
@@ -589,6 +588,76 @@ class <lambda>(torch.nn.Module):
         out = _flatten_args_kwargs(tree)
         self.assertExpectedInline(
             str(out), """[3, 'x', 1, 2, 3, 1, 4, 5, 6, 3, 4, 5]"""
+        )
+
+    def test_cycle_detection_no_cycle(self):
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        mod = fw_graphs[0]
+        self.assertExpectedInline(_detect_cycles(mod.graph), """no cycle detected""")
+
+    def test_cycle_detection_simple(self):
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        mod = fw_graphs[0]
+        add_node = next(n for n in mod.graph.nodes if n.name == "add")
+        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
+        args = add_node.args
+        add_node.args = (args[0], add_2)
+        self.assertExpectedInline(
+            _detect_cycles(mod.graph),
+            """cycle detected in path: deque([arg0_1, add, sum_1, add_2, add])""",
+        )
+
+    def test_cycle_detection_complex(self):
+        def inner_fn(x, y):
+            x0 = x.view(x.size())
+            return x0.view(x.size())
+
+        def inner_fn2(x, y):
+            x = x * 2
+            y = y * 2
+            return x.sum() + y.sum()
+
+        def fn(x, y):
+            o0 = inner_fn(x, y)
+            o1 = inner_fn(x, y)
+            o2 = inner_fn2(x, y)
+            o3 = inner_fn2(x, y)
+            return o0 + o1 + o2.sum() + o3.sum()
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+        x_clone = x.clone()
+        y_clone = y.clone()
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x_clone, y_clone)
+        mod = fw_graphs[0]
+        invoke_subgraph_node = next(
+            n for n in mod.graph.nodes if n.name == "invoke_subgraph"
+        )
+        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
+        args = invoke_subgraph_node.args
+        invoke_subgraph_node.args = (add_2, args[1])
+        self.assertExpectedInline(
+            _detect_cycles(mod.graph),
+            """cycle detected in path: deque([arg0_1, invoke_subgraph_1, getitem_1, sum_2, add_2, invoke_subgraph, getitem, sum_1, add_1, add_2])""",
         )
 
 

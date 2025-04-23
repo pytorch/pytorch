@@ -69,7 +69,12 @@ class AotAutograd:
         def wrap_bw_compiler(bw_compiler_fn):
             def _wrapped_bw_compiler(*args, **kwargs):
                 # stop TorchDynamo from trying to compile our generated backwards pass
-                return disable(disable(bw_compiler_fn)(*args, **kwargs))
+                return disable(
+                    disable(
+                        bw_compiler_fn, reason="do not trace backward compiler function"
+                    )(*args, **kwargs),
+                    reason="do not trace generated backwards pass",
+                )
 
             return _wrapped_bw_compiler
 
@@ -100,7 +105,7 @@ class AotAutograd:
             with enable_aot_logging(), patch_config:
                 cg = aot_module_simplified(gm, example_inputs, **self.kwargs)
                 counters["aot_autograd"]["ok"] += 1
-                return disable(cg)
+                return disable(cg, reason="do not trace AOT-compiled graph")
         except TensorifyScalarRestartAnalysis:
             raise
         except Exception:
