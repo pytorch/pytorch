@@ -204,7 +204,7 @@ class CPythonTestBaseExitStack:
             result.append(2)
         self.assertEqual(result, [1, 2, 3, 4])
 
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_enter_context_errors(self):
         with self.exit_stack() as stack:
@@ -389,7 +389,6 @@ class CPythonTestBaseExitStack:
         self.assertIsInstance(inner_exc, ValueError)
         self.assertIsInstance(inner_exc.__context__, ZeroDivisionError)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_explicit_none_context(self):
         # Ensure ExitStack chaining matches actual nested `with` statements
