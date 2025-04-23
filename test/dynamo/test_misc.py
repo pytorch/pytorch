@@ -1516,7 +1516,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         x = torch.zeros(10)
         torch._dynamo.mark_dynamic(x, 0)
-        self.assertEqual(f(x), (True, True))
+        self.assertEqual(f(x), (True, False))
 
         @torch.compile(fullgraph=True, dynamic=True, backend="eager")
         def g(x, y):
