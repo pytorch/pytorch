@@ -22,7 +22,9 @@ None values for efficiency and code reuse.
 
 import collections
 import functools
+import inspect
 import types
+from collections.abc import Hashable as py_Hashable
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -53,6 +55,10 @@ if TYPE_CHECKING:
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
+def was_instancecheck_override(obj):
+    return type(obj).__dict__.get("__instancecheck__", False)
+
+
 def is_hashable(x):
     # NB - performing isinstance check on a LazVT realizes the VT, accidentally
     # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
@@ -72,6 +78,13 @@ def is_hashable(x):
         return x.as_proxy().node.meta.get("example_value") is not None
     elif isinstance(x, variables.TupleVariable):
         return all(is_hashable(e) for e in x.items)
+    elif (
+        isinstance(x, variables.UserDefinedObjectVariable)
+        and not was_instancecheck_override(x.value)
+        and inspect.getattr_static(x.value, "__hash__") is int.__hash__
+        and isinstance(x.value, int)
+    ):
+        return isinstance(x.value, py_Hashable)
     else:
         return isinstance(
             x,
@@ -80,7 +93,7 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
-                variables.user_defined.UserDefinedClassVariable,
+                variables.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
                 variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
@@ -140,6 +153,11 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
+            elif isinstance(self.vt, variables.UserDefinedObjectVariable):
+                # The re module in Python 3.13+ has a dictionary (_cache2) with
+                # an object as key (`class _ZeroSentinel(int): ...`):
+                # python test/dynamo/test_unittest.py CPythonTestLongMessage.test_baseAssertEqual
+                return self.vt.value
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -516,6 +534,23 @@ class ConstDictVariable(VariableTracker):
             self.items.pop(key)
             self.items[key] = val
             return ConstantVariable.create(None)
+        elif name == "__or__":
+            assert len(args) == 1
+            if not isinstance(args[0], ConstDictVariable):
+                raise TypeError(
+                    f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
+                )
+
+            self.install_dict_keys_match_guard()
+            new_dict_vt = self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
+
+            # NB - Guard on all the keys of the other dict to ensure
+            # correctness.
+            args[0].install_dict_keys_match_guard()
+            new_dict_vt.items.update(args[0].items)
+            return new_dict_vt
         else:
             return super().call_method(tx, name, args, kwargs)
 
