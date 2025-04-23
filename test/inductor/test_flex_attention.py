@@ -96,7 +96,7 @@ def temp_float32_matmul_precision(precision: str):
 
 def skip_on_cpu(test_func):
     """Decorator to skip tests that are not supported on CPU."""
-    decorated_func = skipCPUIf(True, "Not supported on CUDA")(test_func)
+    decorated_func = skipCPUIf(True, "Not supported on CPU")(test_func)
     return decorated_func
 
 
