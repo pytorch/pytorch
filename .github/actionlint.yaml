@@ -55,6 +55,8 @@ self-hosted-runner:
     - linux.rocm.gpu.mi300.4
     - linux.rocm.gpu.mi300.2.test
     - linux.rocm.gpu.mi300.4.test
+    - linux.rocm.gpu.mi300.2.test-2
+    - linux.rocm.gpu.mi300.4.test-2
     - rocm-docker
     # Repo-specific Apple hosted  runners
     - macos-m1-ultra
