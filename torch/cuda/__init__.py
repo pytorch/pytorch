@@ -11,7 +11,6 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-import ctypes
 import importlib
 import os
 import sys
@@ -62,6 +61,7 @@ try:
         if not _version.hip:
             import pynvml  # type: ignore[import]
         else:
+            import ctypes
             from pathlib import Path
 
             # In ROCm (at least up through 6.3.2) there're 2 copies of libamd_smi.so:
@@ -1738,6 +1738,8 @@ def _compile_kernel(
         >>> c = torch.empty_like(a)
         >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
     """
+    import ctypes
+
     from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
 
     # Compile the kernel to PTX

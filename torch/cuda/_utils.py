@@ -10,6 +10,7 @@ from torch._utils import _get_device_index as _torch_get_device_index
 
 
 def _get_nvrtc_version(cuda_version: int) -> str:
+    # TODO: Expose this from native code
     # Follows same logic as LazyNVRTC.cpp getLibVersion()
     major = cuda_version // 1000
     minor = (cuda_version // 10) % 10
@@ -40,16 +41,15 @@ def _get_cuda_library() -> ctypes.CDLL:
 
 # Helper: check CUDA errors
 def _check_cuda(result: int) -> None:
-    if result != 0:
-        err_str = ctypes.c_char_p()
-        libcuda = _get_cuda_library()  # Get reference to CUDA library
-        libcuda.cuGetErrorString(result, ctypes.byref(err_str))
-        error_message = (
-            err_str.value.decode()
-            if err_str.value is not None
-            else "Unknown CUDA error"
-        )
-        raise RuntimeError(f"CUDA error: {error_message}")
+    if result == 0:
+        return
+    err_str = ctypes.c_char_p()
+    libcuda = _get_cuda_library()  # Get reference to CUDA library
+    libcuda.cuGetErrorString(result, ctypes.byref(err_str))
+    error_message = (
+        err_str.value.decode() if err_str.value is not None else "Unknown CUDA error"
+    )
+    raise RuntimeError(f"CUDA error: {error_message}")
 
 
 def _get_nvrtc_library() -> ctypes.CDLL:
@@ -305,6 +305,7 @@ class _CudaKernel:
                 c_int = ctypes.c_int(arg)
                 # Store the C int for reference keeping, not in processed_args
                 c_args.append(ctypes.byref(c_int))
+            # TODO: Python floats are actually doubles
             elif isinstance(arg, float):
                 # Convert floats to C float
                 c_float = ctypes.c_float(arg)
@@ -376,20 +377,20 @@ def _cuda_load_module(
     with stream:
         _check_cuda(libcuda.cuModuleLoadData(ctypes.byref(module), ptx))
 
-    if kernel_names:
-        # Return specific kernels
-        kernels = {}
-        for name in kernel_names:
-            func = ctypes.c_void_p()
-            _check_cuda(
-                libcuda.cuModuleGetFunction(
-                    ctypes.byref(func), module, name.encode("utf-8")
-                )
-            )
-            kernels[name] = _CudaKernel(func, module)
-        return kernels
-    else:
+    if not kernel_names:
         return _CudaModule(module)
+
+    # Return specific kernels
+    kernels = {}
+    for name in kernel_names:
+        func = ctypes.c_void_p()
+        _check_cuda(
+            libcuda.cuModuleGetFunction(
+                ctypes.byref(func), module, name.encode("utf-8")
+            )
+        )
+        kernels[name] = _CudaKernel(func, module)
+    return kernels
 
 
 def _get_device_index(
