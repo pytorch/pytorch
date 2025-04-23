@@ -1127,13 +1127,14 @@ class TestMaxAutotune(TestCase):
             expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
-
+    
+    @parametrize("dynamic", (True, False))
     @config.patch(
         max_autotune=True,
-        # max_autotune_gemm_backends="TRITON",
-        # autotune_fallback_to_aten=False,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
     )
-    def test_max_autotune_decompose_k(self):
+    def test_max_autotune_decompose_k(self, dynamic):
         a = torch.randn(
             32, 32768, dtype=torch.float16, device="cuda", requires_grad=True
         )
@@ -1141,7 +1142,7 @@ class TestMaxAutotune(TestCase):
             32768, 32, dtype=torch.float16, device="cuda", requires_grad=True
         )
 
-        compiled_func = torch.compile(lambda a, b: a @ b)
+        compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
         self.assertEqual(out, a @ b)
