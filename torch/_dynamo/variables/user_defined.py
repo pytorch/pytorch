@@ -181,6 +181,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and issubclass(getattr(builtins, name), BaseException)
         ]
         return {
+            int.__new__,
             object.__new__,
             dict.__new__,
             tuple.__new__,

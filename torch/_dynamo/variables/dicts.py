@@ -253,6 +253,13 @@ class ConstDictVariable(VariableTracker):
     def __contains__(self, vt) -> bool:
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
+
+        # NaN values are not hashable in the traditional sense due to NaN != NaN
+        # Need to loop over all items to check for NaN values
+        # from ..utils import is_constant_nan
+        # if is_constant_nan(vt):
+        #     return any(is_constant_nan(key.vt) for key in self.items.keys())
+
         return (
             is_hashable(vt)
             and Hashable(vt) in self.items
