@@ -20,7 +20,7 @@ TEST(CachingHostAllocatorTest, testPinnedAliasSlice) {
       at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
   ASSERT_TRUE(pinned_tensor.is_pinned());
   ASSERT_TRUE(at::getHostAllocator(at::kXPU)->is_pinned(
-      pinned_tensor.data_ptr().get()));
+      pinned_tensor.data_ptr()));
   ASSERT_TRUE(at::getHostAllocator(at::kXPU)->record_event(
       pinned_tensor.data_ptr(),
       pinned_tensor.storage().data_ptr().get_context(),
