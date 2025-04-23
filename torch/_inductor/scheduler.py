@@ -4329,7 +4329,7 @@ class Scheduler:
 
             num_iters += 1
 
-        if num_iters >= len(nodes):
+        if num_iters > len(nodes):
             raise RuntimeError(
                 """
                 Failed to schedule, while loop ran too long when
