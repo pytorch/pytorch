@@ -215,11 +215,11 @@ std::string TensorCheck::check_verbose(
     // return fmt::format("tensor rank mismatch. expected {}, actual {}",
     // sizes_.size(), ndim);
     fail_reason << prefix
-                << "rank mismatch. expected " << sizes_.size() << ", actual "
+                << "rank mismatch. expected " << dim_ << ", actual "
                 << ndim << "; ";
   }
   const auto& sizes = v.sym_sizes();
-  for (auto i : c10::irange(ndim)) {
+  for (auto i : c10::irange(dim_)) {
     auto known_size = sizes_[i];
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
       fail_reason << prefix
@@ -231,7 +231,7 @@ std::string TensorCheck::check_verbose(
       !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
   if (supports_stride) {
     const auto& strides = v.sym_strides();
-    for (auto i : c10::irange(ndim)) {
+    for (auto i : c10::irange(dim_)) {
       auto known_stride = strides_[i];
       if (known_stride.has_value() && known_stride.value() != strides[i]) {
         fail_reason << prefix
