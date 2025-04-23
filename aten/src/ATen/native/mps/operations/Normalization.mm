@@ -885,9 +885,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
                                                   const std::optional<Tensor>& weight_opt,
                                                   const std::optional<Tensor>& bias_opt,
                                                   double eps) {
-  int64_t N = std::accumulate(
+  auto N = std::accumulate(
       normalized_shape.begin(), normalized_shape.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
-  Tensor out = at::empty_like(input, MemoryFormat::Contiguous);
+  auto out = at::empty_like(input, MemoryFormat::Contiguous);
   auto batch_dim = input.dim() - normalized_shape.size();
   IntArrayRef batch_shape = input.sizes().slice(0, batch_dim);
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -899,14 +899,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   auto M = M_N.first;
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
-  Tensor mean = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
-  Tensor rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
+  auto mean = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
+  auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
 
   auto input_shape = input.sizes();
   int axis_size = static_cast<int>(N);
   float epsilon_buf = static_cast<float>(eps);
   int use_weight_buf = weight.defined() ? 1 : 0;
   int use_bias_buf = bias.defined() ? 1 : 0;
+  int use_weight_and_bias_buf = use_weight_buf & use_bias_buf;
   const auto input_ndim = input.dim();
   const int normalized_ndim = normalized_shape.size();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -926,24 +927,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
       id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:layerNormKernel];
 
-      [computeEncoder setBuffer:mps::getMTLBufferStorage(*X) offset:0 atIndex:0];
-      [computeEncoder setBuffer:mps::getMTLBufferStorage(out) offset:0 atIndex:1];
-      [computeEncoder setBuffer:mps::getMTLBufferStorage(mean) offset:0 atIndex:2];
-      [computeEncoder setBuffer:mps::getMTLBufferStorage(rstd) offset:0 atIndex:3];
-      uint32_t axis_size_u = static_cast<uint32_t>(axis_size);
-      [computeEncoder setBytes:&axis_size_u length:sizeof(axis_size_u) atIndex:4];
-      [computeEncoder setBytes:&epsilon_buf length:sizeof(epsilon_buf) atIndex:5];
-      [computeEncoder setBytes:&use_weight_buf length:sizeof(use_weight_buf) atIndex:6];
-      [computeEncoder setBytes:&use_bias_buf length:sizeof(use_bias_buf) atIndex:7];
-      if (use_weight_buf) {
-        [computeEncoder setBuffer:mps::getMTLBufferStorage(*gamma) offset:0 atIndex:8];
-      } else {
-        [computeEncoder setBuffer:nil offset:0 atIndex:8];
-      }
-      if (use_bias_buf) {
-        [computeEncoder setBuffer:mps::getMTLBufferStorage(bias) offset:0 atIndex:9];
-      } else {
-        [computeEncoder setBuffer:nil offset:0 atIndex:9];
+      mps::mtl_setArgs(computeEncoder, *X, out, mean, rstd, axis_size, epsilon_buf, use_weight_buf, use_bias_buf);
+      if (use_weight_and_bias_buf) {
+        mps::mtl_setArgs<8>(computeEncoder, *gamma, bias);
+      } else if (use_weight_buf) {
+        mps::mtl_setArgs<8>(computeEncoder, *gamma);
+      } else if (use_bias_buf) {
+        mps::mtl_setArgs<9>(computeEncoder, bias);
       }
       MTLSize numThreads = MTLSizeMake(std::min((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
       MTLSize numThreadgroups = MTLSizeMake(M, 1, 1);
