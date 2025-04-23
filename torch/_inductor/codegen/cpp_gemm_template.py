@@ -1083,9 +1083,10 @@ class CppGemmTemplate(CppTemplate):
             BCompensate = None
             x_w_scale = None
             if use_int8_fast_epilogue_path:
-                x_scale = new_inputs[2]
-                x_zp = new_inputs[3]
-                w_scale = new_inputs[4]
+                # new_inputs has been reordered: [x, w, optional[bias], x_scale, x_zp, w_scale, w_zp]
+                x_scale = new_inputs[-4]
+                x_zp = new_inputs[-3]
+                w_scale = new_inputs[-2]
                 if isinstance(W, ir.IRNode):
                     BCompensate = V.graph.add_tensor_constant(
                         V.graph.constants[W.get_name() + "_BMatrixCompens"],
