@@ -289,9 +289,21 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
-// Used for handling syntacitc erros in input arguments.
-// They shuld turn into SytnaxError when the cross into Python
+// Used for handling syntacitc errors in input arguments.
+// They should turn into SytnaxError when the cross into Python
 class C10_API SyntaxError : public Error {
+  using Error::Error;
+};
+
+// Raised when accelerator assert is hit asynchronously.
+// They would turn into AssertionError when the cross into Python
+class C10_API DeviceAssertError : public Error {
+  using Error::Error;
+};
+
+// Raised when accelerator hits IMA
+// They would turn into MemoryError when the cross into Python
+class C10_API DeviceIllegalMemoryAccessError : public Error {
   using Error::Error;
 };
 
