@@ -1364,9 +1364,8 @@ static c10::IValue to_ivalue(
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
           to<AtenTensorHandle>(stable_ivalue));
-      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
-          ret_raiiath.get());
-      return (c10::IValue(arg));
+      return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
+        ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
       return c10::IValue(to<int64_t>(stable_ivalue));
@@ -1433,23 +1432,23 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
+    std::unique_ptr<StableIValue[]> ministack(new StableIValue[std::max(num_arguments, num_returns)]);
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
       const c10::TypePtr& arg_type = schema.arguments()[ministack_idx].type();
-      ministack[ministack_idx] = from_ivalue(arg_type, torch::jit::pop(stack));
+      ministack.get()[ministack_idx] = from_ivalue(arg_type, torch::jit::pop(stack));
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
-    fn_(ministack.data(), num_arguments, num_returns);
+    fn_(ministack.get(), num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
-      torch::jit::push(stack, to_ivalue(ret_type, ministack[idx]));
+      torch::jit::push(stack, to_ivalue(ret_type, ministack.get()[idx]));
     }
   }
 
