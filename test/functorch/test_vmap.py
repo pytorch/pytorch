@@ -4410,6 +4410,12 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
+                skip(
+                    "tril", device_type="mps"
+                ),  # we don't test error input on mps, so the xfail below doesn't work.
+                skip(
+                    "triu", device_type="mps"
+                ),  # we don't test error input on mps, so the xfail below doesn't work.
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
                 xfail("as_strided", "partial_views"),
@@ -4434,8 +4440,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("SortGenVmapAutogradFunction", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail("scatter_add", device_type="mps"),
-                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
-                xfail("scatter", device_type="mps"),
                 xfail("argsort", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail(
@@ -4469,15 +4473,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "eq", device_type="mps"
                 ),  # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, mps:0 and cpu!
                 xfail(
-                    "gather",
-                    device_type="mps",
-                ),
-                xfail(
                     "ge",
-                    device_type="mps",
-                ),
-                xfail(
-                    "gradient",
                     device_type="mps",
                 ),
                 xfail(
@@ -4586,14 +4582,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                     device_type="mps",
                 ),
                 xfail(
-                    "nn.functional.conv1d",
-                    device_type="mps",
-                ),
-                xfail(
-                    "nn.functional.conv2d",
-                    device_type="mps",
-                ),
-                xfail(
                     "nn.functional.elu",
                     device_type="mps",
                 ),
@@ -4620,10 +4608,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),
                 xfail(
                     "nn.functional.prelu",
-                    device_type="mps",
-                ),
-                xfail(
-                    "nn.functional.rms_norm",
                     device_type="mps",
                 ),
                 xfail(
@@ -4708,9 +4692,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # NotImplementedError: The operator 'aten::_upsample_nearest_exact3d.out'
                 # is not currently implemented for the MPS device.
                 xfail("nn.functional.interpolate", "nearest-exact", device_type="mps"),
-                xfail(
-                    "masked_fill", device_type="mps"
-                ),  # RuntimeError: repeat(): Not supported for complex yet!
                 xfail(
                     "chalf",
                     device_type="mps",
@@ -4895,8 +4876,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("SortGenVmapAutogradFunction", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail("scatter_add", device_type="mps"),
-                # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
-                xfail("scatter", device_type="mps"),
                 xfail("argsort", device_type="mps"),
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
                 xfail(
@@ -4930,15 +4909,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "eq", device_type="mps"
                 ),  # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, mps:0 and cpu!
                 xfail(
-                    "gather",
-                    device_type="mps",
-                ),
-                xfail(
                     "ge",
-                    device_type="mps",
-                ),
-                xfail(
-                    "gradient",
                     device_type="mps",
                 ),
                 xfail(
@@ -5044,14 +5015,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),
                 xfail(
                     "nn.functional.celu",
-                    device_type="mps",
-                ),
-                xfail(
-                    "nn.functional.conv1d",
-                    device_type="mps",
-                ),
-                xfail(
-                    "nn.functional.conv2d",
                     device_type="mps",
                 ),
                 xfail(
@@ -5641,6 +5604,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         test(self, op, tuple(inputs), in_dims=tuple(in_dims))
 
+    @skipIfMPS
     def test_torch_return_types_returns(self, device):
         t = torch.randn(3, 2, 2, device=device)
         self.assertTrue(
@@ -5777,6 +5741,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             skip("linalg.ldl_solve", ""),
         },
     )
+    @skipIfMPS
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             if sample.input.dim() != 2 or sample.input.shape[0] == 0:
