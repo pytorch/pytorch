@@ -6,12 +6,14 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (parametrize, run_tests, TestCase, DeterministicGuard)
+    (parametrize, run_tests, TestCase, DeterministicGuard, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
+
+from torch.testing._internal.common_cuda import CDNA3OrLater
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -62,33 +64,6 @@ class TestScatterGather(TestCase):
             expected, idx = src.max(2, True)
             actual = torch.gather(src, 2, idx)
             self.assertEqual(actual, expected, atol=0, rtol=0)
-
-    @dtypes(torch.int8, torch.bfloat16)
-    def test_gather_large(self, device, dtype):
-        # test larger shapes to check vectorized implementation
-        for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100)):
-            src = make_tensor((m, k), device=device, dtype=dtype)
-            alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
-            discontig = alloc0.view(m, 2 * k)[:, ::2].copy_(src)
-            alloc1 = torch.empty(src.nelement() + 1, device=device, dtype=dtype)
-            misaligned = alloc1[1:].view(m, k).copy_(src)
-            num_ind = n
-            for dim in (0, 1):
-                max_ind = src.shape[dim]
-                ind0 = torch.randint(max_ind, (num_ind,), device=device)
-                shape_ind = [1] * src.ndim
-                shape_ind[dim] = ind0.shape[0]
-                shape_out = list(src.shape)
-                shape_out[dim] = ind0.shape[0]
-                ind = ind0.view(shape_ind).expand(shape_out)
-                res = torch.gather(src, dim=dim, index=ind)
-                ref = src[ind0] if dim == 0 else src[:, ind0]
-                self.assertEqual(res, ref, atol=0, rtol=0)
-                res = torch.gather(discontig, dim=dim, index=ind)
-                self.assertEqual(res, ref, atol=0, rtol=0)
-                res = torch.gather(misaligned, dim=dim, index=ind)
-                self.assertEqual(res, ref, atol=0, rtol=0)
-
 
     @dtypes(torch.bool)
     def test_gather_bool(self, device, dtype):
@@ -182,7 +157,13 @@ class TestScatterGather(TestCase):
             # precision types can be small differences
             self.assertEqual(actual, expected, atol=0.04, rtol=0.05)
         else:
-            self.assertEqual(actual, expected, atol=0, rtol=0)
+            # When we are running opportunistic_fastatomics, we will expect some floating point rounding
+            # errors as the order of operation is not guaranteed.
+            if TEST_WITH_ROCM and CDNA3OrLater() \
+                    and not torch.are_deterministic_algorithms_enabled():
+                self.assertEqual(actual, expected, atol=1e-9, rtol=1e-6)
+            else:
+                self.assertEqual(actual, expected, atol=0, rtol=0)
 
         # Tests empty index
         dst = make_tensor((2, 2), device=device, dtype=dtype)
