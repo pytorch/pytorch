@@ -398,6 +398,11 @@ class MultiplicativeLR(LRScheduler):
                     f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}"
                 )
             self.lr_lambdas = list(lr_lambda)
+        for lr_lambda in self.lr_lambdas:
+            if not callable(lr_lambda):
+                raise TypeError(
+                    f"lr_lambda should be a function, but got {type(lr_lambda).__name__}"
+                )
         super().__init__(optimizer, last_epoch)
 
     @override
