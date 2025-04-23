@@ -4626,8 +4626,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "nn.functional.upsample_nearest",
                     device_type="mps",
                 ),
-                xfail(
+                xfailIf(
                     "polar",
+                    lambda sample: MACOS_VERSION < 14,
                     device_type="mps",
                 ),
                 xfail(
@@ -5066,8 +5067,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "nn.functional.upsample_nearest",
                     device_type="mps",
                 ),
-                xfail(
+                xfailIf(
                     "polar",
+                    lambda sample: MACOS_VERSION < 14,
                     device_type="mps",
                 ),
                 xfail(
