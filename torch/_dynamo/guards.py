@@ -67,7 +67,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger
+from torch._dynamo.utils import CompileEventLogger, get_metrics_context
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -2156,6 +2156,12 @@ class GuardBuilder(GuardBuilderBase):
 
             assert isinstance(value, torch.Tensor)
 
+            if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
+                metrics_context = get_metrics_context()
+                metrics_context.increment("param_numel", value.numel())
+                metrics_context.increment("param_bytes", value.nbytes)
+                metrics_context.increment("param_count", 1)
+
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
             #
@@ -2670,6 +2676,7 @@ class CheckFunctionManager:
             used_global_vars = set()
             for guard in sorted_guards:
                 if name := get_global_source_name(guard.originating_source):
+                    assert isinstance(name, str)
                     used_global_vars.add(name)
 
             output_graph_guards_state = dataclasses.replace(
