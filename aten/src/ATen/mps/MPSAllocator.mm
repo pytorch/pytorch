@@ -855,7 +855,7 @@ struct MPSHostAllocator final : public at::HostAllocator {
 
  private:
   static void Delete(void* ptr) {
-    _getSharedAllocator().free(ptr);
+    MPSAllocator::Delete(ptr);
   }
 };
 
