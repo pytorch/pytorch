@@ -1142,8 +1142,13 @@ if HAS_CUDA:
 
             node = self.curr_node()
             first_node = next(node._path_from_root)
-            self.assertFalse(first_node.unaliased_in_all_paths[0])
-            self.assertTrue(first_node.cached_tensor_outputs[0] is None)
+            if torch._inductor.config.graph_partition:
+                # graph partition may changed the order of outputs
+                self.assertFalse(first_node.unaliased_in_all_paths[1])
+                self.assertTrue(first_node.cached_tensor_outputs[1] is None)
+            else:
+                self.assertFalse(first_node.unaliased_in_all_paths[0])
+                self.assertTrue(first_node.cached_tensor_outputs[0] is None)
 
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_multinomial(self):
