@@ -265,12 +265,21 @@ def node_summary(snode):
         detail = ""
         if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
             detail = f" ({snode.node.python_kernel_name})"
-        out_tensor_info = ""
-        layout = snode.node.get_output_spec()
-        if isinstance(layout, ir.Layout):
-            out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
-        node_name = snode.node.maybe_get_name() or ""
-        return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name})"
+        layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
+        out_tensor_info = ",".join(
+            [
+                f" (size={layout.size}, stride={layout.stride})"
+                if isinstance(layout, ir.Layout)
+                else ""
+                for layout in layouts
+            ]
+        )
+        try:
+            node_name = snode.node.maybe_get_name()
+        except AttributeError:
+            # TODO: node_summary was written without FusedSchedulerNode in mind, generally needs to be hardened
+            node_name = ""
+        return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name} ({snode.get_estimated_runtime():.0f} ns)"
 
     # Flatten the summaries for Fused/Foreach/Grouped nodes
     summaries = []
