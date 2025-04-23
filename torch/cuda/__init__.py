@@ -159,7 +159,13 @@ def _nvml_based_avail() -> bool:
 
 
 def is_available() -> bool:
-    r"""Return a bool indicating if CUDA is currently available."""
+    r"""
+    Return a bool indicating if CUDA is currently available.
+
+    .. note:: This function will NOT poison fork if the environment variable
+        ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set. For more details, see
+        :ref:`multiprocessing-poison-fork-note`.
+    """
     if not _is_compiled():
         return False
     if _nvml_based_avail():
@@ -980,7 +986,12 @@ _cached_device_count: Optional[int] = None
 
 
 def device_count() -> int:
-    r"""Return the number of GPUs available."""
+    r"""
+    Return the number of GPUs available.
+
+    .. note:: This API will NOT posion fork if NVML discovery succeeds.
+        See :ref:`multiprocessing-poison-fork-note` for more details.
+    """
     global _cached_device_count
     if not _is_compiled():
         return 0
@@ -1210,8 +1221,7 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
 
 
 def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
+    handle = _get_amdsmi_handler(device)
     # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
     mem_mega_bytes = amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
     mem_bytes = mem_mega_bytes * 1024 * 1024
@@ -1219,16 +1229,12 @@ def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) 
 
 
 def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
 
 
 def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:
-    handle = _get_amdsmi_handler()
-    device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
 
 
