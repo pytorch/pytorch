@@ -298,7 +298,10 @@ if HAS_CUDA:
             FileCheck().check("skipping cudagraphs due to multiple devices").run(
                 captured_output[0]
             )
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1 if torch._inductor.config.graph_partition else 2)
+            self.assertEqual(
+                counters["inductor"]["cudagraph_skips"],
+                1 if torch._inductor.config.graph_partition else 2,
+            )
 
         @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
         def test_skip_symbolic(self):
@@ -1638,10 +1641,16 @@ if HAS_CUDA:
             # the three saved tensors should die in the backward
             # we kept alive the output
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
-            self.assertEqual(
-                self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2)],
-            )
+            if torch._inductor.config.graph_partition:
+                self.assertEqual(
+                    self.curr_node().expected_dead_indices_after_graph,
+                    [(0, 0), (0, 2)],
+                )
+            else:
+                self.assertEqual(
+                    self.curr_node().expected_dead_indices_after_graph,
+                    [(0, 1), (0, 2)],
+                )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         def test_separate_recordings(self):
