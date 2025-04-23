@@ -317,7 +317,7 @@ if __name__ == "__main__":
 
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()
-        with torch.device("cpu"):
+        with torch.accelerator.device_index(None):
             self.assertEqual(torch.xpu.current_device(), prev_device)
         self.assertEqual(torch.xpu.current_device(), prev_device)
         if not torch.xpu.device_count() > 1:
@@ -325,7 +325,7 @@ if __name__ == "__main__":
         src_device = 0
         dst_device = 1
         torch.xpu.set_device(src_device)
-        with torch.device(dst_device):
+        with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.xpu.current_device(), 1)
         self.assertEqual(torch.xpu.set_device(), src_device)
 
