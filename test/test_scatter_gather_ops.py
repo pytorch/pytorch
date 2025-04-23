@@ -109,6 +109,15 @@ class TestScatterGather(TestCase):
                 self.assertEqual(res_ind, ref, atol=0, rtol=0)
                 res_gather = torch.gather(misaligned1, dim=dim, index=ind)
                 self.assertEqual(res_gather, ref, atol=0, rtol=0)
+        # test gather along 1st dim that can accidentally trigger fast path
+        # because due to index dimension in the gather dim being 1
+        # an unexpected squashing in tensorIterator happens
+        src = make_tensor((16, 2, 16), device=device, dtype=dtype)
+        ind = torch.randint(2, (16, 1), device=device).view(16, 1, 1).expand(16, 1, 16)
+        res = torch.gather(src, dim=1, index=ind)
+        if res.device.type == "cuda":
+            ref_cpu = torch.gather(src.cpu(), dim=1, index=ind.cpu())
+            self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
 
 
     @dtypes(torch.bool)
