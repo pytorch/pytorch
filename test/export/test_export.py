@@ -4370,23 +4370,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ],
         )
 
-        class cf_nomemo(torch.nn.Module):
-            def forward(self, x, y, fixes):
-                i = y[0].item()
-                eval(fixes)
-                return x.unsqueeze(1).expand(-1, i)
-
-        retry_export(
-            cf_nomemo(),
-            (torch.randn(8), torch.tensor([2])),
-            fixes=[
-                # Could not guard on data-dependent expression Eq(u0, 1)
-                "torch._check(i != 1)",
-                # Could not guard on data-dependent expression Ne(u0, -1)
-                "torch._check(i != (-1))",
-            ],
-        )
-
         class cf_changevar(torch.nn.Module):
             def forward(self, x, fixes):
                 i = x.item()
@@ -12185,6 +12168,44 @@ def forward(self, x, y):
         self.assertTrue(placeholders[0].meta["val"].requires_grad)
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
+
+    def test_unbacked_expand(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                x = torch.empty(u0, u1, 1)
+                return x.expand(-1, u1, u2)
+
+        ep = export(Foo(), (torch.tensor([1, 2, 3]),))
+        self.assertEqual(
+            list(ep.module()(torch.tensor([3, 4, 5])).shape),
+            [3, 4, 5],
+        )
+        self.assertEqual(
+            list(ep.module()(torch.tensor([0, 1, 0])).shape),
+            [0, 1, 0],
+        )
+
+        class Bar(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.empty(u0)
+                return x.expand(u1)
+
+        ep = export(Bar(), (torch.tensor([2, 2]),))
+        self.assertEqual(
+            ep.module()(torch.tensor([5, 5])).shape[0],
+            5,
+        )
+        self.assertEqual(
+            ep.module()(torch.tensor([1, 1])).shape[0],
+            1,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(u0, u1\) .*",
+        ):
+            ep.module()(torch.tensor([1, 5]))
 
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
