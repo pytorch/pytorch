@@ -1187,6 +1187,17 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+    sloc, extra = a.node.shape_env._get_stack_summary(True)
+    log.info(
+        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        a,
+        assumed_value,
+        sloc,
+        extra,
+    )
+
+
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1215,13 +1226,16 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         try:
             return guard_bool(a)
         except GuardOnDataDependentSymNode:
+            _log_suppressed_dde(a, default)
             return default
+
 
 def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
     return _guard_or(a, False)
+
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
