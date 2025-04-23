@@ -1617,7 +1617,16 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
         output: Optional[FakeTensor],
     ) -> None:
-        if isinstance(output, (int, torch.SymInt, type(None))):
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        if isinstance(output, (int, type(None))):
+            return
+
+        if isinstance(output, torch.SymInt):
+            if has_free_unbacked_symbols(output):
+                # This is unreachable but adding the check for extra safety in
+                # case we change code path in future.
+                raise _BypassDispatchCache("unbacked symbol in output")
             return
 
         # Some ops return tuples of Tensors, but it's rare, so avoid
