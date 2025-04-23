@@ -61,8 +61,7 @@ import time
 import unittest
 from unittest import mock
 from test import support
-from test.test_grammar import (VALID_UNDERSCORE_LITERALS,
-                               INVALID_UNDERSCORE_LITERALS)
+from test_grammar import VALID_UNDERSCORE_LITERALS, INVALID_UNDERSCORE_LITERALS
 
 try:
     import _pylong
@@ -896,7 +895,6 @@ class PyLongModuleTests(__TestCase):
         s4 = b'%d' % n
         self.assertEqual(s4, s.encode('ascii'))
 
-    @skipIfTorchDynamo("infinite loop")
     def test_pylong_int_to_decimal(self):
         self._test_pylong_int_to_decimal((1 << 100_000), '9883109376')
         self._test_pylong_int_to_decimal((1 << 100_000) - 1, '9883109375')
@@ -904,7 +902,6 @@ class PyLongModuleTests(__TestCase):
         self._test_pylong_int_to_decimal(10**30_000 - 1, '9999999999')
         self._test_pylong_int_to_decimal(3**60_000, '9313200001')
 
-    @skipIfTorchDynamo("infinite loop")
     @support.requires_resource('cpu')
     def test_pylong_int_to_decimal_2(self):
         self._test_pylong_int_to_decimal(2**1_000_000, '2747109376')
