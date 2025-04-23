@@ -4314,8 +4314,8 @@ class Scheduler:
 
         schedule: list[BaseSchedulerNode] = []
         num_iters: int = 0
-        while (
-            num_iters < len(nodes) and non_cudagraphable_nodes and cudagraphable_nodes
+        while num_iters < len(nodes) and (
+            non_cudagraphable_nodes or cudagraphable_nodes
         ):
             while non_cudagraphable_nodes:
                 node = non_cudagraphable_nodes.pop(0)
@@ -4364,6 +4364,7 @@ class Scheduler:
             reordered_nodes, name_to_freeable_input_buf, graph_outputs
         )
 
+        # 1.1 here means 10% extra peak memory budget which is quite arbitrary
         if reorder_peak_memory < default_peak_memory * 1.1:
             return reordered_nodes
 
