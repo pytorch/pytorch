@@ -1130,8 +1130,8 @@ class TestMaxAutotune(TestCase):
 
     @config.patch(
         max_autotune=True,
-        max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
+        # max_autotune_gemm_backends="TRITON",
+        # autotune_fallback_to_aten=False,
     )
     def test_max_autotune_decompose_k(self):
         a = torch.randn(
@@ -1144,6 +1144,10 @@ class TestMaxAutotune(TestCase):
         compiled_func = torch.compile(lambda a, b: a @ b)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
+        self.assertEqual(out, a @ b)
+        FileCheck().check("extern_kernels.bmm_dtype").check(
+            "triton_red_fused_0.run"
+        ).check("decompose_k").run(code[0])
 
 
 @instantiate_parametrized_tests

@@ -120,7 +120,12 @@ bmm_template = TritonTemplate(
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
-aten_bmm_dtype = ExternKernelChoice(torch.bmm, "at::_bmm_out_dtype_cuda", name="bmm_dtype", op_overload=aten.bmm.dtype_out)
+aten_bmm_dtype = ExternKernelChoice(
+    torch.bmm,
+    "at::_bmm_out_dtype_cuda",
+    name="bmm_dtype",
+    op_overload=aten.bmm.dtype_out,
+)
 aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
 )
@@ -128,6 +133,9 @@ aten_baddbmm = ExternKernelChoice(
 
 @L.register_lowering(aten.bmm)
 def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
+    """
+    Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
+    """
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
@@ -180,7 +188,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         mat2.get_dtype(),
         layout,
     )
-    
+
     if out_dtype:
         assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
         aten_func = aten_bmm_dtype.bind((mat1, mat2), layout, out_dtype=out_dtype)
@@ -188,11 +196,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_func = aten_bmm.bind((mat1, mat2), layout)
 
     # options to tune from
-    choices = [
-        aten_func
-        if use_aten_gemm_kernels()
-        else []
-    ]
+    choices = [aten_func] if use_aten_gemm_kernels() else []
 
     device_type = ir.get_device_type(mat1)
     bmm_configs = V.choices.get_base_mm_configs(device_type)
@@ -211,7 +215,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
-        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])  # type: ignore[arg-type]
 
     if use_cpp_bmm_template(layout, mat1, mat2):
         from ..codegen.cpp_bmm_template import CppBmmTemplate
