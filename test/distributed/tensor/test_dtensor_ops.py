@@ -112,6 +112,7 @@ dtensor_fails = {
     xfail("_batch_norm_with_update"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
+    xfail("cartesian_prod"),  # decomposes to illegal view that requires redistribute
     xfail("cauchy"),
     xfail("cdist"),
     xfail("cholesky"),

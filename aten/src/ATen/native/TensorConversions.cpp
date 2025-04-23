@@ -1026,19 +1026,8 @@ static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     Tensor not_zero_mask,
     ScalarType index_dtype,
     Device index_device) {
-  auto col_indices =
-      at::native::arange(
-          not_zero_mask.size(-1), index_dtype, kStrided, index_device)
-          .view({1, not_zero_mask.size(-1)})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  auto row_indices =
-      at::native::arange(
-          not_zero_mask.size(-2), index_dtype, kStrided, index_device)
-          .view({not_zero_mask.size(-2), 1})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  return std::pair<Tensor, Tensor>(col_indices, row_indices);
+  auto nz = not_zero_mask.nonzero().transpose(0, 1);
+  return std::pair<Tensor, Tensor>(nz[1], nz[0]);
 }
 
 // Sparse layout conversions Start

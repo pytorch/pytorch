@@ -6,6 +6,7 @@ from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
+from torch._prims_common import DimsType
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -226,8 +227,8 @@ def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
 
 def dim_movedim(
     ndim: int,
-    input: Union[int, Sequence[int]],
-    destination: Union[int, Sequence[int]],
+    input: DimsType,
+    destination: DimsType,
 ) -> DimMap:
     input = normalize_dims(input, ndim)
     destination = normalize_dims(destination, ndim)
@@ -535,8 +536,8 @@ def propagate_shape_and_sharding(
                                 "but only the leftmost dim of a Flatten can be sharded.",
                             )
                     elif input_sharded:
-                        assert shard_placement is not None, (
-                            "Shard placement cannot be None if input_sharded=True"
+                        assert (
+                            shard_placement is not None and shard_mesh_dim is not None
                         )
                         tensor_dim_size = global_input_shape[shard_placement.dim]
                         mesh_dim_size = mesh_sizes[shard_mesh_dim]
@@ -663,7 +664,6 @@ def register_op_strategy_map(
                 generate_redistribute_costs(input_strategy, input_tgt_spec)
             ]
 
-            # TODO(whc) should attach propagated tensor_meta.
             output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
                 PlacementStrategy(
