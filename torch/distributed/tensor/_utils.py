@@ -1,5 +1,6 @@
 from collections import defaultdict
 from collections.abc import Sequence
+from threading import local
 from typing import cast, Optional
 
 import torch
@@ -135,9 +136,9 @@ def _compute_local_shape_and_global_offset(
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 local_offset = [0] * len(global_shape)
-                assert shard_dim < len(local_shape), (
-                    f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-                )
+                assert shard_dim < len(
+                    local_shape
+                ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
                 shard_size, shard_offset = placement._local_shard_size_and_offset(
                     local_shape[shard_dim],
                     mesh_dim_size,
@@ -228,9 +229,9 @@ def compute_global_tensor_info(
                 )
             shard_dim = shard_placement.dim
 
-            assert shard_dim < tensor.ndim, (
-                f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
-            )
+            assert (
+                shard_dim < tensor.ndim
+            ), f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
 
             local_dim_size = tensor_shape[shard_dim]
             tensor_shape[shard_dim] = local_dim_size * mesh_dim_size
@@ -244,6 +245,44 @@ def compute_global_tensor_info(
         elif not isinstance(placement, (Replicate, Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
     return tensor_shape, tensor_stride
+
+
+def compute_global_tensor_shape(
+    shape: torch.Size, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> torch.Size:
+    """
+    Compute the global size of a DTensor from the given local tensor shape,
+    the mesh and placements.
+    """
+    if mesh.ndim > 1:
+        raise NotImplementedError(
+            "compute_global_tensor_shape only supports 1D mesh for now."
+        )
+    if len(placements) != 1:
+        raise NotImplementedError(
+            "compute_global_tensor_shape only supports 1 placement for now."
+        )
+
+    if isinstance(placements[0], Replicate):
+        return shape
+    elif isinstance(placements[0], Shard):
+        local_shape = torch.tensor(list(shape))
+        gathered_shapes = [None for _ in range(torch.distributed.get_world_size())]
+        torch.distributed.all_gather_object(gathered_shapes, local_shape)
+        sharded_dim_sum = 0
+        for shape_tensor in gathered_shapes:
+            if shape_tensor is None:
+                raise RuntimeError(
+                    "Cannot find the shape of the DTensor on some ranks."
+                )
+            sharded_dim_sum += shape_tensor[placements[0].dim]
+        global_shape = list(shape)
+        global_shape[placements[0].dim] = sharded_dim_sum
+        return torch.Size(global_shape)
+    else:
+        raise NotImplementedError(
+            f"Placement type {type(placements[0])} not supported."
+        )
 
 
 def try_find_mesh_from_args(

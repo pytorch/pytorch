@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import random
+from threading import local
 
 import torch
 from torch.distributed.device_mesh import init_device_mesh
@@ -9,6 +11,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
     _explicit_order_placements,
+    compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -140,6 +143,39 @@ class UtilTest(DTensorTestBase):
         for i in range(n_dim):
             offset.append(((global_offset[i]), (global_offset[i] + local_size[i])))
         return offset
+
+    @with_comms
+    def test_compute_global_tensor_shape_1D(self):
+        one_d_placements = [[Shard(1)], [Replicate()]]
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        for placements in one_d_placements:
+            if isinstance(placements[0], Shard):
+                uneven_dim = [i for i in range(self.world_size)]
+                global_shape = compute_global_tensor_shape(
+                    torch.Size([5, uneven_dim[device_mesh.get_rank()]]),
+                    device_mesh,
+                    placements,
+                )
+                self.assertEqual(global_shape, torch.Size([5, sum(uneven_dim)]))
+            else:
+                global_shape = compute_global_tensor_shape(
+                    torch.Size([5, 5]), device_mesh, placements
+                )
+                self.assertEqual(global_shape, torch.Size([5, 5]))
+
+    @with_comms
+    def test_compute_global_tensor_shape_failure_2D(self):
+        placement_2D = [Shard(0), Shard(1)]
+        device_mesh_2D = init_device_mesh(self.device_type, (2, 2))
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "compute_global_tensor_shape only supports 1D mesh for now.",
+        ):
+            _ = compute_global_tensor_shape(
+                torch.Size([2, 2]),
+                device_mesh_2D,
+                placement_2D,
+            )
 
     @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):
