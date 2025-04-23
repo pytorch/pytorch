@@ -812,15 +812,15 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     default_copy_data(dest, src, count);
   }
 
- private:
-  bool m_has_unified_memory;
-  uint32_t m_usage;
-
   static void Delete(void* ptr) {
     if (ptr) {
       _getAllocImpl().free(ptr);
     }
   }
+
+ private:
+  bool m_has_unified_memory;
+  uint32_t m_usage;
 };
 
 namespace {
