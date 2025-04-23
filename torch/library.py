@@ -92,6 +92,8 @@ class Library:
     """
 
     def __init__(self, ns, kind, dispatch_key=""):
+        from torch.fx.operator_schemas import _SCHEMA_TO_SIGNATURE_CACHE
+
         if kind not in ("IMPL", "DEF", "FRAGMENT"):
             raise ValueError("Unsupported kind: ", kind)
 
@@ -127,6 +129,8 @@ class Library:
             _defs,
             self._op_defs,
             self._registration_handles,
+            self.m,
+            _SCHEMA_TO_SIGNATURE_CACHE,
         )
 
     def __repr__(self):
@@ -451,9 +455,9 @@ def _del_library(
     captured_defs,
     op_defs,
     registration_handles,
+    m,
+    schema_to_signature_cache,
 ):
-    import torch.fx
-
     for op_def in op_defs:
         name = op_def
         overload_name = ""
@@ -462,15 +466,16 @@ def _del_library(
         if (
             name,
             overload_name,
-        ) in torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE:
-            del torch.fx.operator_schemas._SCHEMA_TO_SIGNATURE_CACHE[
-                (name, overload_name)
-            ]
+        ) in schema_to_signature_cache:
+            del schema_to_signature_cache[(name, overload_name)]
 
     captured_impls -= op_impls
     captured_defs -= op_defs
     for handle in registration_handles:
         handle.destroy()
+
+    if m is not None:
+        m.reset()
 
 
 @contextlib.contextmanager
