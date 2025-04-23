@@ -161,9 +161,9 @@ def early_config_prune(configs, named_args):
 # Copied from fbgemm grouped_gemm.py
 triton_scaled_grouped_mm_source = r"""
 {% if M_IS_DYNAMIC or N_IS_DYNAMIC or K_IS_DYNAMIC %}
-{{def_kernel("a_ptr", "b_ptr", "a_scale_ptr", "b_scale_ptr", "offsets_ptr")}}
+{{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr", "offsets_ptr")}}
 {% else %}
-{{def_kernel("a_ptr", "b_ptr", "a_scale_ptr", "b_scale_ptr")}}
+{{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr")}}
 {% endif %}
     tidx = tl.program_id(0)
 
@@ -212,7 +212,9 @@ triton_scaled_grouped_mm_source = r"""
 {% else %}
         m_start_offset = 0
         m_size = M
+{% if A_IS_2D %}
         m_scale_start_offset = g.to(tl.int64) * M
+{% endif %}
 {% endif %}
 
         if m_size > 0:
@@ -225,7 +227,9 @@ triton_scaled_grouped_mm_source = r"""
 {% else %}
             n_start_offset = 0
             n_size = N
+{% if B_IS_2D %}
             n_scale_start_offset = g.to(tl.int64) * N
+{% endif %}
 {% endif %}
 {% if K_IS_DYNAMIC %}
             # Move across groups
@@ -316,15 +320,27 @@ triton_scaled_grouped_mm_source = r"""
 
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-                a_scale = tl.load(
-                    a_scale_ptr + m_scale_start_offset + offs_am[:, None],
+                scale_a = tl.load(
+                    scale_a_ptr
+{% if A_IS_2D %}
+                    + m_scale_start_offset
+{% else %}
+                    + g * SCALE_A_STRIDE_G
+{% endif %}
+                    + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
                 )
-                b_scale = tl.load(
-                    b_scale_ptr + n_scale_start_offset + offs_bn[None, :],
+                scale_b = tl.load(
+                    scale_b_ptr
+{% if B_IS_2D %}
+                    + n_scale_start_offset
+{% else %}
+                    + g * SCALE_B_STRIDE_G
+{% endif %}
+                    + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
                 )
-                c = accumulator.to(tl.float32) * a_scale * b_scale
+                c = accumulator.to(tl.float32) * scale_a * scale_b
 
 {% if M_IS_DYNAMIC %}
                 idx_m = (m_start_offset + offs_am[:, None])
@@ -536,17 +552,21 @@ def tuned_scaled_grouped_mm(
         b_size = mat_b.get_size()
         a_stride = mat_a.get_stride()
         b_stride = mat_b.get_stride()
+        scale_a_stride = scale_a.get_stride()
+        scale_b_stride = scale_b.get_stride()
         kwargs["A_SIZE_M"], kwargs["A_SIZE_K"] = a_size[-2], a_size[-1]
         kwargs["A_STRIDE_M"], kwargs["A_STRIDE_K"] = a_stride[-2], a_stride[-1]
         if len(a_size) == 3:
             kwargs["A_SIZE_G"] = a_size[0]
             kwargs["A_STRIDE_G"] = a_stride[0]
+            kwargs["SCALE_A_STRIDE_G"] = scale_a_stride[0]
         # the b_mat is given with its last two dims transposed, revert here
         kwargs["B_SIZE_N"], kwargs["B_SIZE_K"] = b_size[-1], b_size[-2]
         kwargs["B_STRIDE_N"], kwargs["B_STRIDE_K"] = b_stride[-1], b_stride[-2]
         if len(b_size) == 3:
             kwargs["B_SIZE_G"] = b_size[0]
             kwargs["B_STRIDE_G"] = b_stride[0]
+            kwargs["SCALE_B_STRIDE_G"] = scale_b_stride[0]
 
         for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
             triton_scaled_grouped_mm_template.maybe_append_choice(

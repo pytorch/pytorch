@@ -1533,7 +1533,7 @@ namespace {
           "D, arg ",
           arg_idx);
       TORCH_CHECK(
-          scale.is_contiguous(), "scale_a must be contiguous for arg ", arg_idx);
+          scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
       TORCH_CHECK(
           scale.size(0) == mat.size(dim) * scale_multiplier,
           "scale must have the same length as mat for arg ",
@@ -1546,8 +1546,8 @@ namespace {
           "D for arg ",
           arg_idx);
       TORCH_CHECK(
-          scale.stride(1),
-          "scale_a must be contiguous in the last dimension for arg ",
+          scale.stride(1) == 1,
+          "scale must be contiguous in the last dimension for arg ",
           arg_idx);
       TORCH_CHECK(
           scale.size(0) == mat.size(0),
