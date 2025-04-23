@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sympy
-from sympy import S
+from sympy import Add, S
 
 
 """
@@ -77,7 +77,6 @@ from torch.utils._sympy.functions import (
     FloorToInt,
     IsNonOverlappingAndDenseIndicator,
     Max,
-    Min,
     Mod,
     PythonMod,
 )
@@ -305,8 +304,6 @@ def uninteresting_files() -> set[str]:
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
-        torch.fx.proxy,
-        torch.fx._symbolic_trace,
         torch,
         torch._compile,
         torch._dynamo.eval_frame,
@@ -1190,6 +1187,17 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+    sloc, extra = a.node.shape_env._get_stack_summary(True)
+    log.info(
+        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        a,
+        assumed_value,
+        sloc,
+        extra,
+    )
+
+
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1198,43 +1206,42 @@ def compute_unbacked_bindings(
 #  (1) It's an optimization/additional check I do not want to fail for not performing it.
 #  (2) I am willing to deviate from the normal semantics when I have unbacked for the
 #      benefit of not failing.
-def guard_or_false(a: BoolLikeType) -> bool:
-    """
-    Try to guard a, if data dependent error encountered just return false.
-    """
+def _guard_or(a: BoolLikeType, default: bool) -> bool:
     if not isinstance(a, SymBool):
         assert isinstance(a, bool)
         return a
 
+    # if backed_size_oblivious is True we treat backed as unbacked here.
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval_sym_bool(a)
+        return result if result is not None else default
+
+    shape_env = getattr(a.node, "shape_env", None)
+
+    # XLA symnode path.
+    if shape_env is None:
+        return guard_bool(a)
+
     with a.node.shape_env.dde_suppressed():
-        if torch.fx.experimental._config.backed_size_oblivious:
-            return statically_known_true(a)
-        else:
-            try:
-                return guard_bool(a)
-            except GuardOnDataDependentSymNode:
-                return False
+        try:
+            return guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            _log_suppressed_dde(a, default)
+            return default
+
+
+def guard_or_false(a: BoolLikeType) -> bool:
+    """
+    Try to guard a, if data dependent error encountered just return false.
+    """
+    return _guard_or(a, False)
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    if not isinstance(a, SymBool):
-        assert isinstance(a, bool)
-        return a
-
-    with a.node.shape_env.dde_suppressed():
-        if torch.fx.experimental._config.backed_size_oblivious:
-            result = _static_eval_sym_bool(a)
-            if result is not None:
-                return result
-            return True
-        else:
-            try:
-                return guard_bool(a)
-            except GuardOnDataDependentSymNode:
-                return True
+    return _guard_or(a, True)
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1282,8 +1289,11 @@ def definitely_false(a: BoolLikeType) -> bool:
 def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
     assert isinstance(x, SymBool)
     expr = x.node.expr
-    shape_env = x.node.shape_env
+
     try:
+        # Shape env access is inside the try on purpose. XLA symnode does not
+        # have it on its attributes.
+        shape_env = x.node.shape_env
         simplified = shape_env._maybe_evaluate_static(expr)
         if simplified is not None:
             return bool(simplified)
@@ -5964,22 +5974,24 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
-            min_max_replacements = {}
-            for atom in (*expr.atoms(Max), *expr.atoms(Min)):  # type: ignore[has-type]
+        if size_oblivious and expr.has(Max):
+            max_replacements = {}
+            for atom in expr.atoms(Max):
                 if len(atom.args) > 2:
                     continue
                 a, b = atom.args
                 if b == 1 or b == 0:
                     a, b = b, a
                 if a == 1 or a == 0:
-                    vr = self.bound_sympy(b, size_oblivious=True)
-                    if vr.lower >= a:
-                        min_max_replacements[atom] = b if atom.func is Max else a
-                    elif vr.upper <= a:
-                        min_max_replacements[atom] = a if atom.func is Max else b
-            if min_max_replacements:
-                expr = expr.xreplace(min_max_replacements)
+                    if (
+                        isinstance(b, Add)
+                        and len(b.free_symbols) == 2  # TODO: expand to N?
+                        and b.free_symbols == set(b.atoms())
+                        and all(x in self.size_like for x in b.free_symbols)
+                    ):
+                        max_replacements[atom] = b
+            if max_replacements:
+                expr = expr.xreplace(max_replacements)
                 expr = safe_expand(expr)
 
         # TODO it would seem that this pass is not necessary given the
