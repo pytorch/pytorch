@@ -266,7 +266,12 @@ class UniformValueConstantFolder(ConstantFolder):
         # otherwise, stop deduce value and return unknown value
 
         # TODO: cat, more indexing
-        # TODO - do on cpu to avoid syncs
+
+        # do on cpu to avoid syncs
+        if 'device' in node.kwargs:
+            new_kwargs = node.kwargs.copy()  # Keyword arguments, make a dict copy as kwargs is immutable_dict
+            new_kwargs['device'] = torch.device('cpu')
+            node.kwargs = new_kwargs
 
         # single-elem attrs
         if node.op == "get_attr" or (
