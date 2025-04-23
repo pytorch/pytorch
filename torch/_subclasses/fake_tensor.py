@@ -1539,21 +1539,6 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("data dependent output")
 
         if torch.Tag.dynamic_output_shape in func.tags:
-            if func is aten.index.Tensor:
-                _, new_kwargs = normalize_function(  # type: ignore[misc]
-                    func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
-                )
-                for index in new_kwargs["indices"]:
-                    # index calls nonzero for bool or int8 tensors, and
-                    # therefore has a dynamic shape output. For other dtypes,
-                    # the output shape depends on the input shape (and not data)
-                    if isinstance(index, torch.Tensor) and index.dtype in (
-                        torch.bool,
-                        torch.int8,
-                    ):
-                        raise _BypassDispatchCache("dynamic output shape")
-                return
-
             raise _BypassDispatchCache("dynamic output shape")
 
         if torch.Tag.inplace_view in func.tags:
@@ -1633,9 +1618,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # Special case for AOT Dispatcher first pass, where the fake
                 # tensor is called on the functional wrapper of the subgraph.
                 result.append(hash(arg))
-                # functional wrapper is destroyed after fake tensor prop. We
-                # need to put the finalizer on the subgraph.
-                id_hashed_objects.append(arg.subgraph)
+                id_hashed_objects.append(arg)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
