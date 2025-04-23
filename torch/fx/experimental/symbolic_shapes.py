@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sympy
-from sympy import Add, S
+from sympy import S
 
 
 """
@@ -76,6 +76,7 @@ from torch.utils._sympy.functions import (
     FloorToInt,
     IsNonOverlappingAndDenseIndicator,
     Max,
+    Min,
     Mod,
     PythonMod,
 )
@@ -303,6 +304,8 @@ def uninteresting_files() -> set[str]:
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
+        torch.fx.proxy,
+        torch.fx._symbolic_trace,
         torch,
         torch._compile,
         torch._dynamo.eval_frame,
@@ -5129,9 +5132,8 @@ class ShapeEnv:
                         source, constraint
                     )
                     msg = (
-                        f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"Not all values of {var_with_range} are valid because "
+                        f"{self._debug_name(source)} was inferred to be a constant ({val})."
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg
@@ -5933,22 +5935,22 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        if size_oblivious and expr.has(Max):
-            max_replacements = {}
-            for atom in expr.atoms(Max):
+        if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
+            min_max_replacements = {}
+            for atom in (*expr.atoms(Max), *expr.atoms(Min)):  # type: ignore[has-type]
+                if len(atom.args) > 2:
+                    continue
                 a, b = atom.args
                 if b == 1 or b == 0:
                     a, b = b, a
                 if a == 1 or a == 0:
-                    if (
-                        isinstance(b, Add)
-                        and len(b.free_symbols) == 2  # TODO: expand to N?
-                        and b.free_symbols == set(b.atoms())
-                        and all(x in self.size_like for x in b.free_symbols)
-                    ):
-                        max_replacements[atom] = b
-            if max_replacements:
-                expr = expr.xreplace(max_replacements)
+                    vr = self.bound_sympy(b, size_oblivious=True)
+                    if vr.lower >= a:
+                        min_max_replacements[atom] = b if atom.func is Max else a
+                    elif vr.upper <= a:
+                        min_max_replacements[atom] = a if atom.func is Max else b
+            if min_max_replacements:
+                expr = expr.xreplace(min_max_replacements)
                 expr = safe_expand(expr)
 
         # TODO it would seem that this pass is not necessary given the

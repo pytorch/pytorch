@@ -1214,14 +1214,14 @@ utils_device.CURRENT_DEVICE == None""".split(
             get_test_fn(func=min),
             2,
             expected_ops=1,
-            expected_ops_dynamic=ifdynstaticdefault(1, 10),
+            expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
         torch._dynamo.testing.standard_test(
             self,
             get_test_fn(func=max),
             2,
             expected_ops=1,
-            expected_ops_dynamic=ifdynstaticdefault(1, 5),
+            expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
@@ -7604,6 +7604,25 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch.compile(dyn_fn, backend="eager")(y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_2d_expand(self):
+        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+        def func(a, b):
+            a.expand(b.shape)
+            return a * 10
+
+        a = torch.rand(1, 1)
+        b = torch.rand(2, 2)
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+        # TODO(laithsakka): update inductor runtime asserts to properly raise
+        func(a, b)
+        func(torch.rand(4, 5), torch.rand(4, 5))
+        func(torch.rand(1, 1), torch.rand(2, 1))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
         # Tests the following case:
         # Deferred runtime asserts adds sym_constrain_range(u0).
@@ -7862,6 +7881,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         @torch.compile(dynamic=False, backend=counter)
         def fn(x, y):
             return x * y
+
+        fn(2, torch.randn(2))
+        fn(3, torch.randn(3))
+        fn(4, torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L\\['x.*'\\], L\\['y.*'\\]")
+    def test_dynamic_sources_dynamic_override_regex(self):
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x1, y1):
+            return x1 * y1
 
         fn(2, torch.randn(2))
         fn(3, torch.randn(3))
@@ -10898,13 +10931,18 @@ fn
             torch._check_is_size(u0)
             torch._check_is_size(u1)
             torch._check(u0 + u1 == 20)
+
+            y = 0
             if guard_size_oblivious(torch.sym_max(1, u0 + u1) == 20):
-                return torch.tensor(True)
-            else:
-                return torch.tensor(False)
+                y += 1
+            if guard_size_oblivious(torch.sym_max(1, u0**2 + u1 + 2) != 1):
+                y += 1
+            if guard_size_oblivious(torch.sym_min(1, u0) == 1):
+                y += 1
+            return y
 
         # Previously would have thrown guard on data dependent
-        cf(torch.tensor([10, 10])).item()
+        self.assertEqual(cf(torch.tensor([10, 10])), 3)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
