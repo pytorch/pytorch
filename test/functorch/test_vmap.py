@@ -4446,7 +4446,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "clamp", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
-                xfailIf("complex", device_type="mps", fail_fn=MACOS_VERSION < 14),
+                xfailIf(
+                    "complex",
+                    device_type="mps",
+                    fail_fn=lambda sample: MACOS_VERSION < 14,
+                ),
                 xfail(
                     "copysign", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
@@ -4903,7 +4907,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                     "clamp", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
                 # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64.
-                xfailIf("complex", device_type="mps", fail_fn=MACOS_VERSION < 14),
+                xfailIf(
+                    "complex",
+                    device_type="mps",
+                    fail_fn=lambda sample: MACOS_VERSION < 14,
+                ),
                 xfail(
                     "copysign", device_type="mps"
                 ),  # AssertionError: Tensor-likes are not close!
