@@ -56,7 +56,9 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     def test_missing_meta_kernel_impl(self):
@@ -95,7 +97,9 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles["mylib.foo.default"]), 1)
             print(report.op_profiles)
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep = ep.run_decompositions()
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
@@ -129,7 +133,9 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo3.default"]), 2)
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     def test_missing_meta_kernel_custom_op_update_profile(self):
@@ -159,7 +165,9 @@ class TestDraftExport(TestCase):
                 torch.ones(2, 3, 4),
             )
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
                     torch.ops.mylib.foo8(*inp)
                     with self.assertRaisesRegex(
@@ -173,7 +181,7 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
-            with torch._library.fake_profile.register_fake_profile(
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
                 report.op_profiles
             ), FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
                 torch.ops.mylib.foo8(*new_inp)
@@ -560,7 +568,9 @@ class TestDraftExport(TestCase):
                 ],
             )
 
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     def test_override_incorrectly_aliasing_kernel(self):
@@ -641,7 +651,9 @@ class TestDraftExport(TestCase):
                 report.failures[0].data["reason"],
                 "Dtypes torch.bfloat16 and torch.float32 are not equal!",
             )
-            with torch._library.fake_profile.register_fake_profile(report.op_profiles):
+            with torch._library.fake_profile.unsafe_generate_fake_kernels(
+                report.op_profiles
+            ):
                 ep.run_decompositions()
 
     # https://github.com/pytorch/pytorch/issues/140625
