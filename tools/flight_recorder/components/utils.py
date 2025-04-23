@@ -265,6 +265,7 @@ def match_coalesced_groups_with_non_p2p(
     for rank, op_list in all_ops.items():
         if not op_list:
             logger.error("Rank %s has an empty op list.", rank)
+            continue
         if op_list[-1].type == "coalesced" and is_p2p:
             op_list.pop(-1)
 
