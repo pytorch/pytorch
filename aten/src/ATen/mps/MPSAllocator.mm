@@ -853,6 +853,22 @@ struct MPSHostAllocator final : public at::HostAllocator {
     _getSharedAllocator().emptyCache();
   }
 
+  bool record_event(void* ptr, [[maybe_unused]] void* ctx, [[maybe_unused]] c10::Stream stream) override {
+    return _getSharedAllocator().recordEvents({ptr});
+  }
+
+  at::HostStats get_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSAllocator does not support get_stats() yet.");
+  }
+
+  void reset_accumulated_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSAllocator does not support reset_accumulated_stats() yet.");
+  }
+
+  void reset_peak_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "MPSAllocator does not support reset_peak_stats() yet.");
+  }
+
   bool is_pinned(const void* data) override {
     if (!at::mps::is_available()) {
       return false;
