@@ -90,23 +90,9 @@ class ConstantFolder(torch.fx.Interpreter):
         # ConstantFolder not support dynamic shape now
         return False
 
-    def _execute_node_on_cpu(self, node: torch.fx.Node):
-        # Extract the operation (target), arguments, and keyword arguments
-        target = node.target  # The operation, e.g., torch.ops.aten.full
-        args = node.args      # Positional arguments
-        kwargs = node.kwargs.copy()  # Keyword arguments, make a dict copy as kwargs is immutable_dict
-
-        # Update the device in kwargs to CPU
-        if 'device' in kwargs:
-            kwargs['device'] = torch.device('cpu')
-
-        # Execute the operation directly on the CPU
-        result = target(*args, **kwargs)
-        return result
-
     def _deduce_value(self, node: torch.fx.Node) -> Any:
         if self.lifted_constant_names is None:
-            return self._execute_node_on_cpu(node)
+            return super().run_node(node)
         # if lifted_constant_names is passed in, no concrete value is available
         # so we just check if all inputs have values
         if self.skip_folding_node_fn is not None and self.skip_folding_node_fn(node):
