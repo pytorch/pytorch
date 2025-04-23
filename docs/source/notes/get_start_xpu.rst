@@ -52,7 +52,7 @@ Installation
 Binaries
 ^^^^^^^^
 
-Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
+Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio``.
 
 For release wheels
 
