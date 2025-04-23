@@ -73,7 +73,7 @@ def _gen_transform_infos_non_cached(
             if i < device_mesh.ndim - 1:
                 # calculate and save the logical shape for this sharding
                 mesh_dim_size = device_mesh.size(mesh_dim=i)
-                local_shard_size, _ = src._local_shard_size_on_dim(
+                local_shard_size, _ = src._local_shard_size_and_offset(
                     current_logical_shape[src.dim],
                     mesh_dim_size,
                     my_coordinate[i],
@@ -231,9 +231,9 @@ def redistribute_local_tensor(
                     local_tensor, device_mesh, i, my_coordinate[i]
                 )
             else:
-                assert (
-                    current.is_shard()
-                ), f"Current placement should be shard but found {current}"
+                assert current.is_shard(), (
+                    f"Current placement should be shard but found {current}"
+                )
                 shard_spec = cast(Shard, current)
                 if shard_spec.dim != target_placement.dim:
                     new_local_tensor = shard_spec._to_new_shard_dim(
@@ -297,8 +297,11 @@ class Redistribute(torch.autograd.Function):
     ):
         ctx.async_op = async_op
         ctx.backward_dtype = backward_dtype
+        ctx.original_dtype = input._local_tensor.dtype
 
-        if forward_dtype is not None:
+        # TODO(whc) after rebase, the `and forward_dtype != input._local_tensor.dtype` showed up.
+        # is this a problem for simple_fsdp or can we just use what's on main
+        if forward_dtype is not None and forward_dtype != input._local_tensor.dtype:
             local_tensor = input._local_tensor.to(dtype=forward_dtype)
             current_spec = DTensorSpec(
                 mesh=device_mesh,
@@ -337,9 +340,12 @@ class Redistribute(torch.autograd.Function):
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
         async_op = ctx.async_op
-        backward_dtype = ctx.backward_dtype
+        backward_dtype = ctx.backward_dtype or ctx.original_dtype
 
-        if backward_dtype is not None:
+
+        # TODO(whc) after rebase, the condition changed from != None to != grad_output.
+        # is this a problem for simple_fsdp or can we just use what's on main
+        if backward_dtype != grad_output._local_tensor.dtype:
             local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
             current_spec = DTensorSpec(
                 mesh=grad_output._spec.device_mesh,
@@ -366,6 +372,10 @@ class Redistribute(torch.autograd.Function):
             async_op=async_op,
             is_backward=True,
         )
+
+        if output.dtype != ctx.original_dtype:
+            output = output.to(ctx.original_dtype)
+
         # normalize the target placement to replicate if it is partial
         normalized_placements: list[Placement] = []
         for previous_placement in previous_spec.placements:
@@ -378,7 +388,12 @@ class Redistribute(torch.autograd.Function):
         spec = DTensorSpec(
             previous_spec.device_mesh,
             tuple(normalized_placements),
-            previous_spec.tensor_meta,
+            # TODO(whc) after rebase, we create new TensorMeta instead of propagating previous_spec tensor_meta. is this ok?
+            tensor_meta=TensorMeta(
+                shape=grad_output.shape,
+                stride=grad_output.stride(),
+                dtype=output.dtype,
+            ),
         )
         output_dtensor = dtensor.DTensor(
             output,
