@@ -2539,7 +2539,7 @@ class CommonTemplate:
             self.common(fn, (i,), check_lowp=False)
 
     def test_sum_dtype(self):
-        sum_dtype = torch.double if self.device != "mps" else torch.float32
+        sum_dtype = torch.double if self.device != "mps" else torch.bfloat
         def fn(x):
             return x * x.sum(-1, dtype=sum_dtype) + x.sum(dtype=sum_dtype)
 
