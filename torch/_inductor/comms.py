@@ -74,82 +74,6 @@ def reorder_compute_for_overlap(
     )
 
 
-def group_copy_collective(
-    snodes: list[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
-    name_to_fused_node: dict[str, BaseSchedulerNode],
-) -> list[torch._inductor.scheduler.BaseSchedulerNode]:
-    """
-    Find 'lightweight' ops that are consumed only by a collective such as the cast (f32->bf16) followed by allgather
-    Group these in GroupedSchedulerNodes so they will not be separated.
-
-    TODO
-    - should this apply to all collectives?
-    - which ops should be included in the grouping? just one?
-       as many as there are that don't get consumed by other nodes?
-
-    """
-    from . import scheduler
-
-    new_order: list[BaseSchedulerNode] = []
-    scheduled = OrderedSet[Any]()
-    name_to_node = {snode.get_name(): snode for snode in snodes}
-    snode_name_to_final_snode = {}
-
-    def _create_group_node(snodes_to_group):
-        group_node = scheduler.GroupedSchedulerNode.create(snodes_to_group)
-        for snode in snodes_to_group:
-            snode_name_to_final_snode[snode.get_name()] = group_node
-        snode_name_to_final_snode[group_node.get_name()] = group_node
-        return group_node
-
-    # Create grouped nodes for specific sets of ops
-    for snode in snodes:
-        # Case 1: Handle AllGather
-        if is_collective(snode.node):
-            collective_related_snode_set: OrderedSet[
-                scheduler.BaseSchedulerNode
-            ] = OrderedSet()
-            if len(snode.ancestors) < 1:
-                continue
-            # TODO
-            # safely identify the group of nodes that can be fused to this collective
-            # One idea which did not work is to check for len(snode.ancestors == 1),
-            # but this is broken by the fake deps added between collectives and waits
-            maybe_next_node_name = next(iter(snode.ancestors))
-            if maybe_next_node_name not in name_to_node:
-                continue
-            _create_group_node([name_to_node[maybe_next_node_name], snode])
-    assert len(snode_name_to_final_snode) > 0
-    # Build the new node schedule, taking GroupedSchedulerNode into account
-    for snode in snodes:
-        if snode.get_name() in snode_name_to_final_snode:
-            snode = snode_name_to_final_snode[snode.get_name()]
-        if snode in scheduled:
-            continue
-        new_order.append(snode)
-        scheduled.add(snode)
-    return new_order
-
-
-# def flatten_groups(
-#     snodes: list[torch._inductor.scheduler.BaseSchedulerNode],
-#     name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
-#     name_to_fused_node: dict[str, BaseSchedulerNode],
-# ) -> list[torch._inductor.scheduler.BaseSchedulerNode]:
-#     """
-#     Reverse the process of group_copy_collective
-#     """
-#     from . import scheduler
-#     new_order: list[torch._inductor.scheduler.BaseSchedulerNode] = []
-#     for snode in snodes:
-#         if isinstance(snode, scheduler.GroupedSchedulerNode):
-#             new_order.extend(snode.get_nodes())
-#         else:
-#             new_order.append(snode)
-#     return new_order
-
-
 def reorder_comms_preserving_peak_memory(
     snodes: list[BaseSchedulerNode],
     graph_inputs: OrderedSet[str],
@@ -194,23 +118,6 @@ def reorder_comms_preserving_peak_memory(
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
         snodes, graph_inputs
     )
-
-    # Uncomment this block to make workaround bug with GroupedSchedulerNodes
-    # TODO estimate_peak_memory doesn't like GroupedSchedulerNodes
-    #        File "/data/users/whc/pytorch/torch/_inductor/scheduler.py", line 2038, in _init
-    #       self.nodes = comms.reorder_compute_and_comm_for_overlap(
-    #     File "/data/users/whc/pytorch/torch/_inductor/comms.py", line 598, in reorder_compute_and_comm_for_overlap
-    #       order = p(order, graph_inputs, graph_outputs)  # type: ignore[operator]
-    #     File "/data/users/whc/pytorch/torch/_inductor/comms.py", line 193, in reorder_comms_preserving_peak_memory
-    #       peak_memory, curr_memory = estimate_peak_memory(
-    #     File "/data/users/whc/pytorch/torch/_inductor/memory.py", line 305, in estimate_peak_memory
-    #       [
-    #     File "/data/users/whc/pytorch/torch/_inductor/memory.py", line 306, in <listcomp>
-    #       node_to_step[succ_node]
-    #   torch._inductor.exc.InductorError: KeyError: ExternKernelSchedulerNode(name='op1')
-    # peak_memory = 1
-    # curr_memory = [0] * len(snodes)
-
     peak_memory, curr_memory = estimate_peak_memory(
         snodes, name_to_freeable_input_buf, graph_outputs
     )
@@ -259,24 +166,6 @@ def reorder_comms_preserving_peak_memory(
                 if any(
                     o.get_name() in dep_names for o in prev_snode.get_outputs()
                 ) and not contains_wait(prev_snode):
-                    """
-                    snode (op7) is a collective, and it has a fake-dep on op1, another collective.
-                    However due to how wait-node is implemented as mutation,
-                    op7 also depends on op1's wait node (op2) which prevents scheduling op7 earlier
-                    [rank0]:(Pdb) [rank0]:op7: ExternKernelSchedulerNode(_CollectiveKernel)
-                    [rank0]:op7.writes = [StarDep(name='buf8', mode=None)]
-                    [rank0]:op7.unmet_dependencies = [StarDep(name='buf7', mode=None), WeakDep(name='buf3',
-                            mutating_buf='buf8')]
-                    [rank0]:op7.met_dependencies = []
-                    [rank0]:op7.outputs = [
-                    [rank0]:    buf8: _CollectiveKernel
-                    [rank0]:    buf8.layout = FixedLayout('cuda:0', torch.bfloat16, size=[256], stride=[1])
-                    [rank0]:    buf8.users = [NodeUser(node=ExternKernelSchedulerNode(name='op8'), can_inplace=False,
-                                is_weak=False)]
-                    [rank0]:]
-                    [rank0]:op7.node.kernel = torch.ops._c10d_functional.all_gather_into_tensor.default
-                    """
-
                     limiting_factor[snode] = "data dependency"
                     break
                 if peak_memory - curr_memory[j] < curr_memory[j - 1] - curr_memory[j]:
