@@ -2101,7 +2101,6 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
-
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
