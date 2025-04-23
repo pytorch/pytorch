@@ -153,7 +153,9 @@ class MetalOverrides(OpOverrides):
         use_compute_types: bool = True,
     ) -> str:
         if dtype == torch.double:
-            log.warning("float64 cast requested, probably from tensorify_python_scalars")
+            log.warning(
+                "float64 cast requested, probably from tensorify_python_scalars"
+            )
             return f"static_cast<float>({x})"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
