@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-import random
-from threading import local
 
 import torch
 from torch.distributed.device_mesh import init_device_mesh
