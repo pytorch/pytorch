@@ -1728,7 +1728,7 @@ class CommonTemplate:
                 pass  # no device asserts in halide
             # TODO: remove once https://github.com/pytorch/pytorch/issues/144634
             # is fixed.
-            if is_mps_backend(self.device):
+            elif is_mps_backend(self.device):
                 pass  # no device asserts in MPS
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
