@@ -35,7 +35,6 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1724,6 +1723,7 @@ class FakeTensorMode(TorchDispatchMode):
         prevent caching it.
         """
         from torch._higher_order_ops.utils import registered_hop_fake_fns
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
         # For hops, lets look at the output tensor to find any unbacked symints.
         # If there are none, then we rely on the existing checks to validate
