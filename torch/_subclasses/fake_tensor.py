@@ -1633,9 +1633,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # Special case for AOT Dispatcher first pass, where the fake
                 # tensor is called on the functional wrapper of the subgraph.
                 result.append(hash(arg))
-                # functional wrapper is destroyed after fake tensor prop. We
-                # need to put the finalizer on the subgraph.
-                id_hashed_objects.append(arg.subgraph)
+                id_hashed_objects.append(arg)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
