@@ -913,6 +913,7 @@ class GraphSignature:
 class AOTAutogradCacheInfo:
     cache_key: str
     start_time_ns: int
+    forward_symints: list[torch.SymInt]
 
 
 @dataclass
@@ -939,6 +940,11 @@ class AOTConfig:
     pre_dispatch: bool = False
     # Key to use for AOTAutogradCache
     cache_info: Optional[AOTAutogradCacheInfo] = None
+    # If we should ignore the shape_env in the ambient tracing_context.
+    # The net effect is that if dynamic shapes are on, we end up
+    # specializing on example_inputs.
+    # Used only by standalone_compile.
+    ignore_shape_env: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
