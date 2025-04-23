@@ -874,7 +874,7 @@ def get_global_source_name(source: Source) -> Optional[str]:
         return get_global_source_name(source.base)
     if not isinstance(source, GlobalSource):
         return None
-    return source.name
+    return source.global_name
 
 
 def is_from_source(source: Source, target: Source):

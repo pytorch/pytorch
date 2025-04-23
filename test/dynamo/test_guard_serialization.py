@@ -175,12 +175,11 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     return x + 2
 
         m = Module()
+
         def fn(x):
             return m(x)
 
-        ref, loaded = self._test_serialization(
-            "HASATTR", fn, torch.randn(3)
-        )
+        ref, loaded = self._test_serialization("HASATTR", fn, torch.randn(3))
         self._test_check_fn(ref, loaded, {"m": m}, True)
         delattr(m, "a")
         self._test_check_fn(ref, loaded, {"m": m}, False)
