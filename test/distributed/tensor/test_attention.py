@@ -440,6 +440,7 @@ class RingFlexAttentionTest(DTensorTestBase):
     def world_size(self) -> int:
         return 4
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     def test_ring_flex_attention(self) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
@@ -642,7 +643,6 @@ def cp_flex_attention_dispatch_mode(
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor]:
     sharding = Shard(2)
-    # q_dist = DTensor.from_local(query, mode.device_mesh, [sharding])
     k_dist = DTensor.from_local(key, mode._device_mesh, [sharding])
     v_dist = DTensor.from_local(value, mode._device_mesh, [sharding])
     k_global = k_dist.full_tensor()
