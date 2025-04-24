@@ -599,7 +599,7 @@ class NNModuleVariable(VariableTracker):
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             ):
                 unimplemented_v2(
-                    gb_type="non-const NNModule method",
+                    gb_type="non-const argument in nn.Module method",
                     context=f"call_method: {self} {name} {args} {kwargs}",
                     explanation="Dynamo does not support calling "
                     f"method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
