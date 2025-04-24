@@ -485,9 +485,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   c10::Device device = c10::Device(device_key);
-  if (device.has_index()) {
-    device.set_index(device_index);
-  }
+  device.set_index(device_index);
 
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
   runner_ = registered_aoti_runner[device_key](
