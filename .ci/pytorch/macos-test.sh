@@ -87,6 +87,10 @@ test_libtorch() {
   fi
 }
 
+run_cpp_tests() {
+  ./bin/vec_test_all_types_DEFAULT
+}
+
 test_custom_backend() {
   print_cmake_info
 
@@ -308,6 +312,7 @@ elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    run_cpp_tests
     test_libtorch
     test_custom_script_ops
   elif [[ "${SHARD_NUMBER}" == 2 ]]; then
