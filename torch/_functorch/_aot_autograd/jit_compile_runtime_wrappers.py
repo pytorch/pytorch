@@ -55,6 +55,7 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
+    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     DebugAssertWrapper,
     EffectTokensWrapper,
@@ -275,7 +276,7 @@ def aot_dispatch_base(
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
                 guards_expr=guards_expr,
-                lazy_backward_info=None,
+                cached_lazy_backward_info=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -1305,9 +1306,10 @@ def aot_dispatch_autograd(
         def try_save_cache_entry(  # noqa: F811
             compiled_bw_func, lazy_backward_info, _fw_metadata, aot_config
         ):
-            # We shouldn't reuse contexts across cache hits
-            lazy_backward_info.saved_context = None
-            lazy_backward_info.saved_compile_context = None
+            bw_module = lazy_backward_info.bw_module
+            bw_module.meta = {}
+            for node in bw_module.graph.nodes:
+                node.meta = {}
 
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             fw_debug_lines = getattr(
@@ -1354,7 +1356,9 @@ def aot_dispatch_autograd(
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
                     guards_expr=guards_expr,
-                    lazy_backward_info=lazy_backward_info,
+                    cached_lazy_backward_info=CachedAutogradLazyBackwardCompileInfo(
+                        bw_module
+                    ),
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
