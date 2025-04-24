@@ -2,6 +2,8 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
+import warnings
+from types import ModuleType
 from typing import Literal, Optional
 from typing_extensions import deprecated
 
@@ -17,12 +19,41 @@ __all__ = [
     "current_stream",
     "device_count",
     "device_index",
+    "device_module",
     "is_available",
+    "set_default_device",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
     "synchronize",
 ]
+
+
+def set_default_device() -> None:
+    r"""
+    Sets the default ``torch.Tensor`` to be allocated on the current
+    :ref:`accelerator<accelerators>` based on :func:`torch.set_default_device`.
+    """
+
+    acc = current_accelerator()
+    if acc:
+        torch.set_default_device(acc)
+    else:
+        warnings.warn("No accelerators detected.")
+
+
+def device_module() -> Optional[ModuleType]:
+    r"""
+    Return the module associated with the current :ref:`accelerator<accelerators>`.
+
+    Example:
+        >>> acc_mod = torch.accelerator.device_module()
+        >>> acc_mod.device_count()
+        1
+    """
+
+    acc = current_accelerator()
+    return torch.get_device_module(acc) if acc else None
 
 
 def device_count() -> int:
@@ -36,12 +67,9 @@ def device_count() -> int:
         On CUDA, this API will NOT posion fork if NVML discovery succeeds.
         Otherwise, it will. For more details, see :ref:`multiprocessing-poison-fork-note`.
     """
-    acc = current_accelerator()
-    if acc is None:
-        return 0
 
-    mod = torch.get_device_module(acc)
-    return mod.device_count()
+    mod = device_module()
+    return mod.device_count() if mod else 0
 
 
 def is_available() -> bool:
@@ -65,12 +93,9 @@ def is_available() -> bool:
     # Because device like CUDA have a python implementation of is_available that is
     # non-poisoning and some features like Dataloader rely on it.
     # So we are careful to delegate to the Python version of the accelerator here
-    acc = current_accelerator()
-    if acc is None:
-        return False
 
-    mod = torch.get_device_module(acc)
-    return mod.is_available()
+    mod = device_module()
+    return mod.is_available() if mod else False
 
 
 def current_accelerator(check_available: bool = False) -> Optional[torch.device]:

@@ -156,6 +156,25 @@ class TestAccelerator(TestCase):
         ):
             event1.elapsed_time(event2)
 
+    def test_default_device(self):
+        cur_acc = torch.accelerator.current_accelerator(check_available=True)
+        self.assertIsNotNone(cur_acc)
+
+        # Tensors allocated on CPU by default
+        t = torch.randn(10)
+        self.assertEqual(t.device.type, "cpu")
+
+        # Tensors allocated on the current accelerator
+        torch.accelerator.set_default_device()
+        t = torch.randn(20)
+        self.assertEqual(t.device.type, cur_acc.type)
+        self.assertEqual(t.device.type, torch.get_default_device().type)
+
+        # Tensors allocated in a context manager
+        with torch.device("cpu"):
+            t = torch.randn(30)
+            self.assertEqual(t.device.type, "cpu")
+
 
 if __name__ == "__main__":
     run_tests()
