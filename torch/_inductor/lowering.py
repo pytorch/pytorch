@@ -76,6 +76,7 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     register_op_dtype_propagation_rules,
+    register_op_requires_libdevice_fp64,
     sympy_product,
     use_scatter_fallback,
 )
@@ -575,7 +576,6 @@ def make_pointwise(
     override_return_dtype=None,
     override_device=None,
     override_fn_when_input_bool=None,
-    override_fn_when_gpu_float64=None,
     allow_alpha=False,
     triton_fallback=None,
 ):
@@ -596,7 +596,6 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
-        is_gpu_device = is_gpu(decode_device(inputs[0].get_device()).type)
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -619,12 +618,6 @@ def make_pointwise(
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif (
-                override_fn_when_gpu_float64
-                and is_gpu_device
-                and dtype == torch.float64
-            ):
-                return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
                 for inp_index, load in enumerate(loaders):
@@ -846,17 +839,11 @@ def register_pointwise(
     override_return_dtype=None,
     override_fn_when_input_bool=None,
     allow_alpha=False,
-    use_libdevice_for_f64=False,
     triton_fallback=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
     fn = ops_wrapper(name)
-    if use_libdevice_for_f64:
-        fn_libdevice = ops_wrapper("libdevice_" + name)
-        register_op_dtype_propagation_rules(
-            "libdevice_" + name, type_promotion_kind, override_return_dtype
-        )
 
     register_op_dtype_propagation_rules(
         name, type_promotion_kind, override_return_dtype
@@ -869,7 +856,6 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_gpu_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
         triton_fallback=triton_fallback,
     )
@@ -1189,9 +1175,7 @@ def repeat(x, repeats):
 @register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
-def view(x, sizes):
-    assert isinstance(x, TensorBox)
-    assert isinstance(sizes, (list, tuple))
+def view(x: TensorBox, sizes: Sequence[sympy.Expr]) -> TensorBox:
     return TensorBox(View.create(x.data, sizes))
 
 
@@ -2630,6 +2614,7 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
+make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
 
 
 # 1.5) Easy or Impossible
@@ -3743,8 +3728,10 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
 
+    device = self.get_device()
+    assert device is not None
     scatter = ir.Scatter(
-        device=self.get_device(),
+        device=device,
         dtype=self.get_dtype(),
         inner_fn=values.make_loader(),
         ranges=expected_vals_size,  # iter_ranges,
@@ -3964,10 +3951,13 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             assert reduce is None
             return None
 
+    device = self.get_device()
+    assert device is not None
+
     if not include_self:
         # zero out the corresponding elements first
         zero_out = ir.Scatter(
-            device=self.get_device(),
+            device=device,
             dtype=self.get_dtype(),
             inner_fn=lambda index: ops.constant(0, self.get_dtype()),
             ranges=index.get_size(),
@@ -3986,7 +3976,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
     # self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
     scatter = ir.Scatter(
-        device=self.get_device(),
+        device=device,
         dtype=self.get_dtype(),
         inner_fn=fn,
         ranges=index.get_size(),
@@ -6465,11 +6455,11 @@ def register_pointwise_numeric(op, name=None, triton_fallback=None):
     )
 
 
-def register_pointwise_numeric_ldf64(op):
+def register_pointwise_numeric_ldf64(op: torch._ops.OpOverloadPacket):
+    register_op_requires_libdevice_fp64(op.__name__)
     return register_pointwise(
         op,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        use_libdevice_for_f64=True,
     )
 
 
