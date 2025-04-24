@@ -2189,7 +2189,6 @@ coverage_ignore_classes = [
     "integer_interval",
     "interval",
     "less_than",
-    "mixture_same_family",
     "multinomial",
     "stack",
     # torch.distributions.transforms

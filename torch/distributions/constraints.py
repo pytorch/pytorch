@@ -273,6 +273,11 @@ class _MixtureSameFamilyConstraint(Constraint):
     distribution that adds back the rightmost batch dimension before
     performing the validity check with the component distribution
     constraint.
+
+    Args:
+        base_constraint: The ``Constraint`` object of
+            the component distribution constraint of the
+            the :class:`torch.distribution.MixtureSameFamily`distribution.
     """
 
     def __init__(self, base_constraint):
@@ -289,6 +294,10 @@ class _MixtureSameFamilyConstraint(Constraint):
         return self.base_constraint.event_dim
 
     def check(self, value):
+        """
+        Check validity of ``value`` as a possible outcome of sampling
+        the :class:`torch.distribution.MixtureSameFamily` distribution.
+        """
         unsqueezed_value = value.unsqueeze(-1 - self.event_dim)
         result = self.base_constraint.check(unsqueezed_value)
         if value.dim() < self.event_dim:
