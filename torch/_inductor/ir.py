@@ -4596,7 +4596,7 @@ class TemplateBuffer(OperationBuffer):
 
         for inp in self.inputs:
             assert isinstance(inp, (ReinterpretView, Buffer)), type(inp)
-            assert isinstance(inp.layout, IRNode), type(inp.layout)
+            assert isinstance(inp.layout, Layout), type(inp.layout)
 
             indexer = inp.layout.make_indexer()
 
