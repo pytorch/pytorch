@@ -172,7 +172,7 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
-    def view(self, node, sizes: list[Any]) -> ir.View:
+    def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
         return L.view(node, sizes).data
