@@ -202,14 +202,6 @@ void test_aoti_constants_update(
   // Update random weight to buffer #1.
   runner->update_constant_buffer(missing_map, false, false);
   actual_output_tensors = runner->run(input_tensors);
-  if (use_runtime_constant_folding) {
-    // At this moment, this update is applied on the original weight.
-    // The weight being consumed is "folded", so will have no affect.
-    ASSERT_TRUE(
-        torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
-    runner->run_const_fold(/* use_inactive = */ false);
-    actual_output_tensors = runner->run(input_tensors);
-  }
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
