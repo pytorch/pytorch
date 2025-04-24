@@ -420,7 +420,7 @@
       }
     ],
     "decorators": [
-      "@override # Won't work!"
+      "@override"
     ],
     "display_name": "class NotDocstring",
     "docstring": "",

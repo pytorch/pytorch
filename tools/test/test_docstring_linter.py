@@ -158,9 +158,14 @@ OVER = "@override"
 WRAPS = "@functools.wraps(fn)"
 MASSIVE = (
     "@some.long.path.very_long_function_name(",
-    "    adjust_something_fiddly=1231232,    disable_something_critical=True,)",
+    "    adjust_something_fiddly=1231232,",
+    "    disable_something_critical=True,)",
 )
-MASSIVE_FLAT = " ".join(" ".join(MASSIVE).split())
+MASSIVE_FLAT = (
+    "@some.long.path.very_long_function_name("
+    "adjust_something_fiddly=1231232,"
+    "disable_something_critical=True,)"
+)
 DEF = "def function():", "    pass"
 
 INDENTS = 0, 4, 8

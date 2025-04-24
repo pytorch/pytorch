@@ -4531,6 +4531,7 @@ def set_feature_use(feature: str, usage: bool):
 _ddp_optimization_mode: tuple[str, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
+    "python_reducer_without_compiled_forward",
     "no_optimization",
 )
 

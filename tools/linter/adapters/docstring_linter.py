@@ -189,10 +189,11 @@ def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
             for i in range(begin + 1, end):
                 t = tokens[i]
                 if t.type == token.OP and t.string == "@":
-                    yield _join_tokens(tokens[i:end])
+                    non_comments = (t for t in tokens[i:end] if t.type != token.COMMENT)
+                    yield "".join(s.string.strip("\n") for s in non_comments)
                     break
                 elif t.type not in _IGNORE:
-                    return  # No more decorators
+                    return  # no more decorators
             end = begin
 
     return list(decorators())[::-1]
