@@ -1,31 +1,74 @@
 include MANIFEST.in
+include BUCK.oss
+include BUILD.bazel
 include CMakeLists.txt
 include CITATION.cff
+include CODE_OF_CONDUCT.md
+include CODEOWNERS
+include CONTRIBUTING.md
+include Dockerfile
+include GLOSSARY.md
 include LICENSE
+include Makefile
 include NOTICE
-include .gitmodules
-include build_variables.bzl
+include RELEASE.md
+include SECURITY.md
+include WORKSPACE
+include *.bzl
+include docker.Makefile
 include mypy.ini
+include mypy-strict.ini
+include pytest.ini
 include requirements.txt
+include ubsan.supp
 include ufunc_defs.bzl
 include version.txt
-recursive-include android *.*
-recursive-include aten *.*
-recursive-include binaries *.*
-recursive-include c10 *.*
-recursive-include caffe2 *.*
-recursive-include cmake *.*
-recursive-include torch *.*
-recursive-include tools *.*
-recursive-include test *.*
-recursive-include docs *.*
-recursive-include ios *.*
-recursive-include third_party *
-recursive-include test *.*
-recursive-include benchmarks *.*
-recursive-include scripts *.*
-recursive-include mypy_plugins *.*
-recursive-include modules *.*
-recursive-include functorch *.*
+include .bazelignore .bazelrc .bazelversion
+include .clang-format .clang-tidy
+include .cmakelintrc
+include .coveragerc
+include .ctags.d/*.ctags
+include .dockerignore
+include .flake8
+include .gdbinit
+include .lintrunner.toml
+include .lldbinit
+graft .devcontainer
+graft .vscode
+graft android
+graft aten
+graft binaries
+graft c10
+graft caffe2
+graft cmake
+graft torch
+graft tools
+graft test
+graft docs
+graft ios
+graft third_party
+graft test
+graft benchmarks
+graft scripts
+graft mypy_plugins
+graft modules
+graft functorch
+graft torchgen
+# ittapi contains a circular symlink; the following line deals with that
+# prune third_party/ittapi/rust/ittapi-sys/c-library
+# include third_party/ittapi/rust/ittapi-sys/c-library
+# prune third_party/ittapi/rust/ittapi-sys/LICENSES
+# include third_party/ittapi/rust/ittapi-sys/LICENSES
+exclude third_party/ittapi/rust/ittapi-sys/c-library/*
+prune third_party/flatbuffers/java/src/test/java/*
+prune third_party/flatbuffers/kotlin/benchmark/src/jvmMain/java/*
+recursive-include third_party/flatbuffers/java/src/main *
+recursive-include third_party/flatbuffers/tests *.cs *.fbs *.go *.h *.java *.json *.kt *lua *.nim *.php *.py *.rs
+prune torchgen/packaged
 prune */__pycache__
-global-exclude *.o *.so *.dylib *.a .git *.pyc *.swp
+prune **/.github
+prune **/.gitlab
+global-exclude *.o *.so *.dylib *.a
+global-exclude *.pyc *.swp
+global-exclude .git .git-blame-ignore-revs .gitattributes .gitignore .gitmodules
+global-exclude .gitlab-ci.yml

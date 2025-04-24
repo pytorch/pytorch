@@ -57,16 +57,11 @@ jobs:
           echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
-            # Create new folder with specified name so extracting the archive yields that
-            rm -rf "/tmp/$PT_RELEASE_NAME"
-            cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
-            mv "/tmp/$PT_RELEASE_NAME" .
-            # Cleanup
-            rm -rf "$PT_RELEASE_NAME"/{.circleci,.ci}
-            find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
-            # Create archive
-            tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
-            echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
+          pip install build || exit 1
+          python -m build --sdist || exit 1
+          cd dist || exit 1
+          release_file=( *.tar.gz )
+          echo $release_file
       - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
