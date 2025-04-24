@@ -74,6 +74,11 @@ jobs:
         run: |
           mkdir "%NIGHTLIES_PYTORCH_ROOT%"
           mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -141,6 +146,11 @@ jobs:
           echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
           echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
