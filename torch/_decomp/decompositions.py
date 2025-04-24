@@ -1282,7 +1282,7 @@ def _pad_chunk(
             ]
             tensor = aten.constant_pad_nd(tensor, pad, 0)
         view_size = tensor_size[:dim] + torch.Size([num_chunks, -1])
-        padded_tensors.append(tensor.view(view_size))
+        padded_tensors.append(tensor.reshape(view_size))
     return padded_tensors
 
 
