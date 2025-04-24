@@ -120,8 +120,8 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 @dataclasses.dataclass
 class FxConverter:
     """
-    Generates FX IR from Wrapper IR. The input and output code are stored as class
-    attributes.
+    Generates FX IR from Wrapper IR. As each instance is only meant to be used once, the
+    input and output code are stored as attributes.
     """
 
     lines: list[Line]
