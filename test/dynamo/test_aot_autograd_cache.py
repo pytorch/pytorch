@@ -149,7 +149,6 @@ class AOTAutogradCacheTests(InductorTestCase):
                 eager_result = fn(a, b)
                 expected_grads = torch.autograd.grad(eager_result.sum(), inputs=(a, b))
                 compiled_result = compiled_fn(a, b)
-                breakpoint()
                 with torch._dynamo.compiled_autograd._enable(
                     torch.compile(dynamic=dynamic)
                 ):
