@@ -1153,12 +1153,15 @@ def _canonicalize_group_rank(
     if group_rank is not None:
         if global_rank is not None:
             raise ValueError("Can't specify both group_rank and global_rank")
-        global_rank = get_global_rank(group, group_rank)
+        if return_global:
+            return get_global_rank(group, group_rank)
     else:
         if global_rank is None:
             raise ValueError("Must specify global_rank or group_rank")
+        if return_global:
+            return global_rank
         group_rank = get_group_rank(group, global_rank)
-    return global_rank if return_global else group_rank
+    return group_rank
 
 
 def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
@@ -3079,6 +3082,10 @@ def all_gather_object(object_list, obj, group=None):
         ``torch.cuda.set_device()``.
 
     .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
+
+    .. warning::
         :func:`all_gather_object` uses ``pickle`` module implicitly, which is
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
@@ -3177,6 +3184,10 @@ def gather_object(
         ``torch.cuda.current_device()`` and it is the user's responsiblity to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`gather_object` uses ``pickle`` module implicitly, which is
@@ -3300,6 +3311,10 @@ def send_object_list(
         ``torch.cuda.set_device()``.
 
     .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
+
+    .. warning::
         :func:`send_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
@@ -3396,6 +3411,10 @@ def recv_object_list(
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`recv_object_list` uses ``pickle`` module implicitly, which
@@ -3506,6 +3525,10 @@ def broadcast_object_list(
     .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
@@ -3625,6 +3648,10 @@ def scatter_object_list(
     .. note:: Note that this API differs slightly from the scatter collective
         since it does not provide an ``async_op`` handle and thus will be a
         blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`scatter_object_list` uses ``pickle`` module implicitly, which
