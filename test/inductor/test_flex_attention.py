@@ -173,10 +173,7 @@ if HAS_GPU:
     elif TEST_ON_XPU:
         # TODO: Pending on oneDNN's tf32 support.
         torch.backends.cuda.matmul.allow_tf32 = False
-        test_device = (
-            "xpu",
-            "cpu",
-        )
+        test_device = ("xpu",)
 else:
     test_device = ("cpu",)
 
