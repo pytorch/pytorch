@@ -10,6 +10,7 @@ from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.graph_signature import (
     CustomObjArgument,
+    FunctionSchemaArgument,
     InputKind,
     SymIntArgument,
     SymFloatArgument,
@@ -49,7 +50,7 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, (SymInt, SymFloat, SymBool)):
             return True
-        elif isinstance(val, CustomObjArgument):
+        elif isinstance(val, (CustomObjArgument, FunctionSchemaArgument)):
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
@@ -416,6 +417,20 @@ def _verify_exported_program_signature(exported_program) -> None:
             if custom_obj not in exported_program.constants:
                 raise SpecViolationError(
                     f"Custom object {custom_obj} is not in the constants dictionary."
+                )
+        elif input_spec.kind == InputKind.FUNCTION_SCHEMA:
+            if not isinstance(input_spec.arg, FunctionSchemaArgument):
+                raise SpecViolationError(
+                    f"Function schema {input_spec.name} is not a function schema argument. Found {input_spec.arg} instead."
+                )
+            schema_target: str = input_spec.target
+            if schema_target is None:
+                raise SpecViolationError(
+                    f"InputSpec for {input_spec.name} has no target."
+                )
+            if schema_target not in exported_program.constants:
+                raise SpecViolationError(
+                    f"schema {schema_target} is not in the constants dictionary."
                 )
         elif input_spec.kind == InputKind.TOKEN:
             if not isinstance(input_spec.arg, TokenArgument):

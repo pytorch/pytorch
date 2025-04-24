@@ -4301,7 +4301,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
+                # Could not guard on data-dependent expression Ne(Mod(u1, u2), 0)
                 return r.view(items[0], items[2])
 
         M = M_v0
@@ -4310,9 +4310,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
-            f".*{re.escape('torch._check(items[2] != (-1))')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in Eq(u2, -1) and its negation.)')}",
+            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}.*\n"
+            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
+            f".*{re.escape('or r.shape[1], `u2` with items[2] in Ne(Mod(u1, u2), 0) and its negation.')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -4320,59 +4321,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
+                # TODO(pianpwk): this isn't the suggested fixes.
+                # fix issue with % being interpreted as PythonMod instead of Mod
+                torch._check(items[1] == items[2])
                 return r.view(items[0], items[2])
 
         M = M_v1
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('You can add either: torch._check_is_size(u2) or torch._check(u2>=0) Note: torch._check_is_size(u2) could prevent data dependent errors that happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning. See documentation on guard_size_oblivious for more details: https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html')}.*\n"
-            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v2(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                return r.view(items[0], items[2])
-
-        M = M_v2
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
-            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v3(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                torch._check(items[2] == r.shape[1])
-                return r.view(items[0], items[2])
-
-        M = M_v3
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
@@ -4413,23 +4367,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[
                 # Could not guard on data-dependent expression u0 < 0
                 "torch._check(i >= 0)",
-            ],
-        )
-
-        class cf_nomemo(torch.nn.Module):
-            def forward(self, x, y, fixes):
-                i = y[0].item()
-                eval(fixes)
-                return x.unsqueeze(1).expand(-1, i)
-
-        retry_export(
-            cf_nomemo(),
-            (torch.randn(8), torch.tensor([2])),
-            fixes=[
-                # Could not guard on data-dependent expression Eq(u0, 1)
-                "torch._check(i != 1)",
-                # Could not guard on data-dependent expression Ne(u0, -1)
-                "torch._check(i != (-1))",
             ],
         )
 
@@ -4483,6 +4420,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.arange(10), torch.tensor([0, 2, 5, 7, 10])),
             fixes=[],  # nothing to fix!
         )
+
+    def test_simple_unbacked_view(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                y = torch.empty(5, u0)
+                return y.view(u0, 5)  # [5, u0] -> [u0, 5]
+
+        ep = export(Foo(), (torch.tensor([9]),))
+        self.assertEqual(ep.module()(torch.tensor([8])).size(0), 8)
+        self.assertEqual(ep.module()(torch.tensor([5])).size(0), 5)
+
+        class Foov2(torch.nn.Module):
+            def forward(self, xs):
+                xsl = xs.tolist()
+                a, b = xsl
+                x = torch.zeros(a)
+                return x.reshape(b)
+
+        xs = torch.tensor([4, 4])
+        ep = export(Foov2(), (xs,))
+        self.assertEqual(ep.module()(xs).size(0), 4)
+        self.assertEqual(ep.module()(torch.tensor([5, 5])).size(0), 5)
 
     def test_no_suggested_fixes_for_data_dependent_errors(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -7549,22 +7509,19 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 2
             )
 
-    def test_check_is_size_error(self):
+    def test_no_check_is_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
-                # We cannot automatically infer a is a size here because view
-                # accepts -1
                 return torch.randn(24).view(a, 4)
 
         f = Module()
-        if is_non_strict_test(self._testMethodName):
-            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-        else:
-            error = torch._dynamo.exc.UserError
-        error_msg = r"Could not guard on data-dependent expression"
-        with self.assertRaisesRegex(error, error_msg):
-            _ = export(f, (torch.tensor(6),))
+        ep = export(f, (torch.tensor(6),))
+        ep.module()(torch.tensor(6))
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for .* u.* 6"
+        ):
+            ep.module()(torch.tensor(5))
 
     def test_is_non_negative_check_function(self):
         import sympy as sp
@@ -12212,6 +12169,44 @@ def forward(self, x, y):
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
+    def test_unbacked_expand(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                x = torch.empty(u0, u1, 1)
+                return x.expand(-1, u1, u2)
+
+        ep = export(Foo(), (torch.tensor([1, 2, 3]),))
+        self.assertEqual(
+            list(ep.module()(torch.tensor([3, 4, 5])).shape),
+            [3, 4, 5],
+        )
+        self.assertEqual(
+            list(ep.module()(torch.tensor([0, 1, 0])).shape),
+            [0, 1, 0],
+        )
+
+        class Bar(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.empty(u0)
+                return x.expand(u1)
+
+        ep = export(Bar(), (torch.tensor([2, 2]),))
+        self.assertEqual(
+            ep.module()(torch.tensor([5, 5])).shape[0],
+            5,
+        )
+        self.assertEqual(
+            ep.module()(torch.tensor([1, 1])).shape[0],
+            1,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(u0, u1\) .*",
+        ):
+            ep.module()(torch.tensor([1, 5]))
+
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
         class Model(torch.nn.Module):
@@ -13487,7 +13482,7 @@ def forward(self, x):
             node.target == torch.ops.aten._assert_scalar.default
             for node in ep.graph.nodes
         ].count(True)
-        self.assertEqual(num_asserts, 1)
+        self.assertEqual(num_asserts, 2)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
@@ -13587,6 +13582,83 @@ class GraphModule(torch.nn.Module):
                 return (add,)
 """,
         )
+
+    @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
+    @testing.expectedFailureRetraceability  # test_hop doesn't have a dynamo implementation
+    @testing.expectedFailureTrainingIRToRunDecomp  # test_hop doesn't have a dynamo implementation
+    @testing.expectedFailureSerDerNonStrict  # TODO: serde torch.FunctionSchema is not implemented yet
+    @testing.expectedFailureSerDer  # TODO: serde torch.FunctionSchema is not implemented yet
+    def test_export_function_schema(self):
+        from torch._higher_order_ops.utils import (
+            _maybe_run_with_interpreter,
+            autograd_not_implemented,
+            reenter_make_fx,
+            unique_graph_id,
+        )
+        from torch._ops import HigherOrderOperator
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import (
+            ProxyTorchDispatchMode,
+            track_tensor_tree,
+        )
+
+        class TestFunctionSchemaHop(HigherOrderOperator):
+            def __init__(self):
+                super().__init__("test_function_schema")
+
+            def __call__(self, fn, x: torch.Tensor, schema: torch.FunctionSchema):
+                return super().__call__(fn, x, schema)
+
+        def trace_hop(proxy_mode, fn, x, schema):
+            sub_gm = reenter_make_fx(fn)(x)
+            i, gm_name = unique_graph_id(proxy_mode, prefix="_sub_gm")
+            proxy_mode.tracer.root.register_module(gm_name, sub_gm)
+
+            out_proxy = proxy_mode.tracer.create_proxy(
+                "call_function",
+                test_hop,
+                tuple(
+                    proxy_mode.tracer.unwrap_proxy(arg) for arg in (sub_gm, x, schema)
+                ),
+                {},
+            )
+            example_out = test_hop(sub_gm, x, schema)
+            return track_tensor_tree(
+                example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+            )
+
+        def dense_hop(fn, x, schema):
+            return fn(x)
+
+        def fake_hop(mode, fn, x, schema):
+            with mode:
+                return dense_hop(fn, x, schema)
+
+        def func_hop(ctx, fn, x, schema):
+            unwrapped_x = ctx.unwrap_tensors(x)
+            functional_fn = ctx.functionalize(_maybe_run_with_interpreter(fn))
+            return ctx.wrap_tensors(test_hop(functional_fn, unwrapped_x, schema))
+
+        test_hop = TestFunctionSchemaHop()
+        test_hop.py_impl(ProxyTorchDispatchMode)(trace_hop)
+        test_hop.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)(dense_hop)
+        test_hop.py_impl(FakeTensorMode)(fake_hop)
+        test_hop.py_autograd_impl(
+            autograd_not_implemented(test_hop, deferred_error=True)
+        )
+        test_hop.py_functionalize_impl(func_hop)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                def fn(x):
+                    return x.sin()
+
+                return test_hop(fn, x, torch.ops.aten.sin.default._schema)
+
+        mod = Model()
+        x = torch.randn(3, 4)
+        ep = export(mod, (x,))
+        self.assertEqual(x.sin(), ep.module()(x))
 
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):

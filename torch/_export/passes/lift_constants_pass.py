@@ -9,9 +9,11 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
+    _ConstLike,
     ArgumentSpec,
     CustomObjArgument,
     ExportGraphSignature,
+    FunctionSchemaArgument,
     InputKind,
     InputSpec,
     TensorArgument,
@@ -33,36 +35,36 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: dict[
-            Union[int, torch.Tensor, FakeScriptObject], list[Any]
+            Union[int, torch.Tensor, FakeScriptObject, torch.FunctionSchema], list[Any]
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
         # original ScriptObjects.
         self._script_object_map: dict[int, torch.ScriptObject] = {}
 
-    def __getitem__(
-        self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
-    ) -> Any:
+    def __getitem__(self, key: _ConstLike) -> Any:
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
-        assert isinstance(real_key, (int, torch.Tensor, FakeScriptObject))
+        assert isinstance(
+            real_key, (int, torch.Tensor, FakeScriptObject, torch.FunctionSchema)
+        )
         return self._constant_attrs[real_key]
 
-    def __setitem__(self, key: Union[torch.Tensor, torch.ScriptObject], value):
+    def __setitem__(self, key: _ConstLike, value):
         # we shouldn't actually call this, should go to add() instead to handle aliasing
         raise NotImplementedError(
             """Directly setting values for ConstantAttrMap is not supported, please use add(key, value) instead.
 The same key can be mapped to multiple values, for handling constant aliasing."""
         )
 
-    def add(
-        self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject], value: Any
-    ) -> None:
+    def add(self, key: _ConstLike, value: Any) -> None:
         if isinstance(key, torch.ScriptObject):
             if hash(key) not in self._constant_attrs:
                 self._constant_attrs[hash(key)] = []
             self._constant_attrs[hash(key)].append(value)
             self._script_object_map[hash(key)] = key
-        elif isinstance(key, (torch.Tensor, FakeScriptObject)):
+        elif isinstance(
+            key, (int, torch.Tensor, FakeScriptObject, torch.FunctionSchema)
+        ):
             if key not in self._constant_attrs:
                 self._constant_attrs[key] = []
             self._constant_attrs[key].append(value)
@@ -71,7 +73,7 @@ The same key can be mapped to multiple values, for handling constant aliasing.""
                 f"Expected key to be a tensor or ScriptObject, got {type(key)}"
             )
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: _ConstLike):
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
 
         del self._constant_attrs[real_key]
@@ -106,7 +108,7 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
 
 def _get_first_fqn(
     const_attrs: ConstantAttrMap,
-    key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],
+    key: _ConstLike,
 ) -> Any:
     fqns = const_attrs.get(key)
     return fqns[0] if fqns else None
@@ -116,7 +118,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
+) -> dict[str, _ConstLike]:
     """
     Takes a graph module, graph signature, and modifies them implace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
@@ -134,9 +136,7 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: dict[
-        str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
-    ] = {}
+    all_constants: dict[str, _ConstLike] = {}
 
     inputs = graph_signature.input_specs
     num_custom_obj = sum(
@@ -144,6 +144,9 @@ def lift_constants_pass(
     )
     num_tensor_constants = sum(
         input_specs.kind == InputKind.CONSTANT_TENSOR for input_specs in inputs
+    )
+    num_function_schema = sum(
+        input_specs.kind == InputKind.FUNCTION_SCHEMA for input_specs in inputs
     )
 
     fake_mode = detect_fake_mode(
@@ -239,6 +242,19 @@ def lift_constants_pass(
                         constant_name = f"lifted_tensor_{num_tensor_constants}"
                         constant_fqn = get_constant_fqn(node, constant_name)
                     num_tensor_constants += 1
+            elif isinstance(constant_val, torch.FunctionSchema):
+                constant_kind = InputKind.FUNCTION_SCHEMA
+                constant_fqn = _get_first_fqn(constant_attrs, constant_val)
+                if constant_fqn is not None:
+                    constant_name = constant_fqn.replace(".", "_")
+                else:
+                    constant_name = f"lifted_schema_{num_function_schema}"
+                    constant_fqn = get_constant_fqn(node, constant_name)
+                    while constant_fqn in used_target_names:
+                        num_custom_obj += 1
+                        constant_name = f"lifted_schema_{num_function_schema}"
+                        constant_fqn = get_constant_fqn(node, constant_name)
+                    num_function_schema += 1
             else:
                 raise SpecViolationError(
                     f"getattr node {node} referencing unsupported type {type(constant_val)}"
@@ -286,6 +302,11 @@ def lift_constants_pass(
                         class_fqn=class_fqn,
                         fake_val=constant_val,
                     )
+                elif isinstance(constant_val, torch.FunctionSchema):
+                    input_spec_arg = FunctionSchemaArgument(
+                        name=const_placeholder_node.name, schema=str(constant_val)
+                    )
+                    const_placeholder_node.meta["val"] = input_spec_arg
                 else:
                     raise SpecViolationError(
                         f"tried to lift unsupported type {type(constant_val)} from node {node.format_node()}"
@@ -322,7 +343,7 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
+) -> dict[str, _ConstLike,]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
@@ -330,11 +351,7 @@ def rewrite_script_object_meta(
     """
     constants: dict[
         str,
-        Union[
-            torch.Tensor,
-            torch.ScriptObject,
-            FakeScriptObject,
-        ],
+        _ConstLike,
     ] = {}
     for node in gm.graph.nodes:
         if "val" not in node.meta:
@@ -357,7 +374,11 @@ def rewrite_script_object_meta(
     return constants
 
 
-def _materialize_and_lift_constants(gm, export_graph_signature, constant_attrs):
+def _materialize_and_lift_constants(
+    gm: torch.fx.GraphModule,
+    export_graph_signature: ExportGraphSignature,
+    constant_attrs: ConstantAttrMap,
+) -> dict[str, _ConstLike]:
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
     return constants

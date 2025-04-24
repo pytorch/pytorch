@@ -1095,11 +1095,12 @@ def decompose_auto_functionalized(gm: torch.fx.GraphModule):
         )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
+        args_with_meta_val = [arg for arg in flat_args if "val" in arg.meta]
 
         # NB: we combine (args, kwargs) into flat args for replacing.
         # This is replace_by_example uses make_fx which does not support
         # tracing a function with kwargs.
-        def decomp(*flat_args):
+        def decomp(*args_with_meta_val):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             assert len(args) == 1
             mutable_op = args[0]
@@ -1114,7 +1115,9 @@ def decompose_auto_functionalized(gm: torch.fx.GraphModule):
                 return out
             return out
 
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        match.replace_by_example(
+            decomp, args_with_meta_val, run_functional_passes=False
+        )
 
     graph_pass.apply(graph)
 

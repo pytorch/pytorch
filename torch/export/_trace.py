@@ -33,6 +33,7 @@ from torch._export.non_strict_utils import (
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
+    _ConstLike,
     _materialize_and_lift_constants,
     ConstantAttrMap,
 )
@@ -135,11 +136,7 @@ class ATenExportArtifact:
     sig: ExportGraphSignature
     constants: dict[
         str,
-        Union[
-            torch.Tensor,
-            FakeScriptObject,
-            torch.ScriptObject,
-        ],
+        _ConstLike,
     ]
 
 
@@ -382,7 +379,7 @@ def _preserve_requires_grad_pass(
     gm: torch.fx.GraphModule,
     sig: ExportGraphSignature,
     fake_params_buffers: dict[str, torch.Tensor],
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstLike],
     flat_fake_args: list[Any],
 ):
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
@@ -411,7 +408,11 @@ def _preserve_requires_grad_pass(
                     node.meta["val"].requires_grad = constant.requires_grad
                 else:
                     assert node.meta["val"].requires_grad == constant.requires_grad
-        elif spec.kind in (InputKind.CUSTOM_OBJ, InputKind.TOKEN):
+        elif spec.kind in (
+            InputKind.CUSTOM_OBJ,
+            InputKind.TOKEN,
+            InputKind.FUNCTION_SCHEMA,
+        ):
             continue
         else:
             raise AssertionError(spec.kind)
@@ -420,7 +421,7 @@ def _preserve_requires_grad_pass(
 def _remap_constants(
     orig_constant_attrs: ConstantAttrMap,
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstLike],
 ) -> None:
     """Rewrite the graph signature and constants table to use the FQN from the original module."""
     remap_table: dict[str, list[str]] = {}
@@ -921,7 +922,7 @@ def _rewrite_dynamo_tensor_constants(
     orig_mod_buffers: set[torch.Tensor],
     traced_mod_buffers: dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstLike],
 ) -> None:
     """
     Dynamo erroneously marks tensor attributes on modules as buffers.
@@ -942,7 +943,7 @@ def _rewrite_dynamo_tensor_constants(
 def _move_non_persistent_buffers_to_tensor_constants(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstLike],
 ) -> None:
     """
     Moves non-persistent buffers to tensor constants.
