@@ -2681,6 +2681,7 @@ class CheckFunctionManager:
 
             def normalize_create_fn(x):
                 if isinstance(x, functools.partial):
+
                     def _ref(x):
                         if isinstance(x, (TensorWeakRef, weakref.ref)):
                             return x()
