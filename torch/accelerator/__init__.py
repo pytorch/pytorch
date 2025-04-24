@@ -193,7 +193,7 @@ def synchronize(device: _device_t = None, /) -> None:
 
 
 class device_index:
-    r"""Context manager to set the current device index for current accelerator.
+    r"""Context manager to set the current device index for the current :ref:`accelerator<accelerators>`.
     Temporarily changes the current device index to the specified value for the duration
     of the context, and automatically restores the previous device index when exiting
     the context.
@@ -215,6 +215,7 @@ class device_index:
         ...     # No device switching occurs
         ...     pass
     """
+
     def __init__(self, device: Optional[int], /) -> None:
         self.idx = device
         self.prev_idx = -1
