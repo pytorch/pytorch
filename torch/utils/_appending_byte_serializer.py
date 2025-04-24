@@ -1,4 +1,5 @@
 import base64
+import hashlib
 from collections.abc import Iterable
 from typing import Callable, Generic, TypeVar
 
@@ -14,10 +15,13 @@ __all__ = ["AppendingByteSerializer"]
 # Helper classes
 #######################################
 
+SHA256_DIGEST_SIZE = 32
+
 
 class BytesWriter:
-    def __init__(self, preallocate_size: int) -> None:
-        self._data = bytearray(preallocate_size)
+    def __init__(self) -> None:
+        # Reserve SHA256_DIGEST_SIZE bytes for checksum
+        self._data = bytearray(SHA256_DIGEST_SIZE)
 
     def write_uint64(self, i: int) -> None:
         self._data.extend(i.to_bytes(8, byteorder="big", signed=False))
@@ -31,13 +35,26 @@ class BytesWriter:
         self._data.extend(b)
 
     def to_bytes(self) -> bytes:
+        digest = hashlib.sha256(self._data[SHA256_DIGEST_SIZE:]).digest()
+        assert len(digest) == SHA256_DIGEST_SIZE
+        self._data[0:SHA256_DIGEST_SIZE] = digest
         return bytes(self._data)
 
 
 class BytesReader:
     def __init__(self, data: bytes) -> None:
+        # Check for data corruption
+        assert len(data) >= SHA256_DIGEST_SIZE
+        digest = hashlib.sha256(data[SHA256_DIGEST_SIZE:]).digest()
+        assert len(digest) == SHA256_DIGEST_SIZE
+        if data[0:SHA256_DIGEST_SIZE] != digest:
+            raise RuntimeError(
+                "Bytes object is corrupted, checksum does not match. "
+                f"Expected: {data[0:SHA256_DIGEST_SIZE]!r}, Got: {digest!r}"
+            )
+
         self._data = data
-        self._i = 0
+        self._i = SHA256_DIGEST_SIZE
 
     def is_finished(self) -> bool:
         return len(self._data) == self._i
@@ -72,20 +89,17 @@ class AppendingByteSerializer(Generic[T]):
 
     _serialize_fn: Callable[[BytesWriter, T], None]
     _writer: BytesWriter
-    _preallocate_size: int
 
     def __init__(
         self,
         *,
         serialize_fn: Callable[[BytesWriter, T], None],
-        preallocate_size: int = 0,
     ) -> None:
         self._serialize_fn = serialize_fn
-        self._preallocate_size = preallocate_size
         self.clear()
 
     def clear(self) -> None:
-        self._writer = BytesWriter(preallocate_size=self._preallocate_size)
+        self._writer = BytesWriter()
         # First 8-bytes are for version
         self._writer.write_uint64(_ENCODING_VERSION)
 
