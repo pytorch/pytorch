@@ -2,7 +2,6 @@
 import collections
 import logging
 from typing import Any, Union
-from typing_extensions import TypeAlias
 
 import torch
 from torch._export.verifier import SpecViolationError
@@ -17,15 +16,11 @@ from torch.export.exported_program import (
     InputSpec,
     TensorArgument,
 )
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.graph_module import _get_attr
 
 
 log = logging.getLogger(__name__)
-
-
-_ConstantAttributeType: TypeAlias = Union[
-    torch.Tensor, torch.ScriptObject, FakeScriptObject
-]
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
@@ -39,7 +34,8 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: dict[
-            Union[int, torch.Tensor, FakeScriptObject], list[Any]
+            Union[int, torch.Tensor, FakeScriptObject, torch.utils._pytree.TreeSpec],
+            list[Any],
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
