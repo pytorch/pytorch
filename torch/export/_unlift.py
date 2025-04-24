@@ -274,7 +274,9 @@ def _register_attrs_to_new_gm(
     # it is ok because we have a separate pass later in the stack that populates
     # the final gm.
     for name in chain(
-        graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
+        graph_signature.lifted_custom_objs,
+        graph_signature.lifted_tensor_constants,
+        graph_signature.lifted_function_schemas,
     ):
         value = constants[name]
         _assign_attr(
@@ -430,6 +432,7 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
                 InputKind.CONSTANT_TENSOR,
                 InputKind.PARAMETER,
                 InputKind.CUSTOM_OBJ,
+                InputKind.FUNCTION_SCHEMA,
             )
             else None
         )

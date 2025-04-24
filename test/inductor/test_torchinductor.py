@@ -1717,7 +1717,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(1024),))
 
     @xfailIfS390X
-    @xfail_if_mps
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -1727,6 +1726,10 @@ class CommonTemplate:
             fn_opt = torch.compile(fn)
             if is_halide_backend(self.device):
                 pass  # no device asserts in halide
+            # TODO: remove once https://github.com/pytorch/pytorch/issues/144634
+            # is fixed.
+            if is_mps_backend(self.device):
+                pass  # no device asserts in MPS
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -4216,7 +4219,6 @@ class CommonTemplate:
             ),
         )
 
-    @xfail_if_mps
     def test_device_assert(self):
         def fn(x, y):
             x = torch.sum(x.view(int(x.shape[0] / 6), 6), dim=1)
@@ -4224,7 +4226,8 @@ class CommonTemplate:
 
         x1 = torch.randn(30, device=self.device)
         x2 = torch.randn(36, device=self.device)
-        y = torch.ones(1, dtype=torch.float64, device=self.device)
+        dtype = torch.float64 if self.device != "mps" else torch.float32
+        y = torch.ones(1, dtype=dtype, device=self.device)
 
         self.assertEqual(torch.compile(fn)(x1, y), fn(x1, y))
         self.assertEqual(torch.compile(fn)(x2, y), fn(x2, y))
@@ -5989,7 +5992,6 @@ class CommonTemplate:
             )
 
     @xfail_if_triton_cpu
-    @xfail_if_mps  # float64 is not MPS type
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
@@ -10516,7 +10518,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps  # float64 is not MPS type
     def test_rsqrt_dynamic_shapes(self):
         # From HF hf_BigBird model.
         @torch.compile(dynamic=True)

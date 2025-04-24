@@ -112,8 +112,9 @@ def _assign_attr(
                 (
                     torch.Tensor,
                     torch.ScriptObject,
+                    torch.FunctionSchema,
                 ),
-            )
+            ), f"{from_obj} is not allowed to be a constant attr."
             setattr(to_module, field, from_obj)
         elif attr_kind == _AttrKind.MODULE:
             assert isinstance(from_obj, torch.nn.Module)
