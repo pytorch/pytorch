@@ -2,7 +2,6 @@
 import collections
 import logging
 from typing import Any, Union
-from typing_extensions import TypeAlias
 
 import torch
 from torch._export.verifier import SpecViolationError
@@ -10,9 +9,11 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
+    _ConstLike,
     ArgumentSpec,
     CustomObjArgument,
     ExportGraphSignature,
+    FunctionSchemaArgument,
     InputKind,
     InputSpec,
     TensorArgument,
@@ -21,9 +22,6 @@ from torch.fx.graph_module import _get_attr
 
 
 log = logging.getLogger(__name__)
-
-
-_ConstLike: TypeAlias = Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
@@ -37,7 +35,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: dict[
-            Union[int, torch.Tensor, FakeScriptObject], list[Any]
+            Union[int, torch.Tensor, FakeScriptObject, torch.FunctionSchema], list[Any]
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
@@ -46,7 +44,9 @@ class ConstantAttrMap(collections.abc.MutableMapping):
 
     def __getitem__(self, key: _ConstLike) -> Any:
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
-        assert isinstance(real_key, (int, torch.Tensor, FakeScriptObject))
+        assert isinstance(
+            real_key, (int, torch.Tensor, FakeScriptObject, torch.FunctionSchema)
+        )
         return self._constant_attrs[real_key]
 
     def __setitem__(self, key: _ConstLike, value):
@@ -62,7 +62,9 @@ The same key can be mapped to multiple values, for handling constant aliasing.""
                 self._constant_attrs[hash(key)] = []
             self._constant_attrs[hash(key)].append(value)
             self._script_object_map[hash(key)] = key
-        elif isinstance(key, (torch.Tensor, FakeScriptObject)):
+        elif isinstance(
+            key, (int, torch.Tensor, FakeScriptObject, torch.FunctionSchema)
+        ):
             if key not in self._constant_attrs:
                 self._constant_attrs[key] = []
             self._constant_attrs[key].append(value)
@@ -142,6 +144,9 @@ def lift_constants_pass(
     )
     num_tensor_constants = sum(
         input_specs.kind == InputKind.CONSTANT_TENSOR for input_specs in inputs
+    )
+    num_function_schema = sum(
+        input_specs.kind == InputKind.FUNCTION_SCHEMA for input_specs in inputs
     )
 
     fake_mode = detect_fake_mode(
@@ -237,6 +242,19 @@ def lift_constants_pass(
                         constant_name = f"lifted_tensor_{num_tensor_constants}"
                         constant_fqn = get_constant_fqn(node, constant_name)
                     num_tensor_constants += 1
+            elif isinstance(constant_val, torch.FunctionSchema):
+                constant_kind = InputKind.FUNCTION_SCHEMA
+                constant_fqn = _get_first_fqn(constant_attrs, constant_val)
+                if constant_fqn is not None:
+                    constant_name = constant_fqn.replace(".", "_")
+                else:
+                    constant_name = f"lifted_schema_{num_function_schema}"
+                    constant_fqn = get_constant_fqn(node, constant_name)
+                    while constant_fqn in used_target_names:
+                        num_custom_obj += 1
+                        constant_name = f"lifted_schema_{num_function_schema}"
+                        constant_fqn = get_constant_fqn(node, constant_name)
+                    num_function_schema += 1
             else:
                 raise SpecViolationError(
                     f"getattr node {node} referencing unsupported type {type(constant_val)}"
@@ -284,6 +302,11 @@ def lift_constants_pass(
                         class_fqn=class_fqn,
                         fake_val=constant_val,
                     )
+                elif isinstance(constant_val, torch.FunctionSchema):
+                    input_spec_arg = FunctionSchemaArgument(
+                        name=const_placeholder_node.name, schema=str(constant_val)
+                    )
+                    const_placeholder_node.meta["val"] = input_spec_arg
                 else:
                     raise SpecViolationError(
                         f"tried to lift unsupported type {type(constant_val)} from node {node.format_node()}"

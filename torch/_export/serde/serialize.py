@@ -14,6 +14,8 @@ import operator
 import traceback
 import typing
 
+
+
 from collections import OrderedDict, namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -35,7 +37,6 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.verifier import load_verifier
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
@@ -44,6 +45,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import prefix_str, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from torch._export.passes.lift_constants_pass import _ConstLike
 from ..utils import remove_proxy_from_state_dict
 
 from .schema import (  # type: ignore[attr-defined]
@@ -1607,7 +1609,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
         state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
+        constants: dict[str, _ConstLike]
         example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
     def __init__(self) -> None:
