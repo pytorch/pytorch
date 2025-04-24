@@ -1374,11 +1374,6 @@ class InstructionTranslatorBase(
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
 
-                    # Note that this call maybe redundant if compile_subgraph is
-                    # called. This is ok, because calling exit stack close()
-                    # twice is not an issue (second stop is a no op).
-                    self.output.mark_bytecode_tracing_stop()
-
     def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
@@ -3735,6 +3730,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            msg = inspect.getattr_static(
+                func.get_function(), "_torchdynamo_disable_msg", None
+            )
+            unimplemented_v2(
+                gb_type="Skip inlining `torch.compiler.disable()`d function",
+                context=str(func.get_function()),
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
+
         result = trace_rules.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
@@ -3754,11 +3765,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ]
             if "_dynamo" not in func.get_filename():
                 hints += [
-                    f"Remove the function `{fn_qualname}` or the file `{func.get_filename()}` "
-                    "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                    "attempting to trace into the function.",
+                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                    "to force tracing into the function. "
+                    "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
-                    # TODO suggest mark_force_inline when implemented
                 ]
             unimplemented_v2(
                 gb_type="Attempted to inline function marked as skipped",
@@ -3769,23 +3779,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=hints,
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
-            func.get_function(), "_torchdynamo_disable", False
-        ):
-            msg = inspect.getattr_static(
-                func.get_function(), "_torchdynamo_disable_msg", None
-            )
-            unimplemented_v2(
-                gb_type="Skip inlining `torch.compiler.disable()`d function",
-                context=str(func.get_function()),
-                explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
-                f"with `torch.compiler.disable` (reason: {msg})",
-                hints=[
-                    "Remove the `torch.compiler.disable` call",
-                ],
-            )
-        else:
-            return result
+        return result
 
     @staticmethod
     def build_inline_tracer(
@@ -4033,6 +4027,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
+            # realize the VT because we are going to send this to side effects
+            fglobals_vt = fglobals_vt.realize()
             global_source = AttrSource(module_source, name)
         else:
             globals_name = self.output.install_global_by_id(
@@ -4041,6 +4037,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
+            # realize the VT because we are going to send this to side effects
+            fglobals_vt = fglobals_vt.realize()
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
