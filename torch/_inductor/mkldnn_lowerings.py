@@ -26,7 +26,7 @@ from .select_algorithm import (
     ExternKernelChoice,
 )
 from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
-from .virtualized import ops, V
+from .virtualized import ops, OpsValue, V
 
 
 def create_int8_compensation(
@@ -73,14 +73,14 @@ def create_int8_compensation(
 
 
 def codegen_int8_gemm_template_compensation(
-    use_int8_fast_compensation_path,
-    input,
-    _x_w_scale,
-    _x_scale,
-    _w_scale,
-    _weight_compo,
-    _x_zp,
-):
+    use_int8_fast_compensation_path: bool,
+    input: OpsValue,
+    _weight_compo: OpsValue,
+    _x_scale: Optional[OpsValue],
+    _x_zp: Optional[OpsValue],
+    _w_scale: Optional[OpsValue],
+    _x_w_scale: Optional[OpsValue],
+) -> OpsValue:
     if use_int8_fast_compensation_path:
         temp = ops.sub(
             ops.mul(
@@ -807,11 +807,11 @@ def register_onednn_fusion_ops():
                             temp = codegen_int8_gemm_template_compensation(
                                 use_int8_fast_compensation_path,
                                 input,
-                                _x_w_scale,
-                                _x_scale,
-                                _w_scale,
                                 _weight_compo,
+                                _x_scale,
                                 _x_zp,
+                                _w_scale,
+                                _x_w_scale,
                             )
                             # Step 2: add Bias if applicable
                             if bias is not None:
@@ -1131,11 +1131,11 @@ def register_onednn_fusion_ops():
                             temp = codegen_int8_gemm_template_compensation(
                                 use_int8_fast_compensation_path,
                                 input,
-                                _x_w_scale,
-                                _x_scale,
-                                _w_scale,
                                 _weight_compo,
+                                _x_scale,
                                 _x_zp,
+                                _w_scale,
+                                _x_w_scale,
                             )
                             # Step 2: add Bias if applicable
                             if bias is not None:
