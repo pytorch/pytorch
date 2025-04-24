@@ -56,7 +56,6 @@ placeholder_prefixes = {
     InputKind.CONSTANT_TENSOR: "c_",
     InputKind.CUSTOM_OBJ: "obj_",
     InputKind.TOKEN: "token",
-    InputKind.FUNCTION_SCHEMA: "schema_",
 }
 
 _DISABLE_ATEN_TO_ASSERTION_PASS = False
@@ -1006,7 +1005,7 @@ def placeholder_naming_pass(
     # assign new node names
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            assert node.name in name_map, f"{node.name} not in {name_map}"
+            assert node.name in name_map
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
                 node.meta["custom"] = custom_meta[node.name]
