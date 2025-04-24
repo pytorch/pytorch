@@ -916,7 +916,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
     mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
       // which kernel variant to use based on the normalized axis N size
       const int N_READS = 4;
-      std::string metalType = mps::scalarToMetalTypeString(input);
+      auto metalType = mps::scalarToMetalTypeString(input);
       id<MTLComputePipelineState> layerNormKernel = nil;
       if (axis_size <= 1024 * N_READS) {
         layerNormKernel = mps::lib.getPipelineStateForFunc("layer_norm_single_row_" + metalType);
