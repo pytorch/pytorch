@@ -14,11 +14,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    run_tests,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,

@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 
-import torchvision
 import transformers
+from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -18,7 +18,13 @@ from torch.utils import _pytree as torch_pytree
 class DynamoExporterTest(common_utils.TestCase):
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
-            model, args, kwargs=kwargs, dynamo=True, fallback=False, **options
+            model,
+            args,
+            kwargs=kwargs,
+            dynamo=True,
+            fallback=False,
+            verbose=False,
+            **options,
         )
         assert onnx_program is not None
         return onnx_program
@@ -144,31 +150,9 @@ class DynamoExporterTest(common_utils.TestCase):
                 x = torch.cond(x.sum() > 0, true_fn, false_fn, (x, z))
                 return x, z
 
-        onnx_program = torch.onnx.export(
-            CondModel(),
-            (torch.tensor([1, 2]),),
-            dynamo=True,
-            fallback=False,
-        )
+        onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
         onnx_testing.assert_onnx_program(onnx_program)
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
-
-    def test_onnx_export_torchvision_ops(self):
-        class VisionModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, *x):
-                out = torchvision.ops.nms(x[0], x[1], x[2])
-                return out
-
-        args = (
-            torch.tensor([[0, 0, 1, 1], [0.5, 0.5, 1, 1]], dtype=torch.float),
-            torch.tensor([0.1, 0.2]),
-            0,
-        )
-        onnx_program = self.export(VisionModel(), args)
-        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_empty(self):
         def func(x):
@@ -205,27 +189,27 @@ class DynamoExporterTest(common_utils.TestCase):
             _ = self.export(exported_program)
 
     @common_utils.parametrize(
-        "float8_type",
+        "float8_type, onnx_type",
         [
             common_utils.subtest(
-                torch.float8_e5m2,
+                (torch.float8_e5m2, ir.DataType.FLOAT8E5M2),
                 name="torch_float8_e5m2",
             ),
             common_utils.subtest(
-                torch.float8_e5m2fnuz,
+                (torch.float8_e5m2fnuz, ir.DataType.FLOAT8E5M2FNUZ),
                 name="torch_float8_e5m2fnuz",
             ),
             common_utils.subtest(
-                torch.float8_e4m3fn,
+                (torch.float8_e4m3fn, ir.DataType.FLOAT8E4M3FN),
                 name="torch_float8_e4m3fn",
             ),
             common_utils.subtest(
-                torch.float8_e4m3fnuz,
+                (torch.float8_e4m3fnuz, ir.DataType.FLOAT8E4M3FNUZ),
                 name="torch_float8_e4m3fnuz",
             ),
         ],
     )
-    def test_float8_support(self, float8_type):
+    def test_float8_support(self, float8_type: torch.dtype, onnx_type: ir.DataType):
         class Float8Module(torch.nn.Module):
             def forward(self, input: torch.Tensor):
                 input = input.to(float8_type)
@@ -233,12 +217,35 @@ class DynamoExporterTest(common_utils.TestCase):
 
         _ = self.export(Float8Module(), (torch.randn(1, 2),))
 
+    def test_bfloat16_support(self):
+        class BfloatModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Test parameters
+                self.param = torch.nn.Parameter(torch.tensor(2.0, dtype=torch.bfloat16))
+
+            def forward(self, x):
+                # Test constant tensors are stored as bfloat16
+                const = torch.tensor(1.0, dtype=torch.bfloat16)
+                return x * const * self.param
+
+        input = torch.tensor([1.0, 2.0], dtype=torch.bfloat16)
+        onnx_program = self.export(BfloatModel(), (input,), optimize=False)
+        initializers = onnx_program.model.graph.initializers.values()
+        self.assertEqual(len(initializers), 2)
+        for initializer in initializers:
+            self.assertEqual(initializer.dtype, ir.DataType.BFLOAT16)
+        self.assertEqual(onnx_program.model.graph.inputs[0].dtype, ir.DataType.BFLOAT16)
+        self.assertEqual(
+            onnx_program.model.graph.outputs[0].dtype, ir.DataType.BFLOAT16
+        )
+
     def test_export_with_logging_logger(self):
         logger = logging.getLogger(__name__)
 
         class LoggingLoggerModule(torch.nn.Module):
             def forward(self, x):
-                logger.log("abc")
+                logger.info("abc")
                 return x + 1
 
         onnx_program = self.export(LoggingLoggerModule(), (torch.tensor(1),))
@@ -435,6 +442,105 @@ class DynamoExporterTest(common_utils.TestCase):
 
         inputs = {"x": torch.randn(6, 3), "y": torch.randn(6, 3)}
         onnx_testing.assert_onnx_program(onnx_program, kwargs=inputs)
+
+    def test_export_of_rename_dynamic_axes_required_model_with_mixed_type_of_dynamic_shapes(
+        self,
+    ):
+        class NestedModel(torch.nn.Module):
+            def forward(
+                self,
+                x: torch.Tensor,
+                ys: list[torch.Tensor],
+                zs: dict[str, torch.Tensor],
+                c: torch.Tensor,
+            ):
+                y = ys[0] + ys[1] + zs["a"] + zs["b"]
+                w = 5
+                if x.shape[0] < 3 and c.shape[0] != 4:
+                    return x + w, x + y, c
+                else:
+                    return x - w, x - y, c
+
+        input = (
+            torch.ones(5),
+            [torch.zeros(5), torch.ones(5)],
+            {"a": torch.zeros(5), "b": torch.ones(5)},
+            torch.ones(6),
+        )
+
+        dynamic_shapes = (
+            {0: torch.export.Dim("dim_x", min=3)},  # Dim
+            [("custom_name_axis_ys_0",), (torch.export.Dim.AUTO,)],  # custom name
+            {
+                "a": {0: torch.export.Dim.AUTO},
+                "b": ("custom_name_axis_zs_b_0",),
+            },  # _DimHint
+            {0: "custom_name_axis_c_0"},  # custom name
+        )
+
+        # 0. Export the model
+        # 1. Assert the warning message
+        with self.assertWarnsRegex(
+            UserWarning,
+            "# The axis name: .* will not be used, since it shares the same shape constraints with another axis: .*.",
+        ):
+            onnx_program = self.export(
+                NestedModel(), input, dynamic_shapes=dynamic_shapes, optimize=False
+            )
+        # 2. Assert the exported model
+        input = (
+            torch.ones(4),
+            [torch.zeros(4), torch.ones(4)],
+            {"a": torch.zeros(4), "b": torch.ones(4)},
+            torch.ones(5),
+        )
+        onnx_testing.assert_onnx_program(
+            onnx_program,
+            args=input,
+        )
+        # 3. Assert the dynamic axes names
+        # Some names are not respected because they share the same shape constraints,
+        # so they are the same to ExportedProgram.
+        expected_axis_names = [
+            "dim_x",
+            "dim_x",
+            "dim_x",
+            "dim_x",
+            "dim_x",
+            "custom_name_axis_c_0",
+        ]
+
+        for expected_axis_name, input in zip(
+            expected_axis_names, onnx_program.model.graph.inputs
+        ):
+            self.assertEqual(input.shape[0].value, expected_axis_name)
+
+    def test_export_of_static_dim_constraints(self):
+        # NOTE: This test is to ensure that the static dim constraints are respected.
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.l = torch.nn.Linear(6, 4)
+
+            def forward(self, x, y, z):
+                x0 = self.l(x) + y[1:]
+                return x0, z * 2.0
+
+        inputs = (torch.randn(4, 6), torch.randn(5, 4), torch.randn(3, 3))
+        dx = torch.export.Dim("dx", min=3, max=6)
+        dy = dx + 1
+        dz = torch.export.Dim("dz", min=3, max=6)
+
+        # all of these should be fine
+        dynamic_shapes = (
+            {0: dx, 1: torch.export.Dim.AUTO},
+            {0: dy, 1: None},
+            {0: dz, 1: 3},
+        )
+        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        # make sre the naming is working
+        self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
 
 
 if __name__ == "__main__":

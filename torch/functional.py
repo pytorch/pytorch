@@ -116,7 +116,10 @@ def broadcast_shapes(*shapes):
                     max_len = s
         result = [1] * max_len
 
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+        from torch.fx.experimental.symbolic_shapes import (
+            guard_size_oblivious,
+            is_nested_int,
+        )
 
         for shape in shapes:
             if isinstance(shape, (int, torch.SymInt)):
@@ -127,12 +130,23 @@ def broadcast_shapes(*shapes):
                         raise RuntimeError(
                             f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})"
                         )
-                    # NB: result is initialized to 1 so this is effectively an
-                    # equals one test
-                    if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(
-                        shape[i] == result[i]
-                    ):
-                        continue
+
+                    # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
+                    if is_nested_int(shape[i]):
+                        # Broadcasting is allowed for (j0, 1) or (j0, j0);
+                        # not (j0, j1), (j0, 5), etc.
+                        if is_nested_int(result[i]) and guard_size_oblivious(
+                            shape[i] == result[i]
+                        ):
+                            continue
+                    else:
+                        # NB: result is initialized to 1 so this is effectively an
+                        # equals one test
+                        if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(
+                            shape[i] == result[i]
+                        ):
+                            continue
+
                     if result[i] != 1:
                         raise RuntimeError(
                             "Shape mismatch: objects cannot be broadcast to a single shape"
@@ -414,7 +428,7 @@ def einsum(*args: Any) -> Tensor:
             equation, *operands, optimize=opt_einsum.strategy
         )[0]
         # flatten path for dispatching to C++
-        path = [item for pair in tupled_path for item in pair]
+        path = [*itertools.chain.from_iterable(tupled_path)]
     return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
@@ -551,6 +565,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = None,
     return_complex: Optional[bool] = None,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
@@ -698,6 +713,11 @@ def stft(
             normalized=normalized,
             onesided=onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
+        )
+    if center and align_to_window is not None:
+        raise RuntimeError(
+            "stft align_to_window should only be set when center = false"
         )
     # NOTE: Do not edit. This code will be removed once the forward-compatibility
     #       period is over for PR #73432
@@ -716,6 +736,7 @@ def stft(
         normalized,
         onesided,
         return_complex,
+        align_to_window,
     )
 
 
@@ -1439,8 +1460,13 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
-        x1 (Tensor): input tensor of shape :math:`B \times P \times M`.
-        x2 (Tensor): input tensor of shape :math:`B \times R \times M`.
+        x1 (Tensor): input tensor where the last two dimensions represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1 \times D_2 \times \cdots \times D_n \times P \times M`,
+            where :math:`P` is the number of points and :math:`M` is the feature dimension.
+        x2 (Tensor): input tensor where the last two dimensions also represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1' \times D_2' \times \cdots \times D_m' \times R \times M`,
+            where :math:`R` is the number of points and :math:`M` is the feature dimension,
+            which should match the feature dimension of `x1`.
         p: p value for the p-norm distance to calculate between each vector pair
             :math:`\in [0, \infty]`.
         compute_mode:
@@ -1787,6 +1813,7 @@ def norm(  # noqa: F811
     if input.layout == torch.strided and input.device.type in (
         "cpu",
         "cuda",
+        "xpu",
         "meta",
         torch.utils.backend_registration._privateuse1_backend_name,
     ):

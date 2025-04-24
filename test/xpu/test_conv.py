@@ -1255,13 +1255,19 @@ class TestConvolutionNNDeviceType(NNTestCase):
         weight = weight.to(memory_format=torch.channels_last)
         out = torch.conv2d(input, weight, None, (2, 2), (0, 0), (1, 1), 1)
 
-        if dtype is torch.float64:
-            # Like most conv backend, xpu does not support float64 for chanel last conv.
-            # input NHWC, output NCHW
-            assert_size_stride(out, (2, 512, 7, 7), (25088, 49, 7, 1))
-        else:
-            # input NHWC, output NHWC
-            assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
+        # input NHWC, output NHWC
+        assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
+
+    @onlyXPU
+    def test_onednn_allow_tf32_get_set(self):
+        with torch.backends.mkldnn.flags(
+            enabled=None, deterministic=None, allow_tf32=False
+        ):
+            self.assertFalse(torch.backends.mkldnn.allow_tf32)
+        with torch.backends.mkldnn.flags(
+            enabled=None, deterministic=None, allow_tf32=True
+        ):
+            self.assertTrue(torch.backends.mkldnn.allow_tf32)
 
 
 instantiate_device_type_tests(

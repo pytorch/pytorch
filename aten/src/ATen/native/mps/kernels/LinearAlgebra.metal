@@ -4,38 +4,55 @@
 #include <metal_stdlib>
 
 using namespace metal;
-template <typename T>
-c10::metal::opmath_t<T> dot_product(
-    constant T* v1,
-    constant T* v2,
-    ulong2 strides,
-    uint32_t size) {
-  auto rc = c10::metal::opmath_t<T>(0.0);
-  for (uint32_t i = 0; i < size; ++i) {
-    rc += v1[i * strides.x] * v2[i * strides.y];
-  }
-  return rc;
-}
+constant uint TILE_DIM = 16;
 
 template <typename T>
-kernel void naive_matmul(
+kernel void matmul(
     constant T* mat1Data [[buffer(0)]],
     constant T* mat2Data [[buffer(1)]],
     device T* outputData [[buffer(2)]],
     constant array<ulong2, 3>& strides [[buffer(3)]],
     constant uint3& sizes [[buffer(4)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  uint y = thread_index / sizes.x;
-  uint x = thread_index % sizes.x;
-  if (x >= sizes.x || y >= sizes.z) {
-    return;
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 group_id [[threadgroup_position_in_grid]]) {
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
+  c10::metal::opmath_t<T> sum = 0;
+
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
+  for (uint t = 0; t < numTiles; t++) {
+    uint tiledCol = t * TILE_DIM + tid.x;
+    if (row < sizes.x && tiledCol < sizes.y) {
+      A_tile[tid.y][tid.x] =
+          mat1Data[row * strides[0].x + tiledCol * strides[0].y];
+    } else {
+      A_tile[tid.y][tid.x] = 0;
+    }
+
+    uint tiledRow = t * TILE_DIM + tid.y;
+    if (tiledRow < sizes.y && col < sizes.z) {
+      B_tile[tid.y][tid.x] =
+          mat2Data[tiledRow * strides[1].x + col * strides[1].y];
+    } else {
+      B_tile[tid.y][tid.x] = 0;
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint k = 0; k < TILE_DIM; k++) {
+      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  auto rc = dot_product(
-      mat1Data + x * strides[0].x,
-      mat2Data + y * strides[1].y,
-      ulong2(strides[0].y, strides[1].x),
-      sizes.y);
-  outputData[x * strides[2].x + y * strides[2].y] = static_cast<T>(rc);
+
+  if (row < sizes.x && col < sizes.z) {
+    outputData[row * strides[2].x + col * strides[2].y] = static_cast<T>(sum);
+  }
 }
 
 template <typename T>
@@ -45,18 +62,52 @@ kernel void naive_bmm(
     device T* outputData [[buffer(2)]],
     constant array<ulong, 9>& strides [[buffer(3)]],
     constant uint4& sizes [[buffer(4)]],
-    uint thread_index [[thread_position_in_grid]]) {
-  uint b = thread_index / (sizes.x * sizes.z);
-  uint boffs = thread_index % (sizes.x * sizes.z);
-  uint y = boffs / sizes.z;
-  uint x = boffs % sizes.z;
-  auto rc = dot_product(
-      mat1Data + b * strides[2] + y * strides[1],
-      mat2Data + b * strides[5] + x * strides[3],
-      ulong2(strides[0], strides[4]),
-      sizes.y);
-  outputData[b * strides[8] + x * strides[6] + y * strides[7]] =
-      static_cast<T>(rc);
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 group_id [[threadgroup_position_in_grid]]) {
+  uint batch = group_id.z;
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
+  c10::metal::opmath_t<T> sum = 0;
+
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  // batch offsets for both matrices
+  uint batch1Offset = batch * strides[2];
+  uint batch2Offset = batch * strides[5];
+
+  uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
+  for (uint t = 0; t < numTiles; t++) {
+    uint tiledCol = t * TILE_DIM + tid.x;
+    if (row < sizes.x && tiledCol < sizes.y) {
+      A_tile[tid.y][tid.x] =
+          mat1Data[batch1Offset + row * strides[1] + tiledCol * strides[0]];
+    } else {
+      A_tile[tid.y][tid.x] = 0;
+    }
+
+    uint tiledRow = t * TILE_DIM + tid.y;
+    if (tiledRow < sizes.y && col < sizes.z) {
+      B_tile[tid.y][tid.x] =
+          mat2Data[batch2Offset + tiledRow * strides[4] + col * strides[3]];
+    } else {
+      B_tile[tid.y][tid.x] = 0;
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint k = 0; k < TILE_DIM; k++) {
+      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (row < sizes.x && col < sizes.z) {
+    outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
+        static_cast<T>(sum);
+  }
 }
 
 inline float blockReduceSum(
@@ -83,7 +134,7 @@ inline float blockReduceSum(
 
 kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
-    device int* success [[buffer(1)]],
+    device int* info [[buffer(1)]],
     constant uint& N [[buffer(2)]],
     constant uint& NB [[buffer(3)]],
     constant uint& k [[buffer(4)]],
@@ -142,7 +193,7 @@ kernel void factorDiagonalBlock(
     if (linear_tid == 0) {
       float diagVal = tile[kk][kk] - diagElt;
       if (diagVal <= 0.0f) {
-        success[bid.x] = 0;
+        info[bid.x] = kk + 1;
         return;
       }
       tile[kk][kk] = sqrt(diagVal);
@@ -395,15 +446,67 @@ kernel void applySYRK(
   }
 }
 
-#define INSTANTIATE_NAIVE_MM(DTYPE)                          \
-  template [[host_name("naive_matmul_" #DTYPE)]] kernel void \
-  naive_matmul<DTYPE>(                                       \
-      constant DTYPE * mat1Data [[buffer(0)]],               \
-      constant DTYPE * mat2Data [[buffer(1)]],               \
-      device DTYPE * outputData [[buffer(2)]],               \
-      constant array<ulong2, 3> & strides [[buffer(3)]],     \
-      constant uint3 & sizes [[buffer(4)]],                  \
-      uint thread_index [[thread_position_in_grid]])
+kernel void applyPivots(
+    device float* P [[buffer(0)]],
+    device const int* pivots [[buffer(1)]],
+    constant uint& R [[buffer(2)]],
+    constant uint& K [[buffer(3)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 bid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  uint tx = tid.x;
+  uint group_size = tpg.x * tpg.y;
+  uint batch_idx = bid.x;
+
+  for (int i = static_cast<int>(K) - 1; i >= 0; i--) {
+    int pivot = pivots[batch_idx * K + i];
+    if (pivot == i) {
+      // no swap needed
+      continue;
+    }
+
+    for (uint j = tx * 4; j < R; j += group_size * 4) {
+      uint elementsRemaining = R - j;
+
+      // if we can use float4 or not
+      if (elementsRemaining < 4) {
+        for (uint e = 0; e < elementsRemaining; e++) {
+          float row_i_value = P[batch_idx * R * R + i * R + (j + e)];
+          float pivot_row_value = P[batch_idx * R * R + pivot * R + (j + e)];
+
+          P[batch_idx * R * R + i * R + (j + e)] = pivot_row_value;
+          P[batch_idx * R * R + pivot * R + (j + e)] = row_i_value;
+        }
+      } else {
+        // vectorized load/stores
+        device float4* rowIPtr =
+            reinterpret_cast<device float4*>(&P[batch_idx * R * R + i * R + j]);
+        device float4* pivotPtr = reinterpret_cast<device float4*>(
+            &P[batch_idx * R * R + pivot * R + j]);
+
+        float4 row_i_val = *rowIPtr;
+        float4 pivot_val = *pivotPtr;
+
+        *rowIPtr = pivot_val;
+        *pivotPtr = row_i_val;
+      }
+    }
+    // barrier here so different threads do not rush after each other
+    // swapping rows for the next iteration while
+    // some threads are swapping the current one
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+}
+
+#define INSTANTIATE_NAIVE_MM(DTYPE)                                   \
+  template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>( \
+      constant DTYPE * mat1Data [[buffer(0)]],                        \
+      constant DTYPE * mat2Data [[buffer(1)]],                        \
+      device DTYPE * outputData [[buffer(2)]],                        \
+      constant array<ulong2, 3> & strides [[buffer(3)]],              \
+      constant uint3 & sizes [[buffer(4)]],                           \
+      uint2 tid [[thread_position_in_threadgroup]],                   \
+      uint2 group_id [[threadgroup_position_in_grid]])
 
 #define INSTANTIATE_NAIVE_BMM(DTYPE)                                        \
   template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
@@ -412,7 +515,8 @@ kernel void applySYRK(
       device DTYPE * outputData [[buffer(2)]],                              \
       constant array<ulong, 9> & strides [[buffer(3)]],                     \
       constant uint4 & sizes [[buffer(4)]],                                 \
-      uint thread_index [[thread_position_in_grid]])
+      uint3 tid [[thread_position_in_threadgroup]],                         \
+      uint3 group_id [[threadgroup_position_in_grid]])
 
 INSTANTIATE_NAIVE_MM(float);
 INSTANTIATE_NAIVE_MM(half);

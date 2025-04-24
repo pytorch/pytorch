@@ -12,7 +12,7 @@ import tempfile
 import typing
 import unittest
 from types import BuiltinFunctionType
-from typing import Callable, NamedTuple, Optional, Union, List
+from typing import Callable, NamedTuple, Optional, Union
 
 import torch
 import torch.fx.experimental.meta_tracer
@@ -1548,25 +1548,25 @@ class {test_classname}(torch.nn.Module):
             (Optional[list[int]], list[int]),
         ] + [
             # pre-PEP585 signatures
-            (typing.List[int], int),
-            (typing.List[int], create_type_hint([int, int])),
-            (typing.List[int], create_type_hint((int, int))),
-            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (typing.List[int], int),  # noqa: UP006
+            (typing.List[int], create_type_hint([int, int])),  # noqa: UP006
+            (typing.List[int], create_type_hint((int, int))),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),  # noqa: UP006
             (
-                typing.List[torch.Tensor],
+                typing.List[torch.Tensor],  # noqa: UP006
                 create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
             ),
-            (typing.List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
-            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
-            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (typing.List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),  # noqa: UP006
             (
-                typing.List[torch.Tensor],
+                typing.List[torch.Tensor],  # noqa: UP006
                 create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
             ),
-            (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
-            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),
-            (Optional[typing.List[int]], typing.List[int]),
+            (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),  # noqa: UP006
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006
+            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006
         ]
 
         for sig_type, arg_type in should_be_equal:
@@ -1575,7 +1575,7 @@ class {test_classname}(torch.nn.Module):
         should_fail = [
             (int, float),
             (Union[int, float], str),
-            (list[torch.Tensor], List[int]),
+            (list[torch.Tensor], typing.List[int]),  # noqa: UP006
         ] + [
             # pre-PEP585 signatures
             (list[torch.Tensor], list[int]),

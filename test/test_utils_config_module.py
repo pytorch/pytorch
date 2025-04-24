@@ -17,7 +17,7 @@ from torch.testing._internal import (
     fake_config_module3 as config3,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._config_module import _UNSET_SENTINEL, Config
+from torch.utils._config_module import _ConfigEntry, _UNSET_SENTINEL, Config
 
 
 class TestConfigModule(TestCase):
@@ -378,7 +378,7 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             AssertionError,
             msg="AssertionError: justknobs only support booleans, thisisnotvalid is not a boolean",
         ):
-            Config(default="bad", justknob="fake_knob")
+            _ConfigEntry(Config(default="bad", justknob="fake_knob"))
 
     def test_alias(self):
         self.assertFalse(config2.e_aliasing_bool)
@@ -394,6 +394,18 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertTrue(config._is_default("e_dict"))
         t["a"] = "b"
         self.assertFalse(config._is_default("e_dict"))
+
+    def test_invalid_config_int(self):
+        with self.assertRaises(AssertionError):
+            _ConfigEntry(
+                Config(default=2, env_name_default="FAKE_DISABLE", value_type=int)
+            )
+
+    def test_invalid_config_float(self):
+        with self.assertRaises(AssertionError):
+            _ConfigEntry(
+                Config(default=2, env_name_force="FAKE_DISABLE", value_type=float)
+            )
 
 
 if __name__ == "__main__":
