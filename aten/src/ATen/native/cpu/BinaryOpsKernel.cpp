@@ -274,6 +274,107 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
   return floordiv;
 }
 
+template <typename scalar_t>
+inline Vectorized<scalar_t> div_ceil_floating_vec(
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  using vec_t = Vectorized<scalar_t>;
+  const auto basic_div = a / b;
+  vec_t inf(std::numeric_limits<scalar_t>::infinity());
+  auto mod = a.fmod(b);
+  
+  // The logic is simpler than div_floor:
+  // If mod is nonzero, we need to round up (add 1) when a and b have the same sign
+  // When a and b have opposite signs, the result is already correct
+  const auto zero = vec_t(0);
+  // Check if mod is nonzero and a and b have the same sign (both positive or both negative)
+  auto mask = (mod != zero) & ((b < zero) == (a < zero));
+  const auto one = vec_t(1);
+  
+  // When div needs to be ceiled, add 1
+  auto result = basic_div + vec_t::blendv(zero, one, mask);
+  
+  // Handle edge cases like division by zero or infinity
+  result = vec_t::blendv(result, basic_div, b == zero);
+  return result;
+}
+
+void div_ceil_kernel(TensorIteratorBase& iter) {
+  const auto dtype = iter.common_dtype();
+  if (dtype == kByte) {
+    // For unsigned integers, we need custom logic since ceiling division differs from truncation
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_ceil_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0, "ZeroDivisionError");
+        // Ceiling division formula: (a + b - 1) / b
+        return (a + b - 1) / b;
+      });
+    });
+  } else if (isIntegralType(dtype, /*includeBool*/ false)) {
+    // There's no SIMD integer division, so don't try to vectorize it.
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_ceil_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0, "ZeroDivisionError");
+        // Efficient ceiling division for integers
+        if ((a > 0) == (b > 0)) {
+          // Same sign: Use (a + b - 1) / b for ceiling division
+          return (a + b - scalar_t(1)) / b;
+        } else {
+          // Different signs: Integer division already rounds toward zero which is correct
+          return a / b;
+        }
+      });
+    });
+  } else {
+    // Handle floating point types
+    if (iter.is_scalar(2) && iter.data_ptr(2) != nullptr && at::isReducedFloatingType(dtype)) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+          dtype, "div_ceil_cpu_reduced_float", [&]() {
+            using opmath_t = at::opmath_type<scalar_t>;
+            opmath_t b = iter.original_scalar_value<opmath_t>(2);
+            iter.remove_operand(2);
+            using vec_t = Vectorized<opmath_t>;
+            cpu_kernel_vec(
+                iter,
+                [=](scalar_t a) -> scalar_t {
+                  opmath_t result = static_cast<opmath_t>(a) / b;
+                  // If result is not an integer and signs match, ceil it
+                  opmath_t mod = std::fmod(static_cast<opmath_t>(a), b);
+                  if (mod != 0 && ((b < 0) == (a < 0))) {
+                    result += 1;
+                  }
+                  return result;
+                },
+                [=](Vectorized<scalar_t> a) {
+                  return binary_op_scalar(
+                      a, b, [](const vec_t& x, const vec_t& y) {
+                        return div_ceil_floating_vec(x, y);
+                      });
+                });
+          });
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          kBFloat16, kHalf, dtype, "div_ceil_cpu", [&]() {
+            using vec_t = Vectorized<scalar_t>;
+            cpu_kernel_vec(
+                iter,
+                [](scalar_t a, scalar_t b) -> scalar_t {
+                  scalar_t result = a / b;
+                  // If result is not an integer and signs match, ceil it
+                  scalar_t mod = std::fmod(a, b);
+                  if (mod != 0 && ((b < 0) == (a < 0))) {
+                    result += 1;
+                  }
+                  return result;
+                },
+                [](vec_t a, vec_t b) -> vec_t {
+                  return div_ceil_floating_vec(a, b);
+                });
+          });
+    }
+  }
+}
+
 void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
@@ -1374,6 +1475,7 @@ REGISTER_DISPATCH(mul_stub, &mul_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel)
+REGISTER_DISPATCH(div_ceil_stub, &div_ceil_kernel)
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel)
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel)
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel)
