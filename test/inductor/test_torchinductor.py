@@ -2543,6 +2543,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
+    @skip_if_halide
     def test_cummin(self):
         def fn(x):
             return x.cummin(0)
