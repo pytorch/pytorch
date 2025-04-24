@@ -27,6 +27,7 @@ from torch._prims_common import (
     IntLike,
     make_contiguous_strides_for,
     Number,
+    suggest_memory_format,
     TensorLike,
 )
 from torch._prims_common.wrappers import (
@@ -7307,6 +7308,27 @@ def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     res = torch.empty_like(x, dtype=result_dtype, memory_format=torch.contiguous_format)
     return res
 
+
+@register_meta(aten.constant_pad_nd)
+def _constant_pad_nd_meta(input, pad, value=0):
+    input_sizes = input.shape
+    l_inp = len(input_sizes)
+    l_pad = len(pad) // 2
+    l_diff = l_inp - l_pad
+
+    new_shape = list(input_sizes[:l_diff])
+    for i in range(l_pad):
+        pad_idx = len(pad) - ((i + 1) * 2)
+        new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+        new_shape.append(new_dim)
+
+    return torch.empty(
+        new_shape,
+        dtype=input.dtype,
+        device=input.device,
+        requires_grad=input.requires_grad,
+        memory_format=suggest_memory_format(input),
+    )
 
 @register_meta(aten.embedding)
 @out_wrapper()
