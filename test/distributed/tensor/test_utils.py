@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-import random
-from threading import local
 
 import torch
 from torch.distributed.device_mesh import init_device_mesh
@@ -150,7 +148,7 @@ class UtilTest(DTensorTestBase):
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         for placements in one_d_placements:
             if isinstance(placements[0], Shard):
-                uneven_dim = [i for i in range(self.world_size)]
+                uneven_dim = list(range(self.world_size))
                 global_shape = compute_global_tensor_shape(
                     torch.Size([5, uneven_dim[device_mesh.get_rank()]]),
                     device_mesh,
