@@ -287,11 +287,20 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented_v2(
                 gb_type="torch.nn.Module with a non-function custom __getattr__",
-                context=f"var_getattr {self}",
-                explanation="Dynamo encountered a custom `__getattr__` method "
-                "on an `nn.Module` instance that is not a standard Python function. "
-                "Only function-based `__getattr__` methods can be traced.",
-                hints=[*graph_break_hints.USER_ERROR],
+                context=f"var_getattr {self} {name}",
+                explanation=(
+                    "Dynamo detected a nn.Module object with a custom "
+                    "`__getattr__` method, but this method is not a standard "
+                    "Python function (e.g., it might be implemented in C/C++). "
+                    "Dynamo cannot currently trace into such non-standard "
+                    "`__getattr__` methods."
+                ),
+                hints=[
+                    "Avoid using objects with non-standard __getattr__ methods "
+                    "within the compiled region. If possible, implement "
+                    "__getattr__ as a standard Python function.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         options = {"source": AttrSource(obj_source, "__getattr__")}
