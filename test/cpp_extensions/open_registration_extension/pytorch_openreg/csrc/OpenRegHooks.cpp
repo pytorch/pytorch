@@ -40,7 +40,7 @@ struct OpenRegHostAllocator final : at::HostAllocator {
         count);
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool is_pinned(const void* data) const override {
     py::gil_scoped_acquire acquire;
     return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
         .cast<bool>();
@@ -87,11 +87,11 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   }
 
   at::Allocator* getPinnedMemoryAllocator() const override {
-    return getHostAllocator(at::kPrivateUse1);
+    return at::getHostAllocator(at::kPrivateUse1);
   }
 
   bool isPinnedPtr(const void* data) const override {
-    return at::getHostAllocator(at::kPrivateUse1)->isPinnedPtr(data);
+    return at::getHostAllocator(at::kPrivateUse1)->is_pinned(data);
   }
 
   const at::Generator& getDefaultGenerator(
