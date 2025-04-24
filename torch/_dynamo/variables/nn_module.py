@@ -253,7 +253,7 @@ class NNModuleVariable(VariableTracker):
                 "on `nn.Module` instances that have a custom "
                 "`__getattribute__` method defined.",
                 hints=[
-                    "Avoid defining `__getattribute__` in your module. ",
+                    "Avoid defining `__getattribute__` in your module.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -275,7 +275,7 @@ class NNModuleVariable(VariableTracker):
                 "on `nn.Module` instances that have a custom "
                 "`__getattribute__` method defined.",
                 hints=[
-                    "Avoid defining `__getattribute__` in your module. ",
+                    "Avoid defining `__getattribute__` in your module.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -1049,7 +1049,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     gb_type="UnspecializedNNModuleVariable missing method",
                     context=f"call_method: {self} {name} {args} {kwargs}",
                     explanation=f"Dynamo does not support tracing method {name} of nn.Module {self.value}",
-                    hints=[],
+                    hints=[
+                        "Dynamo does not really define unspecialized nn.Module very well.",
+                        *graph_break_hints.DIFFICULT,
+                    ],
                 )
 
             # "_parameters" in self.value.__dict__ checks that module is initialized
