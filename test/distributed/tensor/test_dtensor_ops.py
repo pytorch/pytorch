@@ -112,7 +112,7 @@ dtensor_fails = {
     xfail("_batch_norm_with_update"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
-    xfail("cartesian_prod"),  # decomposes to illegal view that requires redistribute
+    xfail("cartesian_prod"),
     xfail("cauchy"),
     xfail("cdist"),
     xfail("cholesky"),
@@ -156,6 +156,7 @@ dtensor_fails = {
     xfail("fft.rfft"),
     xfail("fft.rfftn"),
     xfail("fill"),
+    xfail("flatten"),
     xfail("flip"),
     xfail("fliplr"),
     xfail("flipud"),
@@ -185,6 +186,7 @@ dtensor_fails = {
     xfail("index_select"),
     xfail("isin"),
     xfail("kthvalue"),
+    xfail("kron"),
     xfail("linalg.cholesky"),
     xfail("linalg.cholesky_ex"),
     xfail("linalg.cross"),
@@ -355,10 +357,13 @@ dtensor_fails = {
     xfail("randint"),
     xfail("randn"),
     xfail("randn_like"),
+    xfail("ravel"),
     xfail("renorm"),
     xfail("repeat_interleave"),
     xfail("resize_"),
     xfail("resize_as_"),
+    xfail("reshape"),
+    xfail("reshape_as"),
     xfail("roll"),
     xfail("rot90"),
     xfail("rsub"),
@@ -422,6 +427,7 @@ dtensor_fails = {
     xfail("svd_lowrank"),
     xfail("t_copy"),
     xfail("take"),
+    xfail("take_along_dim"),
     xfail("tensor_split"),
     xfail("to_sparse"),
     xfail("trace"),
@@ -443,19 +449,10 @@ dtensor_fails = {
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
-    xfail("view_copy"),
-    xfail("zeros"),
-    # TODO(whc) debug/triage
-    xfail(
-        "flatten"
-    ),  # partially supported via view decomp, but some sharding combinations are illegal
-    xfail("ravel"),
-    xfail("reshape"),
-    xfail("reshape_as"),
     xfail("view"),
     xfail("view_as"),
-    xfail("take_along_dim"),
-    xfail("kron"),
+    xfail("view_copy"),
+    xfail("zeros"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
