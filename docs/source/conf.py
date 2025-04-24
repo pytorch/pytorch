@@ -3786,19 +3786,21 @@ htmlhelp_basename = "PyTorchdoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
+latex_engine = 'xelatex'
+latex_show_urls = 'footnote'
+
 latex_elements = {
-    # The paper size ('letterpaper' or 'a4paper').
-    #
-    # 'papersize': 'letterpaper',
-    # The font size ('10pt', '11pt' or '12pt').
-    #
-    # 'pointsize': '10pt',
-    # Additional stuff for the LaTeX preamble.
-    #
-    # 'preamble': '',
-    # Latex figure (float) alignment
-    #
-    # 'figure_align': 'htbp',
+    "papersize": "letterpaper",
+    "pointsize": "10pt",
+    "tableofcontents": r"\pdfbookmark[0]{Contents}{toc}\tableofcontents",
+    "preamble": r"""
+       \usepackage{tocloft}
+       \setcounter{tocdepth}{4}
+       \setcounter{secnumdepth}{4}
+       \usepackage{etoolbox}
+       \pretocmd{\tableofcontents}{\pdfbookmark[0]{Contents}{toc}}{}{}
+    """,
+    "fncychap": r"\usepackage[Bjornstrup]{fncychap}",
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
