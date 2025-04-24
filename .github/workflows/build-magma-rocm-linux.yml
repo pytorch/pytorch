@@ -34,7 +34,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        rocm_version: ["64", "63", "624"]
+        rocm_version: ["64", "63"]
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
