@@ -3340,22 +3340,10 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_6 = sizes[1]
         getitem_7 = sizes[2]
         getitem_8 = sizes[3]
-        getitem_9 = sizes[4];  getitem_9 = None
-        getitem_10 = sizes[5];  getitem_10 = None
-        getitem_11 = sizes[6];  getitem_11 = None
-        getitem_12 = sizes[7];  getitem_12 = None
-        getitem_13 = sizes[8];  getitem_13 = None
-        getitem_14 = sizes[9];  getitem_14 = None
-        getitem_15 = sizes[10];  getitem_15 = None
-        getitem_16 = sizes[11];  getitem_16 = None
-        getitem_17 = sizes[12];  getitem_17 = None
-        getitem_18 = sizes[13];  getitem_18 = None
-        getitem_19 = sizes[14];  getitem_19 = None
-        getitem_20 = sizes[15];  getitem_20 = None
-        getitem_21 = sizes[16]
-        getitem_22 = sizes[17]
-        getitem_23 = sizes[18]
-        getitem_24 = sizes[19];  sizes = None
+        getitem_21 = sizes[4]
+        getitem_22 = sizes[5]
+        getitem_23 = sizes[6]
+        getitem_24 = sizes[7];  sizes = None
         to_int = torch__dynamo_external_utils_to_int(getitem_5);  getitem_5 = None
         to_int_1 = torch__dynamo_external_utils_to_int(getitem_6);  getitem_6 = None
         to_int_2 = torch__dynamo_external_utils_to_int(getitem_7);  getitem_7 = None
