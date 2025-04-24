@@ -4,6 +4,7 @@ import io
 import pickle
 from abc import abstractmethod
 from typing import Any, Callable, NewType, Optional, TypeVar, Union
+from typing_extensions import override, Self
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,7 +18,6 @@ from torch._subclasses.meta_utils import (
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
-from typing_extensions import override, Self
 
 
 _SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
