@@ -545,7 +545,6 @@ class DynamoExporterTest(common_utils.TestCase):
     def test_export_sym_not(self):
         class SymNotModel(torch.nn.Module):
             def forward(self, x):
-                # Apply the model to the input
                 comparison = x.shape[0] == x.shape[1]
                 return torch.sym_not(comparison)
 
