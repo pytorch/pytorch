@@ -270,9 +270,9 @@ _fused_doc = r"""fused (bool, optional): whether the fused implementation is use
               implementation, pass False for either foreach or fused. """
 
 _capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
-            capture in a CUDA graph. Passing True can impair ungraphed performance,
-            so if you don't intend to graph capture this instance, leave it False
-            (default: False)"""
+            capture in a graph on an accelerator. Supported accelerators include CUDA,
+            XPU, HPU, and XLA. Passing True can impair ungraphed performance, so if you
+            don't intend to graph capture this instance, leave it False (default: False)"""
 
 _differentiable_doc = r"""differentiable (bool, optional): whether autograd should
             occur through the optimizer step in training. Otherwise, the step()
