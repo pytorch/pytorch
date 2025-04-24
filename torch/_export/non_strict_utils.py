@@ -102,7 +102,7 @@ def fakify(
         return t
 
     if isinstance(t, _IntWrapper):
-        if t.dim is not None and t.dim.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
+        if t.dynamism is not None and t.dynamism.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
             symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
                 t.val, source, DimDynamic.DYNAMIC
             )
@@ -110,7 +110,7 @@ def fakify(
                 SymIntSymbolicContext(
                     constraint=RelaxedUnspecConstraint(warn_only=False)
                 )
-                if t.dim.type == _DimHintType.DYNAMIC  # type: ignore[union-attr]
+                if t.dynamism.type == _DimHintType.DYNAMIC  # type: ignore[union-attr]
                 else None
             )
             mode.shape_env.tracked_fakes.append(  # type: ignore[union-attr]
