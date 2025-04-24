@@ -49,6 +49,7 @@ from ..utils import (
     get_benchmark_name,
     IndentedBuffer,
     LineContext,
+    set_kernel_post_grad_provenance_tracing,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -454,6 +455,9 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
+        # set provenance tracing kernel mapping for ExternKernel types
+        if config.trace.enabled:
+            set_kernel_post_grad_provenance_tracing(node, kernel_name, is_extern=True)
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
