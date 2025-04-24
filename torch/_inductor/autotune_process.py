@@ -348,7 +348,7 @@ class BenchmarkRequest:
         # the kernel name defined in the module
         self.kernel_name = kernel_name
 
-        if not isinstance(input_tensor_meta, list):
+        if not isinstance(input_tensor_meta, (tuple, list)):
             input_tensor_meta = [input_tensor_meta]
         self.input_tensor_meta = input_tensor_meta
 
