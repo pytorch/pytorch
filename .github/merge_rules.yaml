@@ -399,7 +399,10 @@
   - torch/_inductor/codegen/cpp_micro_gemm.py
   - torch/_inductor/codegen/cpp_template_kernel.py
   - torch/_inductor/codegen/cpp_template.py
+  - torch/_inductor/codegen/cpp_bmm_template.py
   - torch/_inductor/codegen/cpp_gemm_template.py
+  - torch/_inductor/codegen/cpp_grouped_gemm_template.py
+  - torch/_inductor/codegen/cpp_flex_attention_template.py
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repro.py
   - test/inductor/test_cpu_cpp_wrapper.py
@@ -413,6 +416,7 @@
   - leslie-fang-intel
   - jgong5
   - EikanWang
+  - CaoE
   mandatory_checks_name:
   - EasyCLA
   - Lint
