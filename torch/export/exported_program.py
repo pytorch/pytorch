@@ -11,7 +11,6 @@ from collections import namedtuple
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -70,7 +69,6 @@ from .graph_signature import (  # noqa: F401
     ConstantArgument,
     CustomObjArgument,
     ExportGraphSignature,
-    FunctionSchemaArgument,
     InputKind,
     InputSpec,
     OutputKind,
@@ -82,10 +80,6 @@ from .graph_signature import (  # noqa: F401
     TokenArgument,
 )
 
-
-_ConstantAttributeType: TypeAlias = Union[
-    torch.Tensor, torch.ScriptObject, FakeScriptObject, torch.FunctionSchema
-]
 
 __all__ = [
     "ExportedProgram",
@@ -921,7 +915,9 @@ class ExportedProgram:
         range_constraints: "dict[sympy.Symbol, Any]",
         module_call_graph: list[ModuleCallEntry],
         example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
-        constants: Optional[dict[str, _ConstantAttributeType]] = None,
+        constants: Optional[
+            dict[str, Union[torch.Tensor, FakeScriptObject, torch._C.ScriptObject]]
+        ] = None,
         *,
         verifiers: Optional[list[type[Verifier]]] = None,
     ):
@@ -1430,8 +1426,7 @@ class ExportedProgram:
                 arg = (
                     old_input_spec.arg
                     if isinstance(
-                        old_input_spec.arg,
-                        (ConstantArgument, CustomObjArgument, FunctionSchemaArgument),
+                        old_input_spec.arg, (ConstantArgument, CustomObjArgument)
                     )
                     else type(old_input_spec.arg)(node.name)
                 )
@@ -1456,8 +1451,7 @@ class ExportedProgram:
                 arg = (
                     old_output_spec.arg
                     if isinstance(
-                        old_output_spec.arg,
-                        (ConstantArgument, CustomObjArgument, FunctionSchemaArgument),
+                        old_output_spec.arg, (ConstantArgument, CustomObjArgument)
                     )
                     else type(old_output_spec.arg)(node.name)
                 )

@@ -12,7 +12,7 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
-from typing import Dict, List
+from typing import Dict, List, Union
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -13589,6 +13589,7 @@ class GraphModule(torch.nn.Module):
     @testing.expectedFailureSerDerNonStrict  # TODO: serde torch.FunctionSchema is not implemented yet
     @testing.expectedFailureSerDer  # TODO: serde torch.FunctionSchema is not implemented yet
     def test_export_function_schema(self):
+        import torch.utils._pytree as pytree
         from torch._higher_order_ops.utils import (
             _maybe_run_with_interpreter,
             autograd_not_implemented,
@@ -13602,11 +13603,20 @@ class GraphModule(torch.nn.Module):
             track_tensor_tree,
         )
 
+        pytree.register_constant(torch.FunctionSchema)
+
         class TestFunctionSchemaHop(HigherOrderOperator):
             def __init__(self):
                 super().__init__("test_function_schema")
 
-            def __call__(self, fn, x: torch.Tensor, schema: torch.FunctionSchema):
+            def __call__(
+                self,
+                fn,
+                x: torch.Tensor,
+                schema: Union[torch.FunctionSchema, pytree.TreeSpec],
+            ):
+                if isinstance(schema, torch.FunctionSchema):
+                    _, schema = pytree.tree_flatten(schema)
                 return super().__call__(fn, x, schema)
 
         def trace_hop(proxy_mode, fn, x, schema):
@@ -13628,6 +13638,12 @@ class GraphModule(torch.nn.Module):
             )
 
         def dense_hop(fn, x, schema):
+            assert isinstance(schema, pytree.TreeSpec)
+            schema = pytree.tree_unflatten([], schema)
+            assert (
+                isinstance(schema, torch.FunctionSchema)
+                and schema == torch.ops.aten.sin.default._schema
+            )
             return fn(x)
 
         def fake_hop(mode, fn, x, schema):
@@ -13659,6 +13675,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 4)
         ep = export(mod, (x,))
         self.assertEqual(x.sin(), ep.module()(x))
+        pytree._deregister_pytree_node(torch.FunctionSchema)
 
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):
