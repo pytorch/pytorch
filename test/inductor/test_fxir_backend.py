@@ -123,7 +123,7 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(length, device=self.device) for length in [517, 1029, 123]]
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=3)
 
-        # Check the generated code for frees
+        # Check the generated code for frees.
         num_frees = gm.code.count("= None")
         self.assertGreater(num_frees, 0)
 
@@ -277,7 +277,6 @@ class FxirTestCase(InductorTestCase):
         def foo(x, y):
             z = torch.matmul(x, w) + b
             loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
-            # loss = torch.nn.CrossEntropyLoss()(z, y)
             loss.backward()
             return w.grad, b.grad
 
@@ -345,7 +344,7 @@ class FxirTestCase(InductorTestCase):
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
     def test_debug(self, mock_output_code):
-        # Dump debug output to a predetermined directory, so we can find it.
+        # Compile in debug mode.
         args = [torch.randn(11, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.sub, args)
 
