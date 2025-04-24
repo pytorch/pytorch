@@ -17,6 +17,7 @@ __all__ = [
     "CustomObjArgument",
     "ExportBackwardSignature",
     "ExportGraphSignature",
+    "FunctionSchemaArgument",
     "InputKind",
     "InputSpec",
     "OutputKind",
