@@ -2681,11 +2681,11 @@ class CheckFunctionManager:
 
             def normalize_create_fn(x):
                 if isinstance(x, functools.partial):
-                    _ref = (
-                        lambda x: x()
-                        if isinstance(x, (TensorWeakRef, weakref.ref))
-                        else x
-                    )
+                    def _ref(x):
+                        if isinstance(x, (TensorWeakRef, weakref.ref)):
+                            return x()
+                        return x
+
                     new_args = tuple(_ref(a) for a in x.args)
                     new_keywords = {k: _ref(v) for k, v in x.keywords.items()}
                     return functools.partial(x.func, *new_args, **new_keywords)
