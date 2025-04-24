@@ -83,7 +83,7 @@ from .graph_signature import (  # noqa: F401
 )
 
 
-_ConstLike: TypeAlias = Union[
+_ConstantAttributeType: TypeAlias = Union[
     torch.Tensor, torch.ScriptObject, FakeScriptObject, torch.FunctionSchema
 ]
 
@@ -921,7 +921,7 @@ class ExportedProgram:
         range_constraints: "dict[sympy.Symbol, Any]",
         module_call_graph: list[ModuleCallEntry],
         example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
-        constants: Optional[dict[str, _ConstLike]] = None,
+        constants: Optional[dict[str, _ConstantAttributeType]] = None,
         *,
         verifiers: Optional[list[type[Verifier]]] = None,
     ):

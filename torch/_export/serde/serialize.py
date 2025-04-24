@@ -45,7 +45,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import prefix_str, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from torch._export.passes.lift_constants_pass import _ConstLike
+from torch._export.passes.lift_constants_pass import _ConstantAttributeType
 from ..utils import remove_proxy_from_state_dict
 
 from .schema import (  # type: ignore[attr-defined]
@@ -1609,7 +1609,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
         state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: dict[str, _ConstLike]
+        constants: dict[str, _ConstantAttributeType]
         example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
     def __init__(self) -> None:
