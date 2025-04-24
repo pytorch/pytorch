@@ -382,10 +382,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     # If compiler wrapper is used try to infer the actual compiler by invoking it with -v flag
     env = os.environ.copy()
     env['LC_ALL'] = 'C'  # Don't localize output
-    try:
-        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-    except subprocess.CalledProcessError:
-        version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
         # Check for 'gcc' or 'g++' for sccache wrapper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
@@ -448,17 +445,13 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
         warnings.warn(f'Error checking compiler version for {compiler}: {error}')
         return (False, TorchVersion('0.0.0'))
 
-    # convert alpha-numeric string to numeric string
-    # amdclang++ returns str like 0.0.0git, others return 0.0.0
-    numeric_version = [re.sub(r'\D', '', v) for v in version]
+    if tuple(map(int, version)) >= minimum_required_version:
+        return (True, TorchVersion('.'.join(version)))
 
-    if tuple(map(int, numeric_version)) >= minimum_required_version:
-        return (True, TorchVersion('.'.join(numeric_version)))
-
-    compiler = f'{compiler} {".".join(numeric_version)}'
+    compiler = f'{compiler} {".".join(version)}'
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
 
-    return (False, TorchVersion('.'.join(numeric_version)))
+    return (False, TorchVersion('.'.join(version)))
 
 
 def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> None:
@@ -805,7 +798,6 @@ class BuildExtension(build_ext):
 
             if isinstance(extra_postargs, dict) and 'nvcc_dlink' in extra_postargs:
                 cuda_dlink_post_cflags = unix_cuda_flags(extra_postargs['nvcc_dlink'])
-                cuda_dlink_post_cflags = [shlex.quote(f) for f in cuda_dlink_post_cflags]
             else:
                 cuda_dlink_post_cflags = None
 
@@ -2147,9 +2139,7 @@ def _jit_compile(name,
 
 def _get_hipcc_path():
     if IS_WINDOWS:
-        # mypy thinks ROCM_VERSION is None but it will never be None here
-        hipcc_exe = 'hipcc.exe' if ROCM_VERSION >= (6, 4) else 'hipcc.bat'  # type: ignore[operator]
-        return _join_rocm_home('bin', hipcc_exe)
+        return _join_rocm_home('bin', 'hipcc.bat')
     else:
         return _join_rocm_home('bin', 'hipcc')
 

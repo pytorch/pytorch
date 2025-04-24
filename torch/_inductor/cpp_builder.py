@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from ctypes import cdll
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, BinaryIO, Optional, Union
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -330,14 +330,20 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
+def _run_compile_cmd(
+    cmd_line: str, cwd: str, write_stdout_to: Optional[BinaryIO] = None
+) -> None:
     cmd = shlex.split(cmd_line)
     try:
         subprocess.run(
-            cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            cmd,
+            cwd=cwd,
+            check=True,
+            stdout=write_stdout_to if write_stdout_to else subprocess.PIPE,
+            stderr=subprocess.PIPE if write_stdout_to else subprocess.STDOUT,
         )
     except subprocess.CalledProcessError as e:
-        output = e.stdout.decode("utf-8")
+        output = (e.stderr if write_stdout_to else e.stdout).decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
         if openmp_problem and sys.platform == "darwin":
             instruction = (
@@ -353,9 +359,11 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
         raise exc.CppCompileError(cmd, output) from e
 
 
-def run_compile_cmd(cmd_line: str, cwd: str) -> None:
+def run_compile_cmd(
+    cmd_line: str, cwd: str, write_stdout_to: Optional[BinaryIO] = None
+) -> None:
     with dynamo_timed("compile_file"):
-        _run_compile_cmd(cmd_line, cwd)
+        _run_compile_cmd(cmd_line, cwd, write_stdout_to)
 
 
 def normalize_path_separator(orig_path: str) -> str:
@@ -830,13 +838,8 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
         python_include_dirs.append(python_include_path)
 
     if _IS_WINDOWS:
-        python_lib_path = [
-            str(
-                (
-                    Path(sysconfig.get_path("include", scheme="nt")).parent / "libs"
-                ).absolute()
-            )
-        ]
+        python_path = os.path.dirname(sys.executable)
+        python_lib_path = [os.path.join(python_path, "libs")]
     else:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
 
@@ -1439,7 +1442,7 @@ class CppBuilder:
     @staticmethod
     def __get_preprocessor_output_flags() -> tuple[str, str]:
         extension = ".i"
-        output_flags = "/EP /P" if _IS_WINDOWS else "-E -P -o"
+        output_flags = "/EP" if _IS_WINDOWS else "-E -P"
         return extension, output_flags
 
     def __init__(
@@ -1502,19 +1505,18 @@ class CppBuilder:
             file_ext, output_flags = self.__get_python_module_flags()
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
-        relative_target_file = (
-            os.path.basename(self._target_file)
-            if self._use_relative_path
-            else self._target_file
-        )
-        if _IS_WINDOWS:
-            if self._preprocessing:
-                # The target file name is automatically determined by MSVC.
-                self._output = output_flags
-            else:
-                self._output = f"{output_flags}{relative_target_file}"
+        if self._preprocessing:
+            self._output = output_flags
         else:
-            self._output = f"{output_flags} {relative_target_file}"
+            relative_target_file = (
+                os.path.basename(self._target_file)
+                if self._use_relative_path
+                else self._target_file
+            )
+            if _IS_WINDOWS:
+                self._output = f"{output_flags}{relative_target_file}"
+            else:
+                self._output = f"{output_flags} {relative_target_file}"
 
         if isinstance(sources, str):
             sources = [sources]
@@ -1684,7 +1686,13 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-        run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
+        if self._preprocessing:
+            with open(self.get_target_file_path(), "wb") as preprocessed_file:
+                run_compile_cmd(
+                    build_cmd, cwd=_build_tmp_dir, write_stdout_to=preprocessed_file
+                )
+        else:
+            run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
 
     def save_compile_cmd_to_cmake(

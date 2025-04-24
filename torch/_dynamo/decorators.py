@@ -65,7 +65,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, *, reason=None):
+def disable(fn=None, recursive=True):
     """
     Decorator to disable TorchDynamo
 
@@ -74,15 +74,13 @@ def disable(fn=None, recursive=True, *, reason=None):
 
     If recursive=False, Dynamo skips frames associated with the function code,
     but still process recursively invoked frames.
-
-    If reason is provided, it will be printed when Dynamo attempts to trace the disabled function.
     """
     if recursive:
         if fn is not None:
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext(msg=reason)(fn)
-        return DisableContext(msg=reason)
+            return DisableContext()(fn)
+        return DisableContext()
     else:
 
         def wrap(fn):
@@ -91,7 +89,6 @@ def disable(fn=None, recursive=True, *, reason=None):
 
             nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(fn)
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
-            nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
             return nonrecursive_disable_wrapper
 

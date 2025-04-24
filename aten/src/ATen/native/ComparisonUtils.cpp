@@ -30,9 +30,7 @@ void _assert_tensor_metadata_meta_symint(at::Tensor const& tensor, at::OptionalS
   _assert_match(tensor.sym_sizes(), sizes, "sizes");
   _assert_match(tensor.sym_strides(), strides, "strides");
   _assert_match(tensor.dtype(), dtype, "dtype");
-  if (tensor.device().type() != DeviceType::Meta) {
-    _assert_match(tensor.device(), device, "device");
-  }
+  _assert_match(tensor.device(), device, "device");
   _assert_match(tensor.layout(), layout, "layout");
 }
 
@@ -40,9 +38,7 @@ void _assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef s
   _assert_match(tensor.sizes(), sizes, "sizes");
   _assert_match(tensor.strides(), strides, "strides");
   _assert_match(tensor.dtype(), dtype, "dtype");
-  if (tensor.device().type() != DeviceType::Meta) {
-    _assert_match(tensor.device(), device, "device");
-  }
+  _assert_match(tensor.device(), device, "device");
   _assert_match(tensor.layout(), layout, "layout");
 }
 

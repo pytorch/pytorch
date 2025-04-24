@@ -460,18 +460,10 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
-no_cache_flag=""
-progress_flag=""
-# Do not use cache and progress=plain when in CI
-if [[ -n "${CI:-}" ]]; then
-  no_cache_flag="--no-cache"
-  progress_flag="--progress=plain"
-fi
-
 # Build image
 docker build \
-       ${no_cache_flag} \
-       ${progress_flag} \
+       --no-cache \
+       --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \

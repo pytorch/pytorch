@@ -2990,9 +2990,7 @@ class CppVecKernel(CppKernel):
         else:
             # Vertical reduction
             if out_dtype != dtype:
-                converted_value = (
-                    f"{DTYPE_TO_CPP[out_dtype].replace('::', '_')}_{value}"
-                )
+                converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
                 if out_dtype == torch.bool:
                     convert = f"{value}.template cast<bool,{self._get_num_vectors(torch.bool)}>()"
                 else:
@@ -5459,21 +5457,20 @@ class LoopNest:
         start_depth = 0
         max_depth = 0
         is_reduction = self.loops[0].is_reduction
-        num_steps = sympy.Integer(1)
+        loop_sizes = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
+            loop_sizes = loop_sizes * loop.size
             max_depth += 1
 
-        # When the number of steps of the first inner loop is much larger than the number of steps of
-        # all outer loops, change `start_depth` to the first inner loop and recalculate `max_depth`.
+        # When the range of the first inner loop is much larger than the range of all outer loops,
+        # change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
             max_depth < len(self.loops)
-            and isinstance(num_steps, sympy.Integer)
+            and isinstance(loop_sizes, sympy.Integer)
             and isinstance(self.loops[max_depth].size, sympy.Integer)
-            and num_steps * 300
-            < FloorDiv(self.loops[max_depth].size, self.loops[max_depth].steps)
+            and loop_sizes * 300 < self.loops[max_depth].size
         ):
             start_depth = max_depth
             max_depth = 0

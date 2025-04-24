@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
 
 import torch
 import torch.jit
@@ -127,12 +126,7 @@ class VonMises(Distribution):
     support = constraints.real
     has_rsample = False
 
-    def __init__(
-        self,
-        loc: Tensor,
-        concentration: Tensor,
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, loc, concentration, validate_args=None):
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape
         event_shape = torch.Size()

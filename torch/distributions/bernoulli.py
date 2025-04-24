@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
-
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
@@ -12,7 +10,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _Number, Number
+from torch.types import _Number
 
 
 __all__ = ["Bernoulli"]
@@ -43,12 +41,7 @@ class Bernoulli(ExponentialFamily):
     has_enumerate_support = True
     _mean_carrier_measure = 0
 
-    def __init__(
-        self,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
@@ -57,7 +50,6 @@ class Bernoulli(ExponentialFamily):
             is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
         else:
-            assert logits is not None  # helps mypy
             is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits

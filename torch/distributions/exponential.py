@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
-
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -48,11 +46,7 @@ class Exponential(ExponentialFamily):
     def variance(self) -> Tensor:
         return self.rate.pow(-2)
 
-    def __init__(
-        self,
-        rate: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, rate, validate_args=None):
         (self.rate,) = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, _Number) else self.rate.size()
         super().__init__(batch_shape, validate_args=validate_args)

@@ -122,7 +122,6 @@ struct BroadcastOptions {
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  bool asyncOp = true;
   std::optional<at::Tensor> sparseIndices = std::nullopt;
 };
 
@@ -133,7 +132,6 @@ struct ReduceOptions {
   int64_t rootRank = 0;
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  bool asyncOp = true;
 };
 
 struct AllgatherOptions {
@@ -144,7 +142,6 @@ struct AllgatherOptions {
 struct GatherOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  bool asyncOp = true;
 };
 
 struct ScatterOptions {
@@ -161,14 +158,12 @@ struct ReduceScatterOptions {
 
 struct AllToAllOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  bool asyncOp = true;
 };
 
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   std::optional<at::Device> device;
-  bool asyncOp = true;
 };
 
 struct DistributedBackendOptions {

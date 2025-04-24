@@ -69,7 +69,8 @@ variable_list CopyBackwards::apply_with_saved(
     SwapSavedVariables& saved) {
   saved.before(src_options);
 
-  static bool flag [[maybe_unused]] = [&]() {
+  static c10::once_flag flag;
+  c10::call_once(flag, [&]() {
     std::vector<at::TypePtr> schema = {
         IValuePacker<std::array<bool, 2>>::packed_type(),
         IValuePacker<c10::TensorOptions>::packed_type()};
@@ -79,8 +80,7 @@ variable_list CopyBackwards::apply_with_saved(
         name(),
         CopyBackwards_apply_functional_ivalue,
         schema);
-    return true;
-  }();
+  });
 
   PackedArgs packed_args;
   packed_args.pack<std::array<bool, 2>>(

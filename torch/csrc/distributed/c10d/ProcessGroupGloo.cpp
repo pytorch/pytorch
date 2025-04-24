@@ -415,10 +415,6 @@ const auto kLoopbackAddress = "127.0.0.1";
 
 } // namespace
 
-bool getDefaultGlooLazyInit() {
-  return ::c10d::getCvarBool(TORCH_GLOO_LAZY_INIT, false);
-}
-
 // static
 void ProcessGroupGloo::AsyncWork::execute(
     const c10::intrusive_ptr<AsyncWork>& work) {
@@ -691,24 +687,23 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 } // namespace
 
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForInterface(const std::string& interface_name, bool lazyInit) {
-  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(
-      interface_name, lazyInit);
+    createDeviceForInterface(const std::string& interface_name) {
+  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface_name);
 }
 
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForHostname(const std::string& hostname, bool lazyInit) {
+    createDeviceForHostname(const std::string& hostname) {
   TORCH_CHECK(
       doesHostnameResolveToUsableAddress(hostname),
       "Cannot resolve ",
       hostname,
       " to a (local) address");
-  return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname, lazyInit);
+  return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
 }
 
 #if defined(__linux__) || defined(_WIN32)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDefaultDevice(bool lazyInit) {
+    createDefaultDevice() {
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
@@ -721,8 +716,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 
   // Use this machine's hostname if it resolves to an address.
   if (doesHostnameResolveToUsableAddress(hostname.data())) {
-    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(
-        hostname.data(), lazyInit);
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname.data());
   }
 
   // Otherwise, use the loopback address.
@@ -730,13 +724,13 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
       "Unable to resolve hostname to a (local) address. ",
       "Using the loopback address as fallback. ",
       "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
-  return createDeviceForHostname(kLoopbackAddress, lazyInit);
+  return createDeviceForHostname(kLoopbackAddress);
 }
 #endif
 
 #ifdef __APPLE__
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDefaultDevice(bool lazyInit) {
+    createDefaultDevice() {
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
@@ -749,8 +743,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 
   // Use this machine's hostname if it resolves to an address.
   if (doesHostnameResolveToUsableAddress(hostname.get())) {
-    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(
-        hostname.get(), lazyInit);
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname.get());
   }
 
   // Otherwise, use the loopback address.
@@ -758,7 +751,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
       "Unable to resolve hostname to a (local) address. ",
       "Using the loopback address as fallback. ",
       "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
-  return createDeviceForHostname(kLoopbackAddress, lazyInit);
+  return createDeviceForHostname(kLoopbackAddress);
 }
 #endif
 
@@ -792,25 +785,10 @@ ProcessGroupGloo::ProcessGroupGloo(
   contexts_.reserve(options_->devices.size());
   for (const auto i : c10::irange(options_->devices.size())) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
-
-#ifdef GLOO_SHARED_STORE
-    auto underlyingStore = store_;
-#else
-    auto& underlyingStore = *store_;
-#endif
-
-    auto store = std::make_shared<::gloo::rendezvous::PrefixStore>(
-        std::to_string(i), underlyingStore);
-
-#ifdef GLOO_SHARED_STORE
-    auto connectStore = store;
-#else
-    auto& connectStore = *store;
-#endif
-
+    auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
     context->setTimeout(options_->timeout);
     try {
-      context->connectFullMesh(connectStore, options_->devices[i]);
+      context->connectFullMesh(store, options_->devices[i]);
     } catch (const std::runtime_error& e) {
       auto err = e.what();
       // TORCH_CHECK to print the cpp stacktrace.

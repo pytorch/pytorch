@@ -477,7 +477,7 @@ class C10_API TypeMeta final {
   /**
    * convert TypeMeta handles to ScalarType enum values
    */
-  inline ScalarType toScalarType() const {
+  inline ScalarType toScalarType() {
     if (C10_LIKELY(isScalarType())) {
       return static_cast<ScalarType>(index_);
     }
