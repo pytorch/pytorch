@@ -5814,10 +5814,12 @@ def _make_scan_inner(x, *, axis, dtype):
         x = to_dtype(x, dtype)
     axis = _validate_dim(x, axis)
 
+    x_loader = x.make_loader()
+
     return dict(
         device=x.get_device(),
         dtypes=(x.get_dtype(),),
-        inner_fns=(x.make_loader(),),
+        inner_fns=((lambda idx, _: x_loader(idx)),),
         size=x.get_size(),
         axis=axis,
     )
@@ -6304,9 +6306,14 @@ def cummax(x, axis=None):
         "argmax", dtype=dtype, arg_break_ties_left=False
     )
 
+    def rindex(idx, reduction_idx):
+        return ops.index_expr(reduction_idx[0], torch.int64)
+
+    x_loader = x.make_loader()
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (lambda idx, _: x_loader(idx), rindex)
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummax(x, dim=axis)
@@ -6324,9 +6331,14 @@ def cummin(x, axis=None):
         "argmin", dtype=dtype, arg_break_ties_left=False
     )
 
+    def rindex(idx, reduction_idx):
+        return ops.index_expr(reduction_idx[0], torch.int64)
+
+    x_loader = x.make_loader()
+
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (lambda idx, _: x_loader(idx), rindex)
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummin(x, dim=axis)
@@ -6972,7 +6984,8 @@ def associative_scan(
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
-    kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
+    x_loaders = tuple(x.make_loader() for x in xs)
+    kwargs["inner_fns"] = tuple(lambda idx, _: x_loader(idx) for x_loader in x_loaders)
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,

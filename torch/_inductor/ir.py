@@ -2186,7 +2186,7 @@ class Scan(Loops):
         scan_vars: Sequence[Symbol],
     ) -> None:
         idx = self.reindex(vars, scan_vars)
-        values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
+        values = tuple(inner_fn(idx, scan_vars) for inner_fn in self.inner_fns)
         result = ops.scan(self.dtypes, self.combine_fn, values)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
@@ -2212,13 +2212,10 @@ class Scan(Loops):
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
-        return (idx,)
+        return (idx, rindex)
 
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
-        index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
-        idx = self.reindex(index, rindex)
-        return extract_free_symbols(self.inner_fn, idx, unbacked_only=unbacked_only)
+        return extract_free_symbols(self.inner_fn, *self.inner_fn_args(), unbacked_only=unbacked_only)
 
     @classmethod
     def create(  # type: ignore[override]
@@ -2257,7 +2254,7 @@ class Scan(Loops):
                 Pointwise.create(
                     device=device,
                     dtype=dtypes[output_index],
-                    inner_fn=inner_fns[output_index],
+                    inner_fn=lambda idx: inner_fns[output_index](idx, [0]),
                     ranges=size,
                 )
                 for output_index in range(len(dtypes))
@@ -2332,7 +2329,7 @@ class Scan(Loops):
     ) -> tuple[ReductionHint, _IntLike]:
         # TODO: custom splitting heuristic for scan
         def wrapper_fn(idx: Sequence[Expr], reduction_idx: Sequence[Expr]) -> OpsValue:
-            return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]])
+            return inner_fn([*idx[:axis], *reduction_idx, *idx[axis:]], reduction_idx)
 
         return Reduction.num_splits(
             device=device,
