@@ -1973,10 +1973,13 @@ class TestMPS(TestCaseMPS):
         run_det_test(32, 2, 2, 10, 10)
 
     def test_layer_norm(self):
-        # TODO: Test non-contiguous
-        def helper(input_shape, normalized_shape, eps=1e-05, elementwise_affine=True, dtype=torch.float32):
+        def helper(input_shape, normalized_shape, eps=1e-05, elementwise_affine=True, dtype=torch.float32, non_contiguous=False):
             cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
+            if non_contiguous:
+                x = x.mT
+                cpu_x = cpu_x.mT
+                normalized_shape[-1], normalized_shape[-2] = normalized_shape[-2], normalized_shape[-1]
 
             cpu_op = torch.nn.LayerNorm(normalized_shape, eps=eps, elementwise_affine=elementwise_affine, device='cpu', dtype=dtype)
             mps_op = torch.nn.LayerNorm(normalized_shape, eps=eps, elementwise_affine=elementwise_affine, device='mps', dtype=dtype)
@@ -2006,10 +2009,10 @@ class TestMPS(TestCaseMPS):
                 self.assertEqual(mps_op.weight.grad, cpu_op.weight.grad)
                 self.assertEqual(mps_op.bias.grad, cpu_op.bias.grad)
 
-        for elementwise_affine in [True, False]:
-            helper((2, 2, 2, 2), (2, 2), elementwise_affine=elementwise_affine)
-            helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
-            helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
+        for (elementwise_affine, non_contiguous) in itertools.product([True, False], [True, False]):
+            helper((2, 2, 2, 2), [2, 2], elementwise_affine=elementwise_affine, non_contiguous=non_contiguous)
+            helper((2, 3, 4, 5), [4, 5], elementwise_affine=elementwise_affine, non_contiguous=non_contiguous)
+            helper((2, 3, 4, 5, 6), [4, 5, 6], elementwise_affine=elementwise_affine, non_contiguous=non_contiguous)
 
         # Regression test for https://github.com/pytorch/pytorch/issues/96113
         torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
