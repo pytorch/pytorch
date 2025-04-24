@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import builtins
 import contextlib
 import dataclasses
@@ -14,6 +16,7 @@ import re
 import sys
 import textwrap
 import time
+from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
@@ -34,7 +37,6 @@ from torch.utils._ordered_set import OrderedSet
 from ..utils._sympy.functions import CeilDiv
 from . import config, ir
 from .autotune_process import (
-    TensorMeta,
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
     TritonGPUBenchmarkRequest,
@@ -58,7 +60,6 @@ from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_m
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
-from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .runtime.triton_compat import HAS_WARP_SPEC
@@ -93,6 +94,8 @@ if TYPE_CHECKING:
 
     from torch._inductor.codegen.simd import IterationRangesRoot
 
+    from .ops_handler import StoreMode
+
 
 class KernelNamespace:
     pass
@@ -111,6 +114,92 @@ class BenchmarkTensors:
 
     def unpack(self):
         return self.input_tensors, self.output_tensor
+
+
+LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
+
+
+@dataclasses.dataclass
+class TensorMeta:
+    device: torch.device
+    dtype: torch.dtype
+    size: torch._prims_common.ShapeType
+    stride: torch._prims_common.StrideType
+    offset: int
+    allocation_size: Sequence[sympy.Expr]
+    name: Optional[str] = None
+
+    @staticmethod
+    def from_irnodes(
+        irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]],
+    ) -> Union[TensorMeta, list[TensorMeta]]:
+        if isinstance(irnodes, Sequence):
+            result = [TensorMeta.from_irnode(x) for x in irnodes]
+            return result
+        else:
+            return TensorMeta.from_irnode(irnodes)
+
+    @staticmethod
+    def from_irnode(node: LayoutOrBuffer) -> TensorMeta:
+        if isinstance(node, ir.Layout):
+            node = ir.Buffer(name="fake", layout=node)
+        # triton templates want the base tensor.
+        if isinstance(node, ir.BaseView):
+            node = node.unwrap_view()
+
+        assert not isinstance(node, ir.Layout)
+
+        # Inplace padding may reinterpret a tensor to a larger tensor if the
+        # stride is large enough. The V.graph.get_allocation_size takes this into account.
+        # So we need to call as_strided in the end to 'view' the tensor with the correct
+        # sizes/strides
+        dtype = node.get_dtype()
+        assert dtype is not None
+        device = node.get_device()
+        assert device is not None
+
+        return TensorMeta(
+            size=V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            stride=V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            device=device,
+            dtype=dtype,
+            offset=V.graph.sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
+            allocation_size=V.graph.sizevars.size_hints(
+                V.graph.get_allocation_size(node),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            name=node.get_name(),
+        )
+
+    def to_tensor(self) -> torch.Tensor:
+        # preserve rng states to avoid the rand_strided call below changes
+        # the rng states for the real model code.
+        with preserve_rng_state():
+            if self.allocation_size is None or self.allocation_size == self.size:
+                return rand_strided(
+                    self.size,
+                    self.stride,
+                    device=self.device,
+                    dtype=self.dtype,
+                    extra_size=self.offset,
+                )
+            else:
+                return rand_strided(
+                    self.allocation_size,
+                    self.stride,
+                    device=self.device,
+                    dtype=self.dtype,
+                    extra_size=self.offset,
+                ).as_strided(self.size, self.stride)
 
 
 @dataclasses.dataclass
@@ -202,7 +291,7 @@ class SubgraphInfo:
     ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
     # only copied over if not None
-    range_trees: Optional[list["IterationRangesRoot"]] = None
+    range_trees: Optional[list[IterationRangesRoot]] = None
     numels = None  # type: ignore[var-annotated]
 
     def __post_init__(self):
@@ -779,8 +868,8 @@ class TritonTemplateKernel(TritonKernel):
                     self,
                     name: str,
                     index: sympy.Expr,
-                    value: "CSEVariable",
-                    mode: "StoreMode" = None,
+                    value: CSEVariable,
+                    mode: StoreMode = None,
                 ):
                     V.kernel.store_buffer_names.add(name)
                     V.kernel.cse.store_cache[name] = value
@@ -1071,7 +1160,7 @@ class TritonTemplate(KernelTemplate):
     # Allow subclasses to override the kernel type
     kernel_type: type[Any] = TritonTemplateKernel
     index_counter = itertools.count()
-    all_templates: dict[str, "TritonTemplate"] = {}
+    all_templates: dict[str, TritonTemplate] = {}
 
     def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
         super().__init__(name)
@@ -2285,57 +2374,7 @@ class AlgorithmSelectorCache(PersistentCache):
         Convert an ir.Buffer into a concrete torch.Tensor we can use for
         benchmarking.
         """
-        if isinstance(node, ir.Layout):
-            node = ir.Buffer(name="fake", layout=node)
-        # triton templates want the base tensor.
-        if isinstance(node, ir.BaseView):
-            node = node.unwrap_view()
-
-        # Inplace padding may reinterpret a tensor to a larger tensor if the
-        # stride is large enough. The V.graph.get_allocation_size takes this into account.
-        # So we need call as_strided in the end to 'view' the tensor with the correct
-        # sizes/strides
-        return AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            node.get_device(),
-            node.get_dtype(),
-            node.layout.offset,
-            V.graph.sizevars.size_hints(
-                V.graph.get_allocation_size(node),
-                fallback=config.unbacked_symint_fallback,
-            ),
-        )
-
-    @staticmethod
-    def generate_example_value(
-        size, stride, device, dtype, extra_size, allocation_size=None
-    ):
-        # preserve rng states to avoid the rand_strided call below changes
-        # the rng states for the real model code.
-        with preserve_rng_state():
-            if allocation_size is None or allocation_size == size:
-                return rand_strided(
-                    size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                )
-            else:
-                return rand_strided(
-                    allocation_size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                ).as_strided(size, stride)
+        return TensorMeta.from_irnode(node).to_tensor()
 
     @staticmethod
     def key_of(node):

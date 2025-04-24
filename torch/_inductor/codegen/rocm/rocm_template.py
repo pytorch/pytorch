@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from unittest.mock import patch
 
-from ...autotune_process import TensorMeta
 from ...ir import Buffer, IRNode, Layout
+from ...select_algorithm import TensorMeta
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate

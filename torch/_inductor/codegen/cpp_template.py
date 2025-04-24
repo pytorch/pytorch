@@ -11,7 +11,8 @@ from unittest.mock import patch
 import sympy
 
 from .. import codecache, config, ir
-from ..autotune_process import CppBenchmarkRequest, TensorMeta
+from ..autotune_process import CppBenchmarkRequest
+from ..select_algorithm import TensorMeta
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
 from .common import KernelTemplate

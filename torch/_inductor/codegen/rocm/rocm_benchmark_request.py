@@ -8,16 +8,14 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._inductor import config
-from torch._inductor.autotune_process import (
-    BenchmarkRequest,
-    GPUDeviceBenchmarkMixin,
-    TensorMeta,
-)
+from torch._inductor.autotune_process import BenchmarkRequest, GPUDeviceBenchmarkMixin
 from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from torch._inductor.select_algorithm import TensorMeta
 
 
 log = logging.getLogger(__name__)

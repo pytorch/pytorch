@@ -11,8 +11,9 @@ import sympy
 import torch
 from torch._logging import getArtifactLogger
 
-from ...autotune_process import CUDABenchmarkRequest, TensorMeta
+from ...autotune_process import CUDABenchmarkRequest
 from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout
+from ...select_algorithm import TensorMeta
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate

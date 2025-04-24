@@ -14,7 +14,6 @@ import subprocess
 import sys
 import time
 import warnings
-from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
@@ -22,8 +21,6 @@ from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.testing import rand_strided
-from torch._inductor import ir
 from torch._inductor.codecache import (
     CppCodeCache,
     CUDACodeCache,
@@ -37,16 +34,16 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
     from types import ModuleType
 
-    from torch._inductor.select_algorithm import TritonTemplateCaller
+    from torch._inductor.select_algorithm import TensorMeta, TritonTemplateCaller
 
     from .codegen.common import WorkspaceArg
 
 from . import config
 from .codegen.common import WorkspaceZeroMode
 from .runtime.benchmarking import benchmarker
-from .virtualized import V
 
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -331,64 +328,6 @@ class TuningProcessPool:
         return results
 
 
-LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
-
-
-@dataclasses.dataclass
-class TensorMeta:
-    device: torch.device
-    dtype: torch.dtype
-    sizes: torch._prims_common.ShapeType
-    strides: torch._prims_common.StrideType
-    offset: int
-    name: Optional[str] = None
-
-    @classmethod
-    def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
-    ) -> Union[TensorMeta, list[TensorMeta]]:
-        if isinstance(irnodes, Sequence):
-            result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
-            assert all(isinstance(x, TensorMeta) for x in result)
-            return result
-
-        node = irnodes
-        if isinstance(node, ir.Layout):
-            node = ir.Buffer(name="fake", layout=node)
-
-        dtype = node.get_dtype()
-        assert dtype is not None
-        device = node.get_device()
-        assert device is not None
-
-        return TensorMeta(
-            device=device,
-            dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            strides=V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            offset=V.graph.sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
-            name=node.get_name(),
-        )
-
-    def to_tensor(self) -> torch.Tensor:
-        return rand_strided(
-            self.sizes,
-            self.strides,
-            device=self.device,
-            dtype=self.dtype,
-            extra_size=self.offset,
-        )
-
-
 @dataclasses.dataclass
 class BenchmarkRequest:
     """
@@ -409,7 +348,7 @@ class BenchmarkRequest:
         # the kernel name defined in the module
         self.kernel_name = kernel_name
 
-        if isinstance(input_tensor_meta, TensorMeta):
+        if not isinstance(input_tensor_meta, list):
             input_tensor_meta = [input_tensor_meta]
         self.input_tensor_meta = input_tensor_meta
 
