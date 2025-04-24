@@ -2508,6 +2508,7 @@ class TestSDPACudaOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH], set_priority=True):
             actual = torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+            actual.backward(torch.randn_like(actual))
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             math_ref = torch.nn.functional.scaled_dot_product_attention(
                 query.contiguous().to(torch.float32),
