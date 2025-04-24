@@ -1275,7 +1275,6 @@ class DeviceCachingAllocator {
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
           releasePool(mempool_id);
-          std::cout<< "DAN " << block_found << " " << mempool_params.pool << " " << mempool_id.second << std::endl;
           if(block_found){
             params = mempool_params;
             break;
@@ -2942,7 +2941,6 @@ class DeviceCachingAllocator {
       release_blocks(it->second->small_blocks, context);
       release_blocks(it->second->large_blocks, context);
       if (it->second->cudaMalloc_count == 0) {
-        std::cout << "release_cached_blocks: " << it->first.second << std::endl;
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
         it = graph_pools_freeable.erase(it);
@@ -4134,7 +4132,6 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
 // can't use __declspec(dllexport) and __declspec(thread)
 // together: https://stackoverflow.com/a/50967977
 static thread_local MemPool* active_mempool_ = nullptr;
-static thread_local MemPool* valid_mempool_ = nullptr;
 
 MemPoolContext::MemPoolContext(MemPool* mempool)
     : prev_mempool_(active_mempool_) {
@@ -4146,14 +4143,7 @@ MemPoolContext::~MemPoolContext() {
 }
 
 MemPool* MemPoolContext::getActiveMemPool() {
-  if(active_mempool_ != nullptr){
-    valid_mempool_ = active_mempool_;
-  }
   return active_mempool_;
-}
-
-MemPool* MemPoolContext::getValidMemPool() {
-  return valid_mempool_;
 }
 
 } // namespace c10::cuda

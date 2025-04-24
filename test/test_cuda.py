@@ -5024,11 +5024,6 @@ class TestMemPool(TestCase):
         self.assertEqual(called_dummy_free.value, 321)
 
     def test_mempool_limited_memory_with_allocator(self):
-        pool = torch.cuda.MemPool(useOnOOM=True)
-
-        # MemPool doesn't have an allocator by default
-        self.assertEqual(pool.allocator, None)
-
         from torch.utils.cpp_extension import load_inline
 
         dummy_allocator_source = """
@@ -5037,19 +5032,14 @@ class TestMemPool(TestCase):
         #include <cuda_runtime_api.h>
 
         extern "C" {
-          C10_EXPORT int called_dummy_alloc = 0;
-          C10_EXPORT int called_dummy_free = 0;
-
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
           C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
-            called_dummy_alloc = 123;
             void* ptr;
             C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
             return ptr;
           }
 
           C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
-            called_dummy_free = 321;
             C10_CUDA_CHECK(cudaFree(ptr));
           }
         }
@@ -5068,60 +5058,59 @@ class TestMemPool(TestCase):
             "dummy_alloc",
             "dummy_free",
         )
-        pool = torch.cuda.MemPool(allocator.allocator())
-
-        # pool should point to the same allocator as the one passed into it
-        self.assertEqual(allocator.allocator(), pool.allocator)
-
-        # pool's use count should be 1 at this point as MemPool object
-        # holds a reference
-        self.assertEqual(pool.use_count(), 1)
-
-        # no allocations happened yet, so called_dummy_alloc and
-        # called_dummy_free should be 0
-        alloc_lib = ctypes.CDLL(dummy_allocator)
-        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
-        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
-        self.assertEqual(called_dummy_alloc.value, 0)
-        self.assertEqual(called_dummy_free.value, 0)
+        pool_do_not_use = torch.cuda.MemPool(allocator.allocator(), useOnOOM=False)
+        pool_use = torch.cuda.MemPool(allocator.allocator(), useOnOOM=True)
 
         nelem_1mb = 1024 * 1024 // 4
 
-        self._setup_mempool_limited_memory_test(40)
-        # remaining free mem: 40 mb
-        # mempool [] 40 mb
+        self._setup_mempool_limited_memory_test(80)
+        # remaining free mem: 80 mb
+        # mempool_use [] 0 mb
+        # mempool_do_not_use [] 0 mb
         # default pool [] 0 mb
-        with torch.cuda.use_mem_pool(pool):
+        with torch.cuda.use_mem_pool(pool_do_not_use):
             a = torch.randn(40*nelem_1mb, device="cuda")
+        with torch.cuda.use_mem_pool(pool_use):
+            b = torch.randn(40*nelem_1mb, device="cuda")
         a_dataptr = a.data_ptr()
-        # remaining free mem: 0 mb
-        # mempool [aaaa] 40 mb
-        # default pool [] 0 mb
-        del a
-        # remaining free mem: 0 mb
-        # mempool [____] 40 mb
-        # default pool [] 0 mb
-
-        # b should not oom and instead can use mempool as fallback
-        b = torch.randn(30*nelem_1mb, device="cuda")
         b_dataptr = b.data_ptr()
         # remaining free mem: 0 mb
-        # mempool [bbb_] 40 mb
+        # mempool_do_not_use [aaaa] 40 mb
+        # mempool_use [bbbb] 40 mb
         # default pool [] 0 mb
-        del b
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory
+            c = torch.randn(40*nelem_1mb, device="cuda")
+
+        del a, b
         # remaining free mem: 0 mb
-        # mempool [____] 40 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [____] 40 mb
         # default pool [] 0 mb
 
-        # expect that we used same memory address for both a and b
-        self.assertEqual(a_dataptr, b_dataptr)
+        # c should not oom and instead can use mempool_use as fallback
+        c = torch.randn(30*nelem_1mb, device="cuda")
+        c_dataptr = c.data_ptr()
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [ccc_] 40 mb
+        # default pool [] 0 mb
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory since can't use mempool_do_not_use
+            d = torch.randn(30*nelem_1mb, device="cuda")
+
+        del c
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [____] 40 mb
+        # default pool [] 0 mb
+
+        # expect that we used same memory address for both a and c
+        self.assertEqual(b_dataptr, c_dataptr)
 
         # pool's destructor calls emptyCache()
-        del pool
+        del pool_use, pool_do_not_use
 
-        # called_dummy_free should be 321 if dummy_free was used to deallocate
-        # out tensor
-        self.assertEqual(called_dummy_free.value, 321)
         self._teardown_mempool_limited_memory_test()
 
 
