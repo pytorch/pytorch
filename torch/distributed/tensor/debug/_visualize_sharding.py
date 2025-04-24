@@ -111,11 +111,10 @@ def _compute_local_shape_and_global_offset(
                 assert shard_dim < len(local_shape), (
                     f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
                 )
-                shard_size, shard_offset = placement._local_shard_size_on_dim(
+                shard_size, shard_offset = placement._local_shard_size_and_offset(
                     local_shape[shard_dim],
                     mesh_dim_size,
                     my_coordinate[idx],
-                    return_offset=True,
                 )
 
                 local_shape[shard_dim] = shard_size

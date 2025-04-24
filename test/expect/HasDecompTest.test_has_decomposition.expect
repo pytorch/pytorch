@@ -371,6 +371,7 @@ aten::_fused_adamw_.tensor_lr
 aten::_fused_moving_avg_obs_fq_helper
 aten::_fused_moving_avg_obs_fq_helper.out
 aten::_fused_moving_avg_obs_fq_helper_functional
+aten::_fused_rms_norm
 aten::_fused_sdp_choice
 aten::_fused_sgd
 aten::_fused_sgd.out
@@ -722,6 +723,8 @@ aten::blackman_window.out
 aten::blackman_window.periodic
 aten::blackman_window.periodic_out
 aten::bmm
+aten::bmm.dtype
+aten::bmm.dtype_out
 aten::bmm.out
 aten::ccol_indices
 aten::ccol_indices_copy
@@ -994,6 +997,8 @@ aten::mkldnn_rnn_layer.out
 aten::mkldnn_rnn_layer_backward
 aten::mkldnn_rnn_layer_backward.out
 aten::mm
+aten::mm.dtype
+aten::mm.dtype_out
 aten::mm.out
 aten::mode
 aten::mode.values
