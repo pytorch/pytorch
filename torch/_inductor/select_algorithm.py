@@ -181,25 +181,43 @@ class TensorMeta:
         )
 
     def to_tensor(self) -> torch.Tensor:
+        return self.generate_example_value(
+            self.size,
+            self.stride,
+            self.device,
+            self.dtype,
+            self.offset,
+            self.allocation_size,
+        )
+
+    @staticmethod
+    def generate_example_value(
+        size: torch._prims_common.ShapeType,
+        stride: torch._prims_common.StrideType,
+        device: torch.device,
+        dtype: torch.dtype,
+        extra_size: int,
+        allocation_size: Optional[Sequence[sympy.Expr]] = None,
+    ) -> torch.Tensor:
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
         with preserve_rng_state():
-            if self.allocation_size is None or self.allocation_size == self.size:
+            if allocation_size is None or allocation_size == size:
                 return rand_strided(
-                    self.size,
-                    self.stride,
-                    device=self.device,
-                    dtype=self.dtype,
-                    extra_size=self.offset,
+                    size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
                 )
             else:
                 return rand_strided(
-                    self.allocation_size,
-                    self.stride,
-                    device=self.device,
-                    dtype=self.dtype,
-                    extra_size=self.offset,
-                ).as_strided(self.size, self.stride)
+                    allocation_size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
+                ).as_strided(size, stride)
 
 
 @dataclasses.dataclass
@@ -2375,6 +2393,14 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmarking.
         """
         return TensorMeta.from_irnode(node).to_tensor()
+
+    @staticmethod
+    def generate_example_value(
+        size, stride, device, dtype, extra_size, allocation_size=None
+    ):
+        return TensorMeta.generate_example_value(
+            size, stride, device, dtype, extra_size, allocation_size
+        )
 
     @staticmethod
     def key_of(node):
