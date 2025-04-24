@@ -8349,9 +8349,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         compiled = torch.compile(fn)
 
-        def compare(a, b):
-            out_eager = fn(a, b)
-            out_inductor = compiled(a, b)
+        a = torch.randn([8, 8])
+        b = torch.randn([2, 8])
+
+        for dtype in (torch.int8, torch.float16, torch.int64, torch.bool):
+            out_eager = fn(a.to(dtype), b)
+            out_inductor = compiled(a.to(dtype), b)
             self.assertEqual(
                 out_inductor.dtype,
                 out_eager.dtype,
@@ -8361,13 +8364,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.allclose(out_inductor, out_eager),
                 f"Allclose failed for dtype {a.dtype}",
             )
-
-        a = torch.randn([8, 8])
-        b = torch.randn([2, 8])
-
-        for dtype in (torch.int8, torch.float16, torch.int64, torch.bool):
-            compare(a.to(dtype), b)
-            compare(a, b.to(dtype))
+            out_eager = fn(a, b.to(dtype))
+            out_inductor = compiled(a, b.to(dtype))
+            self.assertEqual(
+                out_inductor.dtype,
+                out_eager.dtype,
+                f"Expected dtype {out_eager.dtype}, but got {out_inductor.dtype}",
+            )
+            self.assertTrue(
+                torch.allclose(out_inductor, out_eager),
+                f"Allclose failed for dtype {a.dtype}",
+            )
 
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
