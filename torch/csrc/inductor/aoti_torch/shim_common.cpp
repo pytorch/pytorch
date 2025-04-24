@@ -1432,12 +1432,12 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    std::unique_ptr<StableIValue[]> ministack(new StableIValue[std::max(num_arguments, num_returns)]);
+    auto ministack = std::make_unique<StableIValue[]>(std::max(num_arguments, num_returns));
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
       const c10::TypePtr& arg_type = schema.arguments()[ministack_idx].type();
-      ministack.get()[ministack_idx] = from_ivalue(arg_type, torch::jit::pop(stack));
+      ministack[ministack_idx] = from_ivalue(arg_type, torch::jit::pop(stack));
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
@@ -1448,7 +1448,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
-      torch::jit::push(stack, to_ivalue(ret_type, ministack.get()[idx]));
+      torch::jit::push(stack, to_ivalue(ret_type, ministack[idx]));
     }
   }
 
