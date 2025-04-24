@@ -270,14 +270,8 @@ static void add_sub_lerp_template(const Tensor& self,
   auto commonDtype = at::result_type(self, other);
   if (alpha_has_value) {
     at::native::alpha_check(commonDtype, alpha);
-  } else if ((self_complex == other_complex) // TODO - handle casts to complex dtypes
+  } else if (self.is_mps() && other.is_mps() && (self_complex == other_complex) // TODO - handle casts to complex dtypes
              && (output.scalar_type() == commonDtype)) {
-    if (!self.is_mps() || !other.is_mps()) {
-      auto self_scalar = self.dim() == 0 ? mps::wrapped_scalar_tensor_mps(self.item(), output.device()) : self;
-      auto other_scalar = other.dim() == 0 ? mps::wrapped_scalar_tensor_mps(other.item(), output.device()) : other;
-      mps::binary_op_kernel(op_name, self_scalar, other_scalar, output);
-      return;
-    }
     mps::binary_op_kernel(op_name, self, other, output);
     return;
   }
