@@ -403,8 +403,9 @@ class Tracer(TracerBase):
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                base_name = "_tensor_constant"
-                if isinstance(a, (FakeScriptObject, ScriptObject)):
+                if isinstance(a, torch.Tensor):
+                    base_name = "_tensor_constant"
+                elif isinstance(a, (FakeScriptObject, ScriptObject)):
                     base_name = "_torchbind_obj"
                 elif isinstance(a, torch.FunctionSchema):
                     base_name = "_function_schema"
