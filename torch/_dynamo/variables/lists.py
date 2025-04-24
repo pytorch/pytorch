@@ -1058,7 +1058,7 @@ class SliceVariable(VariableTracker):
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented_v2(
-                gb_type="Unsupported attribute for slice",
+                gb_type="Unsupported attribute for slice() object",
                 context=f"var_getattr {self} {name}",
                 explanation=f"Expected attribute to be one of {','.join(fields)} "
                 f"but got {name}",
