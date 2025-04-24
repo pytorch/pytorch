@@ -1039,7 +1039,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 unimplemented_v2(
                     gb_type="UnspecializedNNModuleVariable missing method",
                     context=f"call_method: {self} {name} {args} {kwargs}",
-                    explanation=f"Dynamo does not support tracing method {name}",
+                    explanation=f"Dynamo does not support tracing method {name} of nn.Module {self.value}",
                     hints=[],
                 )
 
