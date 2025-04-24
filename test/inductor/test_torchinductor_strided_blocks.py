@@ -54,8 +54,7 @@ def run_and_compare(
     expected_num_programs: int = 1,
     expected_num_triton_kernels: int = 1,
     config_patches: Optional[dict] = None,
-    rtol: Optional[float] = None,
-    atol: Optional[float] = None,
+    tol: Optional[float] = None,
 ):
     """
     Runs the module through Inductor, comparing to eager reference.
@@ -70,10 +69,9 @@ def run_and_compare(
         result, code = run_and_get_code(compiled, *args)
 
     # Check numerical accuracy
-    # Don't clobber the default tolerance values
-    tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
+    kwargs = {"tol": tol} if tol is not None else {}
     ref = func(*args)
-    self.assertTrue(same(ref, result, **tol))
+    self.assertTrue(same(ref, result, **kwargs))
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)
@@ -979,8 +977,7 @@ class CommonTemplate:
             *[torch.ones(200, 200, device=self.device) * p],
             expected_num_triton_kernels=2,
             expected_num_block_pointers=3,
-            atol=p * 0.06,
-            rtol=0.06,
+            tol=0.06,
         )
 
     def test_pointwise_index_order(self):
