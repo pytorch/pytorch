@@ -493,7 +493,7 @@ class FxConverter:
 
     def _generate_comm_buffer_free(self, line: Line) -> None:
         assert isinstance(line, CommBufferFreeLine)
-        self.gm.graph.free(line.node)
+        self._free(line.node)
 
     def _generate_triton_call(self, line: Line) -> None:
         assert isinstance(line, KernelCallLine)
