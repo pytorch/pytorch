@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-
 from onnxscript.onnx_opset import opset18 as op
 
 import torch
