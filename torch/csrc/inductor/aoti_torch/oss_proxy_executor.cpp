@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
@@ -585,6 +586,9 @@ OSSProxyExecutor::OSSProxyExecutor(
     device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
   } else {
     int device_idx = -1;
+#ifdef USE_CUDA
+    AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx));
+#endif // USE_CUDA
     device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
   }
 
