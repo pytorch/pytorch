@@ -474,7 +474,7 @@ class ListVariable(CommonListMethodsVariable):
                     unimplemented_v2(
                         gb_type="Unsupported conversion for slice assignment",
                         context=f"call_method {self} {name} {args}",
-                        explanation=f"Missing dynamo support for expanding {value} into a list for slice assignment.",
+                        explanation=f"Missing dynamo support for converting {value} into a list for slice assignment.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
