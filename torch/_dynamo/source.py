@@ -869,6 +869,10 @@ def is_from_local_source(source: Source, *, only_allow_input=False):
     return True
 
 
+def is_from_global_source(source: Source) -> bool:
+    return get_global_source_name(source) is not None
+
+
 def get_global_source_name(source: Source) -> Optional[str]:
     if isinstance(source, ChainedSource):
         return get_global_source_name(source.base)
