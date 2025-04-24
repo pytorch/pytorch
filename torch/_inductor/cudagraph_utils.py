@@ -170,7 +170,11 @@ def check_multiple_devices_or_any_cpu_nodes(
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
-    if torch._inductor.config.graph_partition:
+    # dynamo cudagraph does not support graph partition
+    if (
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
+    ):
         # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
         device_node_mapping.pop(torch.device("cpu"), None)
 
