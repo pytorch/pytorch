@@ -2393,9 +2393,17 @@ class SubgraphTracer(fx.Tracer):
             if (
                 not is_strict_export
                 and not is_non_strict_export
-                and isinstance(example_value, torch.Tensor)
             ):
-                self._lift_basic_symbols(example_value, source)
+                if isinstance(example_value, torch.Tensor):
+                    self._lift_basic_symbols(example_value, source)
+                elif isinstance(example_value, (list, tuple)):
+                    for i,e in enumerate(example_value):
+                        if source:
+                            e_source = GetItemSource(
+                                base=source, index=i, index_is_slice=False
+                            )
+                        if isinstance(e, torch.Tensor):
+                            self._lift_basic_symbols(e, e_source)
 
             # Bound the symbol to ph if example_value is a SymInt with basic symbol.
             if isinstance(example_value, torch.SymInt) and isinstance(
