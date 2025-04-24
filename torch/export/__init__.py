@@ -132,6 +132,10 @@ def export_for_training(
          is passed here.
          WARNING: This option is experimental and use this at your own risk.
 
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
+
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
 
@@ -247,6 +251,10 @@ def export(
          different and the model will be serialized in the same way regardless of what value
          is passed here.
 
+        preserve_module_call_signature: A list of submodule paths for which the original
+         calling conventions are preserved as metadata. The metadata will be used when calling
+         torch.export.unflatten to preserve the original calling conventions of modules.
+
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
 
@@ -272,15 +280,42 @@ def export(
             "Maybe try converting your ScriptModule to an ExportedProgram "
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
-    return _export(
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-        pre_dispatch=True,
-    )
+
+    try:
+        return _export(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+            pre_dispatch=True,
+        )
+    except Exception as e:
+        draft_export_msg = (
+            "The error above occurred when calling torch.export.export. If you would "
+            "like to view some more information about this error, and get a list "
+            "of all other errors that may occur in your export call, you can "
+            "replace your `export()` call with `draft_export()`."
+        )
+
+        # For errors that we know can be caught by draft-export, add the message
+        # to ask users to try out draft-export
+        if isinstance(
+            e,
+            (
+                torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+                torch._subclasses.fake_tensor.UnsupportedOperatorException,
+                torch._dynamo.exc.UserError,
+                torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+            ),
+        ):
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
+        elif isinstance(e, RuntimeError) and "no fake impl registered" in str(e):
+            new_msg = str(e) + "\n\n" + draft_export_msg
+            e.args = (new_msg,)
+        raise e
 
 
 DEFAULT_PICKLE_PROTOCOL = 2

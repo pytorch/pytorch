@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import sympy
+from sympy import S
+
+from torch._prims_common import BoolLike, FloatLike, IntLike
+
 
 """
 ``torch.fx.experimental.symbolic_shapes`` provides interfaces for interacting with
@@ -63,6 +68,7 @@ from torch.fx.experimental.recording import (
     ShapeEnvEvent,
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
@@ -73,6 +79,7 @@ from torch.utils._sympy.functions import (
     FloorToInt,
     IsNonOverlappingAndDenseIndicator,
     Max,
+    Min,
     Mod,
     PythonMod,
 )
@@ -103,9 +110,6 @@ DimList = list
 
 log = logging.getLogger(__name__)
 
-import sympy
-from sympy import Add, S
-
 
 class GuardOnDataDependentSymNode(RuntimeError):
     cond: sympy.Basic
@@ -129,6 +133,8 @@ __all__ = [
     "ShapeEnv",
     "is_concrete_int",
     "is_concrete_float",
+    "is_concrete_bool",
+    "has_static_value",
     "guard_int",
     "guard_float",
     "guard_scalar",
@@ -137,7 +143,6 @@ __all__ = [
     "SYMPY_INTERP",
     "free_symbols",
     "is_symbol_binding_fx_node",
-    "is_concrete_bool",
     "is_nested_int",
     "SHAPEENV_EVENT_KEY",
     "CURRENT_NODE_KEY",
@@ -303,6 +308,8 @@ def uninteresting_files() -> set[str]:
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
+        torch.fx.proxy,
+        torch.fx._symbolic_trace,
         torch,
         torch._compile,
         torch._dynamo.eval_frame,
@@ -399,6 +406,51 @@ def is_concrete_float(a: Union[float, SymFloat]) -> bool:
         return True
 
     return False
+
+
+def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
+    """
+    Utility to check if underlying object
+    in SymBool is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymBool or bool): Object to test if it bool
+    """
+    assert isinstance(a, (SymBool, bool))
+
+    if isinstance(a, bool):
+        return True
+
+    if isinstance(
+        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
+    ):
+        return True
+
+    return False
+
+
+def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> bool:
+    """
+    User-code friendly utility to check if a value is static or dynamic.
+    Returns true if given a constant, or a symbolic expression with a fixed value.
+
+    Args:
+        a (Union[SymBool, SymFloat, SymInt, bool, float, int]): Object to test
+    """
+    assert isinstance(a, BoolLike + FloatLike + IntLike)
+    if (
+        isinstance(a, BoolLike)
+        and is_concrete_bool(a)  # type: ignore[arg-type]
+        or isinstance(a, FloatLike)
+        and is_concrete_float(a)  # type: ignore[arg-type]
+        or isinstance(a, IntLike)
+        and is_concrete_int(a)  # type: ignore[arg-type]
+    ):
+        return True
+
+    assert isinstance(a, py_sym_types)
+    return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
 
 
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
@@ -772,28 +824,6 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     return expr
 
 
-def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
-    """
-    Utility to check if underlying object
-    in SymBool is concrete value. Also returns
-    true if integer is passed in.
-
-    Args:
-        a (SymBool or bool): Object to test if it bool
-    """
-    assert isinstance(a, (SymBool, bool))
-
-    if isinstance(a, bool):
-        return True
-
-    if isinstance(
-        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
-    ):
-        return True
-
-    return False
-
-
 def is_nested_int(s: Union[int, SymInt]) -> TypeGuard[SymInt]:
     return isinstance(s, torch.SymInt) and s.node.is_nested_int()
 
@@ -849,7 +879,7 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
 
 def has_free_symbols(val: IterateExprs) -> bool:
     """Faster version of bool(free_symbols(val))"""
-    return not all(e.is_number for e in _iterate_exprs(val))
+    return not all((e.is_number or e.is_Boolean) for e in _iterate_exprs(val))
 
 
 def has_free_unbacked_symbols(x: IterateExprs) -> bool:
@@ -5932,22 +5962,22 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        if size_oblivious and expr.has(Max):
-            max_replacements = {}
-            for atom in expr.atoms(Max):
+        if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
+            min_max_replacements = {}
+            for atom in (*expr.atoms(Max), *expr.atoms(Min)):  # type: ignore[has-type]
+                if len(atom.args) > 2:
+                    continue
                 a, b = atom.args
                 if b == 1 or b == 0:
                     a, b = b, a
                 if a == 1 or a == 0:
-                    if (
-                        isinstance(b, Add)
-                        and len(b.free_symbols) == 2  # TODO: expand to N?
-                        and b.free_symbols == set(b.atoms())
-                        and all(x in self.size_like for x in b.free_symbols)
-                    ):
-                        max_replacements[atom] = b
-            if max_replacements:
-                expr = expr.xreplace(max_replacements)
+                    vr = self.bound_sympy(b, size_oblivious=True)
+                    if vr.lower >= a:
+                        min_max_replacements[atom] = b if atom.func is Max else a
+                    elif vr.upper <= a:
+                        min_max_replacements[atom] = a if atom.func is Max else b
+            if min_max_replacements:
+                expr = expr.xreplace(min_max_replacements)
                 expr = safe_expand(expr)
 
         # TODO it would seem that this pass is not necessary given the
@@ -7391,6 +7421,17 @@ class _PythonMsgPrinter(PythonPrinter):
         return self.src_map[sym.name][0]
 
 
+def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
+    """
+    Check if a condition (SymPy expression) is checking for non-negative values (>= 0).
+    Returns the variable name if it's a non-negative check (>= 0), None otherwise.
+    """
+    if isinstance(cond, sympy.Rel):
+        if cond.rel_op == ">=" and cond.rhs == 0:
+            return str(cond.lhs)
+    return None
+
+
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: defaultdict[str, list[str]]
 ) -> None:
@@ -7403,12 +7444,29 @@ def _suggest_torch_checks(
     printer = _PythonMsgPrinter(src_map)
     msg = e.args[0]
     msg += "\nTo fix the error, insert one of the following checks before this call:"
-    # suggested fixes to resolve `cond`` are to tell the compiler to assume
+
+    not_cond_str = printer.doprint(sympy.Not(cond))
+    var_name = _is_non_negative_check(cond)
+
+    # suggested fixes to resolve `cond` are to tell the compiler to assume
     # either `cond` or its negation (the user will need to select which)
-    suggested_fixes = [
-        f"torch._check({printer.doprint(cond)})",
-        f"torch._check({printer.doprint(sympy.Not(cond))})",
-    ]
+    suggested_fixes = []
+
+    if var_name:
+        suggested_fixes = [
+            f"You can add either: torch._check_is_size({var_name}) or torch._check({var_name}>=0)"
+            f" Note: torch._check_is_size({var_name}) could prevent data dependent errors that"
+            + " happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning."
+            + " See documentation on guard_size_oblivious for more details:"
+            + " https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html",
+            f"torch._check({not_cond_str})",
+        ]
+    else:
+        suggested_fixes = [
+            f"torch._check({printer.doprint(cond)})",
+            f"torch._check({not_cond_str})",
+        ]
+
     for i, fix in enumerate(suggested_fixes):
         msg += f"\n  {i + 1}. {fix}"
     src_mapped = ", ".join(

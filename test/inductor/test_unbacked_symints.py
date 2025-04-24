@@ -456,9 +456,13 @@ class TestUnbackedSymints(InductorTestCase):
             return qk, qk2, qvec
 
         example_inputs = (
-            torch.empty_strided((12, 1, 512, 64), (64, 196608, 768, 1), device=device),
-            torch.empty_strided((12, 1, 512, 64), (64, 196608, 768, 1), device=device),
-            torch.empty((12,), device=device),
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.empty_strided(
+                (12, 1, 512, 64), (64, 196608, 768, 1), device=device
+            ).uniform_(0, 1),
+            torch.randn((12,), device=device),
             torch.scalar_tensor(10, device=device, dtype=torch.int8),
         )
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
