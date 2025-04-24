@@ -1082,19 +1082,28 @@ class CppGemmTemplate(CppTemplate):
         if not skip_int8_compensation and _is_int8_gemm(new_inputs):
             BCompensate = None
             x_w_scale = None
+
+            def _get_compensation_node(W, use_int8_fast_compensation_path):
+                BCompensate = V.graph.add_tensor_constant(
+                    V.graph.constants[W.get_name() + "_BMatrixCompens"],
+                    W.get_name() + "_BMatrixCompens",
+                )
+                x_w_scale = None
+                if use_int8_fast_compensation_path:
+                    x_w_scale = V.graph.add_tensor_constant(
+                        V.graph.constants[W.get_name() + "_x_w_compens"],
+                        W.get_name() + "_x_w_compens",
+                    )
+                return BCompensate, x_w_scale
+
             if use_int8_fast_compensation_path:
                 # new_inputs has been reordered: [x, w, optional[bias], x_scale, x_zp, w_scale, w_zp]
                 x_scale = new_inputs[-4]
                 x_zp = new_inputs[-3]
                 w_scale = new_inputs[-2]
                 if isinstance(W, ir.IRNode):
-                    BCompensate = V.graph.add_tensor_constant(
-                        V.graph.constants[W.get_name() + "_BMatrixCompens"],
-                        W.get_name() + "_BMatrixCompens",
-                    )
-                    x_w_scale = V.graph.add_tensor_constant(
-                        V.graph.constants[W.get_name() + "_x_w_compens"],
-                        W.get_name() + "_x_w_compens",
+                    BCompensate, x_w_scale = _get_compensation_node(
+                        W, use_int8_fast_compensation_path
                     )
                 else:
                     # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
@@ -1109,9 +1118,8 @@ class CppGemmTemplate(CppTemplate):
                 new_inputs.append(x_w_scale)
             else:
                 if isinstance(W, ir.IRNode):
-                    BCompensate = V.graph.add_tensor_constant(
-                        V.graph.constants[W.get_name() + "_BMatrixCompens"],
-                        W.get_name() + "_BMatrixCompens",
+                    BCompensate, _ = _get_compensation_node(
+                        W, use_int8_fast_compensation_path
                     )
                 else:
                     # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
