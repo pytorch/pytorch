@@ -2215,14 +2215,17 @@ class Scan(Loops):
         return (idx, rindex)
 
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
-        return extract_free_symbols(self.inner_fn, *self.inner_fn_args(), unbacked_only=unbacked_only)
+        idx, rindex = self.inner_fn_args()
+        return extract_free_symbols(
+            self.inner_fn, idx, rindex, unbacked_only=unbacked_only
+        )
 
     @classmethod
     def create(  # type: ignore[override]
         cls,
         device: torch.device,
         dtypes: tuple[torch.dtype, ...],
-        inner_fns: tuple[Callable[[Sequence[Expr]], Any], ...],
+        inner_fns: tuple[Callable[[Sequence[Expr], Sequence[Expr]], Any], ...],
         size: list[Integer],
         axis: int,
         combine_fn: Callable[[tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]],
@@ -2320,7 +2323,7 @@ class Scan(Loops):
         cls,
         device: torch.device,
         dtype: torch.dtype,
-        inner_fn: Callable[[Sequence[Expr]], OpsValue],
+        inner_fn: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
         axis: int,
         pointwise_ranges: list[Integer],
         scan_ranges: list[Integer],
