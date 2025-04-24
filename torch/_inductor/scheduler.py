@@ -28,9 +28,9 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.symbol import free_symbol_is_type, SymT
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -45,6 +45,7 @@ from .ir import (
     GraphPartitionSignature,
     MultiOutput,
     MultiOutputLayout,
+    NoneLayout,
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -60,6 +61,7 @@ from .utils import (
     GraphPartitionMap,
     IndentedBuffer,
     is_collective,
+    is_cudagraph_unsafe_op,
     is_gpu,
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
@@ -179,6 +181,9 @@ class SchedulerBuffer:
     def get_mutations(self) -> Sequence[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
+
+    def get_device(self) -> Optional[torch.device]:
+        return self.node.get_output_spec().get_device()
 
 
 @dataclasses.dataclass
@@ -463,6 +468,40 @@ class BaseSchedulerNode:
             | self.scheduler.completed_operations
         )
 
+        def single_index_in_fused_node(buf_to_be_inplaced: SchedulerBuffer) -> bool:
+            # Inside of NodeUser, we track that the read and write are equivalent
+            # before deciding if the use can be inplace.
+            # But if that use is fused into a larger kernel, we need to check equivalence
+            # of other accesses in fused scheduler node as well.
+            fused_node = buf_to_be_inplaced.scheduler.get_fused_node(self)
+            buf_name = buf_to_be_inplaced.get_name()
+            # Dedup read/writes with equivalent indices
+            # TODO - would be nice if we could just cache accesses on ReadWrites,
+            # and inforce variant that this class & members are functional..
+            deps: OrderedSet[Dep] = OrderedSet()
+            for user in buf_to_be_inplaced.users:
+                user_node = user.node
+                if not isinstance(user_node, BaseSchedulerNode):
+                    continue
+
+                if (
+                    user_node.get_first_name()
+                    not in buf_to_be_inplaced.scheduler.name_to_fused_node
+                    or buf_to_be_inplaced.scheduler.get_fused_node(user_node)
+                    is not fused_node
+                ):
+                    continue
+
+                deps |= (
+                    o
+                    for o in user_node.read_writes.reads_and_writes()
+                    if o.name == buf_name
+                )
+                if len(deps) > 1:
+                    return False
+
+            return True
+
         for buf in self.get_outputs():
             buf_node = buf.node
             assert buf_node is not None
@@ -514,6 +553,7 @@ class BaseSchedulerNode:
                             and len(input_buf.node.get_inputs_that_alias_output()) > 0
                         )
                         and can_match_buffer_size(input_buf.node, buf.node)
+                        and single_index_in_fused_node(input_buf)
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
@@ -636,6 +676,13 @@ class BaseSchedulerNode:
             self.node, MultiOutput
         ):
             # todo: Calculate this - it's kinda annoying.
+            return {}
+        if (
+            isinstance(self, ExternKernelSchedulerNode)
+            and isinstance(self.node, ir.FallbackKernel)
+            and self.node.op_overload
+            is torch._prims.rng_prims.graphsafe_run_with_rng_state
+        ):
             return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
@@ -947,6 +994,7 @@ kernel_name_to_op = {
     "extern_kernels.bmm": torch.ops.aten.bmm,
     "extern_kernels.addmm": torch.ops.aten.addmm,
     "extern_kernels._scaled_mm": torch.ops.aten._scaled_mm,
+    "extern_kernels._scaled_grouped_mm": torch.ops.aten._scaled_grouped_mm,
 }
 
 
@@ -1723,8 +1771,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         template_nodes = [x for x in filtered_nodes if x.is_template()]
         if template_nodes:
             log.debug(
-                "ComboKernels: %d template nodes are filtered",
-                OrderedSet([len(template_nodes)]),
+                "ComboKernels: %d template nodes are filtered: %s",
+                len(template_nodes),
+                template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
         return filtered_nodes
@@ -2049,6 +2098,10 @@ class Scheduler:
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
+
+        if torch._inductor.config.graph_partition:
+            self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
+
         self.compute_last_usage()
         log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
@@ -2259,7 +2312,7 @@ class Scheduler:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
 
             unbacked_symbol_uses = sorted(
-                node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
+                node.node.get_free_symbol_uses(unbacked_only=True), key=lambda x: x.name
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
@@ -2324,7 +2377,7 @@ class Scheduler:
 
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
-            for s in out.get_unbacked_symbol_uses():
+            for s in out.get_free_symbol_uses(unbacked_only=True):
                 assert s in unbacked_symbol_to_origin_node, (
                     f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
                 )
@@ -2772,9 +2825,6 @@ class Scheduler:
 
             return (fut, mod)
 
-        # After the succesful fusion with Template, we finalize its config.
-        # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
-        # accomplishes this.
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
@@ -2785,10 +2835,9 @@ class Scheduler:
                 else node2.get_template_node()
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
-            choice_timings = multi_node.choice_timings
-            _, ms1 = multi_node.get_min_choice()
 
             # Eagerly compile and benchmark non-template nodes
+            choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
@@ -3062,7 +3111,7 @@ class Scheduler:
         fused_nodes = OrderedSet(self.nodes)
         count = 0
         num_nodes_orig = len(self.nodes)
-        log.debug("ComboKernels: Generating with num_ck_nodes = %d...", num_ck_nodes)
+        log.debug("ComboKernels: Generating with num_ck_nodes = %s...", num_ck_nodes)
         for num, node_list in enumerate(
             ForeachKernelSchedulerNode.group_nodes_for_combo_kernels(self)
         ):
@@ -3096,7 +3145,7 @@ class Scheduler:
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)
         log.info(
-            "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodels",
+            "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodes",
             count,
             num_nodes_orig,
             len(self.nodes),
@@ -3876,6 +3925,8 @@ class Scheduler:
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
+                elif isinstance(inp, ir.GeneratorState):
+                    continue
                 else:
                     storage = inp.data
                     assert (
@@ -3983,14 +4034,7 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if (
-            hasattr(node.node, "layout")
-            and hasattr(node.node.layout, "size")
-            and any(
-                isinstance(expr, sympy.Expr) and expr.free_symbols
-                for expr in node.node.layout.size
-            )
-        ):
+        if is_cudagraph_unsafe_op(node.node):
             return True
 
         return False
@@ -4051,6 +4095,102 @@ class Scheduler:
                     signature.constant_names,
                 )
             )
+
+    def get_graph_partition_symbol_inputs(
+        self,
+        partition: PartitionType,
+        input_nodes: dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]],
+    ) -> OrderedSet[sympy.Symbol]:
+        """
+        Returns all symbol inputs which are required to be in scope to successfully
+        perform codegen for this graph partition, including:
+        - free symbols used in partition nodes
+        - free symbols in partition input/node shapes, strides, and offsets. This is needed
+          for recording cudagraphs for tensors with dynamic shapes.
+        """
+
+        def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
+            free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
+            layout = node.maybe_get_layout()
+            if isinstance(layout, ir.Layout):
+                free_symbol_uses.update(
+                    free_symbols(layout.size)
+                    | free_symbols(layout.stride)
+                    | free_symbols(layout.offset)
+                )
+                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                    # symint may be used as index in layout.target
+                    free_symbol_uses.update(get_layout_symints(layout.target))
+            else:
+                assert layout is None, (
+                    f"Expect layout to be None but found layout={layout}"
+                )
+            return free_symbol_uses
+
+        def get_scheduler_node_symbol_uses(
+            node: BaseSchedulerNode,
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Gets symbols used in node.
+            """
+            if isinstance(node, FusedSchedulerNode):
+                return OrderedSet().union(
+                    *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
+                )
+            assert node.node is not None
+            free_symbol_uses = node.node.get_free_symbol_uses()
+            free_symbol_uses.update(
+                *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
+            )
+            return free_symbol_uses
+
+        def get_input_node_symbols(
+            node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Gets symbols used in input node shapes, strides, and offsets.
+            """
+            if isinstance(node, ir.TorchBindObject):
+                # TorchBindObject does not involve dynamic shapes yet
+                return OrderedSet()
+            elif isinstance(node, ir.IRNode):
+                return get_layout_symints(node)
+            else:
+                # node cannot be sympy.Expr since node comes from read_writes and
+                # read_writes does not contain sympy.Expr
+                raise NotImplementedError(f"Unsupported input node type: {type(node)}")
+
+        def filter_symbols(
+            symbols: OrderedSet[sympy.Symbol],
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Filters a set of symbols that are required for codegen. Skip symbols
+            that are always internal to kernels, such as SymT.TMP, SymT.INDEX,
+            and SymT.R0_INDEX.
+            """
+            return OrderedSet(
+                s
+                for s in symbols
+                if symbol_is_type(
+                    s,
+                    (
+                        SymT.SIZE,
+                        SymT.FLOAT,
+                        SymT.UNBACKED_INT,
+                        SymT.UNBACKED_FLOAT,
+                        SymT.PRECOMPUTED_SIZE,
+                    ),
+                )
+            )
+
+        candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
+            *(get_scheduler_node_symbol_uses(node) for node in partition)
+        )
+        candidate_symbols.union(
+            *(get_input_node_symbols(node) for _, node in input_nodes.items())
+        )
+
+        return filter_symbols(candidate_symbols)
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
@@ -4117,7 +4257,12 @@ class Scheduler:
                 name for name in partition_input_names if name in V.graph.constants
             ]
 
+            symbol_inputs = self.get_graph_partition_symbol_inputs(
+                partition, input_nodes
+            )
+
             partition_signature = GraphPartitionSignature(
+                symbol_inputs,
                 input_nodes,
                 output_nodes,
                 input_deallocation,
@@ -4133,6 +4278,38 @@ class Scheduler:
 
         return signatures[::-1]
 
+    def reorder_for_partition_with_simple_dependency(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder a node if it should be partitioned and has simple dependency:
+        1. move a partitioned node to the front if it has no dependency
+        2. move a partitioned node to the back if it is only used by OutputNode
+        3. otherwise do not reorder
+        """
+
+        front: list[BaseSchedulerNode] = []
+        middle: list[BaseSchedulerNode] = []
+        back: list[BaseSchedulerNode] = []
+
+        def only_output_user(node: BaseSchedulerNode) -> bool:
+            for buf in node.get_outputs():
+                for use in buf.users:
+                    if not isinstance(use.node, OutputNode):
+                        return False
+            return True
+
+        for node in nodes:
+            should_partition = self.should_partition(node)
+            if should_partition and len(node.unmet_dependencies) == 0:
+                front.append(node)
+            elif should_partition and only_output_user(node):
+                back.append(node)
+            else:
+                middle.append(node)
+
+        return front + middle + back
+
     def graph_partition(
         self,
     ) -> tuple[list[PartitionType], list[GraphPartitionSignature]]:
@@ -4141,7 +4318,6 @@ class Scheduler:
         graph partitions and compute partition input/output signatures.
         """
         partitions: list[PartitionType] = []
-
         skip_cudagraph = True
         cur_partition: PartitionType = []
         skip_cudagraphs = []
@@ -4320,7 +4496,11 @@ class Scheduler:
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if device is not None and self.get_backend(device).ready_to_flush():
+                if (
+                    device is not None
+                    and device.type != "meta"
+                    and self.get_backend(device).ready_to_flush()
+                ):
                     self.flush()
 
         if self.current_device and device_need_guard(self.current_device.type):
@@ -4432,7 +4612,9 @@ class Scheduler:
                     if (
                         buffer
                         and get_device_type(buffer) == "cpu"
-                        and not isinstance(buffer.layout, MultiOutputLayout)
+                        and not isinstance(
+                            buffer.layout, (NoneLayout, MultiOutputLayout)
+                        )
                         and buffer.get_size() == []
                     ):
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)

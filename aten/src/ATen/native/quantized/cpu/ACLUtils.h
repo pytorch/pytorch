@@ -8,6 +8,7 @@
 #include <arm_compute/core/TensorInfo.h>
 #include <arm_compute/function_info/ActivationLayerInfo.h>
 #include <arm_compute/runtime/NEON/functions/NEActivationLayer.h>
+#include <arm_compute/runtime/NEON/functions/NEArithmeticAddition.h>
 #include <arm_compute/runtime/NEON/functions/NEGEMMLowpMatrixMultiplyCore.h>
 #include <arm_compute/runtime/NEON/functions/NEQuantizationLayer.h>
 #include <arm_compute/runtime/Tensor.h>
@@ -119,6 +120,29 @@ struct StaticQuantMatmul : public QuantMatmul {
  private:
   std::optional<arm_compute::Tensor> bia_q_tensor_;
   std::optional<at::Tensor> bia_q_tensor_orig_;
+};
+
+struct QuantAdd {
+  arm_compute::Tensor qa_tensor;
+  arm_compute::Tensor qb_tensor;
+  arm_compute::Tensor qdst_tensor;
+  arm_compute::NEArithmeticAddition q_add;
+
+  QuantAdd(
+      arm_compute::DataType dtype,
+      const std::vector<int64_t>& input_dims,
+      double qa_scale,
+      int64_t qa_offset,
+      double qb_scale,
+      int64_t qb_offset,
+      double dst_scale,
+      int64_t dst_offset);
+
+  arm_compute::Status validate();
+  void configure();
+
+ private:
+  arm_compute::ConvertPolicy policy{arm_compute::ConvertPolicy::SATURATE};
 };
 
 } // namespace at::native::acl_utils
