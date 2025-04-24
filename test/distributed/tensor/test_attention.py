@@ -1,15 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import unittest
-from functools import lru_cache
-from typing import Any, Callable
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
-from torch._ops import TorchDispatchMode
 from torch.distributed._tensor.experimental._attention import (
     _AttentionContextParallel,
     _CausalBehavior,
@@ -18,6 +14,8 @@ from torch.distributed._tensor.experimental._attention import (
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
+    ContextParallelMode,
+    FlexAttentionContiguousSharder,
     set_rotate_method,
 )
 from torch.distributed.device_mesh import init_device_mesh
@@ -25,11 +23,6 @@ from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Sha
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
-from torch.nn.attention.flex_attention import (
-    _mask_mod_signature,
-    BlockMask,
-    create_block_mask,
-)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -519,7 +512,9 @@ class RingFlexAttentionTest(DTensorTestBase):
         )
         # NOTE: flex_attention checks block_mask shape and input shape before
         # calling into flex_attention_hop.
-        with CPMode(device_mesh, block_mask):
+        with ContextParallelMode(
+            device_mesh, block_mask, sharder=FlexAttentionContiguousSharder()
+        ):
             out = flex_attention(
                 q_local, k_local, v_local, block_mask=block_mask_post_sharding
             )
@@ -531,140 +526,6 @@ class RingFlexAttentionTest(DTensorTestBase):
         torch.testing.assert_close(
             dist_out.full_tensor(), expect_out, atol=1e-1, rtol=1e-2
         )
-
-
-class CPMode(TorchDispatchMode):
-    def __init__(self, device_mesh: DeviceMesh, block_mask: BlockMask):
-        super().__init__()
-
-        block_mask_tuple = block_mask.as_tuple()
-        assert len(block_mask_tuple) == 13
-        Q_LEN: int = block_mask_tuple[0]
-        KV_LEN: int = block_mask_tuple[1]
-
-        mask_mod: _mask_mod_signature = block_mask_tuple[-1]
-        Q_BLOCK_SIZE: int = block_mask_tuple[-3]
-        KV_BLOCK_SIZE: int = block_mask_tuple[-2]
-
-        # TODO: support other KV block sizes
-        assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
-
-        # resolve CP device mesh info
-        assert device_mesh.ndim == 1
-        cp_rank = device_mesh.get_local_rank()
-        cp_group_size = device_mesh.size()
-        device_type = device_mesh.device_type
-
-        # the sharding function is configurable
-        sharding_map = regular_sharding(
-            Q_LEN, KV_LEN, Q_BLOCK_SIZE, KV_BLOCK_SIZE, cp_group_size, device_type
-        )
-
-        # rewrite block_mask
-        cp_mask_mod = rewrite_mask_mod_for_cp(
-            mask_mod, cp_rank, Q_BLOCK_SIZE, sharding_map
-        )
-        cp_block_mask = create_block_mask_cached(
-            cp_mask_mod,
-            B=1,
-            H=1,
-            M=Q_LEN // cp_group_size,
-            N=KV_LEN,
-            device=device_type,
-            BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
-        )
-
-        self._device_mesh = device_mesh
-        self._sharding_map = sharding_map
-        self._cp_block_mask = cp_block_mask
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        return func(*args, **kwargs)
-
-
-@lru_cache
-def create_block_mask_cached(score_mod, B, H, M, N, device, BLOCK_SIZE):
-    block_mask = create_block_mask(
-        score_mod, B, H, M, N, device=device, BLOCK_SIZE=BLOCK_SIZE
-    )
-    return block_mask
-
-
-def regular_sharding(
-    Q_LEN: int,
-    KV_LEN: int,
-    Q_BLOCK_SIZE: int,
-    KV_BLOCK_SIZE: int,
-    cp_size: int,
-    device_type: str,
-) -> torch.Tensor:
-    assert Q_LEN == KV_LEN
-    assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
-    assert (
-        Q_LEN % (Q_BLOCK_SIZE * cp_size) == 0
-    ), "context parallel requires even sharding for now"
-    q_num_blocks = Q_LEN // Q_BLOCK_SIZE
-    local_num_blk = q_num_blocks // cp_size
-    return torch.arange(q_num_blocks, device=device_type).view(cp_size, local_num_blk)
-
-
-def rewrite_mask_mod_for_cp(
-    mask_mod: _mask_mod_signature,
-    rank: int,
-    block_size: int,
-    load_balancer_output: torch.Tensor,
-) -> _mask_mod_signature:
-    def local_q_idx_to_q_idx(local_q_idx) -> torch.Tensor:
-        # calculate local block_idx and block_offset
-        local_blk_idx, local_blk_offset = (
-            local_q_idx // block_size,
-            local_q_idx % block_size,
-        )
-        assert rank < load_balancer_output.size(0)
-        blk_idx = load_balancer_output[rank][local_blk_idx]
-        return blk_idx * block_size + local_blk_offset
-
-    return lambda b, h, q_idx, kv_idx: mask_mod(
-        b, h, local_q_idx_to_q_idx(q_idx), kv_idx
-    )
-
-
-@flex_attention_hop.py_impl(CPMode)
-def cp_flex_attention_dispatch_mode(
-    mode: CPMode,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    score_mod: Callable,
-    block_mask: tuple,
-    scale: float,
-    kernel_options: dict[str, Any],
-    score_mod_other_buffers: tuple = (),
-    mask_mod_other_buffers: tuple = (),
-) -> tuple[torch.Tensor, torch.Tensor]:
-    sharding = Shard(2)
-    k_dist = DTensor.from_local(key, mode._device_mesh, [sharding])
-    v_dist = DTensor.from_local(value, mode._device_mesh, [sharding])
-    k_global = k_dist.full_tensor()
-    v_global = v_dist.full_tensor()
-
-    # TODO: add kv reorder
-    sharding_map = mode._sharding_map
-    assert sharding_map is not None
-
-    out, lse = flex_attention_hop(
-        query,
-        k_global,
-        v_global,
-        score_mod=score_mod,  # TODO: rewrite score_mod for cp
-        block_mask=mode._cp_block_mask.as_tuple(),
-        scale=scale,
-        kernel_options=kernel_options,
-        score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
-    )
-
-    return out, lse
 
 
 if __name__ == "__main__":
