@@ -839,7 +839,7 @@ class CppGemmTemplate(CppTemplate):
         Add choices for the GEMM template.
         """
         # Fast path to save the epilogue calculation when x_scale/x_zp/w_scale are constant
-        use_int8_fast_epilogue_path = _is_int8_gemm(input_nodes) and all(
+        use_int8_fast_compensation_path = _is_int8_gemm(input_nodes) and all(
             (
                 isinstance(input_nodes[idx], ir.TensorBox)
                 and isinstance(input_nodes[idx].data.data, ir.ConstantBuffer)
@@ -963,7 +963,7 @@ class CppGemmTemplate(CppTemplate):
                 new_layout,
                 micro_gemm,
                 pre_block_weights,
-                use_int8_fast_epilogue_path,
+                use_int8_fast_compensation_path,
             )
 
         def postprocessor(output):
@@ -986,8 +986,8 @@ class CppGemmTemplate(CppTemplate):
                     new_layout,
                     micro_gemm,
                     pre_block_weights,
-                    use_int8_fast_epilogue_path,
-                    skip_int8_compensate=True,
+                    use_int8_fast_compensation_path,
+                    skip_int8_compensation=True,
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -1033,8 +1033,8 @@ class CppGemmTemplate(CppTemplate):
         layout: ir.Layout,
         micro_gemm: CppMicroGemm,
         should_block_weight: bool,
-        use_int8_fast_epilogue_path: bool = False,
-        skip_int8_compensate: bool = False,
+        use_int8_fast_compensation_path: bool = False,
+        skip_int8_compensation: bool = False,
     ):
         """
         NOTE Weight prep consists of 2 separate steps:
@@ -1079,10 +1079,10 @@ class CppGemmTemplate(CppTemplate):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
 
-        if _is_int8_gemm(new_inputs) and not skip_int8_compensate:
+        if not skip_int8_compensation and _is_int8_gemm(new_inputs):
             BCompensate = None
             x_w_scale = None
-            if use_int8_fast_epilogue_path:
+            if use_int8_fast_compensation_path:
                 # new_inputs has been reordered: [x, w, optional[bias], x_scale, x_zp, w_scale, w_zp]
                 x_scale = new_inputs[-4]
                 x_zp = new_inputs[-3]

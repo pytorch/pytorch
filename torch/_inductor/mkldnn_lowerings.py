@@ -30,20 +30,20 @@ from .virtualized import ops, V
 
 
 def create_int8_compensation(
-    x_scale,
-    x_zp,
-    w_scale,
-    packed_weight,
-    W_tensor,
-):
-    use_int8_fast_epilogue_path = False
+    W_tensor: torch.Tensor,
+    packed_weight: ir.TensorBox,
+    x_scale: ir.TensorBox,
+    x_zp: ir.TensorBox,
+    w_scale: ir.TensorBox,
+) -> tuple[bool, ir.TensorBox, Optional[ir.TensorBox]]:
+    use_int8_fast_compensation_path = False
     weight_compens = None
     x_w_scale = None
     if all(
         isinstance(item, ir.TensorBox) and item.get_name() in V.graph.constants
         for item in [x_scale, x_zp, w_scale]
     ):
-        use_int8_fast_epilogue_path = True
+        use_int8_fast_compensation_path = True
         x_w_scale_tensor = (
             V.graph.constants[x_scale.get_name()]
             * V.graph.constants[w_scale.get_name()]
@@ -66,14 +66,14 @@ def create_int8_compensation(
             name=packed_weight.get_name() + "_BMatrixCompens",
         )
     return (
-        use_int8_fast_epilogue_path,
+        use_int8_fast_compensation_path,
         weight_compens,
         x_w_scale,
     )
 
 
 def codegen_int8_gemm_template_compensation(
-    use_int8_fast_epilogue_path,
+    use_int8_fast_compensation_path,
     input,
     _x_w_scale,
     _x_scale,
@@ -81,7 +81,7 @@ def codegen_int8_gemm_template_compensation(
     _weight_compo,
     _x_zp,
 ):
-    if use_int8_fast_epilogue_path:
+    if use_int8_fast_compensation_path:
         temp = ops.sub(
             ops.mul(
                 input,
@@ -750,15 +750,15 @@ def register_onednn_fusion_ops():
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
 
                     (
-                        use_int8_fast_epilogue_path,
+                        use_int8_fast_compensation_path,
                         weight_compens,
                         x_w_scale,
                     ) = create_int8_compensation(
+                        W_tensor,
+                        packed_weight,
                         x_scale,
                         x_zp,
                         w_scale,
-                        packed_weight,
-                        W_tensor,
                     )
 
                     def epilogue_creator(input_buffer):
@@ -771,11 +771,10 @@ def register_onednn_fusion_ops():
                         ]
                         input_loader = input_buffer.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
-                        x_w_scale_loader = (
-                            None
-                            if not use_int8_fast_epilogue_path
-                            else x_w_scale.make_loader()
-                        )
+                        x_w_scale_loader = None
+                        if use_int8_fast_compensation_path:
+                            assert x_w_scale is not None
+                            x_w_scale_loader = x_w_scale.make_loader()
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
                         x_zp_loader = x_zp.make_loader()
@@ -791,27 +790,22 @@ def register_onednn_fusion_ops():
                             # cvt to FP32 before doing compensation
                             input = ops.to_dtype(input, torch.float32)
                             weight_compens_index = (index[-1],)
-                            _x_scale = (
-                                None
-                                if use_int8_fast_epilogue_path
-                                else x_scale_loader(())
-                            )
-                            _x_zp = (
-                                None if use_int8_fast_epilogue_path else x_zp_loader(())
-                            )
-                            _w_scale = (
-                                None
-                                if use_int8_fast_epilogue_path
-                                else w_scale_loader(weight_compens_index)
-                            )
+
+                            _x_scale = None
+                            _x_zp = None
+                            _w_scale = None
+                            if not use_int8_fast_compensation_path:
+                                _x_scale = x_scale_loader(())
+                                _x_zp = x_zp_loader(())
+                                _w_scale = w_scale_loader(weight_compens_index)
                             _weight_compo = weight_compens_loader(weight_compens_index)
-                            # Step 1: Compute s8s8->s32 or u8s8->s32 GEMM & then apply compensation
                             _x_w_scale = None
-                            if use_int8_fast_epilogue_path:
+                            if use_int8_fast_compensation_path:
                                 assert x_w_scale_loader is not None
                                 _x_w_scale = x_w_scale_loader(weight_compens_index)
+                            # Step 1: Compute s8s8->s32 or u8s8->s32 GEMM & then apply compensation
                             temp = codegen_int8_gemm_template_compensation(
-                                use_int8_fast_epilogue_path,
+                                use_int8_fast_compensation_path,
                                 input,
                                 _x_w_scale,
                                 _x_scale,
@@ -1079,15 +1073,15 @@ def register_onednn_fusion_ops():
                     W_tensor = V.graph.constants[packed_weight.get_name()]
                     W_tensor = W_tensor.to_dense()
                     (
-                        use_int8_fast_epilogue_path,
+                        use_int8_fast_compensation_path,
                         weight_compens,
                         x_w_scale,
                     ) = create_int8_compensation(
+                        W_tensor,
+                        packed_weight,
                         x_scale,
                         x_zp,
                         w_scale,
-                        packed_weight,
-                        W_tensor,
                     )
 
                     def epilogue_creator(input_buffer):
@@ -1102,11 +1096,10 @@ def register_onednn_fusion_ops():
                         input_loader = input_buffer.make_loader()
                         x2_loader = x2.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
-                        x_w_scale_loader = (
-                            None
-                            if not use_int8_fast_epilogue_path
-                            else x_w_scale.make_loader()
-                        )
+                        x_w_scale_loader = None
+                        if use_int8_fast_compensation_path:
+                            assert x_w_scale is not None
+                            x_w_scale_loader = x_w_scale.make_loader()
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
                         x_zp_loader = x_zp.make_loader()
@@ -1119,32 +1112,24 @@ def register_onednn_fusion_ops():
                             nonlocal bias
                             input = input_loader(index)
                             _x2 = x2_loader(index)
-                            _x_scale = (
-                                None
-                                if use_int8_fast_epilogue_path
-                                else x_scale_loader(())
-                            )
-                            _x_zp = (
-                                None if use_int8_fast_epilogue_path else x_zp_loader(())
-                            )
-
-                            # MicroKernel Output is with int32
-                            # cvt to FP32 before doing compensation
-                            input = ops.to_dtype(input, torch.float32)
+                            _x_scale = None
+                            _x_zp = None
+                            _w_scale = None
                             weight_compens_index = (index[-1],)
-                            _w_scale = (
-                                None
-                                if use_int8_fast_epilogue_path
-                                else w_scale_loader(weight_compens_index)
-                            )
+                            if not use_int8_fast_compensation_path:
+                                _x_scale = x_scale_loader(())
+                                _x_zp = x_zp_loader(())
+                                _w_scale = w_scale_loader(weight_compens_index)
+                            # MicroKernel Output is with int32: cvt to FP32 before doing compensation
+                            input = ops.to_dtype(input, torch.float32)
                             _weight_compo = weight_compens_loader(weight_compens_index)
-                            # Step 1: Doing compensation to cvt fp32
                             _x_w_scale = None
-                            if use_int8_fast_epilogue_path:
+                            if use_int8_fast_compensation_path:
                                 assert x_w_scale_loader is not None
                                 _x_w_scale = x_w_scale_loader(weight_compens_index)
+                            # Step 1: Doing compensation to cvt fp32
                             temp = codegen_int8_gemm_template_compensation(
-                                use_int8_fast_epilogue_path,
+                                use_int8_fast_compensation_path,
                                 input,
                                 _x_w_scale,
                                 _x_scale,
