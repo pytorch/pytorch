@@ -2,7 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -224,7 +224,7 @@ class device_index:
         if self.idx is not None:
             self.prev_idx = torch._C._accelerator_exchangeDevice(self.idx)
 
-    def __exit__(self, *args: Any) -> Literal[False]:
+    def __exit__(self, *args: object) -> Literal[False]:
         if self.idx is not None:
             torch._C._accelerator_maybeExchangeDevice(self.prev_idx)
         return False
