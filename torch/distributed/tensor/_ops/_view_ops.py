@@ -6,6 +6,7 @@ from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor
+from torch._prims_common import DimsType
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -226,8 +227,8 @@ def dim_flatten(ndim: int, start_dim=0, end_dim=-1) -> DimMap:
 
 def dim_movedim(
     ndim: int,
-    input: Union[int, Sequence[int]],
-    destination: Union[int, Sequence[int]],
+    input: DimsType,
+    destination: DimsType,
 ) -> DimMap:
     input = normalize_dims(input, ndim)
     destination = normalize_dims(destination, ndim)
@@ -559,9 +560,11 @@ def propagate_shape_and_sharding(
             shard_dim_map[in_dim.input_dim] = dim
 
     input_tgt_placements = [
-        Replicate()
-        if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
-        else p
+        (
+            Replicate()
+            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
+            else p
+        )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
     output_placements = [
