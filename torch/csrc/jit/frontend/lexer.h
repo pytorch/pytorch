@@ -401,10 +401,20 @@ struct TORCH_API SharedParserData {
       case '?':
       case '~':
       single_char_token:
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            std::strchr(valid_single_char_tokens, *pos) != nullptr,
+            "Did you forget to add the character `",
+            *pos,
+            "` to valid_single_char_tokens?");
         *end = next_pos;
         *kind = *pos;
         return true;
     }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        std::strchr(valid_single_char_tokens, *pos) == nullptr,
+        "Did you forget to add the character `",
+        *pos,
+        "` to the above switch statement?");
     return false;
   }
 
@@ -706,11 +716,11 @@ struct Token {
   int kind;
   SourceRange range;
   Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
-  std::string text() {
+  std::string text() const {
     return std::string(range.token_text());
   }
 
-  std::string_view text_view() {
+  std::string_view text_view() const {
     return range.token_text();
   }
 

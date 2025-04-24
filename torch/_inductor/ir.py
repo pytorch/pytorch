@@ -55,6 +55,7 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
+    statically_known_true,
     SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -86,6 +87,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
     ir_dataclass,
@@ -2593,6 +2595,24 @@ def is_stride_order_storage_and_layout(
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
+
+
+def is_unaligned(node: IRNode) -> bool:
+    if isinstance(node, (TensorBox, StorageBox)):
+        return is_unaligned(node.data)
+
+    if isinstance(node, ReinterpretView):
+        layout = node.layout
+        has_unaligned_layout = not statically_known_true(
+            layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
+        )
+        return is_unaligned(node.data) or has_unaligned_layout
+
+    if isinstance(node, Buffer):
+        return node.get_name() in V.graph.unaligned_buffers
+
+    # assume to be aligned otherwise
+    return False
 
 
 @ir_dataclass
@@ -6990,9 +7010,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.
-        has_unaligned_input = any(
-            arg.get_name() in V.graph.unaligned_buffers for arg in tensor_args
-        )
+        has_unaligned_input = any(is_unaligned(arg) for arg in tensor_args)
 
         device = cls.find_device(tensor_args, example_output)
 
