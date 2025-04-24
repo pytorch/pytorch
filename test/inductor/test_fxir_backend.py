@@ -74,13 +74,13 @@ class FxirTestCase(InductorTestCase):
         # Get the FX graph from the backend.
         gms = self._run_and_capture_graphs(opt, args)
 
-        # Check code
+        # Check the code for triton kernels.
         num_kernels = sum(
             self._count_ops(gm, triton_kernel_wrapper_mutation) for gm in gms
         )
         self.assertEqual(num_kernels, expected_num_triton_kernels)
 
-        # Check accuracy
+        # Check accuracy.
         result = opt(*args)
         ref = func(*args)
         if metadata_only:
