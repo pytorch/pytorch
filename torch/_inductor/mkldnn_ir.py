@@ -5,7 +5,7 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
-from torch._prims_common import make_channels_last_strides_for
+from torch._prims_common import make_channels_last_strides_for, StrideType
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import (
@@ -175,7 +175,7 @@ def _prepare_convolution_fusion_create(
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
     if dynamic_shapes and is_contiguous_storage_and_layout(x):
-        output_stride = FlexibleLayout.contiguous_strides(output_size)
+        output_stride: StrideType = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
 

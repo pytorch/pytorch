@@ -23,7 +23,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, ParamSpec, Self, TypeAlias
+from typing_extensions import assert_never, Never, override, ParamSpec, Self, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -55,6 +55,7 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
+    statically_known_true,
     SymTypes,
 )
 from torch.fx.node import Node
@@ -88,6 +89,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
     ir_dataclass,
@@ -1835,8 +1837,8 @@ class Reduction(Loops):
 
 
 def _fixed_indexer(
-    size: Sequence[Expr],
-    stride: Optional[Sequence[Expr]] = None,
+    size: Sequence[int],
+    stride: Optional[Sequence[int]] = None,
     offset: Expr = Integer(0),
 ) -> Callable[[Sequence[Expr]], Expr]:
     """A closure containing math to read a given element"""
@@ -1853,7 +1855,7 @@ def _fixed_indexer(
     return indexer
 
 
-INNER_FN_TY = Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]
+INNER_FN_TY: TypeAlias = Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]
 
 
 class MultiOutputReduction(Reduction):
@@ -2619,6 +2621,24 @@ def is_stride_order_storage_and_layout(
         return False
 
 
+def is_unaligned(node: IRNode) -> bool:
+    if isinstance(node, (TensorBox, StorageBox)):
+        return is_unaligned(node.data)
+
+    if isinstance(node, ReinterpretView):
+        layout = node.layout
+        has_unaligned_layout = not statically_known_true(
+            layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
+        )
+        return is_unaligned(node.data) or has_unaligned_layout
+
+    if isinstance(node, Buffer):
+        return node.get_name() in V.graph.unaligned_buffers
+
+    # assume to be aligned otherwise
+    return False
+
+
 @ir_dataclass
 class BaseView(IRNode):
     data: IRNode
@@ -2958,7 +2978,7 @@ class View(GenericView):
 
     @classmethod
     def create(cls, x: IRNode, new_size: Sequence[Expr]) -> IRNode:  # type: ignore[override]
-        assert isinstance(new_size, (tuple, list)), type(new_size)
+        assert isinstance(new_size, Sequence), type(new_size)
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # Skip pointless views
@@ -3006,7 +3026,7 @@ class View(GenericView):
     @staticmethod
     def resolve_negative_size(
         old_size: Sequence[Expr], new_size: Sequence[Expr]
-    ) -> tuple[Sequence[Expr], Sequence[Expr]]:
+    ) -> tuple[list[Expr], list[Expr]]:
         new_size = [V.graph.sizevars.simplify(x) for x in new_size]
         old_size = [V.graph.sizevars.simplify(x) for x in old_size]
 
@@ -3636,7 +3656,7 @@ class Layout(OutputSpec):
         )
 
     def storage_size(self) -> Expr:
-        return compute_required_storage_length(self.size, self.stride, self.offset)
+        return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
 
 
 class FixedLayout(Layout):
@@ -3648,13 +3668,13 @@ class FixedLayout(Layout):
 
 
 class FlexibleLayout(Layout):
-    """A Tensor layout we are allowed to change"""
+    """A Tensor layout that we are allowed to change"""
 
     allow_indexing = False
 
     # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
-    def contiguous_strides(sizes: Sequence[int]) -> Sequence[Expr]:
+    def contiguous_strides(sizes: Sequence[int]) -> list[Expr]:
         if len(sizes) == 0:
             return []
         reversed_strides = [sympy.S.One]
@@ -3663,7 +3683,7 @@ class FlexibleLayout(Layout):
         return list(reversed(reversed_strides))
 
     @staticmethod
-    def fill_ordered(sizes: Sequence[int], order: Sequence[int]) -> Sequence[Expr]:
+    def fill_ordered(sizes: Sequence[int], order: Sequence[int]) -> list[Expr]:
         """
         Create a stride based on the order the dimensions should be filled in.
 
@@ -3764,7 +3784,7 @@ class FlexibleLayout(Layout):
         )
 
     def as_fill_order(self, order: Sequence[int]) -> FixedLayout:
-        new_stride = self.fill_ordered(self.size, order)
+        new_stride: Sequence[int] = self.fill_ordered(self.size, order)
         if self.should_pad_strides():
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
         return FixedLayout(
@@ -4575,6 +4595,9 @@ class TemplateBuffer(OperationBuffer):
         )
 
         for inp in self.inputs:
+            assert isinstance(inp, (ReinterpretView, Buffer)), type(inp)
+            assert isinstance(inp.layout, Layout), type(inp.layout)
+
             indexer = inp.layout.make_indexer()
 
             def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> None:
@@ -4947,7 +4970,7 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
-        output_stride = FlexibleLayout.contiguous_strides(new_size)
+        output_stride: Sequence[int] = FlexibleLayout.contiguous_strides(new_size)
         if config.comprehensive_padding:
             # Ensure the output stride matches the alignment requirements
             output_stride = Layout._pad_strides(
@@ -5926,25 +5949,7 @@ class ExternKernel(InputsKernel):
 @ir_dataclass(frozen=False)
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
-        self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
-        kernel_name = self.get_kernel_name()
-        if (
-            V.graph.cpp_wrapper
-            and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
-        ):
-            # For https://github.com/pytorch/pytorch/issues/128474
-            kernel_name = "aoti_torch__mm_plus_mm_out"
-        else:
-            kernel_name = self.get_kernel_name()
-        device = d.type if (d := self.get_device()) else V.graph.device_type
-        wrapper.generate_extern_kernel_out(
-            kernel_name,
-            self.codegen_reference(),
-            self.output_view.codegen_reference() if self.output_view else None,
-            args,
-            device,
-        )
+        wrapper.generate_extern_kernel_out(self)
 
     def __init__(
         self,
@@ -6000,7 +6005,7 @@ class RandomSeeds(ExternKernelOut):
 
 
 class ExternKernelAlloc(ExternKernel):
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
         wrapper.generate_extern_kernel_alloc(self)
 
     def __init__(
@@ -6174,13 +6179,13 @@ class SubgraphBuffer(ExternKernel):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         class CodegenGraph:
-            def __init__(self, graph: GraphLowering):
+            def __init__(self, graph: "GraphLowering"):
                 self.graph = graph
                 self.name = graph.name
 
         wrapper.codegen_subgraph(
             CodegenGraph(self.subgraph),
-            [*[buffer.get_name() for buffer in self.inputs]],
+            [*[buffer.get_name() for buffer in self.inputs_as_nodes]],
             [self.name],
         )
 
@@ -6217,7 +6222,11 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel = kernel.fn
         return kernel, configs, restore_value_args, reset_to_zero_args
 
+    @override
     def codegen(self, wrapper: "PythonWrapperCodegen") -> None:
+        """Overrides the parent member.
+        See https://github.com/pytorch/pytorch/issues/151692"""
+
         from torch._inductor.utils import triton_version_uses_attrs_dict
 
         (
@@ -6808,6 +6817,9 @@ class ExternKernelNode:
 
 
 class FallbackKernel(ExternKernelAlloc):
+    """The external kernel we create when we can't find any others?
+    Help me reviewers. :-)"""
+
     def __init__(
         self,
         layout: OutputSpec,
@@ -7013,6 +7025,7 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self) -> Sequence[Any]:
+        """Export the ExternFallbackNodes (for custom ops) into a serialized file"""
         log.debug(
             "Extern kernel node added for node %s with target %s.",
             self.get_name(),
@@ -7194,6 +7207,7 @@ class FallbackKernel(ExternKernelAlloc):
     def create(
         cls, kernel: _OpOverloads, *args: Any, **kwargs: Any
     ) -> "FallbackKernel":
+        """Create an instance of FallbackKernel from an _OpOverloads"""
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         if kernel not in fake_incorrect_kernels:
             context = cast(AbstractContextManager[None], V.graph.fake_mode)
@@ -7211,9 +7225,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.
-        has_unaligned_input = any(
-            arg.get_name() in V.graph.unaligned_buffers for arg in tensor_args
-        )
+        has_unaligned_input = any(is_unaligned(arg) for arg in tensor_args)
 
         device = cls.find_device(tensor_args, example_output)
 
@@ -7773,6 +7785,7 @@ class Conditional(ExternKernel):
         false_fn: Subgraph,
         operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ) -> Sequence[IRNode]:
+        """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
         predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
         fx_operands: Argument = V.graph.current_node.args[-1]
