@@ -138,7 +138,7 @@ class BaseListVariable(VariableTracker):
                     value = variables.ConstantVariable.create(value.constant.item())
                 else:
                     unimplemented_v2(
-                        gb_type="__getitem__ with non-constant tensor",
+                        gb_type="Indexing list with non-scalar tensor",
                         context=f"call_method {self} {name} {args} {kwargs}",
                         explanation=(
                             "Cannot perform __getitem__ with non-constant tensor."
