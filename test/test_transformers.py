@@ -4050,6 +4050,25 @@ class TestSDPAXpuOnly(NNTestCase):
         attn_mask = make_tensor(attn_mask_shape)
         attn_mask = attn_mask.expand(1, 1, seqlen, seqlen)
 
+        actual = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+
+        math_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            query.float(), key.float(), value.float(), attn_mask=attn_mask, dropout_p=0.0, is_causal=False)[0]
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
+    def test_scaled_dot_product_attention_fused_kernels_safe_softmax(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
+        batch, num_heads, seqlen, head_dim = 32, 16, 32, 64
+        q_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        k_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        v_shape = SdpaShape(batch, num_heads, seqlen, head_dim)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        attn_mask = torch.full((seqlen, seqlen), float('-inf') ,device=device, dtype=torch.bfloat16)
+
         # test that we do not dispatch to onednn for an unsupported case
         actual = F.scaled_dot_product_attention(
             query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
