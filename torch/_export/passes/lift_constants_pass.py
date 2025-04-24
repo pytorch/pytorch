@@ -23,7 +23,9 @@ from torch.fx.graph_module import _get_attr
 log = logging.getLogger(__name__)
 
 
-_ConstantAttributeType: TypeAlias = Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
+_ConstantAttributeType: TypeAlias = Union[
+    torch.Tensor, torch.ScriptObject, FakeScriptObject
+]
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
