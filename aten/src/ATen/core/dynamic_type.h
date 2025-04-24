@@ -187,9 +187,7 @@ class DynamicType : public SharedType {
     return false;
   }
   friend struct Type;
-  // NOTE: Here we are using SingletonOrSharedTypePtr to mean
-  // "original-type-because-it-was-actually-a-DynamicType or shared".
-  static SingletonOrSharedTypePtr<const DynamicType> create(const Type& ty);
+  static std::shared_ptr<const DynamicType> create(const Type& ty);
   DynamicType(const Type& other);
   bool equals(const DynamicType& other) const;
 

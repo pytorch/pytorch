@@ -397,14 +397,9 @@ struct Token {
   int kind;
   SourceRange range;
   Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
-  std::string text() const {
+  std::string text() {
     return std::string(range.token_text());
   }
-
-  std::string_view text_view() const {
-    return range.token_text();
-  }
-
   std::string kindString() const {
     return kindToString(kind);
   }
