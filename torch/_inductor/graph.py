@@ -29,7 +29,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
 )
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
@@ -113,6 +112,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._higher_order_ops.effects import _EffectType
+    from torch.fx import GraphModule
     from torch.fx.graph import Graph
 
     from .codegen.wrapper import PythonWrapperCodegen
