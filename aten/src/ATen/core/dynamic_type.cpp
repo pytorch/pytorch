@@ -78,13 +78,15 @@ DynamicType::~DynamicType() {
   arguments_.~Arguments();
 }
 
-SingletonOrSharedTypePtr<const DynamicType> DynamicType::create(const Type& other) {
+std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
     TORCH_INTERNAL_ASSERT(
         !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
-    return SingletonTypePtr<const DynamicType>(dynRaw);
+  }
+  if (auto dyn = other.cast<DynamicType>()) {
+    return dyn;
   }
   return std::shared_ptr<const DynamicType>(new DynamicType{other});
 }

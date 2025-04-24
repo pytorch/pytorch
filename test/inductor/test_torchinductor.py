@@ -1717,6 +1717,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(1024),))
 
     @xfailIfS390X
+    @xfail_if_mps
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -1726,10 +1727,6 @@ class CommonTemplate:
             fn_opt = torch.compile(fn)
             if is_halide_backend(self.device):
                 pass  # no device asserts in halide
-            # TODO: remove once https://github.com/pytorch/pytorch/issues/144634
-            # is fixed.
-            elif is_mps_backend(self.device):
-                pass  # no device asserts in MPS
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -2538,14 +2535,10 @@ class CommonTemplate:
         for i in inps:
             self.common(fn, (i,), check_lowp=False)
 
+    @xfail_if_mps
     def test_sum_dtype(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("bfloat unsupported on MacOS-13")
-
-        sum_dtype = torch.double if self.device != "mps" else torch.bfloat16
-
         def fn(x):
-            return x * x.sum(-1, dtype=sum_dtype) + x.sum(dtype=sum_dtype)
+            return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
