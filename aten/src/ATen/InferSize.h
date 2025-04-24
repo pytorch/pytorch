@@ -26,9 +26,7 @@ inline void infer_size_impl(
   std::optional<int64_t> infer_dim;
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
     if (shape[dim] == -1) {
-      if (infer_dim) {
-        throw std::runtime_error("only one dimension can be inferred");
-      }
+      TORCH_CHECK(!infer_dim, "only one dimension can be inferred");
       infer_dim = dim;
     } else if (shape[dim] >= 0) {
       newsize *= shape[dim];
@@ -59,9 +57,8 @@ inline void infer_size_impl(
     return;
   }
 
-  std::ostringstream ss;
-  ss << "shape '" << shape << "' is invalid for input of size " << numel;
-  throw std::runtime_error(ss.str());
+  TORCH_CHECK(
+      false, "shape '", shape, "' is invalid for input of size ", numel);
 }
 
 inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
