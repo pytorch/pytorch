@@ -885,8 +885,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
                                                   const std::optional<Tensor>& weight_opt,
                                                   const std::optional<Tensor>& bias_opt,
                                                   double eps) {
-  auto N = std::accumulate(
-      normalized_shape.begin(), normalized_shape.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
+  auto N = c10::multiply_integers(normalized_shape);
   auto out = at::empty_like(input, MemoryFormat::Contiguous);
   auto batch_dim = input.dim() - normalized_shape.size();
   IntArrayRef batch_shape = input.sizes().slice(0, batch_dim);
