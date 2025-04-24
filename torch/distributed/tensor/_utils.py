@@ -252,6 +252,20 @@ def compute_global_tensor_shape(
     """
     Compute the global size of a DTensor from the given local tensor shape,
     the mesh and placements.
+    NOTE: Currently this function only supports 1D mesh.
+
+    Args:
+        shape (:class:`torch.Size`):
+            Shape of the Local tensor
+        mesh (:class:`DeviceMesh`):
+            Object which describes the mesh topology
+            of devices for the DTensor.
+        placements (Sequence[:class:`Placement`]]):
+            The attribute of the DTensor that describes its layout
+            on the mesh topology.
+
+    Return:
+        tensor_shape: Shape of the glocal DTensor.
     """
     if mesh.ndim > 1:
         raise NotImplementedError(
