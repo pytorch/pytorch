@@ -796,7 +796,7 @@ class NNModuleVariable(VariableTracker):
                 key = args[0].as_python_constant()
             else:
                 unimplemented_v2(
-                    gb_type="Unsupported key type for __getitem__",
+                    gb_type="Unsupported key type for nn.Module.__getitem__",
                     context=f"call_method: {self} {name} {args} {kwargs}",
                     explanation="Dynamo does not support getitem on "
                     "`nn.Module` with non-constant key.",
