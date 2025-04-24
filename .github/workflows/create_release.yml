@@ -57,7 +57,7 @@ jobs:
           echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
-          pip install build || exit 1
+          pip install build==1.2.2.post1 || exit 1
           python -m build --sdist || exit 1
           cd dist || exit 1
           release_file=( *.tar.gz )
