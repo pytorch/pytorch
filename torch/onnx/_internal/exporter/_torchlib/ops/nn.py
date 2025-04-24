@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from onnxscript.onnx_opset import opset20 as op20, opset21 as op21
+from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 
 import torch
 from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
@@ -37,6 +38,11 @@ def aten_group_norm(
 ) -> TFloat:
     """group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor"""
 
+    c = op21.Shape(input, start=1, end=2)
+    if weight is None:
+        weight = op21.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
+    if bias is None:
+        bias = op21.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
     return op21.GroupNormalization(
         input, weight, bias, epsilon=eps, num_groups=num_groups
     )
