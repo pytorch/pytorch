@@ -472,7 +472,7 @@ class ListVariable(CommonListMethodsVariable):
             if isinstance(key, SliceVariable):
                 if not value.has_force_unpack_var_sequence(tx):
                     unimplemented_v2(
-                        gb_type="Unsupported expanding for slice assignment",
+                        gb_type="Unsupported conversion for slice assignment",
                         context=f"call_method {self} {name} {args}",
                         explanation=f"Missing dynamo support for expanding {value} into a list for slice assignment.",
                         hints=[*graph_break_hints.SUPPORTABLE],
