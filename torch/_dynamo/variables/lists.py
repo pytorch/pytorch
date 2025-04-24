@@ -141,7 +141,7 @@ class BaseListVariable(VariableTracker):
                         gb_type="Indexing list with non-scalar tensor",
                         context=f"call_method {self} {name} {args} {kwargs}",
                         explanation=(
-                            "Cannot perform __getitem__ with non-constant tensor."
+                            "Attempted to index list-like object with tensor with > 1 element."
                         ),
                         hints=[*graph_break_hints.USER_ERROR],
                     )
