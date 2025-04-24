@@ -1132,7 +1132,7 @@ class MemPool(_MemPool):
 
     """
 
-    def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None, useOnOOM = False):
+    def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None, useOnOOM=False):
         super().__init__(allocator, True, useOnOOM)
 
     @property

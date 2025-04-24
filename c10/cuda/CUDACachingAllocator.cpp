@@ -1261,21 +1261,22 @@ class DeviceCachingAllocator {
     }
 
     // we are about to oom, try to use existing mempools as a last resort
-    if (!block_found && params.err == cudaErrorMemoryAllocation){
+    if (!block_found && params.err == cudaErrorMemoryAllocation) {
       // if already trying to use a mempool, then just oom
       auto active_pool = MemPoolContext::getActiveMemPool();
-      if(!active_pool){
+      if (!active_pool) {
         for (MempoolId_t mempool_id : use_on_oom_pools) {
           auto filter = [](cudaStream_t) { return true; };
           beginAllocateToPool(mempool_id, filter);
           auto& pool = get_pool(size, stream);
           const size_t alloc_size = get_allocation_size(size);
-          AllocParams mempool_params(device, size, stream, &pool, alloc_size, stats);
+          AllocParams mempool_params(
+              device, size, stream, &pool, alloc_size, stats);
           mempool_params.stat_types = get_stat_types_for_pool(pool);
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
           releasePool(mempool_id);
-          if(block_found){
+          if (block_found) {
             params = mempool_params;
             break;
           }
@@ -2116,7 +2117,7 @@ class DeviceCachingAllocator {
   void setUseOnOOM(bool use_on_oom, MempoolId_t mempool_id) {
     // Choose if this pool should be used as a last resort before ooming
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    if(use_on_oom){
+    if (use_on_oom) {
       use_on_oom_pools.insert(mempool_id);
     }
   }
@@ -4086,7 +4087,9 @@ MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
     bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created), use_on_oom_(use_on_oom) {
+    : allocator_(allocator),
+      is_user_created_(is_user_created),
+      use_on_oom_(use_on_oom) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {

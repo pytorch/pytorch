@@ -564,7 +564,6 @@ struct C10_CUDA_API MemPoolContext {
   //  }
   //
   static MemPool* getActiveMemPool();
-  static MemPool* getValidMemPool();
 
  private:
   MemPool* prev_mempool_;

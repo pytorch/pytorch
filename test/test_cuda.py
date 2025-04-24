@@ -4887,7 +4887,7 @@ class TestMemPool(TestCase):
     def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-        device = torch.device(f"cuda:0")
+        device = torch.device("cuda:0")
 
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
@@ -4937,7 +4937,6 @@ class TestMemPool(TestCase):
           C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
             called_dummy_alloc = 123;
             void* ptr;
-            std::cout << "dummy_alloc: " << size << std::endl;
             C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
             return ptr;
           }
@@ -4987,7 +4986,6 @@ class TestMemPool(TestCase):
             # pool's use count should be 2 at this point as use_mem_pool
             # holds a reference
             self.assertEqual(pool.use_count(), 2)
-
 
         # pool's use count should be back to 1 at this point as use_mem_pool
         # released its reference
@@ -5069,9 +5067,9 @@ class TestMemPool(TestCase):
         # mempool_do_not_use [] 0 mb
         # default pool [] 0 mb
         with torch.cuda.use_mem_pool(pool_do_not_use):
-            a = torch.randn(40*nelem_1mb, device="cuda")
+            a = torch.randn(40 * nelem_1mb, device="cuda")
         with torch.cuda.use_mem_pool(pool_use):
-            b = torch.randn(40*nelem_1mb, device="cuda")
+            b = torch.randn(40 * nelem_1mb, device="cuda")
         a_dataptr = a.data_ptr()
         b_dataptr = b.data_ptr()
         # remaining free mem: 0 mb
@@ -5080,7 +5078,7 @@ class TestMemPool(TestCase):
         # default pool [] 0 mb
         with self.assertRaises(torch.OutOfMemoryError):
             # out of memory
-            c = torch.randn(40*nelem_1mb, device="cuda")
+            c = torch.randn(40 * nelem_1mb, device="cuda")
 
         del a, b
         # remaining free mem: 0 mb
@@ -5089,7 +5087,7 @@ class TestMemPool(TestCase):
         # default pool [] 0 mb
 
         # c should not oom and instead can use mempool_use as fallback
-        c = torch.randn(30*nelem_1mb, device="cuda")
+        c = torch.randn(30 * nelem_1mb, device="cuda")
         c_dataptr = c.data_ptr()
         # remaining free mem: 0 mb
         # mempool_do_not_use [____] 40 mb
@@ -5097,7 +5095,7 @@ class TestMemPool(TestCase):
         # default pool [] 0 mb
         with self.assertRaises(torch.OutOfMemoryError):
             # out of memory since can't use mempool_do_not_use
-            d = torch.randn(30*nelem_1mb, device="cuda")
+            d = torch.randn(30 * nelem_1mb, device="cuda")
 
         del c
         # remaining free mem: 0 mb
@@ -5112,7 +5110,6 @@ class TestMemPool(TestCase):
         del pool_use, pool_do_not_use
 
         self._teardown_mempool_limited_memory_test()
-
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
