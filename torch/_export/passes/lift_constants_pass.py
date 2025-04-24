@@ -23,7 +23,7 @@ from torch.fx.graph_module import _get_attr
 log = logging.getLogger(__name__)
 
 
-_ConstLike: TypeAlias = Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
+_ConstantAttributeType: TypeAlias = Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
@@ -44,19 +44,19 @@ class ConstantAttrMap(collections.abc.MutableMapping):
         # original ScriptObjects.
         self._script_object_map: dict[int, torch.ScriptObject] = {}
 
-    def __getitem__(self, key: _ConstLike) -> Any:
+    def __getitem__(self, key: _ConstantAttributeType) -> Any:
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
         assert isinstance(real_key, (int, torch.Tensor, FakeScriptObject))
         return self._constant_attrs[real_key]
 
-    def __setitem__(self, key: _ConstLike, value):
+    def __setitem__(self, key: _ConstantAttributeType, value):
         # we shouldn't actually call this, should go to add() instead to handle aliasing
         raise NotImplementedError(
             """Directly setting values for ConstantAttrMap is not supported, please use add(key, value) instead.
 The same key can be mapped to multiple values, for handling constant aliasing."""
         )
 
-    def add(self, key: _ConstLike, value: Any) -> None:
+    def add(self, key: _ConstantAttributeType, value: Any) -> None:
         if isinstance(key, torch.ScriptObject):
             if hash(key) not in self._constant_attrs:
                 self._constant_attrs[hash(key)] = []
@@ -71,7 +71,7 @@ The same key can be mapped to multiple values, for handling constant aliasing.""
                 f"Expected key to be a tensor or ScriptObject, got {type(key)}"
             )
 
-    def __delitem__(self, key: _ConstLike):
+    def __delitem__(self, key: _ConstantAttributeType):
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
 
         del self._constant_attrs[real_key]
@@ -106,7 +106,7 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
 
 def _get_first_fqn(
     const_attrs: ConstantAttrMap,
-    key: _ConstLike,
+    key: _ConstantAttributeType,
 ) -> Any:
     fqns = const_attrs.get(key)
     return fqns[0] if fqns else None
@@ -116,7 +116,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> dict[str, _ConstLike]:
+) -> dict[str, _ConstantAttributeType]:
     """
     Takes a graph module, graph signature, and modifies them implace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
@@ -134,7 +134,7 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: dict[str, _ConstLike] = {}
+    all_constants: dict[str, _ConstantAttributeType] = {}
 
     inputs = graph_signature.input_specs
     num_custom_obj = sum(
@@ -320,7 +320,7 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> dict[str, _ConstLike,]:
+) -> dict[str, _ConstantAttributeType,]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
@@ -328,7 +328,7 @@ def rewrite_script_object_meta(
     """
     constants: dict[
         str,
-        _ConstLike,
+        _ConstantAttributeType,
     ] = {}
     for node in gm.graph.nodes:
         if "val" not in node.meta:
@@ -355,7 +355,7 @@ def _materialize_and_lift_constants(
     gm: torch.fx.GraphModule,
     export_graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> dict[str, _ConstLike]:
+) -> dict[str, _ConstantAttributeType]:
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
     return constants
