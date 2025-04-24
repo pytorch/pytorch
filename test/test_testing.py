@@ -440,6 +440,40 @@ if __name__ == '__main__':
             op.supported_dtypes(torch.device("cuda", index=1)),
         )
 
+    def test_setup_and_teardown_run_for_device_specific_tests(self, device):
+        # TODO: Move this (and other similar text blocks) to some fixtures/ subdir
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
+
+class TestFoo(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # store something on the test class to query during teardown
+        cls.stored_thing = "called with " + cls.__name__
+
+    @classmethod
+    def tearDownClass(cls):
+        # throw here so we know teardown was run
+        raise RuntimeError(cls.stored_thing)
+
+    def test_bar(self, device):
+        # make sure the test can access the stored thing
+        print(self.stored_thing)
+
+instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}')
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        expected_device_class_name = f"TestFoo{self.device_type.upper()}"
+        expected_error_text = f"RuntimeError: called with {expected_device_class_name}"
+        self.assertIn(expected_error_text, stderr)
+
+
 instantiate_device_type_tests(TestTesting, globals())
 
 
@@ -907,6 +941,28 @@ class TestAssertCloseErrorMessage(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at index (1, 0)")):
+                fn()
+
+    def test_small_float_dtype(self):
+        for dtype in [
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        ]:
+            w = torch.tensor([3.14, 1.0], dtype=dtype)
+            x = torch.tensor([1.0, 3.14], dtype=dtype)
+            y = torch.tensor([3.14, 3.14], dtype=dtype)
+            z = torch.tensor([1.0, 3.14], dtype=dtype)
+            for fn in assert_close_with_inputs(x, y):
+                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 0")):
+                    fn()
+
+            for fn in assert_close_with_inputs(w, y):
+                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 1")):
+                    fn()
+            for fn in assert_close_with_inputs(x, z):
                 fn()
 
     def test_abs_diff_scalar(self):
