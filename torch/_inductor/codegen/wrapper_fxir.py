@@ -22,7 +22,7 @@ from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
 from torch._inductor.virtualized import V
 
-from .. import config, ir
+from .. import ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
 from .common import WorkspaceArg, WorkspaceZeroMode, WrapperGraphModule
 from .wrapper import (
@@ -81,28 +81,32 @@ class TritonKernel:
 
 class WrapperFxCodegen(PythonWrapperCodegen):
     """
-    Generate Wrapper FX IR, for use in other backends.
+    Backend to generate wrapper code as an FX IR graph.
     """
 
     supports_caching = False
 
-    def __init__(self) -> None:
-        super().__init__()
-        graph = torch.fx.Graph()
-        self.gm = GraphModule({}, graph)  # Wrapper FX IR.
-        self.buffer_to_node: dict[
-            Optional[str], torch.fx.Node
-        ] = {}  # Symbol table for codegen.
-        self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
-        self._unique_symbol_ids: Counter[str] = Counter()
+    def _generate(self, is_inference: bool) -> tuple[WrapperGraphModule, None]:
+        self.run_wrapper_ir_passes(is_inference)
 
-    def _get_unique_symbol(self, prefix: str) -> str:
+        prologue = "\n".join(
+            [
+                self.imports.getvalue(),
+                self.header.getvalue(),
+            ]
+        )
+        gm = FxConverter(lines=self.lines, prologue=prologue).generate()
+        compiled_fn = self.compile_graph(gm)
+
+        return WrapperGraphModule(gm, compiled_fn), None
+
+    def compile_graph(self, gm: GraphModule) -> Callable[..., Any]:
         """
-        Returns a symbol IDs that are guaranteed to be unique.
+        Converts the graph module into a runnable function. The default implementation
+        is simply an interpreter calling kernels in eager mode. Derived backends can
+        override this to do further compilation.
         """
-        unique_id = self._unique_symbol_ids[prefix]
-        self._unique_symbol_ids[prefix] += 1
-        return f"{prefix}_{unique_id}"
+        return gm.forward
 
     @classmethod
     def create(
@@ -115,25 +119,39 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         # For derived backends, this could be a subclass.
         return cls()
 
-    def compile_graph(self, gm: GraphModule) -> Callable[..., Any]:
+
+@dataclasses.dataclass
+class FxConverter:
+    """
+    Generates FX IR from Wrapper IR. The input and output code are stored as class
+    attributes.
+    """
+
+    lines: list[Line]
+    prologue: str = ""
+
+    def __post_init__(self) -> None:
+        graph = torch.fx.Graph()
+        self.gm = GraphModule({}, graph)  # Wrapper FX IR.
+        self.buffer_to_node: dict[
+            Optional[str], torch.fx.Node
+        ] = {}  # Symbol table for codegen.
+        self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
+        self._unique_symbol_ids: Counter[str] = Counter()
+
+    def _get_unique_symbol(self, prefix: str) -> str:
         """
-        Converts the graph module into a runnable function. The default implementation
-        is simply an interpreter calling kernels in eager mode. Derived backends can
-        override this to do further compilation.
+        Returns a symbol ID that is guaranteed to be unique, for the given prefix.
         """
-        return gm.forward
+        unique_id = self._unique_symbol_ids[prefix]
+        self._unique_symbol_ids[prefix] += 1
+        return f"{prefix}_{unique_id}"
 
     def _import_kernel(self, code: str, kernel_name: str) -> CachingAutotuner:
         """
-        Imports a kernel from source.
+        Imports a kernel from source, possibly autotuning block parameters.
         """
-        module_code = "\n".join(
-            [
-                self.imports.getvalue(),
-                self.header.getvalue(),
-                code,
-            ]
-        )
+        module_code = "\n".join([self.prologue, code])
         mod = PyCodeCache.load(module_code)
         kernel = getattr(mod, kernel_name)
 
@@ -249,9 +267,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 )
 
                 # Generate FX IR for the view.
-                self._generate_reinterpret(
-                    ReinterpretLine(self, buffer, reused_as, node.layout)
-                )
+                self._generate_reinterpret_helper(buffer, reused_as, node.layout)
 
                 return reused_as
             else:
@@ -274,15 +290,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         self.gm.graph.output(output_value)
 
-    def _generate(self, is_inference: bool) -> tuple[WrapperGraphModule, None]:
-        # We disable planning during training because it presently increases peak memory consumption.
-        # TODO don't duplicate this code. Refactor into a helper in the base class.
-        if is_inference and config.memory_planning:
-            self.memory_plan()
-        else:
-            self.memory_plan_reuse()
-
-        # Generate FX IR from Wrapper IR.
+    def generate(self) -> torch.fx.GraphModule:
+        """
+        Main entrypoint for FX codegen.
+        """
         self._generate_graph_inputs()
         for line in self.lines:
             line_type = type(line)
@@ -326,9 +337,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
         self._generate_output()
         self.gm.recompile()
-        compiled_fn = self.compile_graph(self.gm)
-
-        return WrapperGraphModule(self.gm, compiled_fn), None
+        return self.gm
 
     def _generate_allocate(self, line: Line) -> None:
         assert isinstance(line, AllocateLine)
@@ -395,10 +404,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def _generate_reinterpret(self, line: Line) -> None:
         assert isinstance(line, ReinterpretLine)
+        self._generate_reinterpret_helper(line.node, line.reused_as, line.layout)
 
-        input_buffer = line.node
-        result_buffer = line.reused_as
-        layout = line.layout
+    def _generate_reinterpret_helper(
+        self, input_buffer: BufferLike, result_buffer: BufferLike, layout: ir.Layout
+    ) -> None:
         input_node = self.buffer_to_node[input_buffer.get_name()]
 
         # Look up output metadata.
@@ -589,7 +599,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert isinstance(line, KernelDefinitionLine)
 
         # Generate code for the kernel.
-        kernel_code = super()._format_kernel_definition(
+        kernel_code = PythonWrapperCodegen._format_kernel_definition(
             line.kernel_name, line.kernel_body, metadata=line.metadata
         )
 

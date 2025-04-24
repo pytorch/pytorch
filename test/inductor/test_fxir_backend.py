@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mut
 from torch._inductor import config
 from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.triton import TritonScheduling
-from torch._inductor.codegen.wrapper_fxir import WrapperFxCodegen
+from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.inductor_utils import (
@@ -43,13 +43,16 @@ class FxirTestCase(InductorTestCase):
     def _run_and_capture_graphs(self, opt, args) -> torch.fx.GraphModule:
         gms = []
 
-        def generate(self, *args, **kwargs):
+        orig_generate = FxConverter.generate
+
+        def generate(self) -> torch.fx.GraphModule:
             nonlocal gms
-            gms.append(self.gm)
-            return self._generate(*args, **kwargs)
+            gm = orig_generate(self)
+            gms.append(gm)
+            return gm
 
         with unittest.mock.patch.object(
-            torch._inductor.codegen.wrapper_fxir.WrapperFxCodegen, "generate", generate
+            torch._inductor.codegen.wrapper_fxir.FxConverter, "generate", generate
         ):
             opt(*args)
 
