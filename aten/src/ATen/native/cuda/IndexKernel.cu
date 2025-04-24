@@ -14,8 +14,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/quantized/IndexKernel.h>
-#include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/native/cuda/IndexKernelUtils.h>
 
 #include <c10/core/Scalar.h>
 
@@ -54,7 +52,7 @@ static void launch_kernel(const int64_t N, const func_t& f) {
 }
 
 template <typename func_t>
-void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const func_t& f, const bool is_gather_like) {
+void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const func_t& f) {
   const auto num_indices = index_size.size();
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(static_cast<int64_t>(num_indices) == iter.ntensors() - 2);
@@ -65,29 +63,9 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_index_kernel(sub_iter, index_size, index_stride, f, is_gather_like);
+      gpu_index_kernel(sub_iter, index_size, index_stride, f);
     }
     return;
-  }
-
-
-  char* const out_ptr = static_cast<char*>(iter.data_ptr(0));
-  char* const in_ptr = static_cast<char*>(iter.data_ptr(1));
-
-  if (is_gather_like && num_indices==1) {
-      const size_t element_size = iter.element_size(0);
-      constexpr size_t alignment = 16;
-      if (at::native::fast_gather_kernel_eligible<alignment>(iter, out_ptr, in_ptr, index_stride[0], element_size)) {
-        auto slice_size = iter.shape()[0] * element_size;
-        auto num_ind = iter.shape()[1];
-        auto ind_dim_size = index_size[0];
-        auto inp_stride_bytes = index_stride[0];
-        auto out_stride_bytes = iter.strides(0)[1];
-        if (iter.numel() == 0) return;
-        at::native::vectorized_gather_kernel_launch<alignment>(out_ptr, in_ptr, (int64_t*)iter.data_ptr(2), num_ind,
-        slice_size, ind_dim_size, inp_stride_bytes, out_stride_bytes, /*allow_neg_indices*/true);
-        return;
-      }
   }
 
   auto sizes = std::array<int64_t, MAX_DIMS>{};
@@ -99,6 +77,8 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
     index_ptrs[i] = (char*)iter.data_ptr(i + 2);
   }
 
+  char* const out_ptr = static_cast<char*>(iter.data_ptr(0));
+  char* const in_ptr = static_cast<char*>(iter.data_ptr(1));
 
   auto offset_calc = make_offset_calculator<3>(iter);
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
@@ -203,14 +183,14 @@ template <typename scalar_t>
 void index_kernel_impl(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
     *reinterpret_cast<scalar_t*>(out_data) = *reinterpret_cast<const scalar_t*>(in_data + offset);
-  }, true);
+  });
 }
 
 template <typename scalar_t>
 void index_put_kernel_impl(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
     *reinterpret_cast<scalar_t*>(out_data + offset) = *reinterpret_cast<const scalar_t*>(in_data);
-  }, false);
+  });
 }
 
 static void index_kernel(
@@ -300,7 +280,7 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
       // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
       qvalue = (qvalue < qmin) ? qmin : (qmax < qvalue) ? qmax : qvalue;
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
-    }, false);
+    });
   });
 }
 
