@@ -133,6 +133,10 @@
 #include <callgrind.h>
 #endif
 
+#ifdef USE_ITT
+#include <torch/csrc/itt.h>
+#endif
+
 namespace py = pybind11;
 
 static PyObject* module;
@@ -1755,12 +1759,6 @@ void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
-#endif
-
-#ifdef USE_ITT
-namespace torch::profiler {
-void initIttBindings(PyObject* module);
-} // namespace torch::profiler
 #endif
 
 static std::vector<PyMethodDef> methods;
