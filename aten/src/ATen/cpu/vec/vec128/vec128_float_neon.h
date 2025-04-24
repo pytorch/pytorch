@@ -540,7 +540,7 @@ Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<floa
 
 template <>
 Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
-  return Vectorized<float>(vfmsq_f32(c, a, b));
+  return Vectorized<float>(vnegq_f32(vfmsq_f32(c, a, b)));
 }
 
 inline Vectorized<float> Vectorized<float>::erf() const{
