@@ -8,7 +8,7 @@ import token
 from enum import Enum
 from functools import cached_property, total_ordering
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -92,7 +92,7 @@ class Block:
     is_method: bool = dc.field(default=False, repr=False)
 
     # A block index to the parent of this block, or None for a top-level block.
-    parent: int | None = None
+    parent: Optional[int] = None
 
     # A list of block indexes for the children
     children: list[int] = dc.field(default_factory=list)
@@ -121,6 +121,11 @@ class Block:
 
     @cached_property
     def decorators(self) -> list[str]:
+        """A list of decorators for this function or method.
+
+        Each decorator both the @ symbol and any arguments to the decorator
+        but no extra whitespace.
+        """
         return list(_get_decorators(self.tokens, self.begin))
 
     @cached_property
@@ -168,32 +173,26 @@ class Block:
         return o.index < self.index
 
 
-def _join_tokens(tl: Sequence[TokenInfo]) -> str:
-    # Gets rid of carriage returns and indents
-    lines = {j.start[0]: j.line for j in tl}
-    return " ".join(" ".join(lines.values()).split()).strip()
-
-
 _IGNORE = {token.COMMENT, token.DEDENT, token.INDENT, token.NL}
 
 
 def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
     def decorators() -> Iterator[str]:
         rev = reversed(range(block_start))
-        nls = (i for i in rev if tokens[i].type == token.NEWLINE)
-        nls = itertools.chain(nls, [-1])
+        newlines = (i for i in rev if tokens[i].type == token.NEWLINE)
+        newlines = itertools.chain(newlines, [-1])  # To account for the first line
 
-        it = iter(nls)
-        end = next(it, -1)
+        it = iter(newlines)
+        end = next(it, -1)  # Like itertools.pairwise in Python 3.10
         for begin in it:
             for i in range(begin + 1, end):
                 t = tokens[i]
                 if t.type == token.OP and t.string == "@":
-                    non_comments = (t for t in tokens[i:end] if t.type != token.COMMENT)
-                    yield "".join(s.string.strip("\n") for s in non_comments)
+                    useful = (t for t in tokens[i:end] if t.type not in _IGNORE)
+                    yield "".join(s.string.strip("\n") for s in useful)
                     break
                 elif t.type not in _IGNORE:
-                    return  # no more decorators
+                    return  # A statement means no more decorators
             end = begin
 
     return list(decorators())[::-1]
