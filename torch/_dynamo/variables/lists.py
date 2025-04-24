@@ -349,7 +349,7 @@ class RangeVariable(BaseListVariable):
         fields = ["start", "stop", "step"]
         if name not in fields:
             unimplemented_v2(
-                gb_type="Unsupported attribute for range",
+                gb_type="Unsupported attribute for range() object",
                 context=f"var_getattr {self} {name}",
                 explanation=f"Expected attribute to be one of {','.join(fields)} "
                 f"but got {name}",
