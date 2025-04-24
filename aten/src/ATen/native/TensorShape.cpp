@@ -4198,7 +4198,7 @@ Tensor ravel(const Tensor& self) {
 }
 
 static inline void handle_unflatten_exception(
-    const c10::Error& e,
+    const std::runtime_error& e,
     const Tensor& self,
     int64_t dim,
     SymIntArrayRef sizes,
@@ -4252,8 +4252,8 @@ static Tensor unflatten_impl(
   SymDimVector inferred_size;
   try {
     inferred_size = at::infer_size_dv(sizes, self.sym_size(dim));
-  } catch (const c10::Error& e) {
-    // at::infer_size would throw c10::Error for invalid size,
+  } catch (const std::runtime_error& e) {
+    // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more
     // user-friendly way for both tensors and named tensors
     handle_unflatten_exception(e, self, dim, sizes, names);
