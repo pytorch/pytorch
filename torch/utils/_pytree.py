@@ -1211,6 +1211,11 @@ class TreeSpec:
 
         return unflatten_fn(child_pytrees, self.context)
 
+    def __hash__(self) -> int:
+        if self.num_children > 0:
+            raise NotImplementedError("Cannot hash none-leaf TreeSpec.")
+        return hash((self.type, self.context))
+
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
 # this class with `dataclasses.fields`, etc., while having a simplified

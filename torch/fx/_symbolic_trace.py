@@ -396,7 +396,13 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(
-            a, (torch.Tensor, ScriptObject, FakeScriptObject, torch.FunctionSchema)
+            a,
+            (
+                torch.Tensor,
+                ScriptObject,
+                FakeScriptObject,
+                torch.utils._pytree.TreeSpec,
+            ),
         ):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
@@ -407,8 +413,8 @@ class Tracer(TracerBase):
                     base_name = "_tensor_constant"
                 elif isinstance(a, (FakeScriptObject, ScriptObject)):
                     base_name = "_torchbind_obj"
-                elif isinstance(a, torch.FunctionSchema):
-                    base_name = "_function_schema"
+                elif isinstance(a, torch.utils._pytree.TreeSpec):
+                    base_name = "_tree_spec_constant"
                 else:
                     raise RuntimeError(
                         f"cannot create constant arg for {a} of type {type(a)}."
@@ -777,7 +783,10 @@ class Tracer(TracerBase):
             # in create_arg
             self.tensor_attrs: dict[
                 Union[
-                    torch.Tensor, ScriptObject, FakeScriptObject, torch.FunctionSchema
+                    torch.Tensor,
+                    ScriptObject,
+                    FakeScriptObject,
+                    torch.utils._pytree.TreeSpec,
                 ],
                 str,
             ] = {}
@@ -790,7 +799,7 @@ class Tracer(TracerBase):
                             torch.Tensor,
                             ScriptObject,
                             FakeScriptObject,
-                            torch.FunctionSchema,
+                            torch.utils._pytree.TreeSpec,
                         ),
                     ):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
