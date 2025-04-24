@@ -41,7 +41,7 @@ treat_parameters_as_free_to_save = True
 # Applies CSE to the graph before partitioning
 cse = True
 
-from torch._inductor.config import is_fbcode
+from torch._environment import is_fbcode
 
 
 enable_autograd_cache: bool = Config(
