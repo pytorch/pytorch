@@ -1365,7 +1365,7 @@ static c10::IValue to_ivalue(
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
           to<AtenTensorHandle>(stable_ivalue));
       return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
-        ret_raiiath.get())));
+          ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
       return c10::IValue(to<int64_t>(stable_ivalue));
@@ -1432,7 +1432,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    auto ministack = std::make_unique<StableIValue[]>(std::max(num_arguments, num_returns));
+    auto ministack =
+        std::make_unique<StableIValue[]>(std::max(num_arguments, num_returns));
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
