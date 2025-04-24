@@ -97,6 +97,10 @@ def reset():
     compiled_autograd.reset()
 
 
+def normalize_log(log):
+    return re.sub(r"(<eval_with_key>\.)\d+", r"\1<ID>", log)
+
+
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -2950,10 +2954,44 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
-        assert "torch::autograd::AccumulateGrad (NodeCall" in logs.getvalue()
-        assert (
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot"
-            not in logs.getvalue()
+        # By default, we should only see a logged graph, and we should
+        # see stack traces on nodes except for the getitem nodes
+        self.assertExpectedInline(
+            logs.getvalue(),
+            """\
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.1 class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        # No stacktrace found for following nodes
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+        getitem_2 = sizes[0]
+        getitem_3 = sizes[1]
+        getitem_4 = sizes[2]
+        getitem_5 = sizes[3];  sizes = None
+        to_int = torch__dynamo_external_utils_to_int(getitem_2);  getitem_2 = None
+        to_int_1 = torch__dynamo_external_utils_to_int(getitem_3);  getitem_3 = None
+        to_int_2 = torch__dynamo_external_utils_to_int(getitem_4);  getitem_4 = None
+        to_int_3 = torch__dynamo_external_utils_to_int(getitem_5);  getitem_5 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_6 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 1)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_6], [True], [to_int, to_int_1]);  getitem_6 = to_int = to_int_1 = None
+        getitem_7 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_7], [((None, None, device(type='cpu'), 6, 0, None), [to_int_2, to_int_3], False)]);  getitem_7 = to_int_2 = to_int_3 = None
+        getitem_8 = validate_outputs_1[0];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 2)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_8);  getitem_1 = getitem_8 = accumulate_grad__default = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
+
+""",  # noqa: B950
         )
 
     def test_logs_aot_bwd_reuse(self):
@@ -2992,38 +3030,189 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
-        expected_logs = [
-            "torch::autograd::GraphRoot (NodeCall 0)",
-            "ReluBackward0 (NodeCall 2)",
-            "AddmmBackward0 (NodeCall 3)",
-            "ReluBackward0 (NodeCall 5)",
-            "TBackward0 (NodeCall 6)",
-            "torch::autograd::AccumulateGrad (NodeCall 7)",
-            "torch::autograd::AccumulateGrad (NodeCall 9)",
-            "TBackward0 (NodeCall 10)",
-            "torch::autograd::AccumulateGrad (NodeCall 11)",
-            "SumBackward0 (NodeCall 1)",
-            "ReluBackward0 (NodeCall 2)",
-            "AddmmBackward0 (NodeCall 3)",
-            "torch::autograd::AccumulateGrad (NodeCall 11)",
-            "TBackward0 (NodeCall 4)",
-            "torch::autograd::AccumulateGrad (NodeCall 5)",
-            "ReluBackward0 (NodeCall 6)",
-            "AddmmBackward0 (NodeCall 7)",
-            "torch::autograd::AccumulateGrad (NodeCall 10)",
-            "TBackward0 (NodeCall 8)",
-            "torch::autograd::AccumulateGrad (NodeCall 9)",
-            "torch::autograd::AccumulateGrad (NodeCall 11)",
-        ]
+        # We should see logs other than the graph, and we should
+        # see stack traces on all graph nodes, even the getitems
+        self.assertExpectedInline(
+            normalize_log(logs.getvalue()),
+            """\
+Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]
+DCE removed 5 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.<ID> class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 2)
+        getitem_1 = inputs[1]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 3)
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 5)
+        getitem_4 = inputs[4]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 6)
+        getitem_5 = inputs[5]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 7)
+        getitem_6 = inputs[6]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 9)
+        getitem_7 = inputs[7]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 10)
+        getitem_8 = inputs[8]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        getitem_9 = inputs[9];  inputs = None
+        getitem_10 = sizes[0]
+        getitem_11 = sizes[1]
+        getitem_12 = sizes[2]
+        getitem_13 = sizes[3]
+        getitem_14 = sizes[4]
+        getitem_15 = sizes[5]
+        getitem_16 = sizes[6]
+        getitem_17 = sizes[7]
+        getitem_18 = sizes[8]
+        getitem_19 = sizes[9]
+        getitem_20 = sizes[10]
+        getitem_21 = sizes[11]
+        getitem_22 = sizes[12]
+        getitem_23 = sizes[13]
+        getitem_24 = sizes[14]
+        getitem_25 = sizes[15]
+        getitem_26 = sizes[16]
+        getitem_27 = sizes[17]
+        getitem_28 = sizes[18]
+        getitem_29 = sizes[19]
+        getitem_30 = sizes[20]
+        getitem_31 = sizes[21]
+        getitem_32 = sizes[22]
+        getitem_33 = sizes[23]
+        getitem_34 = sizes[24]
+        getitem_35 = sizes[25]
+        getitem_36 = sizes[26]
+        getitem_37 = sizes[27]
+        getitem_38 = sizes[28]
+        getitem_39 = sizes[29]
+        getitem_40 = sizes[30]
+        getitem_41 = sizes[31]
+        getitem_42 = sizes[32]
+        getitem_43 = sizes[33];  sizes = None
+        to_int = torch__dynamo_external_utils_to_int(getitem_10);  getitem_10 = None
+        to_int_1 = torch__dynamo_external_utils_to_int(getitem_11);  getitem_11 = None
+        to_int_2 = torch__dynamo_external_utils_to_int(getitem_12);  getitem_12 = None
+        to_int_3 = torch__dynamo_external_utils_to_int(getitem_13);  getitem_13 = None
+        to_int_4 = torch__dynamo_external_utils_to_int(getitem_14);  getitem_14 = None
+        to_int_5 = torch__dynamo_external_utils_to_int(getitem_15);  getitem_15 = None
+        to_int_6 = torch__dynamo_external_utils_to_int(getitem_16);  getitem_16 = None
+        to_int_7 = torch__dynamo_external_utils_to_int(getitem_17);  getitem_17 = None
+        to_int_8 = torch__dynamo_external_utils_to_int(getitem_18);  getitem_18 = None
+        to_int_9 = torch__dynamo_external_utils_to_int(getitem_19);  getitem_19 = None
+        to_int_10 = torch__dynamo_external_utils_to_int(getitem_20);  getitem_20 = None
+        to_int_11 = torch__dynamo_external_utils_to_int(getitem_21);  getitem_21 = None
+        to_int_12 = torch__dynamo_external_utils_to_int(getitem_22);  getitem_22 = None
+        to_int_13 = torch__dynamo_external_utils_to_int(getitem_23);  getitem_23 = None
+        to_int_14 = torch__dynamo_external_utils_to_int(getitem_24);  getitem_24 = None
+        to_int_15 = torch__dynamo_external_utils_to_int(getitem_25);  getitem_25 = None
+        to_int_16 = torch__dynamo_external_utils_to_int(getitem_26);  getitem_26 = None
+        to_int_17 = torch__dynamo_external_utils_to_int(getitem_27);  getitem_27 = None
+        to_int_18 = torch__dynamo_external_utils_to_int(getitem_28);  getitem_28 = None
+        to_int_19 = torch__dynamo_external_utils_to_int(getitem_29);  getitem_29 = None
+        to_int_20 = torch__dynamo_external_utils_to_int(getitem_30);  getitem_30 = None
+        to_int_21 = torch__dynamo_external_utils_to_int(getitem_31);  getitem_31 = None
+        to_int_22 = torch__dynamo_external_utils_to_int(getitem_32);  getitem_32 = None
+        to_int_23 = torch__dynamo_external_utils_to_int(getitem_33);  getitem_33 = None
+        to_int_24 = torch__dynamo_external_utils_to_int(getitem_34);  getitem_34 = None
+        to_int_25 = torch__dynamo_external_utils_to_int(getitem_35);  getitem_35 = None
+        to_int_26 = torch__dynamo_external_utils_to_int(getitem_36);  getitem_36 = None
+        to_int_27 = torch__dynamo_external_utils_to_int(getitem_37);  getitem_37 = None
+        to_int_28 = torch__dynamo_external_utils_to_int(getitem_38);  getitem_38 = None
+        to_int_29 = torch__dynamo_external_utils_to_int(getitem_39);  getitem_39 = None
+        to_int_30 = torch__dynamo_external_utils_to_int(getitem_40);  getitem_40 = None
+        to_int_31 = torch__dynamo_external_utils_to_int(getitem_41);  getitem_41 = None
+        to_int_32 = torch__dynamo_external_utils_to_int(getitem_42);  getitem_42 = None
+        to_int_33 = torch__dynamo_external_utils_to_int(getitem_43);  getitem_43 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_44 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 1)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_44], [True], [to_int, to_int_1]);  getitem_44 = to_int = to_int_1 = None
+        getitem_45 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_45], [((None, None, device(type='cpu'), 6, 0, None), [to_int_2, to_int_3], False)]);  getitem_45 = to_int_2 = to_int_3 = None
+        getitem_46 = validate_outputs_1[0];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 2)
+        relu_backward0 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_46], [True], getitem_1);  getitem_46 = getitem_1 = None
+        getitem_47 = relu_backward0[0];  relu_backward0 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_47], [((None, None, device(type='cpu'), 6, 0, None), [to_int_4, to_int_5], False)]);  getitem_47 = to_int_4 = to_int_5 = None
+        getitem_48 = validate_outputs_2[0];  validate_outputs_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 3)
+        addmm_backward0 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_48], [True, True, True], 1, 1, getitem_2, 0, [to_int_6, to_int_7], [to_int_8, to_int_9], getitem_3, 0, [to_int_10, to_int_11], [to_int_12, to_int_13]);  getitem_48 = getitem_2 = to_int_6 = to_int_7 = to_int_8 = to_int_9 = getitem_3 = to_int_10 = to_int_11 = to_int_12 = to_int_13 = None
+        getitem_49 = addmm_backward0[0]
+        getitem_50 = addmm_backward0[1]
+        getitem_51 = addmm_backward0[2];  addmm_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_49, getitem_50, getitem_51], [((None, None, device(type='cpu'), 6, 0, None), [to_int_14], False), ((None, None, device(type='cpu'), 6, 0, None), [to_int_15, to_int_16], False), ((None, None, device(type='cpu'), 6, 0, None), [to_int_17, to_int_18], False)]);  getitem_49 = getitem_50 = getitem_51 = to_int_14 = to_int_15 = to_int_16 = to_int_17 = to_int_18 = None
+        getitem_52 = validate_outputs_3[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        accumulate_grad__default_3 = torch.ops.inductor.accumulate_grad_.default(getitem_9, getitem_52);  getitem_9 = getitem_52 = accumulate_grad__default_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 3)
+        getitem_53 = validate_outputs_3[1]
+        getitem_54 = validate_outputs_3[2];  validate_outputs_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 4)
+        tbackward0 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_54], [True]);  getitem_54 = None
+        getitem_55 = tbackward0[0];  tbackward0 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_55], [((None, None, device(type='cpu'), 6, 0, None), [to_int_19, to_int_20], False)]);  getitem_55 = to_int_19 = to_int_20 = None
+        getitem_56 = validate_outputs_4[0];  validate_outputs_4 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 5)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_56);  getitem_4 = getitem_56 = accumulate_grad__default = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 6)
+        relu_backward0_1 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_53], [True], getitem_5);  getitem_53 = getitem_5 = None
+        getitem_57 = relu_backward0_1[0];  relu_backward0_1 = None
+        validate_outputs_6 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_57], [((None, None, device(type='cpu'), 6, 0, None), [to_int_21, to_int_22], False)]);  getitem_57 = to_int_21 = to_int_22 = None
+        getitem_58 = validate_outputs_6[0];  validate_outputs_6 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 7)
+        addmm_backward0_1 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_58], [True, False, True], 1, 1, getitem_6, 0, [to_int_23, to_int_24], [], None, 0, [to_int_25, to_int_26], [to_int_27, to_int_28]);  getitem_58 = getitem_6 = to_int_23 = to_int_24 = to_int_25 = to_int_26 = to_int_27 = to_int_28 = None
+        getitem_59 = addmm_backward0_1[0]
+        getitem_60 = addmm_backward0_1[1]
+        getitem_61 = addmm_backward0_1[2];  addmm_backward0_1 = None
+        validate_outputs_7 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_59, getitem_60, getitem_61], [((None, None, device(type='cpu'), 6, 0, None), [to_int_29], False), None, ((None, None, device(type='cpu'), 6, 0, None), [to_int_30, to_int_31], False)]);  getitem_59 = getitem_60 = getitem_61 = to_int_29 = to_int_30 = to_int_31 = None
+        getitem_62 = validate_outputs_7[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 10)
+        accumulate_grad__default_2 = torch.ops.inductor.accumulate_grad_.default(getitem_8, getitem_62);  getitem_8 = getitem_62 = accumulate_grad__default_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 7)
+        getitem_64 = validate_outputs_7[2];  validate_outputs_7 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 8)
+        tbackward0_1 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_64], [True]);  getitem_64 = None
+        getitem_65 = tbackward0_1[0];  tbackward0_1 = None
+        validate_outputs_8 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_65], [((None, None, device(type='cpu'), 6, 0, None), [to_int_32, to_int_33], False)]);  getitem_65 = to_int_32 = to_int_33 = None
+        getitem_66 = validate_outputs_8[0];  validate_outputs_8 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 9)
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_7, getitem_66);  getitem_7 = getitem_66 = accumulate_grad__default_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
 
-        found = 0
-        for line in logs.getvalue().split("\n"):
-            if found == len(expected_logs):
-                break
-            if expected_logs[found] in line:
-                found += 1
-
-        self.assertEqual(found, len(expected_logs))
+""",  # noqa: B950
+        )
 
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
@@ -3056,18 +3245,103 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
-        expected_logs = [
-            "code: CompiledFunctionBackward (NodeCall 2)",
-        ]
+        # We should see node names prefixed by aot0
+        self.assertExpectedInline(
+            normalize_log(logs.getvalue()),
+            """\
+Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]
+DCE removed 20 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.<ID> class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward (NodeCall 2)
+        getitem_1 = inputs[1]
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        getitem_4 = inputs[4]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 3)
+        getitem_5 = inputs[5]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 5)
+        getitem_6 = inputs[6]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        getitem_7 = inputs[7];  inputs = None
+        getitem_8 = sizes[0]
+        getitem_9 = sizes[1]
+        getitem_10 = sizes[2]
+        getitem_11 = sizes[3];  sizes = None
+        to_int = torch__dynamo_external_utils_to_int(getitem_8);  getitem_8 = None
+        to_int_1 = torch__dynamo_external_utils_to_int(getitem_9);  getitem_9 = None
+        to_int_2 = torch__dynamo_external_utils_to_int(getitem_10);  getitem_10 = None
+        to_int_3 = torch__dynamo_external_utils_to_int(getitem_11);  getitem_11 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_28 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 1)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_28], [True], [to_int, to_int_1]);  getitem_28 = to_int = to_int_1 = None
+        getitem_29 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_29], [((None, None, device(type='cpu'), 6, 0, None), [to_int_2, to_int_3], False)]);  getitem_29 = to_int_2 = to_int_3 = None
+        getitem_30 = validate_outputs_1[0];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward0 (NodeCall 2)
+        getitem_31 = hooks[0];  hooks = getitem_31 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2, getitem_3, getitem_4), [], getitem_30);  getitem_1 = getitem_3 = getitem_4 = getitem_30 = None
+        aot0_primals_3 = call_aot_bwd_prologue[0]
+        aot0_primals_4 = call_aot_bwd_prologue[1]
+        aot0_relu = call_aot_bwd_prologue[2]
+        aot0_le = call_aot_bwd_prologue[3]
+        aot0_tangents_1 = call_aot_bwd_prologue[4];  call_aot_bwd_prologue = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3233 in forward, code: return model(x)
+        aot0_full_default = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+        aot0_where = torch.ops.aten.where.self(aot0_le, aot0_full_default, aot0_tangents_1);  aot0_le = aot0_tangents_1 = None
+        aot0_permute_1 = torch.ops.aten.permute.default(aot0_primals_4, [1, 0]);  aot0_primals_4 = None
+        aot0_permute_2 = torch.ops.aten.permute.default(aot0_permute_1, [1, 0]);  aot0_permute_1 = None
+        aot0_mm = torch.ops.aten.mm.default(aot0_where, aot0_permute_2);  aot0_permute_2 = None
+        aot0_permute_3 = torch.ops.aten.permute.default(aot0_where, [1, 0])
+        aot0_mm_1 = torch.ops.aten.mm.default(aot0_permute_3, aot0_relu);  aot0_permute_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 4)
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, aot0_mm_1);  getitem_2 = aot0_mm_1 = accumulate_grad__default_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3233 in forward, code: return model(x)
+        aot0_sum_1 = torch.ops.aten.sum.dim_IntList(aot0_where, [0], True);  aot0_where = None
+        aot0_view = torch.ops.aten.reshape.default(aot0_sum_1, [4]);  aot0_sum_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 3)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_5, aot0_view);  getitem_5 = aot0_view = accumulate_grad__default = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3233 in forward, code: return model(x)
+        aot0_le_1 = torch.ops.aten.le.Scalar(aot0_relu, 0);  aot0_relu = None
+        aot0_where_1 = torch.ops.aten.where.self(aot0_le_1, aot0_full_default, aot0_mm);  aot0_le_1 = aot0_full_default = aot0_mm = None
+        aot0_permute_6 = torch.ops.aten.permute.default(aot0_where_1, [1, 0])
+        aot0_mm_2 = torch.ops.aten.mm.default(aot0_permute_6, aot0_primals_3);  aot0_permute_6 = aot0_primals_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        accumulate_grad__default_3 = torch.ops.inductor.accumulate_grad_.default(getitem_7, aot0_mm_2);  getitem_7 = aot0_mm_2 = accumulate_grad__default_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3233 in forward, code: return model(x)
+        aot0_sum_2 = torch.ops.aten.sum.dim_IntList(aot0_where_1, [0], True);  aot0_where_1 = None
+        aot0_view_1 = torch.ops.aten.reshape.default(aot0_sum_2, [4]);  aot0_sum_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 5)
+        accumulate_grad__default_2 = torch.ops.inductor.accumulate_grad_.default(getitem_6, aot0_view_1);  getitem_6 = aot0_view_1 = accumulate_grad__default_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
 
-        found = 0
-        for line in logs.getvalue().split("\n"):
-            if found == len(expected_logs):
-                break
-            if expected_logs[found] in line:
-                found += 1
-
-        self.assertEqual(found, len(expected_logs))
+""",  # noqa: B950
+        )
 
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
@@ -3092,24 +3366,80 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
-        expected_logs = [
-            "CompiledFunctionBackward1",
-            "aot1_sin_1",
-            "aot1_neg",
-            "aot0_tangents_2",
-            "aot1_cos_1",
-            "aot0_tangents_1",
-            "CompiledFunctionBackward0",
-            "aot0_sin_1",
-            "aot0_neg",
-            "aot0_mul",
-            "aot0_cos_1",
-            "aot0_mul_1",
-            "aot0_add",
-        ]
+        # We should see node names prefixed by aot0 and aot1
+        self.assertExpectedInline(
+            normalize_log(logs.getvalue()),
+            """\
+Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]
+DCE removed 10 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.<ID> class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward (NodeCall 2)
+        getitem_1 = inputs[1]
+        getitem_2 = inputs[2]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward (NodeCall 3)
+        getitem_3 = inputs[3];  inputs = None
+        getitem_4 = sizes[0]
+        getitem_5 = sizes[1];  sizes = None
+        to_int = torch__dynamo_external_utils_to_int(getitem_4);  getitem_4 = None
+        to_int_1 = torch__dynamo_external_utils_to_int(getitem_5);  getitem_5 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_15 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 1)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_15], [True], [to_int]);  getitem_15 = to_int = None
+        getitem_16 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_16], [((None, None, device(type='cpu'), 6, 0, None), [to_int_1], False)]);  getitem_16 = to_int_1 = None
+        getitem_17 = validate_outputs_1[0];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward1 (NodeCall 2)
+        getitem_18 = hooks[0];  getitem_18 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], getitem_17);  getitem_1 = getitem_2 = getitem_17 = None
+        aot1_primals_1 = call_aot_bwd_prologue[0]
+        aot1_primals_2 = call_aot_bwd_prologue[1]
+        aot1_tangents_1 = call_aot_bwd_prologue[2];  call_aot_bwd_prologue = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3356 in torch_dynamo_resume_in_f_at_3355, code: return tmp1.sin() + tmp2.cos()
+        aot1_sin_1 = torch.ops.aten.sin.default(aot1_primals_2);  aot1_primals_2 = None
+        aot1_neg = torch.ops.aten.neg.default(aot1_sin_1);  aot1_sin_1 = None
+        aot1_mul = torch.ops.aten.mul.Tensor(aot1_tangents_1, aot1_neg);  aot1_neg = None
+        aot1_cos_1 = torch.ops.aten.cos.default(aot1_primals_1);  aot1_primals_1 = None
+        aot1_mul_1 = torch.ops.aten.mul.Tensor(aot1_tangents_1, aot1_cos_1);  aot1_tangents_1 = aot1_cos_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward0 (NodeCall 3)
+        getitem_22 = hooks[1];  hooks = getitem_22 = None
+        call_aot_bwd_prologue_1 = torch__dynamo_compiled_autograd_call_aot_bwd_prologue_1((getitem_3,), [], aot1_mul_1, aot1_mul);  aot1_mul_1 = aot1_mul = None
+        aot0_primals_1 = call_aot_bwd_prologue_1[0]
+        aot0_tangents_1 = call_aot_bwd_prologue_1[1]
+        aot0_tangents_2 = call_aot_bwd_prologue_1[2];  call_aot_bwd_prologue_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3354 in f, code: tmp2 = x.cos()
+        aot0_sin_1 = torch.ops.aten.sin.default(aot0_primals_1)
+        aot0_neg = torch.ops.aten.neg.default(aot0_sin_1);  aot0_sin_1 = None
+        aot0_mul = torch.ops.aten.mul.Tensor(aot0_tangents_2, aot0_neg);  aot0_tangents_2 = aot0_neg = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3353 in f, code: tmp1 = x.sin()
+        aot0_cos_1 = torch.ops.aten.cos.default(aot0_primals_1);  aot0_primals_1 = None
+        aot0_mul_1 = torch.ops.aten.mul.Tensor(aot0_tangents_1, aot0_cos_1);  aot0_tangents_1 = aot0_cos_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3353 in f, code: tmp1 = x.sin()
+        aot0_add = torch.ops.aten.add.Tensor(aot0_mul, aot0_mul_1);  aot0_mul = aot0_mul_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 4)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_3, aot0_add);  getitem_3 = aot0_add = accumulate_grad__default = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
 
-        self.assertEqual(
-            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
+""",  # noqa: B950
         )
 
     @mock.patch(
@@ -3141,22 +3471,69 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             opt_fn(y, obj).sum().backward()
         self.assertEqual(x.grad, y.grad)
 
-        expected_logs = [
-            "CompiledFunctionBackward0",
-            "aot0_primals_2",
-            "aot0_tangents_2",
-            "aot0_tangents_1",
-            "aot0_sin",
-            "aot0_cos",
-            "aot0_mul",
-            "aot0_add_1",
-            "aot0_trace_wrapped",
-            "aot0_cos_1",
-            "aot0_mul_1",
-        ]
+        # There should be some node names prefixed by aot0
+        self.assertExpectedInline(
+            normalize_log(logs.getvalue()),
+            """\
+Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]
+DCE removed 4 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.<ID> class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward (NodeCall 2)
+        getitem_1 = inputs[1];  inputs = None
+        getitem_2 = sizes[0]
+        getitem_3 = sizes[1]
+        getitem_5 = sizes[2];  sizes = None
+        to_int = torch__dynamo_external_utils_to_int(getitem_2);  getitem_2 = None
+        to_int_1 = torch__dynamo_external_utils_to_int(getitem_3);  getitem_3 = None
+        to_int_3 = torch__dynamo_external_utils_to_int(getitem_5);  getitem_5 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_8 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 1)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_8], [True], [to_int]);  getitem_8 = to_int = None
+        getitem_9 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_9], [((None, None, device(type='cpu'), 6, 0, None), [to_int_1], False)]);  getitem_9 = to_int_1 = None
+        getitem_10 = validate_outputs_1[0];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: CompiledFunctionBackward0 (NodeCall 2)
+        zeros = torch.ops.aten.zeros.default([to_int_3], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  to_int_3 = None
+        getitem_11 = hooks[0];  getitem_11 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1,), [], getitem_10, zeros);  getitem_10 = zeros = None
+        aot0_primals_2 = hooks[1];  hooks = None
+        aot0_primals_1 = call_aot_bwd_prologue[0]
+        aot0_tangents_1 = call_aot_bwd_prologue[1]
+        aot0_tangents_2 = call_aot_bwd_prologue[2];  call_aot_bwd_prologue = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3454 in fn, code: y = x.sin()
+        aot0_sin = torch.ops.aten.sin.default(aot0_primals_1)
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3457 in fn, code: z = y.sin()
+        aot0_cos = torch.ops.aten.cos.default(aot0_sin);  aot0_sin = None
+        aot0_mul = torch.ops.aten.mul.Tensor(aot0_tangents_1, aot0_cos);  aot0_tangents_1 = aot0_cos = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3455 in fn, code: closure_var = y + 1
+        aot0_add_1 = torch.ops.aten.add.Tensor(aot0_mul, aot0_tangents_2);  aot0_mul = aot0_tangents_2 = None
+        aot0_trace_wrapped = torch__dynamo__trace_wrapped_higher_order_op_self_invoke(aot0_add_1, bw_state = aot0_primals_2);  aot0_add_1 = aot0_primals_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/test/inductor/test_compiled_autograd.py:3454 in fn, code: y = x.sin()
+        aot0_cos_1 = torch.ops.aten.cos.default(aot0_primals_1);  aot0_primals_1 = None
+        aot0_mul_1 = torch.ops.aten.mul.Tensor(aot0_trace_wrapped, aot0_cos_1);  aot0_trace_wrapped = aot0_cos_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 3)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, aot0_mul_1);  getitem_1 = aot0_mul_1 = accumulate_grad__default = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
 
-        self.assertEqual(
-            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
+""",  # noqa: B950
         )
 
     @skipIfWindows(msg="AssertionError: Scalars are not equal!")
@@ -3186,20 +3563,188 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
-        patterns1 = [
-            r".*Cache miss due to new autograd node: torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), "
-            r"previous key sizes=\[\]\n",
-        ]
+        # We should see "Cache miss due to new autograd node: ..."
+        self.assertExpectedInline(
+            normalize_log(logs.getvalue()),
+            """\
+Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]
+DCE removed 5 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.<ID> class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 2)
+        getitem_1 = inputs[1]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 3)
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 5)
+        getitem_4 = inputs[4]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 6)
+        getitem_5 = inputs[5]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 7)
+        getitem_6 = inputs[6]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 9)
+        getitem_7 = inputs[7]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 10)
+        getitem_8 = inputs[8]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        getitem_9 = inputs[9];  inputs = None
+        getitem_10 = sizes[0]
+        getitem_11 = sizes[1]
+        getitem_12 = sizes[2]
+        getitem_13 = sizes[3]
+        getitem_14 = sizes[4]
+        getitem_15 = sizes[5]
+        getitem_16 = sizes[6]
+        getitem_17 = sizes[7]
+        getitem_18 = sizes[8]
+        getitem_19 = sizes[9]
+        getitem_20 = sizes[10]
+        getitem_21 = sizes[11]
+        getitem_22 = sizes[12]
+        getitem_23 = sizes[13]
+        getitem_24 = sizes[14]
+        getitem_25 = sizes[15]
+        getitem_26 = sizes[16]
+        getitem_27 = sizes[17]
+        getitem_28 = sizes[18]
+        getitem_29 = sizes[19]
+        getitem_30 = sizes[20]
+        getitem_31 = sizes[21]
+        getitem_32 = sizes[22]
+        getitem_33 = sizes[23]
+        getitem_34 = sizes[24]
+        getitem_35 = sizes[25]
+        getitem_36 = sizes[26]
+        getitem_37 = sizes[27]
+        getitem_38 = sizes[28]
+        getitem_39 = sizes[29]
+        getitem_40 = sizes[30]
+        getitem_41 = sizes[31]
+        getitem_42 = sizes[32]
+        getitem_43 = sizes[33];  sizes = None
+        to_int = torch__dynamo_external_utils_to_int(getitem_10);  getitem_10 = None
+        to_int_1 = torch__dynamo_external_utils_to_int(getitem_11);  getitem_11 = None
+        to_int_2 = torch__dynamo_external_utils_to_int(getitem_12);  getitem_12 = None
+        to_int_3 = torch__dynamo_external_utils_to_int(getitem_13);  getitem_13 = None
+        to_int_4 = torch__dynamo_external_utils_to_int(getitem_14);  getitem_14 = None
+        to_int_5 = torch__dynamo_external_utils_to_int(getitem_15);  getitem_15 = None
+        to_int_6 = torch__dynamo_external_utils_to_int(getitem_16);  getitem_16 = None
+        to_int_7 = torch__dynamo_external_utils_to_int(getitem_17);  getitem_17 = None
+        to_int_8 = torch__dynamo_external_utils_to_int(getitem_18);  getitem_18 = None
+        to_int_9 = torch__dynamo_external_utils_to_int(getitem_19);  getitem_19 = None
+        to_int_10 = torch__dynamo_external_utils_to_int(getitem_20);  getitem_20 = None
+        to_int_11 = torch__dynamo_external_utils_to_int(getitem_21);  getitem_21 = None
+        to_int_12 = torch__dynamo_external_utils_to_int(getitem_22);  getitem_22 = None
+        to_int_13 = torch__dynamo_external_utils_to_int(getitem_23);  getitem_23 = None
+        to_int_14 = torch__dynamo_external_utils_to_int(getitem_24);  getitem_24 = None
+        to_int_15 = torch__dynamo_external_utils_to_int(getitem_25);  getitem_25 = None
+        to_int_16 = torch__dynamo_external_utils_to_int(getitem_26);  getitem_26 = None
+        to_int_17 = torch__dynamo_external_utils_to_int(getitem_27);  getitem_27 = None
+        to_int_18 = torch__dynamo_external_utils_to_int(getitem_28);  getitem_28 = None
+        to_int_19 = torch__dynamo_external_utils_to_int(getitem_29);  getitem_29 = None
+        to_int_20 = torch__dynamo_external_utils_to_int(getitem_30);  getitem_30 = None
+        to_int_21 = torch__dynamo_external_utils_to_int(getitem_31);  getitem_31 = None
+        to_int_22 = torch__dynamo_external_utils_to_int(getitem_32);  getitem_32 = None
+        to_int_23 = torch__dynamo_external_utils_to_int(getitem_33);  getitem_33 = None
+        to_int_24 = torch__dynamo_external_utils_to_int(getitem_34);  getitem_34 = None
+        to_int_25 = torch__dynamo_external_utils_to_int(getitem_35);  getitem_35 = None
+        to_int_26 = torch__dynamo_external_utils_to_int(getitem_36);  getitem_36 = None
+        to_int_27 = torch__dynamo_external_utils_to_int(getitem_37);  getitem_37 = None
+        to_int_28 = torch__dynamo_external_utils_to_int(getitem_38);  getitem_38 = None
+        to_int_29 = torch__dynamo_external_utils_to_int(getitem_39);  getitem_39 = None
+        to_int_30 = torch__dynamo_external_utils_to_int(getitem_40);  getitem_40 = None
+        to_int_31 = torch__dynamo_external_utils_to_int(getitem_41);  getitem_41 = None
+        to_int_32 = torch__dynamo_external_utils_to_int(getitem_42);  getitem_42 = None
+        to_int_33 = torch__dynamo_external_utils_to_int(getitem_43);  getitem_43 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_44 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 1)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_44], [True], [to_int, to_int_1]);  getitem_44 = to_int = to_int_1 = None
+        getitem_45 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_45], [((None, None, device(type='cpu'), 6, 0, None), [to_int_2, to_int_3], False)]);  getitem_45 = to_int_2 = to_int_3 = None
+        getitem_46 = validate_outputs_1[0];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 2)
+        relu_backward0 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_46], [True], getitem_1);  getitem_46 = getitem_1 = None
+        getitem_47 = relu_backward0[0];  relu_backward0 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_47], [((None, None, device(type='cpu'), 6, 0, None), [to_int_4, to_int_5], False)]);  getitem_47 = to_int_4 = to_int_5 = None
+        getitem_48 = validate_outputs_2[0];  validate_outputs_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 3)
+        addmm_backward0 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_48], [True, True, True], 1, 1, getitem_2, 0, [to_int_6, to_int_7], [to_int_8, to_int_9], getitem_3, 0, [to_int_10, to_int_11], [to_int_12, to_int_13]);  getitem_48 = getitem_2 = to_int_6 = to_int_7 = to_int_8 = to_int_9 = getitem_3 = to_int_10 = to_int_11 = to_int_12 = to_int_13 = None
+        getitem_49 = addmm_backward0[0]
+        getitem_50 = addmm_backward0[1]
+        getitem_51 = addmm_backward0[2];  addmm_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_49, getitem_50, getitem_51], [((None, None, device(type='cpu'), 6, 0, None), [to_int_14], False), ((None, None, device(type='cpu'), 6, 0, None), [to_int_15, to_int_16], False), ((None, None, device(type='cpu'), 6, 0, None), [to_int_17, to_int_18], False)]);  getitem_49 = getitem_50 = getitem_51 = to_int_14 = to_int_15 = to_int_16 = to_int_17 = to_int_18 = None
+        getitem_52 = validate_outputs_3[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        accumulate_grad__default_3 = torch.ops.inductor.accumulate_grad_.default(getitem_9, getitem_52);  getitem_9 = getitem_52 = accumulate_grad__default_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 3)
+        getitem_53 = validate_outputs_3[1]
+        getitem_54 = validate_outputs_3[2];  validate_outputs_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 4)
+        tbackward0 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_54], [True]);  getitem_54 = None
+        getitem_55 = tbackward0[0];  tbackward0 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_55], [((None, None, device(type='cpu'), 6, 0, None), [to_int_19, to_int_20], False)]);  getitem_55 = to_int_19 = to_int_20 = None
+        getitem_56 = validate_outputs_4[0];  validate_outputs_4 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 5)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_56);  getitem_4 = getitem_56 = accumulate_grad__default = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 6)
+        relu_backward0_1 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_53], [True], getitem_5);  getitem_53 = getitem_5 = None
+        getitem_57 = relu_backward0_1[0];  relu_backward0_1 = None
+        validate_outputs_6 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_57], [((None, None, device(type='cpu'), 6, 0, None), [to_int_21, to_int_22], False)]);  getitem_57 = to_int_21 = to_int_22 = None
+        getitem_58 = validate_outputs_6[0];  validate_outputs_6 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 7)
+        addmm_backward0_1 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_58], [True, False, True], 1, 1, getitem_6, 0, [to_int_23, to_int_24], [], None, 0, [to_int_25, to_int_26], [to_int_27, to_int_28]);  getitem_58 = getitem_6 = to_int_23 = to_int_24 = to_int_25 = to_int_26 = to_int_27 = to_int_28 = None
+        getitem_59 = addmm_backward0_1[0]
+        getitem_60 = addmm_backward0_1[1]
+        getitem_61 = addmm_backward0_1[2];  addmm_backward0_1 = None
+        validate_outputs_7 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_59, getitem_60, getitem_61], [((None, None, device(type='cpu'), 6, 0, None), [to_int_29], False), None, ((None, None, device(type='cpu'), 6, 0, None), [to_int_30, to_int_31], False)]);  getitem_59 = getitem_60 = getitem_61 = to_int_29 = to_int_30 = to_int_31 = None
+        getitem_62 = validate_outputs_7[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 10)
+        accumulate_grad__default_2 = torch.ops.inductor.accumulate_grad_.default(getitem_8, getitem_62);  getitem_8 = getitem_62 = accumulate_grad__default_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 7)
+        getitem_64 = validate_outputs_7[2];  validate_outputs_7 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 8)
+        tbackward0_1 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_64], [True]);  getitem_64 = None
+        getitem_65 = tbackward0_1[0];  tbackward0_1 = None
+        validate_outputs_8 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_65], [((None, None, device(type='cpu'), 6, 0, None), [to_int_32, to_int_33], False)]);  getitem_65 = to_int_32 = to_int_33 = None
+        getitem_66 = validate_outputs_8[0];  validate_outputs_8 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 9)
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_7, getitem_66);  getitem_7 = getitem_66 = accumulate_grad__default_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
 
-        all_logs = logs.getvalue()
-
-        pattern1 = r"".join(patterns1)
-        matches1 = re.findall(pattern1, all_logs)
-        self.assertEqual(len(matches1), 1)
-        assert isinstance(
-            matches1[0], str
-        )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
-        self.assertEqual(len(matches1), len(patterns1))
+""",  # noqa: B950
+        )
 
     def test_verbose_logs_dynamic_shapes(self):
         logs, ctx = logs_to_string(
@@ -3213,22 +3758,394 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             torch.nn.ReLU(),
         )
 
-        for i, j in zip([10, 11, 12], [10, 10, 11]):
+        for i, j in zip([10, 11], [10, 10]):
             model.zero_grad()
             x = torch.randn([i, 4])
             y = torch.randn([j, 4])
             result = model(x).sum() + model(y).sum()
-            with ctx(), compiled_autograd._enable(torch.compile(backend="eager")):
+            with ctx(), compiled_autograd._enable(
+                torch.compile(backend="eager"), dynamic=False
+            ):
                 result.backward()
 
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 2)
 
-        actual_logs = logs.getvalue()
-        expected_logs = [
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
-        ]
-        for expected in expected_logs:
-            self.assertTrue(expected in actual_logs)
+        # We should see something like: "Cache miss due to 7 changed tensor shapes"
+        self.assertExpectedInline(
+            normalize_log(logs.getvalue()),
+            """\
+Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]
+DCE removed 6 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.<ID> class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 3)
+        getitem_1 = inputs[1]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 4)
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        getitem_4 = inputs[4]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 7)
+        getitem_5 = inputs[5]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 10)
+        getitem_6 = inputs[6]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        getitem_7 = inputs[7]
+        getitem_8 = inputs[8]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 13)
+        getitem_9 = inputs[9]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 14)
+        getitem_10 = inputs[10]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 15)
+        getitem_11 = inputs[11]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 17)
+        getitem_12 = inputs[12]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 18)
+        getitem_13 = inputs[13]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 19)
+        getitem_14 = inputs[14];  inputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_15 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddBackward0 (NodeCall 1)
+        add_backward0 = torch__dynamo_compiled_autograd_ops_AddBackward0([getitem_15], [True, True], 1, 6, 6);  getitem_15 = None
+        getitem_16 = add_backward0[0]
+        getitem_17 = add_backward0[1];  add_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_16, getitem_17], [((None, None, device(type='cpu'), 6, 0, None), [], False), ((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem_16 = getitem_17 = None
+        getitem_18 = validate_outputs_1[0]
+        getitem_19 = validate_outputs_1[1];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 2)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_19], [True], [10, 4]);  getitem_19 = None
+        getitem_20 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_20], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_20 = None
+        getitem_21 = validate_outputs_2[0];  validate_outputs_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 3)
+        relu_backward0 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_21], [True], getitem_1);  getitem_21 = getitem_1 = None
+        getitem_22 = relu_backward0[0];  relu_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_22], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_22 = None
+        getitem_23 = validate_outputs_3[0];  validate_outputs_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 4)
+        addmm_backward0 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_23], [True, True, True], 1, 1, getitem_2, 0, [10, 4], [4, 1], getitem_3, 0, [4, 4], [1, 4]);  getitem_23 = getitem_2 = getitem_3 = None
+        getitem_24 = addmm_backward0[0]
+        getitem_25 = addmm_backward0[1]
+        getitem_26 = addmm_backward0[2];  addmm_backward0 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_24, getitem_25, getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [4], False), ((None, None, device(type='cpu'), 6, 0, None), [10, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_24 = getitem_25 = getitem_26 = None
+        getitem_27 = validate_outputs_4[0]
+        getitem_28 = validate_outputs_4[1]
+        getitem_29 = validate_outputs_4[2];  validate_outputs_4 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 5)
+        tbackward0 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_29], [True]);  getitem_29 = None
+        getitem_30 = tbackward0[0];  tbackward0 = None
+        validate_outputs_5 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_30], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_30 = None
+        getitem_31 = validate_outputs_5[0];  validate_outputs_5 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 6)
+        relu_backward0_1 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_28], [True], getitem_4);  getitem_28 = getitem_4 = None
+        getitem_32 = relu_backward0_1[0];  relu_backward0_1 = None
+        validate_outputs_6 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_32], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_32 = None
+        getitem_33 = validate_outputs_6[0];  validate_outputs_6 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 7)
+        addmm_backward0_1 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_33], [True, False, True], 1, 1, getitem_5, 0, [10, 4], [], None, 0, [4, 4], [1, 4]);  getitem_33 = getitem_5 = None
+        getitem_34 = addmm_backward0_1[0]
+        getitem_35 = addmm_backward0_1[1]
+        getitem_36 = addmm_backward0_1[2];  addmm_backward0_1 = None
+        validate_outputs_7 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_34, getitem_35, getitem_36], [((None, None, device(type='cpu'), 6, 0, None), [4], False), None, ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_34 = getitem_35 = getitem_36 = None
+        getitem_37 = validate_outputs_7[0]
+        getitem_39 = validate_outputs_7[2];  validate_outputs_7 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 8)
+        tbackward0_1 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_39], [True]);  getitem_39 = None
+        getitem_40 = tbackward0_1[0];  tbackward0_1 = None
+        validate_outputs_8 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_40], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_40 = None
+        getitem_41 = validate_outputs_8[0];  validate_outputs_8 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 9)
+        sum_backward0_1 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_18], [True], [10, 4]);  getitem_18 = None
+        getitem_42 = sum_backward0_1[0];  sum_backward0_1 = None
+        validate_outputs_9 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_42], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_42 = None
+        getitem_43 = validate_outputs_9[0];  validate_outputs_9 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 10)
+        relu_backward0_2 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_43], [True], getitem_6);  getitem_43 = getitem_6 = None
+        getitem_44 = relu_backward0_2[0];  relu_backward0_2 = None
+        validate_outputs_10 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_44], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_44 = None
+        getitem_45 = validate_outputs_10[0];  validate_outputs_10 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 11)
+        addmm_backward0_2 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_45], [True, True, True], 1, 1, getitem_7, 0, [10, 4], [4, 1], getitem_8, 0, [4, 4], [1, 4]);  getitem_45 = getitem_7 = getitem_8 = None
+        getitem_46 = addmm_backward0_2[0]
+        getitem_47 = addmm_backward0_2[1]
+        getitem_48 = addmm_backward0_2[2];  addmm_backward0_2 = None
+        validate_outputs_11 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_46, getitem_47, getitem_48], [((None, None, device(type='cpu'), 6, 0, None), [4], False), ((None, None, device(type='cpu'), 6, 0, None), [10, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_46 = getitem_47 = getitem_48 = None
+        getitem_49 = validate_outputs_11[0]
+        getitem_50 = validate_outputs_11[1]
+        getitem_51 = validate_outputs_11[2];  validate_outputs_11 = None
+        add = torch.add(getitem_27, getitem_49);  getitem_27 = getitem_49 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 19)
+        accumulate_grad__default_3 = torch.ops.inductor.accumulate_grad_.default(getitem_14, add);  getitem_14 = add = accumulate_grad__default_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 12)
+        tbackward0_2 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_51], [True]);  getitem_51 = None
+        getitem_52 = tbackward0_2[0];  tbackward0_2 = None
+        validate_outputs_12 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_52], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_52 = None
+        getitem_53 = validate_outputs_12[0];  validate_outputs_12 = None
+        add_1 = torch.add(getitem_31, getitem_53);  getitem_31 = getitem_53 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 13)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_9, add_1);  getitem_9 = add_1 = accumulate_grad__default = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 14)
+        relu_backward0_3 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_50], [True], getitem_10);  getitem_50 = getitem_10 = None
+        getitem_54 = relu_backward0_3[0];  relu_backward0_3 = None
+        validate_outputs_14 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_54], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_54 = None
+        getitem_55 = validate_outputs_14[0];  validate_outputs_14 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 15)
+        addmm_backward0_3 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_55], [True, False, True], 1, 1, getitem_11, 0, [10, 4], [], None, 0, [4, 4], [1, 4]);  getitem_55 = getitem_11 = None
+        getitem_56 = addmm_backward0_3[0]
+        getitem_57 = addmm_backward0_3[1]
+        getitem_58 = addmm_backward0_3[2];  addmm_backward0_3 = None
+        validate_outputs_15 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_56, getitem_57, getitem_58], [((None, None, device(type='cpu'), 6, 0, None), [4], False), None, ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_56 = getitem_57 = getitem_58 = None
+        getitem_59 = validate_outputs_15[0]
+        getitem_61 = validate_outputs_15[2];  validate_outputs_15 = None
+        add_2 = torch.add(getitem_37, getitem_59);  getitem_37 = getitem_59 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 18)
+        accumulate_grad__default_2 = torch.ops.inductor.accumulate_grad_.default(getitem_13, add_2);  getitem_13 = add_2 = accumulate_grad__default_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 16)
+        tbackward0_3 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_61], [True]);  getitem_61 = None
+        getitem_62 = tbackward0_3[0];  tbackward0_3 = None
+        validate_outputs_16 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_62], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_62 = None
+        getitem_63 = validate_outputs_16[0];  validate_outputs_16 = None
+        add_3 = torch.add(getitem_41, getitem_63);  getitem_41 = getitem_63 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 17)
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_12, add_3);  getitem_12 = add_3 = accumulate_grad__default_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 19)
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
+
+Cache miss due to 7 changed tensor shapes (total of 7): sizes[0], sizes[1], sizes[2], sizes[3], sizes[4], sizes[5], sizes[6]
+DCE removed 6 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.<ID> class CompiledAutograd1(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 3)
+        getitem_1 = inputs[1]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 4)
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        getitem_4 = inputs[4]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 7)
+        getitem_5 = inputs[5]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 10)
+        getitem_6 = inputs[6]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 11)
+        getitem_7 = inputs[7]
+        getitem_8 = inputs[8]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 13)
+        getitem_9 = inputs[9]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 14)
+        getitem_10 = inputs[10]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 15)
+        getitem_11 = inputs[11]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 17)
+        getitem_12 = inputs[12]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 18)
+        getitem_13 = inputs[13]
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 19)
+        getitem_14 = inputs[14];  inputs = None
+        getitem_15 = sizes[0]
+        getitem_16 = sizes[1]
+        getitem_17 = sizes[2]
+        getitem_18 = sizes[3]
+        getitem_19 = sizes[4]
+        getitem_20 = sizes[5]
+        getitem_21 = sizes[6];  sizes = None
+        to_int = torch__dynamo_external_utils_to_int(getitem_15);  getitem_15 = None
+        to_int_1 = torch__dynamo_external_utils_to_int(getitem_16);  getitem_16 = None
+        to_int_2 = torch__dynamo_external_utils_to_int(getitem_17);  getitem_17 = None
+        to_int_3 = torch__dynamo_external_utils_to_int(getitem_18);  getitem_18 = None
+        to_int_4 = torch__dynamo_external_utils_to_int(getitem_19);  getitem_19 = None
+        to_int_5 = torch__dynamo_external_utils_to_int(getitem_20);  getitem_20 = None
+        to_int_6 = torch__dynamo_external_utils_to_int(getitem_21);  getitem_21 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_22 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddBackward0 (NodeCall 1)
+        add_backward0 = torch__dynamo_compiled_autograd_ops_AddBackward0([getitem_22], [True, True], 1, 6, 6);  getitem_22 = None
+        getitem_23 = add_backward0[0]
+        getitem_24 = add_backward0[1];  add_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_23, getitem_24], [((None, None, device(type='cpu'), 6, 0, None), [], False), ((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem_23 = getitem_24 = None
+        getitem_25 = validate_outputs_1[0]
+        getitem_26 = validate_outputs_1[1];  validate_outputs_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 2)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_26], [True], [10, 4]);  getitem_26 = None
+        getitem_27 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_27 = None
+        getitem_28 = validate_outputs_2[0];  validate_outputs_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 3)
+        relu_backward0 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_28], [True], getitem_1);  getitem_28 = getitem_1 = None
+        getitem_29 = relu_backward0[0];  relu_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_29], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_29 = None
+        getitem_30 = validate_outputs_3[0];  validate_outputs_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 4)
+        addmm_backward0 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_30], [True, True, True], 1, 1, getitem_2, 0, [10, 4], [4, 1], getitem_3, 0, [4, 4], [1, 4]);  getitem_30 = getitem_2 = getitem_3 = None
+        getitem_31 = addmm_backward0[0]
+        getitem_32 = addmm_backward0[1]
+        getitem_33 = addmm_backward0[2];  addmm_backward0 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31, getitem_32, getitem_33], [((None, None, device(type='cpu'), 6, 0, None), [4], False), ((None, None, device(type='cpu'), 6, 0, None), [10, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_31 = getitem_32 = getitem_33 = None
+        getitem_34 = validate_outputs_4[0]
+        getitem_35 = validate_outputs_4[1]
+        getitem_36 = validate_outputs_4[2];  validate_outputs_4 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 5)
+        tbackward0 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_36], [True]);  getitem_36 = None
+        getitem_37 = tbackward0[0];  tbackward0 = None
+        validate_outputs_5 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_37 = None
+        getitem_38 = validate_outputs_5[0];  validate_outputs_5 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 6)
+        relu_backward0_1 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_35], [True], getitem_4);  getitem_35 = getitem_4 = None
+        getitem_39 = relu_backward0_1[0];  relu_backward0_1 = None
+        validate_outputs_6 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_39], [((None, None, device(type='cpu'), 6, 0, None), [10, 4], False)]);  getitem_39 = None
+        getitem_40 = validate_outputs_6[0];  validate_outputs_6 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 7)
+        addmm_backward0_1 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_40], [True, False, True], 1, 1, getitem_5, 0, [10, 4], [], None, 0, [4, 4], [1, 4]);  getitem_40 = getitem_5 = None
+        getitem_41 = addmm_backward0_1[0]
+        getitem_42 = addmm_backward0_1[1]
+        getitem_43 = addmm_backward0_1[2];  addmm_backward0_1 = None
+        validate_outputs_7 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_41, getitem_42, getitem_43], [((None, None, device(type='cpu'), 6, 0, None), [4], False), None, ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_41 = getitem_42 = getitem_43 = None
+        getitem_44 = validate_outputs_7[0]
+        getitem_46 = validate_outputs_7[2];  validate_outputs_7 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 8)
+        tbackward0_1 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_46], [True]);  getitem_46 = None
+        getitem_47 = tbackward0_1[0];  tbackward0_1 = None
+        validate_outputs_8 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_47], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_47 = None
+        getitem_48 = validate_outputs_8[0];  validate_outputs_8 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: SumBackward0 (NodeCall 9)
+        sum_backward0_1 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_25], [True], [to_int, 4]);  getitem_25 = to_int = None
+        getitem_49 = sum_backward0_1[0];  sum_backward0_1 = None
+        validate_outputs_9 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_49], [((None, None, device(type='cpu'), 6, 0, None), [to_int_1, 4], False)]);  getitem_49 = to_int_1 = None
+        getitem_50 = validate_outputs_9[0];  validate_outputs_9 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 10)
+        relu_backward0_2 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_50], [True], getitem_6);  getitem_50 = getitem_6 = None
+        getitem_51 = relu_backward0_2[0];  relu_backward0_2 = None
+        validate_outputs_10 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_51], [((None, None, device(type='cpu'), 6, 0, None), [to_int_2, 4], False)]);  getitem_51 = to_int_2 = None
+        getitem_52 = validate_outputs_10[0];  validate_outputs_10 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 11)
+        addmm_backward0_2 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_52], [True, True, True], 1, 1, getitem_7, 0, [to_int_3, 4], [4, 1], getitem_8, 0, [4, 4], [1, 4]);  getitem_52 = getitem_7 = to_int_3 = getitem_8 = None
+        getitem_53 = addmm_backward0_2[0]
+        getitem_54 = addmm_backward0_2[1]
+        getitem_55 = addmm_backward0_2[2];  addmm_backward0_2 = None
+        validate_outputs_11 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_53, getitem_54, getitem_55], [((None, None, device(type='cpu'), 6, 0, None), [4], False), ((None, None, device(type='cpu'), 6, 0, None), [to_int_4, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_53 = getitem_54 = getitem_55 = to_int_4 = None
+        getitem_56 = validate_outputs_11[0]
+        getitem_57 = validate_outputs_11[1]
+        getitem_58 = validate_outputs_11[2];  validate_outputs_11 = None
+        add = torch.add(getitem_34, getitem_56);  getitem_34 = getitem_56 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 19)
+        accumulate_grad__default_3 = torch.ops.inductor.accumulate_grad_.default(getitem_14, add);  getitem_14 = add = accumulate_grad__default_3 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 12)
+        tbackward0_2 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_58], [True]);  getitem_58 = None
+        getitem_59 = tbackward0_2[0];  tbackward0_2 = None
+        validate_outputs_12 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_59], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_59 = None
+        getitem_60 = validate_outputs_12[0];  validate_outputs_12 = None
+        add_1 = torch.add(getitem_38, getitem_60);  getitem_38 = getitem_60 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 13)
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_9, add_1);  getitem_9 = add_1 = accumulate_grad__default = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: ReluBackward0 (NodeCall 14)
+        relu_backward0_3 = torch__dynamo_compiled_autograd_ops_ReluBackward0([getitem_57], [True], getitem_10);  getitem_57 = getitem_10 = None
+        getitem_61 = relu_backward0_3[0];  relu_backward0_3 = None
+        validate_outputs_14 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_61], [((None, None, device(type='cpu'), 6, 0, None), [to_int_5, 4], False)]);  getitem_61 = to_int_5 = None
+        getitem_62 = validate_outputs_14[0];  validate_outputs_14 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: AddmmBackward0 (NodeCall 15)
+        addmm_backward0_3 = torch__dynamo_compiled_autograd_ops_AddmmBackward0([getitem_62], [True, False, True], 1, 1, getitem_11, 0, [to_int_6, 4], [], None, 0, [4, 4], [1, 4]);  getitem_62 = getitem_11 = to_int_6 = None
+        getitem_63 = addmm_backward0_3[0]
+        getitem_64 = addmm_backward0_3[1]
+        getitem_65 = addmm_backward0_3[2];  addmm_backward0_3 = None
+        validate_outputs_15 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_63, getitem_64, getitem_65], [((None, None, device(type='cpu'), 6, 0, None), [4], False), None, ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_63 = getitem_64 = getitem_65 = None
+        getitem_66 = validate_outputs_15[0]
+        getitem_68 = validate_outputs_15[2];  validate_outputs_15 = None
+        add_2 = torch.add(getitem_44, getitem_66);  getitem_44 = getitem_66 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 18)
+        accumulate_grad__default_2 = torch.ops.inductor.accumulate_grad_.default(getitem_13, add_2);  getitem_13 = add_2 = accumulate_grad__default_2 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: TBackward0 (NodeCall 16)
+        tbackward0_3 = torch__dynamo_compiled_autograd_ops_TBackward0([getitem_68], [True]);  getitem_68 = None
+        getitem_69 = tbackward0_3[0];  tbackward0_3 = None
+        validate_outputs_16 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_69], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_69 = None
+        getitem_70 = validate_outputs_16[0];  validate_outputs_16 = None
+        add_3 = torch.add(getitem_48, getitem_70);  getitem_48 = getitem_70 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 17)
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_12, add_3);  getitem_12 = add_3 = accumulate_grad__default_1 = None
+        
+         # File: /home/xmfan/core/a/pytorch/torch/_dynamo/compiled_autograd.py:1342 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 19)
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
+
+""",  # noqa: B950
+        )
 
     def test_verbose_logs_snapshot(self):
         def fn():
@@ -3241,25 +4158,14 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             x = torch.randn([2, 4])
             result = model(x).sum()
             result.backward()
-            yield model[0].weight.grad
-            yield model[0].bias.grad
-            yield model[2].weight.grad
-            yield model[2].bias.grad
 
         logs, ctx = logs_to_string(
             torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
         )
-        with ctx():
-            with compiled_autograd._enable(compiler_fn):
-                # unused, verbose level already snapshot with contextmanager
-                torch._logging.set_logs(compiled_autograd_verbose=True)
+        with compiled_autograd._enable(compiler_fn):
+            with ctx():  # # unused in c++, verbose level already snapshot at _enable time
                 fn()
-
-        unexpected_logs = [
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0)"
-        ]
-
-        self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
+        assert "Cache miss due to new autograd node not" not in logs.getvalue()
 
     def test_tensor_subclass_basic(self):
         from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode

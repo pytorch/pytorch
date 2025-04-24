@@ -2390,14 +2390,11 @@ class SubgraphTracer(fx.Tracer):
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
-            if (
-                not is_strict_export
-                and not is_non_strict_export
-            ):
+            if not is_strict_export and not is_non_strict_export:
                 if isinstance(example_value, torch.Tensor):
                     self._lift_basic_symbols(example_value, source)
                 elif isinstance(example_value, (list, tuple)):
-                    for i,e in enumerate(example_value):
+                    for i, e in enumerate(example_value):
                         if source:
                             e_source = GetItemSource(
                                 base=source, index=i, index_is_slice=False
