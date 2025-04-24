@@ -598,7 +598,9 @@ void dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 
 template <>
 void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
-  if (at::detail::getCUDAHooks().isGPUArch({"gfx1100"})) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  c10::string_view arch(dprops->gcnArchName);
+  if (arch == "gfx1100") {
     dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGS(at::Half));
   } else{
     dispatch_half_gemm(CUDABLAS_GEMM_ARGS(at::Half));

@@ -173,7 +173,7 @@ class TestMatcher(JitTestCase):
             torch.randn(3, 3, 3, 3),
         )
         pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs, strict=True
+            WrapperModule(pattern), example_inputs
         ).module()
         before_split_res = pattern_gm(*example_inputs)
         pattern_gm, _ = _split_to_graph_and_name_node_map(pattern_gm)
@@ -204,11 +204,11 @@ class TestMatcher(JitTestCase):
             torch.randn(3, 3, 3, 3),
         )
         pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs, strict=True
+            WrapperModule(pattern), example_inputs
         ).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
         target_gm = export_for_training(
-            WrapperModule(target_graph), example_inputs, strict=True
+            WrapperModule(target_graph), example_inputs
         ).module()
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
@@ -248,11 +248,9 @@ class TestMatcher(JitTestCase):
                 return linear, {"linear": linear, "x": x}
 
         example_inputs = (torch.randn(3, 5),)
-        pattern_gm = export_for_training(
-            Pattern(), example_inputs, strict=True
-        ).module()
+        pattern_gm = export_for_training(Pattern(), example_inputs).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
-        target_gm = export_for_training(M(), example_inputs, strict=True).module()
+        target_gm = export_for_training(M(), example_inputs).module()
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
             name_node_map = internal_match.name_node_map

@@ -1003,7 +1003,9 @@ class Pipe(torch.nn.Module):
         logger.info("Tracing model ...")
         try:
             ep = torch.export.export_for_training(
-                mod, example_args, example_kwargs, strict=True
+                mod,
+                example_args,
+                example_kwargs,
             )
         except Exception as e:
             raise RuntimeError(

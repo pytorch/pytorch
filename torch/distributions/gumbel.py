@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -34,12 +33,7 @@ class Gumbel(TransformedDistribution):
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
 
-    def __init__(
-        self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
         finfo = torch.finfo(self.loc.dtype)
         if isinstance(loc, _Number) and isinstance(scale, _Number):

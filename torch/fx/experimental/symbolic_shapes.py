@@ -1195,30 +1195,20 @@ def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
-    if torch.fx.experimental._config.backed_size_oblivious:
-        return statically_known_true(a)
-    else:
-        try:
-            return bool(guard_bool(a))
-        except GuardOnDataDependentSymNode:
-            return False
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return False
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    if torch.fx.experimental._config.backed_size_oblivious:
-        result = _static_eval(a)
-        if result is not None:
-            return result
-        else:
-            return True
-    else:
-        try:
-            return bool(guard_bool(a))
-        except GuardOnDataDependentSymNode:
-            return True
+    try:
+        return bool(guard_bool(a))
+    except GuardOnDataDependentSymNode:
+        return True
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1263,23 +1253,6 @@ def definitely_false(a: BoolLikeType) -> bool:
     return not bool(a)
 
 
-def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
-    if isinstance(x, SymBool):
-        expr = x.node.expr
-        shape_env = x.node.shape_env
-        try:
-            simplified = shape_env._maybe_evaluate_static(expr)
-            if simplified is not None:
-                return bool(simplified)
-            else:
-                return None
-        except Exception:
-            log.debug("Could not simplify %s", expr)
-            return None
-    assert isinstance(x, bool)
-    return x
-
-
 def statically_known_true(x: Union[bool, SymBool]) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
@@ -1291,11 +1264,18 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     Args:
         x (bool, SymBool): The expression to try statically evaluating
     """
-    result = _static_eval(x)
-    if result is None:
+    if isinstance(x, SymBool):
+        expr = x.node.expr
+        shape_env = x.node.shape_env
+        try:
+            simplified = shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+        except Exception:
+            log.debug("Could not simplify %s", expr)
         return False
-    else:
-        return result
+    assert isinstance(x, bool)
+    return x
 
 
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
@@ -3350,6 +3330,8 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
+        if specialize_zero_one:
+            self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -4559,10 +4541,7 @@ class ShapeEnv:
         sloc = self._get_sloc()
 
         if val in (0, 1) and specialize_zero_one:
-            if val == 0:
-                return sympy.S.Zero
-            else:
-                return sympy.S.One
+            r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular

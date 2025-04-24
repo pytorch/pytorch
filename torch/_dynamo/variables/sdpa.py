@@ -10,7 +10,6 @@ from .base import VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 PARAM_NAMES = "query key value attn_mask dropout is_causal enable_gqa".split()
@@ -37,7 +36,7 @@ class SDPAParamsVariable(VariableTracker):
         self.param_vars = param_vars
         super().__init__(**kwargs)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen):
         assert self.source is None
         assert self.param_vars is not None
         codegen.add_push_null(

@@ -43,6 +43,7 @@ struct ExecutionPlan {
 // They are only valid only right after you call getDebugState() and should
 // never be used again once another GraphExecutor function is called.
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GraphExecutorState {
   const Graph* graph = nullptr;
   ExecutionPlan fallback; // XXX: members of this field are optional

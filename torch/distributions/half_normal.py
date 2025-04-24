@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
 
 import torch
 from torch import inf, Tensor
@@ -34,13 +33,8 @@ class HalfNormal(TransformedDistribution):
     arg_constraints = {"scale": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
-    base_dist: Normal
 
-    def __init__(
-        self,
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, scale, validate_args=None):
         base_dist = Normal(0, scale, validate_args=False)
         super().__init__(base_dist, AbsTransform(), validate_args=validate_args)
 

@@ -350,17 +350,6 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
 TCPStore::~TCPStore() = default;
 
-c10::intrusive_ptr<Store> TCPStore::clone() {
-  TCPStoreOptions opts;
-  opts.port = addr_.port;
-  opts.isServer = false;
-  opts.waitWorkers = false;
-  opts.timeout = timeout_;
-  opts.useLibUV = usingLibUv_;
-
-  return c10::make_intrusive<TCPStore>(addr_.host, opts);
-}
-
 void TCPStore::waitForWorkers() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__waitForWorkers);
   if (!numWorkers_.has_value()) {

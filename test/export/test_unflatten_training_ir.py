@@ -14,7 +14,7 @@ test_classes = {}
 
 
 def mocked_training_ir_export(*args, **kwargs):
-    return export_for_training(*args, **kwargs, strict=True)
+    return export_for_training(*args, **kwargs)
 
 
 def make_dynamic_cls(cls):

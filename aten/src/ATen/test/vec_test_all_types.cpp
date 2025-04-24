@@ -192,11 +192,6 @@ namespace {
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
-        test_unary<vec>(
-            NAME_INFO(negate), std::negate<ValueType<vec>>(),
-            [](vec v) { return -v; },
-            createDefaultUnaryTestCase<vec>(TestSeed()),
-            RESOLVE_OVERLOAD(filter_int_minimum));
     }
     TYPED_TEST(SignManipulationHalfPrecision, AbsNegate) {
       typedef enum  {
@@ -334,7 +329,7 @@ namespace {
       test_binary<vec>(
           NAME_INFO(fmod),
           RESOLVE_OVERLOAD(std::fmod),
-          [](const auto& v0, const auto& v1) { return vec(v0).fmod(v1); },
+          [](vec v0, vec v1) { return v0.fmod(v1); },
           createDefaultBinaryTestCase<vec>(TestSeed()),
           RESOLVE_OVERLOAD(filter_fmod));
     }
@@ -376,22 +371,11 @@ namespace {
     }
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
-// NOTE: Because SVE uses ACL logic, the precision changes, hence the adjusted tolerance.
-#if defined(CPU_CAPABILITY_SVE)
-        using UVT = UvalueType<vec>;
-        UVT tolerance = getDefaultTolerance<UVT>();
-        test_unary<vec>(
-            NAME_INFO(tanH),
-            RESOLVE_OVERLOAD(std::tanh),
-            [](vec v) { return v.tanh(); },
-            createDefaultUnaryTestCase<vec>(TestSeed(), tolerance));
-#else
         test_unary<vec>(
             NAME_INFO(tanH),
             RESOLVE_OVERLOAD(std::tanh),
             [](vec v) { return v.tanh(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
-#endif
     }
     TYPED_TEST(Hyperbolic, Sinh) {
         using vec = TypeParam;
@@ -604,8 +588,8 @@ namespace {
         test_binary<vec>(
             NAME_INFO(atan2),
             RESOLVE_OVERLOAD(std::atan2),
-            [](const auto& v0, const auto& v1) {
-              return vec(v0).atan2(v1);
+            [](vec v0, vec v1) {
+                return v0.atan2(v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
     }
@@ -614,7 +598,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(pow),
             RESOLVE_OVERLOAD(std::pow),
-            [](const auto& v0, const auto& v1) { return vec(v0).pow(v1); },
+            [](vec v0, vec v1) { return v0.pow(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(RealTests, Hypot) {
@@ -622,7 +606,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(hypot),
             RESOLVE_OVERLOAD(std::hypot),
-            [](const auto& v0, const auto& v1) { return vec(v0).hypot(v1); },
+            [](vec v0, vec v1) { return v0.hypot(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(RealTests, NextAfter) {
@@ -630,7 +614,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(nextafter),
             RESOLVE_OVERLOAD(std::nextafter),
-            [](const auto& v0, const auto& v1) { return vec(v0).nextafter(v1); },
+            [](vec v0, vec v1) { return v0.nextafter(v1); },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(Interleave, Interleave) {
@@ -680,7 +664,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(plus),
             std::plus<VT>(),
-            [](const auto& v0, const auto& v1) -> vec {
+            [](const vec& v0, const vec& v1) -> vec {
                 return v0 + v1;
             },
             createDefaultBinaryTestCase<vec>(TestSeed()),
@@ -692,7 +676,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(minus),
             std::minus<VT>(),
-            [](const auto& v0, const auto& v1) -> vec {
+            [](const vec& v0, const vec& v1) -> vec {
                 return v0 - v1;
             },
             createDefaultBinaryTestCase<vec>(TestSeed()),
@@ -703,7 +687,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(mult),
             RESOLVE_OVERLOAD(local_multiply),
-            [](const auto& v0, const auto& v1) { return v0 * v1; },
+            [](const vec& v0, const vec& v1) { return v0 * v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
@@ -713,7 +697,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(division),
             RESOLVE_OVERLOAD(local_division),
-            [](const auto& v0, const auto& v1) { return v0 / v1; },
+            [](const vec& v0, const vec& v1) { return v0 / v1; },
             createDefaultBinaryTestCase<vec>(seed),
             RESOLVE_OVERLOAD(filter_div_ub));
     }
@@ -722,7 +706,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(bit_and),
             RESOLVE_OVERLOAD(local_and),
-            [](const auto& v0, const auto& v1) { return v0 & v1; },
+            [](const vec& v0, const vec& v1) { return v0 & v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitOr) {
@@ -730,7 +714,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(bit_or),
             RESOLVE_OVERLOAD(local_or),
-            [](const auto& v0, const auto& v1) { return v0 | v1; },
+            [](const vec& v0, const vec& v1) { return v0 | v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitXor) {
@@ -738,7 +722,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(bit_xor),
             RESOLVE_OVERLOAD(local_xor),
-            [](const auto& v0, const auto& v1) { return v0 ^ v1; },
+            [](const vec& v0, const vec& v1) { return v0 ^ v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Comparison, Equal) {
@@ -801,7 +785,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(minimum),
             minimum<VT>,
-            [](const auto& v0, const auto& v1) {
+            [](const vec& v0, const vec& v1) {
                 return minimum(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
@@ -812,7 +796,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(maximum),
             maximum<VT>,
-            [](const auto& v0, const auto& v1) {
+            [](const vec& v0, const vec& v1) {
                 return maximum(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
@@ -823,7 +807,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(clamp min),
             clamp_min<VT>,
-            [](const auto& v0, const auto& v1) {
+            [](const vec& v0, const vec& v1) {
                 return clamp_min(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));
@@ -834,7 +818,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(clamp max),
             clamp_max<VT>,
-            [](const auto& v0, const auto& v1) {
+            [](const vec& v0, const vec& v1) {
                 return clamp_max(v0, v1);
             },
             createDefaultBinaryTestCase<vec>(TestSeed()));

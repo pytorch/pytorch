@@ -18,7 +18,9 @@
 TORCH_DECLARE_bool(torch_jit_enable_expanded_stacks);
 TORCH_DECLARE_bool(torch_jit_expanded_stacks_mangled);
 
-namespace torch::jit::interpreter {
+namespace torch::jit {
+
+namespace interpreter {
 
 template <class Ttarget, class Tsource>
 Ttarget safe_narrow_cast(Tsource v) {
@@ -62,7 +64,7 @@ struct NodeSourceInfo {
   const char* func_name_{nullptr};
   const char* file_name_{nullptr};
   size_t line_{0};
-  NodeSourceInfo() = default;
+  NodeSourceInfo() {}
 };
 
 struct CodeImpl {
@@ -1058,4 +1060,5 @@ struct MobileCodeImpl : CodeImpl {
   bool emit_promoted_ops_;
 };
 
-} // namespace torch::jit::interpreter
+} // namespace interpreter
+} // namespace torch::jit

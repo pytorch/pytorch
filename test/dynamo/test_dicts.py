@@ -21,7 +21,6 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.testing import same
-from torch._dynamo.utils import dict_items
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TestCase
 
@@ -936,17 +935,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, d2)
         self.assertEqual(ref, res)
         self.assertEqual(d1.calls, d2.calls)
-
-    def test_items_type(self):
-        def fn():
-            d = dict({"a": 1, "b": "2", "c": torch.tensor(3)})
-            return d.items()
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        ref = fn()
-        res = opt_fn()
-        self.assertEqual(ref, res)
-        self.assertEqual(type(res), dict_items)
 
 
 if __name__ == "__main__":
