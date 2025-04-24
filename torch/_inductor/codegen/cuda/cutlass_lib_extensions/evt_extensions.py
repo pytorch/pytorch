@@ -1,9 +1,13 @@
 from typing import Any, Union
 
-from torch._inductor.ir import ComputedBuffer, InputBuffer
+from torch._inductor.ir import (
+    ComputedBuffer,
+    InputBuffer,
+    is_contiguous_strides_for_shape,
+)
 from torch.utils._ordered_set import OrderedSet
 
-from ..cutlass_utils import try_import_cutlass
+from ..cutlass_utils import torch_dtype_to_cutlass_type, try_import_cutlass
 
 
 EpilogueFunctor = Any  # EpilogueFunctor local class defined in _trace
@@ -19,6 +23,7 @@ if try_import_cutlass():
     import ast
     import ctypes
     import textwrap
+    from typing import Union
 
     from cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
         EmptyByte,
@@ -41,12 +46,73 @@ if try_import_cutlass():
     from cutlass.backend.evt.ir.tensor import (  # type: ignore[import-untyped, import-not-found]
         Tensor as CutlassTensor,
     )
-    from cutlass_library import DataType, EpilogueScheduleType, TileDescription
+    from cutlass_library import (
+        DataType,
+        EpilogueScheduleType,
+        LayoutType,
+        TileDescription,
+    )
 
+    import torch
     from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
 
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
+
+    TORCH_TO_CUTLASS_DTYPE = {
+        torch.float32: DataType.f32,
+        torch.float16: DataType.f16,
+        torch.bfloat16: DataType.bf16,
+    }
+
+    def create_example_tensors(
+        read_names: list[str],
+        write_names: list[str],
+        buffer_renames: dict[str, str],
+        name_to_buffer: dict[str, Buffer],
+    ) -> dict[str, CutlassTensor]:
+        example_tensors = {}
+
+        def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
+            shape = buffer.get_layout().size
+            stride = buffer.get_layout().stride
+            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+                f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
+            )
+            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+                f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
+            )
+            shape = tuple(int(x) for x in shape)
+            stride = tuple(int(x) for x in stride)
+
+            is_column_major = is_contiguous_strides_for_shape(stride, shape)
+            is_row_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
+
+            if not is_row_major and not is_column_major:
+                raise RuntimeError(
+                    f"Cannot create example tensor for {buffer.get_name()} with \
+non-contiguous layout, recieved stride: {stride} and shape: {shape}"
+                )
+
+            return CutlassTensor(
+                shape=shape,
+                layout_tag=LayoutType.RowMajor
+                if is_row_major
+                else LayoutType.ColumnMajor,
+                element=torch_dtype_to_cutlass_type(buffer.get_layout().dtype),
+            )
+
+        for name in read_names + write_names:
+            key = name
+
+            if name in buffer_renames:
+                key = buffer_renames[
+                    name
+                ]  # Need to rewrite some special args (e.g. acc is a required arg name)
+
+            example_tensors[key] = cutlass_tensor_from_buffer(name_to_buffer[name])
+
+        return example_tensors
 
     def trace(
         fn_src: str,
