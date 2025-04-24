@@ -23,7 +23,7 @@ from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
-from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
+from .cpp_utils import cexpr, DEVICE_TO_ATEN, DEVICE_TO_INT, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .wrapper import (
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -322,9 +322,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             raise AssertionError(f"Unknown value type: {type(value)}")
 
     def generate_input_output_runtime_checks(self):
-        # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
-        # real input/output tensor match ones provided at compile time via sample
-        # input/output.
+        """
+        In debug_compile mode, we generate checks to ensure the dtype/shape/stride/device of each
+        real input/output tensor match ones provided at compile time via sample
+        input/output.
+        """
+
         def gen_check(handle_kind, idx, name, tensor):
             # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
             self.prefix.writeline(
@@ -403,6 +406,27 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         }}
                     """
                 )
+
+            # check input device type
+            if isinstance(tensor, ir.TensorBox):
+                tensor_device = tensor.get_device()
+                if tensor_device is not None:
+                    expected_device_type = DEVICE_TO_INT.get(tensor_device.type)
+                    if expected_device_type is not None:
+                        self.codegen_input_device_type_var_decl(self.prefix, name)
+                        device_type_str = str(tensor_device.type)
+                        self.prefix.splice(
+                            f"""
+                                int32_t {name}_expected_device_type = {expected_device_type};
+                                if ({name}_expected_device_type != {name}_device_type) {{
+                                    std::stringstream ss;
+                                    ss << "{handle_kind}[{idx}]: unmatched device type, "
+                                    << "expected: " << {name}_expected_device_type << "{expected_device_type}({device_type_str}), "
+                                    << "but got: " << {name}_device_type << "\\n";
+                                    throw std::runtime_error(ss.str());
+                                }}
+                            """
+                        )
 
         # Create a separate function for each input check to avoid "too big to optimize" error
         for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
@@ -592,6 +616,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
         code.writeline(f"auto {name}_stride = {name}.strides();")
+
+    def codegen_input_device_type_var_decl(self, code: IndentedBuffer, name):
+        code.writeline(f"int32_t {name}_device_type;")
+        code.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
+        )
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
