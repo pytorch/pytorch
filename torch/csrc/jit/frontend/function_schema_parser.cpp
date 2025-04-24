@@ -158,8 +158,8 @@ struct SchemaParser {
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
-      fake_type = ListType::create(std::move(fake_type));
-      real_type = ListType::create(std::move(real_type));
+      fake_type = c10::TypeFactory::create<ListType>(std::move(fake_type));
+      real_type = c10::TypeFactory::create<ListType>(std::move(real_type));
       N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
