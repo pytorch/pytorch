@@ -877,10 +877,28 @@ def get_global_source_name(source: Source) -> Optional[str]:
     return source.global_name
 
 
+def is_from_nonlocal_source(source: Source):
+    if isinstance(source, ChainedSource):
+        return is_from_nonlocal_source(source.base)
+    return (
+        isinstance(source, LocalSource)
+        and source.is_derefed_cell_contents
+        and not source.is_input
+    )
+
+
 def is_from_source(source: Source, target: Source):
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
     return source == target
+
+
+def is_from_unspecialized_nn_module_source(source: Source):
+    if isinstance(source, UnspecializedNNModuleSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_unspecialized_nn_module_source(source.base)
+    return False
 
 
 def is_from_unspecialized_param_buffer_source(source: Source):

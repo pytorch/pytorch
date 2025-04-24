@@ -35,8 +35,8 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return
 
         self._frame_state = _FrameState(
-            f_locals=frame.f_locals,
-            f_globals=frame.f_globals,
+            f_locals=dict(frame.f_locals),
+            f_globals=dict(frame.f_globals),
             f_code=frame.f_code,
             f_builtins=frame.f_builtins,
         )
