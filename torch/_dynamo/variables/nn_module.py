@@ -311,7 +311,7 @@ class NNModuleVariable(VariableTracker):
 
         if not self.source:
             unimplemented_v2(
-                gb_type="GETATTR with no source",
+                gb_type="getattr with no source",
                 context=f"var_getattr {self} {name}",
                 explanation="Dynamo does not know how to access an attribute "
                 "on an `nn.Module` instance that lacks a source. This is "
