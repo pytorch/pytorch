@@ -89,7 +89,7 @@ ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 # gfortran and python needed for building magma from source for ROCm
 RUN apt-get update -y && \
     apt-get install gfortran -y && \
-    apt-get install python -y && \
+    apt-get install python3 python-is-python3 -y && \
     apt-get clean
 
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
