@@ -43,7 +43,6 @@ class TensorCheck {
       const LocalState& state,
       PyTypeObject* pt,
       const at::Tensor& v,
-      c10::DispatchKeySet dispatch_key_set,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
 

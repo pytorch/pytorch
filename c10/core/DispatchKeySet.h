@@ -398,10 +398,6 @@ class DispatchKeySet final {
     return repr_;
   }
 
-  static DispatchKeySet from_raw_repr(uint64_t x) {
-    return DispatchKeySet(RAW, x);
-  }
-
   DispatchKey highestFunctionalityKey() const {
     auto functionality_idx = indexOfHighestBit();
     // This means that none of the functionality bits were set.
