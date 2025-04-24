@@ -25,8 +25,7 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._dynamo.utils import counters, dynamo_timed, identity
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
@@ -2285,57 +2284,15 @@ class AlgorithmSelectorCache(PersistentCache):
         Convert an ir.Buffer into a concrete torch.Tensor we can use for
         benchmarking.
         """
-        if isinstance(node, ir.Layout):
-            node = ir.Buffer(name="fake", layout=node)
-        # triton templates want the base tensor.
-        if isinstance(node, ir.BaseView):
-            node = node.unwrap_view()
-
-        # Inplace padding may reinterpret a tensor to a larger tensor if the
-        # stride is large enough. The V.graph.get_allocation_size takes this into account.
-        # So we need call as_strided in the end to 'view' the tensor with the correct
-        # sizes/strides
-        return AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            node.get_device(),
-            node.get_dtype(),
-            node.layout.offset,
-            V.graph.sizevars.size_hints(
-                V.graph.get_allocation_size(node),
-                fallback=config.unbacked_symint_fallback,
-            ),
-        )
+        return TensorMeta.from_irnode(node).to_tensor()
 
     @staticmethod
     def generate_example_value(
         size, stride, device, dtype, extra_size, allocation_size=None
     ):
-        # preserve rng states to avoid the rand_strided call below changes
-        # the rng states for the real model code.
-        with preserve_rng_state():
-            if allocation_size is None or allocation_size == size:
-                return rand_strided(
-                    size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                )
-            else:
-                return rand_strided(
-                    allocation_size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                ).as_strided(size, stride)
+        return TensorMeta.generate_example_value(
+            size, stride, device, dtype, extra_size, allocation_size
+        )
 
     @staticmethod
     def key_of(node):

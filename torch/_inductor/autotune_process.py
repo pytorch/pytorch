@@ -23,6 +23,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
+from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import ir
 from torch._inductor.codecache import (
     CppCodeCache,
@@ -38,6 +39,8 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     from types import ModuleType
+
+    from sympy import Expr
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
@@ -338,55 +341,101 @@ LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
 class TensorMeta:
     device: torch.device
     dtype: torch.dtype
-    sizes: torch._prims_common.ShapeType
-    strides: torch._prims_common.StrideType
+    size: torch._prims_common.ShapeType
+    stride: torch._prims_common.StrideType
     offset: int
+    allocation_size: Sequence[Expr]
     name: Optional[str] = None
 
-    @classmethod
+    @staticmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
+        irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]],
     ) -> Union[TensorMeta, list[TensorMeta]]:
         if isinstance(irnodes, Sequence):
-            result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
-            assert all(isinstance(x, TensorMeta) for x in result)
+            result = [TensorMeta.from_irnode(x) for x in irnodes]
             return result
+        else:
+            return TensorMeta.from_irnode(irnodes)
 
-        node = irnodes
+    @staticmethod
+    def from_irnode(node: LayoutOrBuffer) -> TensorMeta:
         if isinstance(node, ir.Layout):
             node = ir.Buffer(name="fake", layout=node)
+        # triton templates want the base tensor.
+        if isinstance(node, ir.BaseView):
+            node = node.unwrap_view()
 
+        assert not isinstance(node, ir.Layout)
+
+        # Inplace padding may reinterpret a tensor to a larger tensor if the
+        # stride is large enough. The V.graph.get_allocation_size takes this into account.
+        # So we need to call as_strided in the end to 'view' the tensor with the correct
+        # sizes/strides
         dtype = node.get_dtype()
         assert dtype is not None
         device = node.get_device()
         assert device is not None
 
         return TensorMeta(
-            device=device,
-            dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(
+            size=V.graph.sizevars.size_hints(
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
             ),
-            strides=V.graph.sizevars.size_hints(
+            stride=V.graph.sizevars.size_hints(
                 node.get_stride(),
                 fallback=config.unbacked_symint_fallback,
             ),
+            device=device,
+            dtype=dtype,
             offset=V.graph.sizevars.size_hint(
                 node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
+            allocation_size=V.graph.sizevars.size_hints(
+                V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
             ),
             name=node.get_name(),
         )
 
     def to_tensor(self) -> torch.Tensor:
-        return rand_strided(
-            self.sizes,
-            self.strides,
-            device=self.device,
-            dtype=self.dtype,
-            extra_size=self.offset,
+        return self.generate_example_value(
+            self.size,
+            self.stride,
+            self.device,
+            self.dtype,
+            self.offset,
+            self.allocation_size,
         )
+
+    @staticmethod
+    def generate_example_value(
+        size: torch._prims_common.ShapeType,
+        stride: torch._prims_common.StrideType,
+        device: torch.device,
+        dtype: torch.dtype,
+        extra_size: int,
+        allocation_size: Optional[Sequence[Expr]] = None,
+    ) -> torch.Tensor:
+        # preserve rng states to avoid the rand_strided call below changes
+        # the rng states for the real model code.
+        with preserve_rng_state():
+            if allocation_size is None or allocation_size == size:
+                return rand_strided(
+                    size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
+                )
+            else:
+                return rand_strided(
+                    allocation_size,
+                    stride,
+                    device=device,
+                    dtype=dtype,
+                    extra_size=extra_size,
+                ).as_strided(size, stride)
 
 
 @dataclasses.dataclass
@@ -419,7 +468,7 @@ class BenchmarkRequest:
                 assert all(
                     getattr(output_tensor_meta[0], attr) == getattr(x, attr)
                     for x in output_tensor_meta
-                    for attr in ["device", "dtype", "sizes", "strides", "offset"]
+                    for attr in ["device", "dtype", "size", "strides", "offset"]
                 )
             output_tensor_meta = output_tensor_meta[0]
         self.output_tensor_meta = output_tensor_meta
