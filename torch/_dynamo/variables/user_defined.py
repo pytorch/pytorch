@@ -987,8 +987,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj_var = VariableTracker.build(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif callable(self.value):
-            if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
