@@ -37,7 +37,7 @@ struct MPSHooks : public at::MPSHooksInterface {
   size_t getRecommendedMaxMemory() const override;
   void setMemoryFraction(double ratio) const override;
   C10_DEPRECATED_MESSAGE(
-    "getMPSHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kMPS)->is_pinned(...) instead.")
+      "getMPSHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kMPS)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override;
   Allocator* getPinnedMemoryAllocator() const override;
 
