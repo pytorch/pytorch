@@ -307,7 +307,9 @@ class _TorchNumpyPickleData:
 
 class _GraphModulePickleData:
     @classmethod
-    def reduce_helper(cls, pickler: GraphPickler, obj: torch.fx.GraphModule) -> tuple[
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch.fx.GraphModule
+    ) -> tuple[
         Callable[[Self, _UnpickleState], torch.fx.GraphModule],
         tuple[Self, _UnpickleStateToken],
     ]:
