@@ -32,7 +32,11 @@ class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+#else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
+#endif
   }
 };
 static ReduceAdd reduce_add;
@@ -140,7 +144,7 @@ struct _cuda_scatter_gather_internal_kernel {
       // the dst and src are contiguous and all the dims and pts are multiple of 16
       constexpr size_t element_size = sizeof(scalar_t);
       constexpr size_t alignment = 16;
-      if (at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride, element_size)) {
+      if (at::native::fast_gather_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
         auto ind_dim_size = index_size;
@@ -170,7 +174,7 @@ struct _cuda_scatter_gather_internal_kernel {
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
 
   }
-}; // struct _cuda_scatter_fill_internal_kernel
+}; // struct _cuda_scatter_gather_internal_kernel
 
 template <bool is_scatter_like = true, bool cast_to_opaque = true>
 struct cuda_scatter_gather_base_kernel {
