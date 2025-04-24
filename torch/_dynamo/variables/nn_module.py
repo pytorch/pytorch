@@ -602,7 +602,7 @@ class NNModuleVariable(VariableTracker):
                     gb_type="non-const NNModule method",
                     context=f"call_method: {self} {name} {args} {kwargs}",
                     explanation="Dynamo does not support calling "
-                    f"method `{name}` with non-constant arguments.",
+                    f"method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
                     hints=[],
                 )
 
