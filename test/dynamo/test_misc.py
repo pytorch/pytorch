@@ -1520,6 +1520,35 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 9)
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_user_code_statically_known(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            has_static_value,
+            statically_known_true,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            # At this point, this isn't statically known, only the hint says so.
+            if statically_known_true(x.shape[0] > 9):
+                raise Exception()
+            torch._check(x.shape[0] >= 10)
+            # But now it is.
+            return statically_known_true(x.shape[0] > 9), has_static_value(x.shape[0])
+
+        x = torch.zeros(10)
+        torch._dynamo.mark_dynamic(x, 0)
+        self.assertEqual(f(x), (True, False))
+
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
+        def g(x, y):
+            n = x.item()
+            torch._check(n == 3)
+            return has_static_value(4.0), has_static_value(n)
+
+        out = g(torch.tensor([3]), torch.zeros(1))
+        self.assertEqual(out, (True, True))
+
     def test_dictcomp(self):
         def fn1(inputs):
             return {k: v + 1 for k, v in inputs.items()}
