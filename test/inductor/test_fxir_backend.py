@@ -338,8 +338,8 @@ class FxirTestCase(InductorTestCase):
             if node.name == symbol_name
         ]
 
-        # Check the size hint of the placeholder.
-        self.assertEqual(placeholder.meta["val"], static_numel)
+        # Check the metadata of the placeholder.
+        self.assertEqual(placeholder.meta["val"], symbolic_numel)
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")

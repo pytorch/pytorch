@@ -62,9 +62,6 @@ class SymbolBuffer:
     def get_name(self) -> str:
         return str(self.symbol)
 
-    def get_hint(self) -> Any:
-        return V.graph.sizevars.size_hint(self.symbol)
-
 
 CodegenBuffer = Union[BufferLike, SymbolBuffer]
 
@@ -180,7 +177,7 @@ class FxConverter:
         assert name
         node.name = name
         node.meta["val"] = (
-            buffer.get_hint()
+            convert_to_symint(buffer.symbol)
             if isinstance(buffer, SymbolBuffer)
             else self._fake_tensor(
                 tuple(buffer.get_size()),
