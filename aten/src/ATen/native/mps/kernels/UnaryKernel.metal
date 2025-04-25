@@ -67,8 +67,28 @@ struct sqrt_functor {
   }
 };
 
+struct bitwise_not_functor {
+  template <typename T>
+  inline enable_if_t<!is_same_v<T, bool> && is_scalar_integral_v<T>, T>
+  operator()(const T x) {
+    return ~x;
+  }
+
+  template <typename T>
+  inline enable_if_t<is_same_v<T, bool>, T> operator()(const T x) {
+    return !x;
+  }
+};
+
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
+
+REGISTER_UNARY_OP(bitwise_not, int, int);
+REGISTER_UNARY_OP(bitwise_not, long, long);
+REGISTER_UNARY_OP(bitwise_not, short, short);
+REGISTER_UNARY_OP(bitwise_not, char, char);
+REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
+REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \

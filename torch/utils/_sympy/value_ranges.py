@@ -1004,22 +1004,6 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 
-def _rewrite_for_value_range_analysis(expr: sympy.Expr):
-    """
-    Sometimes accuracy of value range analysis can be improved
-    with simple rewriting rules.
-    """
-
-    # Rewrite X - X%Y to (X//Y) * Y.
-    x, y = sympy.Wild("x"), sympy.Wild("y")
-    expr = expr.replace(
-        x - torch.utils._sympy.functions.Mod(x, y),
-        torch.utils._sympy.functions.FloorDiv(x, y) * y,
-    )
-
-    return expr
-
-
 def bound_sympy(
     expr: sympy.Expr, ranges: Optional[dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
@@ -1063,7 +1047,6 @@ def bound_sympy(
             vr = ValueRanges.unknown()
         return vr
 
-    expr = _rewrite_for_value_range_analysis(expr)
     return sympy_interp(
         SymPyValueRangeAnalysis, ranges, expr, missing_handler=missing_handler
     )
