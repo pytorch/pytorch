@@ -1295,6 +1295,11 @@ class AOTInductorTestsTemplate:
                     torch.ones(1, device=device, dtype=torch.float32),
                     persistent=True,
                 )
+                self.register_buffer(
+                    "_tensor_constant1",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
                 self.sub_mod = SubModule(device)
 
             def forward(self, x):
@@ -1303,6 +1308,7 @@ class AOTInductorTestsTemplate:
                         x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
                     ),
                     self._tensor_constant0,
+                    self._tensor_constant1,
                     self.sub_mod._tensor_constant1,
                 )
 
