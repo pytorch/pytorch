@@ -480,7 +480,9 @@ class MetaTensorDescriber:
             functorch_stack=maybe_functorch_stack,
             autograd_meta_from=autograd_meta_from,
             current_level=current_level,
-            data=t if self.copy_data else None,
+            data=(t.real_tensor if _is_fake_tensor(t) else t)
+            if self.copy_data
+            else None,
         )
         if trace and r.id not in self.traced_tensors:
             trace_structured(
@@ -1696,11 +1698,18 @@ class MetaConverter(Generic[_TensorT]):
                         )
                         if self.copy_data:
                             with torch.no_grad(), no_dispatch():
-                                assert t.size is not None
-                                assert t.stride is not None
+                                assert t.data is not None
+                                assert t.data.size() is not None
+                                assert t.data.stride() is not None
+                                assert t.dtype == t.data.dtype
+                                assert t.device == t.data.device
                                 assert _is_fake_tensor(r)
+                                assert not _is_fake_tensor(t.data)
                                 r.real_tensor = torch.empty_strided(
-                                    t.size, t.stride, dtype=t.dtype, device=t.device
+                                    t.data.size(),
+                                    t.data.stride(),
+                                    dtype=t.dtype,
+                                    device=t.device,
                                 )
                                 _safe_copy(r.real_tensor, t.data)
 
