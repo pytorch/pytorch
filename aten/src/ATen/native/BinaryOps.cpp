@@ -988,7 +988,7 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
 }
 
 // Ceiling division implementation
-Tensor& ceiling_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
+static Tensor& ceiling_divide_out_impl(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   div_ceil_stub(iter.device_type(), iter);
   if (!result.defined()) {
@@ -997,28 +997,41 @@ Tensor& ceiling_divide_out(const Tensor& self, const Tensor& other, Tensor& resu
   return result;
 }
 
-Tensor ceiling_divide(const Tensor& self, const Tensor& other) {
+static Tensor ceiling_divide_impl(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_ceil_stub(iter.device_type(), iter);
   return iter.output();
 }
 
-Tensor& ceiling_divide_(Tensor& self, const Tensor& other) {
-  return native::ceiling_divide_out(self, other, self);
+static Tensor& ceiling_divide_impl_(Tensor& self, const Tensor& other) {
+  return ceiling_divide_out_impl(self, other, self);
 }
 
-// Alias for ceiling_divide 
-Tensor& divup_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::ceiling_divide_out(result, self, other);
+// Public API
+static Tensor& ceiling_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return ceiling_divide_out_impl(self, other, result);
 }
 
-Tensor divup(const Tensor& self, const Tensor& other) {
-  return at::ceiling_divide(self, other);
+static Tensor ceiling_divide(const Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl(self, other);
 }
 
-Tensor& divup_(Tensor& self, const Tensor& other) {
-  return self.ceiling_divide_(other);
+static Tensor& ceiling_divide_(Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl_(self, other);
+}
+
+// Alias for ceiling_divide
+static Tensor& divup_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return ceiling_divide_out_impl(self, other, result);
+}
+
+static Tensor divup(const Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl(self, other);
+}
+
+static Tensor& divup_(Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl_(self, other);
 }
 
 // TODO: Make this structured to undo the perf regression from native:: removal
@@ -1550,20 +1563,20 @@ Tensor& floor_divide_(Tensor& self, const Scalar& other) {
   return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
 }
 
-Tensor ceiling_divide(const Tensor& self, const Scalar& other) {
-  return at::ceiling_divide(self, wrapped_scalar_tensor(other));
+static Tensor ceiling_divide(const Tensor& self, const Scalar& other) {
+  return ceiling_divide_impl(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& ceiling_divide_(Tensor& self, const Scalar& other) {
-  return at::ceiling_divide_out(self, self, wrapped_scalar_tensor(other));
+static Tensor& ceiling_divide_(Tensor& self, const Scalar& other) {
+  return ceiling_divide_out_impl(self, self, wrapped_scalar_tensor(other));
 }
 
-Tensor divup(const Tensor& self, const Scalar& other) {
-  return at::ceiling_divide(self, other);
+static Tensor divup(const Tensor& self, const Scalar& other) {
+  return ceiling_divide_impl(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& divup_(Tensor& self, const Scalar& other) {
-  return self.ceiling_divide_(other);
+static Tensor& divup_(Tensor& self, const Scalar& other) {
+  return ceiling_divide_out_impl(self, self, wrapped_scalar_tensor(other));
 }
 
 Tensor& fmod_out(const Tensor& self, const Scalar& other, Tensor & result) {
