@@ -33,7 +33,7 @@ pushd tmp
 set VC_VERSION_LOWER=14
 set VC_VERSION_UPPER=36
 
-call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
+call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
 
 set install_root=%CD%
 set INCLUDE=%INCLUDE%;%install_root%\include;%install_root%\include\torch\csrc\api\include
