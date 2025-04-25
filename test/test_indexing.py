@@ -882,6 +882,7 @@ class TestIndexing(TestCase):
         result = torch.take_along_dim(x, indices, dim=1)
         expected = torch.tensor([[30, 20, 10], [60, 50, 40]])
         self.assertTrue(torch.equal(result, expected))
+        
     def test_bool_indices(self, device):
         v = torch.randn(5, 7, 3, device=device)
         boolIndices = torch.tensor(

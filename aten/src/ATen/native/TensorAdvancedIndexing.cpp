@@ -2670,7 +2670,8 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
   // Wrap negative indices to positive (Python-style)
-  indices_broadcasted = indices_broadcasted.remainder(self_broadcasted.size(dim));
+indices_broadcasted =
+indices_broadcasted.remainder(self_broadcasted.size(dim));
   return std::make_tuple(
       std::move(self_broadcasted),
       std::move(indices_broadcasted),
@@ -2710,7 +2711,10 @@ Tensor take_along_dim(
     auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
     auto dim_size = self_broadcasted.size(dim);
-    auto fixed_indices = at::where(indices_broadcasted >= 0, indices_broadcasted, indices_broadcasted + dim_size);
+    auto fixed_indices = at::where(
+         indices_broadcasted >= 0,
+          indices_broadcasted,
+          indices_broadcasted + dim_size);
     return self_broadcasted.gather(dim, fixed_indices);
   }
 
