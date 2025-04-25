@@ -116,19 +116,6 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_DISTRIBUTED=0
   export USE_MKLDNN=0
 
-  # Reference: https://github.com/shibatch/sleef/tree/master/docs/1-user-guide#method-2
-  export SLEEF_TARGET_EXEC_USE_QEMU=ON
-  # TODO: Remove the following sleef update code once the submodule is updated to the b56eab1
-  # Update sleef submodule for RISC-V
-  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
-  git config --global --add safe.directory /var/lib/jenkins/workspace
-  git submodule update --init third_party/sleef
-  cd third_party/sleef
-  git remote add upstream https://github.com/shibatch/sleef || true
-  git fetch upstream
-  git checkout master
-  git pull upstream "$(git rev-parse --abbrev-ref HEAD)"
-  cd ../..
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
