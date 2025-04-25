@@ -21,6 +21,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
+#include <c10/util/env.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 
@@ -854,8 +855,8 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   static auto fast_math = []() {
-    auto val = std::getenv("PYTORCH_MPS_FAST_MATH");
-    return val && std::stoi(val) != 0;
+    auto const val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");
+    return val.has_value() && val != "0";
   }();
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
@@ -922,7 +923,8 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 }
 
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
-  return std::make_shared<MetalKernelFunction>(getPipelineStateForFunc(name));
+  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  return std::make_shared<MetalKernelFunction>(cpl, func);
 }
 
 class BundledShaderLibary : public MetalShaderLibrary {
@@ -1088,10 +1090,12 @@ DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
 }
 
 // MetalKernelFunction implementation
-MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_) : cps([cps_ retain]) {}
+MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_, MTLFunction_t f_)
+    : cps([cps_ retain]), func([f_ retain]) {}
 
 MetalKernelFunction::~MetalKernelFunction() {
   [cps release];
+  [func release];
 }
 
 void MetalKernelFunction::runCommandBlock(std::function<void(void)> run) {
@@ -1150,6 +1154,10 @@ uint64_t MetalKernelFunction::getThreadExecutionWidth() const {
 
 uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
   return [cps staticThreadgroupMemoryLength];
+}
+
+void* get_tensor_gpu_address(const at::TensorBase& t) {
+  return reinterpret_cast<void*>(getMTLBufferStorage(t).gpuAddress + t.storage_offset() * t.element_size());
 }
 
 } // namespace at::native::mps
