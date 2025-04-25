@@ -353,7 +353,6 @@ class AsyncCompile:
                 chromium_log = get_chromium_event_logger()
                 event_data = chromium_log.get_event_data().get("PyCodeCache.load_by_key_path", {})
                 kernel_info = event_data.get("triton_kernel_info", {})
-                kernel_info["is_backward"] = is_backward
                 kernel_info[kernel_name] = info
                 chromium_log.add_event_data(
                     "PyCodeCache.load_by_key_path",
@@ -391,7 +390,6 @@ class AsyncCompile:
                 chromium_log = get_chromium_event_logger()
                 event_data = chromium_log.get_event_data().get("PyCodeCache.load_by_key_path", {})
                 kernel_info = event_data.get("triton_kernel_info", {})
-                kernel_info["is_backward"] = is_backward
                 kernel_info[kernel_name] = info
                 chromium_log.add_event_data(
                     "PyCodeCache.load_by_key_path",
@@ -479,11 +477,10 @@ class AsyncCompile:
             data = event_data["PyCodeCache.load_by_key_path"]
             if "triton_kernel_info" in data:
                 info = data["triton_kernel_info"]
-                backward_str = "backward" if info["is_backward"] else "forward"
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
-                        "name": f"triton_kernel_info_{backward_str}",
+                        "name": f"triton_kernel_info",
                         "encoding": "json",
                     },
                     payload_fn=lambda: json.dumps(data["triton_kernel_info"]),
