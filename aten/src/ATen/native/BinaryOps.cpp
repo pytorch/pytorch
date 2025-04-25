@@ -1568,7 +1568,8 @@ static Tensor ceiling_divide(const Tensor& self, const Scalar& other) {
 }
 
 static Tensor& ceiling_divide_(Tensor& self, const Scalar& other) {
-  return ceiling_divide_out_impl(self, self, wrapped_scalar_tensor(other));
+  auto other_tensor = wrapped_scalar_tensor(other);
+  return ceiling_divide_out_impl(self, self, other_tensor);
 }
 
 static Tensor divup(const Tensor& self, const Scalar& other) {
@@ -1576,7 +1577,8 @@ static Tensor divup(const Tensor& self, const Scalar& other) {
 }
 
 static Tensor& divup_(Tensor& self, const Scalar& other) {
-  return ceiling_divide_out_impl(self, self, wrapped_scalar_tensor(other));
+  auto other_tensor = wrapped_scalar_tensor(other);
+  return ceiling_divide_out_impl(self, self, other_tensor);
 }
 
 Tensor& fmod_out(const Tensor& self, const Scalar& other, Tensor & result) {
