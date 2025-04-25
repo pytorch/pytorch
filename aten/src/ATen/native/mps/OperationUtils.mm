@@ -333,8 +333,7 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
         if (exclude_shape) {
           str += "-1";
         } else {
-          str +=
-              getArrayRefString(tensor.sizes());
+          str += getArrayRefString(tensor.sizes());
         }
       }
       str += "]";
