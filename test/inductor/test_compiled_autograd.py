@@ -1198,7 +1198,7 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    def test_dynamic_shapes_annotations_on_initial_gradient(self):
+    def test_dynamic_shapes_annotations(self):
         @torch.compile
         def f(x):
             return x.sin().sin()
