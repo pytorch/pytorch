@@ -1254,7 +1254,7 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
         return socket_power
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
-        if socker_power != "N/A":
+        if socket_power != "N/A":
             return socket_power
         else:
             return 0
