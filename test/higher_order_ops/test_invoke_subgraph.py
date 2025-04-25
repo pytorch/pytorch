@@ -410,10 +410,10 @@ class GraphModule(torch.nn.Module):
 
         ___forward_invoke_subgraph_0_post_graph_1 = self.___forward_invoke_subgraph_0_post_graph
 
-        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem = primals_2 = None
-        getitem_11: "f32[8]" = invoke_subgraph_5[2]
-        getitem_10: "f32[8]" = invoke_subgraph_5[1]
-        getitem_1: "f32[8]" = invoke_subgraph_5[0];  invoke_subgraph_5 = None
+        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem = primals_2 = None
+        getitem_11: "f32[8]" = invoke_subgraph_6[2]
+        getitem_10: "f32[8]" = invoke_subgraph_6[1]
+        getitem_1: "f32[8]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
         return (getitem_1, getitem_9, getitem_8, getitem_11, getitem_10)
 
     class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
