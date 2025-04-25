@@ -19,7 +19,7 @@ function install_cuda {
         runfile="${runfile}_sbsa"
     fi
     runfile="${runfile}.run"
-    wget -q https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/${runfile}
+    wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
     chmod +x ${runfile}
     ./${runfile} --toolkit --silent
     rm -f ${runfile}
