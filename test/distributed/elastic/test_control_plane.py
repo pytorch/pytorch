@@ -8,14 +8,14 @@ import socket
 import tempfile
 from contextlib import contextmanager
 
+from urllib3.connection import HTTPConnection
+from urllib3.connectionpool import HTTPConnectionPool
+
 from torch.distributed.elastic.control_plane import (
     TORCH_WORKER_SERVER_SOCKET,
     worker_main,
 )
 from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
-
-from urllib3.connection import HTTPConnection
-from urllib3.connectionpool import HTTPConnectionPool
 
 
 class UnixHTTPConnection(HTTPConnection):
