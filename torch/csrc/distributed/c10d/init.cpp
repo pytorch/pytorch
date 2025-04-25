@@ -2987,9 +2987,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             bool lazyInit = ::c10d::getDefaultGlooLazyInit();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv && strlen(ifnameEnv) > 1) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
+            auto ifnameEnv =
+                c10::utils::get_env(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && ifnameEnv->size() > 1) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(
                         iface, lazyInit));
@@ -3148,6 +3149,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "get_error",
               &::c10d::ProcessGroupNCCL::getError,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_enable_nan_check",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 bool enable_nan_check) {
+                self->setEnableNanCheck(enable_nan_check);
+              },
+              py::arg("enable_nan_check"),
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -3170,6 +3179,9 @@ for details.
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
 #ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite("split_share", &ncclConfig_t::splitShare)
+#endif
+#ifdef NCCL_HAS_QOS
+      .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
 #endif
       .def_property(
           "net_name",

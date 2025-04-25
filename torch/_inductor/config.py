@@ -124,6 +124,9 @@ force_disable_caches: bool = Config(
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
+# Unsafe way to mark function as cacheable
+unsafe_marked_cacheable_functions: list[str] = []
+
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
@@ -421,7 +424,7 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # NOTE: This feature is deprecated and will be defauled to False in the future.
 # Whether we fall back to ATen or hard error when no matches are found during autotuning
 autotune_fallback_to_aten = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "0") == "1"
 )
 
 # the value used as a fallback for the unbacked SymInts
@@ -946,9 +949,9 @@ class cpp:
     vec_isa_ok: Optional[bool] = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = int(
@@ -1118,13 +1121,12 @@ class triton:
     )
 
     # should we put op names in kernel names
-    # False: No special names (just triton__1, triton__2, etc.)
     # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
     # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
     # "inductor_node": Maps to the node name in the FX graph passed to Inductor
-    descriptive_names: Union[
-        bool, Literal["torch", "original_aten", "inductor_node"]
-    ] = "original_aten"
+    descriptive_names: Literal["torch", "original_aten", "inductor_node"] = (
+        "original_aten"
+    )
 
     # use alternate codegen for smaller reductions
     persistent_reductions = (
