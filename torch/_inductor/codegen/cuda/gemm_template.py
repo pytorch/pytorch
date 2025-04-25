@@ -24,7 +24,7 @@ from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
-from .cutlass_presets import PRESETS
+from .cutlass_presets import gen_cutlass_presets
 
 
 log = logging.getLogger(__name__)
@@ -865,11 +865,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             if inductor_cuda_config.cutlass_op_allowlist_regex:
                 patterns.append(inductor_cuda_config.cutlass_op_allowlist_regex)
             if inductor_cuda_config.cutlass_presets:
+                presets = gen_cutlass_presets()
                 preset_nums = [
                     int(x) for x in inductor_cuda_config.cutlass_presets.split(",")
                 ]
                 for preset_num in preset_nums:
-                    preset = PRESETS.get(preset_num, {}).get(
+                    preset = presets.get(preset_num, {}).get(
                         inductor_cuda_config.cutlass_instantiation_level, []
                     )
 
