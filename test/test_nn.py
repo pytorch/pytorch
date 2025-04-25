@@ -6718,6 +6718,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, ".*both arguments.*1D.*"):
             m(inp)
 
+    @tf32_on_and_off(0.005)
     @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     @parametrize_test('bias', [
         subtest(False, name='nobias'), subtest(True, name='bias')])
