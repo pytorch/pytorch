@@ -5,6 +5,8 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import sympy
 
+import torch
+from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
@@ -37,7 +39,7 @@ def solve_for_zero(expr: sympy.Expr) -> Optional[tuple[sympy.Rel, sympy.Expr]]:
     return out
 
 
-def solve_for_tiling(expr: sympy.Expr) -> Optional[int]:
+def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     """
     Giving an expr with a single free symbol, try to find a tiling that would
     make the expression coalesced with respect to that symbol.
@@ -82,7 +84,11 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[int]:
 
     eq_1_expr = sum(eq_1_expressions)
 
-    def indexing_div_rep(x, y, z=None):
+    def indexing_div_rep(
+        x: sympy.Expr,
+        y: sympy.Expr,
+        z: Optional[sympy.Expr] = None,
+    ) -> sympy.Expr:
         return x / y
 
     is_non_differentiable = eq_1_expr.has(ModularIndexing) or eq_1_expr.has(
@@ -136,37 +142,146 @@ def find_coalesced_var(
     return None
 
 
+@dataclasses.dataclass(frozen=True)
+class FusedNormalizedReadsWrites:
+    """
+    Normalized reads and writes for nodes in the same FusedSchedulerNode.
+    """
+
+    index_vars: OrderedSet[sympy.Symbol]
+    reduce_vars: OrderedSet[sympy.Symbol]
+    reads: OrderedSet[sympy.Expr]
+    writes: OrderedSet[sympy.Expr]
+    var_ranges: dict[sympy.Symbol, int]
+
+
 def _extract_fused_node_meta(
     node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> tuple[
-    OrderedSet[sympy.Symbol],
-    OrderedSet[sympy.Symbol],
-    OrderedSet[sympy.Expr],
-    OrderedSet[sympy.Expr],
-    dict[sympy.Symbol, int],
-]:
+) -> FusedNormalizedReadsWrites:
     """Extracts index variables, reduce variables, read/write expressions, and variable ranges from a fused node."""
     reads: OrderedSet[sympy.Expr] = OrderedSet()
     writes: OrderedSet[sympy.Expr] = OrderedSet()
-    all_index_vars: OrderedSet[sympy.Symbol] = OrderedSet()
-    all_reduce_vars: OrderedSet[sympy.Symbol] = OrderedSet()
-    var_ranges: dict[sympy.Symbol, int] = {}
 
     outputs = node.get_buffer_names()
     inputs = OrderedSet(dep.name for dep in node.read_writes.reads)
 
+    pointwise_numel = node.group[1][0]
+    red_numel = node.group[1][1]
+
+    # If there are fused nodes with one node having:
+    # sizes = ([2048], [])
+    # ranges: {p0: 2048}
+    # and another node with
+    # sizes: ([32, 64], [])
+    # ranges: {p0: 32, p1: 64}
+    # The p0 in the first node actually corresponds to
+    # 64 * p0 + p1
+    # So we find the node with the most number of splits, and
+    # normalize the other nodes to use the same iter vars.
+
+    def get_pw_red_splits(
+        n: "SchedulerNode",
+    ) -> tuple[
+        tuple[list[sympy.Symbol], list[int]], tuple[list[sympy.Symbol], list[int]]
+    ]:
+        if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+            return (
+                (n._body.iter_vars, n._body.sizes[0]),
+                (n._body.reduce_vars, n._body.sizes[1]),
+            )  # type: ignore[return-value]
+
+        assert sympy_product(n._body.sizes[0]) == pointwise_numel * red_numel  # type: ignore[operator]
+        i = len(n._body.sizes[0]) - 1
+        prod = 1
+        while i >= 0:
+            prod *= n._body.sizes[0][i]
+            if prod == red_numel:
+                break
+
+        if i >= 0:
+            pw_splits = n._body.sizes[0][0:i]
+            iter_vars = n._body.iter_vars[0:i]
+
+            red_splits = n._body.sizes[0][i:]
+            red_vars = n._body.iter_vars[i:]
+            return (iter_vars, pw_splits), (red_vars, red_splits)  # type: ignore[return-value]
+
+        # TODO - handle
+        raise RuntimeError(
+            f"Unhandled node: size: {n._body.sizes}, pw: {pointwise_numel}, red: {red_numel}"
+        )
+
+    pw_splits: list[int] = []
+    red_splits: list[int] = []
+
     for n in node.get_nodes():
+        if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
+            continue
+
+        (_, n_pw_splits), (_, n_red_splits) = get_pw_red_splits(n)
+        if len(n_pw_splits) > len(pw_splits):
+            pw_splits = n_pw_splits
+        if len(n_red_splits) > len(red_splits):
+            red_splits = n_red_splits
+
+    # lets use different prefix (`n`) to distinguish
+    (norm_pw_vars, norm_red_vars), ranges = index_vars_no_squeeze(
+        pw_splits, red_splits, prefix="n"
+    )
+
+    def norm_to_split(
+        norm_ranges: dict[sympy.Symbol, int],
+        norm_vars: list[sympy.Symbol],
+        curr_sizes: list[int],
+        curr_vars: list[sympy.Symbol],
+    ) -> dict[sympy.Symbol, sympy.Expr]:
+        norm_index = len(norm_vars) - 1
+        var_map: dict[sympy.Symbol, sympy.Expr] = {}
+        for var, size in zip(reversed(curr_vars), reversed(curr_sizes)):
+            var_replacement = []
+            prod = 1
+            while size != 1:
+                norm_var = norm_vars[norm_index]
+                # NYI : non compatible splits - could try again with different splits
+                assert size % norm_ranges[norm_var] == 0
+                size = size // norm_ranges[norm_var]
+                norm_index -= 1
+                var_replacement.append(norm_var * prod)
+                prod *= norm_ranges[norm_var]
+
+            var_map[var] = sum(reversed(var_replacement))
+
+        return var_map
+
+    for n in node.get_nodes():
+        if not isinstance(n, torch._inductor.scheduler.SchedulerNode):
+            continue
+
         body = n._body
-        all_index_vars |= body.iter_vars
-        all_reduce_vars |= body.reduce_vars
-        var_ranges.update(body.var_ranges)
-
+        n_reads: OrderedSet[sympy.Expr] = OrderedSet()
+        n_writes: OrderedSet[sympy.Expr] = OrderedSet()
         for inp in inputs:
-            reads |= body.get_all_read_expr(inp)
+            n_reads |= body.get_all_read_expr(inp)
         for out in outputs:
-            writes |= body.get_all_write_expr(out)
+            n_writes |= body.get_all_write_expr(out)
 
-    return all_index_vars, all_reduce_vars, reads, writes, var_ranges
+        (iter_vars, pw_splits), (red_vars, red_splits) = get_pw_red_splits(n)
+        var_map = norm_to_split(ranges, norm_pw_vars, pw_splits, iter_vars)
+        var_map.update(norm_to_split(ranges, norm_red_vars, red_splits, red_vars))
+
+        n_reads = [sympy_subs(read, var_map) for read in n_reads]
+        n_writes = [sympy_subs(read, var_map) for read in n_writes]
+
+        reads |= n_reads
+        writes |= n_writes
+
+    return FusedNormalizedReadsWrites(
+        norm_pw_vars,  # type: ignore[arg-type]
+        norm_red_vars,  # type: ignore[arg-type]
+        reads,
+        writes,
+        ranges,
+    )
 
 
 def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
@@ -200,6 +315,8 @@ class VarTiling:
 class CoalesceVarAnalysis:
     coalesced_by_var: dict[sympy.Expr, int]
 
+    norm_read_writes: FusedNormalizedReadsWrites
+
     # Expression, split, score
     suggested_split: Optional[VarTiling] = None
 
@@ -220,9 +337,13 @@ def analyze_memory_coalescing(
     Tiling p0 by 64 will make this expression coalesced.
     """
 
-    _, _, reads, writes, var_ranges = _extract_fused_node_meta(fused_node)
+    norm_read_writes = _extract_fused_node_meta(fused_node)
 
-    coalesced_by_var = Counter()
+    reads = norm_read_writes.reads
+    writes = norm_read_writes.writes
+    var_ranges = norm_read_writes.var_ranges
+
+    coalesced_by_var: dict[sympy.Symbol, int] = Counter()
     uncoalesced_addrs: dict[sympy.Expr, int] = {}
 
     for memory_expr in itertools.chain(reads, writes):
@@ -234,21 +355,28 @@ def analyze_memory_coalescing(
             uncoalesced_addrs[memory_expr] = size
 
     if not uncoalesced_addrs:
-        return CoalesceVarAnalysis(coalesced_by_var=coalesced_by_var)
+        return CoalesceVarAnalysis(
+            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+        )
 
     # map from var -> tiling -> total_score
     potential_tiling_scores: dict[sympy.Expr, dict[int, int]] = defaultdict(Counter)
 
     for uncoalesced_expr, addr_score in uncoalesced_addrs.items():
-        expr_subs = {v: 0 for v in uncoalesced_expr.free_symbols}
+        expr_subs = dict.fromkeys(uncoalesced_expr.free_symbols, 0)
         for v in uncoalesced_expr.free_symbols:
             del expr_subs[v]
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
             tiling_factor = solve_for_tiling(single_var_expr)
-            if tiling_factor is None or not tiling_factor.is_constant():
+            if (
+                tiling_factor is None
+                or not tiling_factor.is_constant()
+                or not tiling_factor.is_integer
+            ):
                 continue
 
+            tiling_factor = int(tiling_factor)
             MIN_TILING_BLOCK = 4
             if any(
                 (b < MIN_TILING_BLOCK)
@@ -269,7 +397,9 @@ def analyze_memory_coalescing(
                 best_tiling_score = score
 
     if best_tiling is None:
-        return CoalesceVarAnalysis(coalesced_by_var=coalesced_by_var)
+        return CoalesceVarAnalysis(
+            coalesced_by_var=coalesced_by_var, norm_read_writes=norm_read_writes
+        )
 
     # TODO - for strictly pointwise fusions,
     # we can consider just swizzling the var if the var we are going to tile
@@ -277,5 +407,6 @@ def analyze_memory_coalescing(
     # TODO - could also prefer index var splits to reduction, better tested
     return CoalesceVarAnalysis(
         coalesced_by_var=coalesced_by_var,
-        suggested_split=VarTiling(best_tiling[0], best_tiling[1], score),
+        norm_read_writes=norm_read_writes,
+        suggested_split=VarTiling(best_tiling[0], best_tiling[1], best_tiling_score),
     )

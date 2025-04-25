@@ -18,8 +18,8 @@ import sympy
 
 import torch
 import torch._logging
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch._inductor.tiling_utils import analyze_memory_coalescing
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -2005,23 +2005,15 @@ class SIMDScheduling(BaseScheduling):
         """
         Generates a tiling, and a score of each tile according to each tiles coalesced memory accesses.
         """
-        tilings = []
         tiling_var: Optional[sympy.Expr] = (
             None
             if not coalesce_analysis.suggested_split
             else coalesce_analysis.suggested_split.var
         )
-        all_red_vars: OrderedSet[sympy.Symbol] = OrderedSet()
-        all_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
-        ranges = {}
-        for node in node_schedule:
-            if isinstance(node, scheduler.SchedulerNode):
-                all_red_vars |= node._body.reduce_vars
-                all_iter_vars |= node._body.iter_vars
-                ranges.update(node._body.var_ranges)
 
-        # TODO - need to sort the iter/red vars to correspond to node pointwise/reduction numel?
-        all_iter_vars -= all_red_vars
+        all_iter_vars = coalesce_analysis.norm_read_writes.index_vars
+        all_red_vars = coalesce_analysis.norm_read_writes.reduce_vars
+        ranges = coalesce_analysis.norm_read_writes.var_ranges
 
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
@@ -2046,8 +2038,13 @@ class SIMDScheduling(BaseScheduling):
             """
 
             ranges = pw_ranges if is_pointwise else red_ranges
+            target_numel = pointwise_numel if is_pointwise else reduction_numel
+            # Some kernels have no reduction ranges, and a reduction numel of 1
             if not ranges:
-                return ([], [])
+                if target_numel:
+                    return ([target_numel], [])
+                else:
+                    return ([], [])
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
             if out := scored_sub_split.get(key, None):
