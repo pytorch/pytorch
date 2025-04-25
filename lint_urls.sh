@@ -44,6 +44,8 @@ done < <(
     ':(exclude)**/*.gradle*' \
     ':(exclude)**/*gradle*' \
     ':(exclude)**/third-party/**' \
+    ':(exclude)**/third_party/**' \
+  | grep -v '@lint-ignore' \
   | sed -E 's/[^/[:alnum:]]+$//' \
   | grep -Ev '://(0\.0\.0\.0|127\.0\.0\.1|localhost)([:/])' \
   | grep -Ev 'fwdproxy:8080' \
