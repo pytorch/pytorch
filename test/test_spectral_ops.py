@@ -1226,6 +1226,14 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
             y = x.stft(10, pad_mode='constant')
 
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_stft_align_to_window_only_requires_non_center(self, device):
+        x = torch.rand(100)
+        for align_to_window in [True, False]:
+            with self.assertRaisesRegex(RuntimeError, 'stft align_to_window should only be set when center = false'):
+                y = x.stft(10, center=True, return_complex=True, align_to_window=align_to_window)
+
     # stft and istft are currently warning if a window is not provided
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
@@ -1358,7 +1366,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft(pattern)
 
     @onlyNativeDeviceTypes
@@ -1425,7 +1433,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft_with_padding(pattern)
 
     @onlyNativeDeviceTypes

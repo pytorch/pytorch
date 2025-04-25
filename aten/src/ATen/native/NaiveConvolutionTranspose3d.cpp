@@ -20,9 +20,6 @@
 
 namespace at::native {
 
-template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-
 namespace {
 
 static inline void slow_conv_transpose3d_shape_check(
@@ -668,8 +665,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
       output_padding_height,
       1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t n_output_plane;
+  int64_t n_output_plane = 0;
   if (grad_weight.defined()) {
     n_output_plane = grad_weight.size(1);
   } else if (grad_bias.defined()) {

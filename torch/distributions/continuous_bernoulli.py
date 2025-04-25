@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from numbers import Number
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -14,7 +14,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch.types import _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["ContinuousBernoulli"]
@@ -46,20 +46,25 @@ class ContinuousBernoulli(ExponentialFamily):
     autoencoders, Loaiza-Ganem G and Cunningham JP, NeurIPS 2019.
     https://arxiv.org/abs/1907.06845
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.unit_interval
     _mean_carrier_measure = 0
     has_rsample = True
 
     def __init__(
-        self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None
+        self,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
+        lims: tuple[float, float] = (0.499, 0.501),
+        validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, Number)
+            is_scalar = isinstance(probs, _Number)
             (self.probs,) = broadcast_all(probs)
             # validate 'probs' here if necessary as it is later clamped for numerical stability
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
@@ -68,7 +73,8 @@ class ContinuousBernoulli(ExponentialFamily):
                     raise ValueError("The parameter probs has invalid values")
             self.probs = clamp_probs(self.probs)
         else:
-            is_scalar = isinstance(logits, Number)
+            assert logits is not None  # helps mypy
+            is_scalar = isinstance(logits, _Number)
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
         if is_scalar:

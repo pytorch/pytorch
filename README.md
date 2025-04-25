@@ -169,8 +169,6 @@ Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
 
-\* We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
-
 An example of environment setup is shown below:
 
 * Linux:
@@ -223,7 +221,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 #### Get the PyTorch Source
 ```bash
-git clone --recursive https://github.com/pytorch/pytorch
+git clone https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
@@ -245,7 +243,8 @@ pip install -r requirements.txt
 ```bash
 pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
+# magma installation: run with active conda environment. specify CUDA version to install
+.ci/docker/common/install_magma_conda.sh 12.4
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
@@ -274,13 +273,6 @@ conda install -c conda-forge libuv=1.39
 #### Install PyTorch
 **On Linux**
 
-If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
-```bash
-export _GLIBCXX_USE_CXX11_ABI=1
-```
-
-Please **note** that starting from PyTorch 2.5, the PyTorch build with XPU supports both new and old C++ ABIs. Previously, XPU only supported the new C++ ABI. If you want to compile with Intel GPU support, please follow [Intel GPU Support](#intel-gpu-support).
-
 If you're compiling for AMD ROCm then first run this command:
 ```bash
 # Only run this if you're compiling for ROCm
@@ -305,7 +297,7 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 
 **CPU-only builds**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
 python setup.py develop
@@ -351,6 +343,28 @@ set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC
 
 python setup.py develop
 
+```
+
+**Intel GPU builds**
+
+In this mode PyTorch with Intel GPU support will be built.
+
+Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed and the environment variables are configured prior to starting the build. For build tool support, `Visual Studio 2022` is required.
+
+Then PyTorch can be built with the command:
+
+```cmd
+:: CMD Commands:
+:: Set the CMAKE_PREFIX_PATH to help find corresponding packages
+:: %CONDA_PREFIX% only works after `conda activate custom_env`
+
+if defined CMAKE_PREFIX_PATH (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library;%CMAKE_PREFIX_PATH%"
+) else (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
+)
+
+python setup.py develop
 ```
 
 ##### Adjust Build Options (Optional)
@@ -409,8 +423,19 @@ make -f docker.Makefile
 
 ### Building the Documentation
 
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
-readthedocs theme.
+To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
+and the pytorch_sphinx_theme2.
+
+
+
+Before you build the documentation locally, ensure `torch` is
+installed in your environment. For small fixes, you can install the
+nightly version as described in [Getting Started](https://pytorch.org/get-started/locally/).
+
+For more complex fixes, such as adding a new module and docstrings for
+the new module, you might need to install torch [from source](#from-source).
+See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
+for docstring conventions.
 
 ```bash
 cd docs/
@@ -424,12 +449,22 @@ Run `make` to get a list of all available output formats.
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
 
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-`conda`) then `npm` will probably install a version of `katex` that is not
-compatible with your version of `nodejs` and doc builds will fail.
-A combination of versions that is known to work is `node@6.13.1` and
-`katex@0.13.18`. To install the latter with `npm` you can run
-```npm install -g katex@0.13.18```
+> [!NOTE]
+> If you installed `nodejs` with a different package manager (e.g.,
+> `conda`) then `npm` will probably install a version of `katex` that is not
+> compatible with your version of `nodejs` and doc builds will fail.
+> A combination of versions that is known to work is `node@6.13.1` and
+> `katex@0.13.18`. To install the latter with `npm` you can run
+> ```npm install -g katex@0.13.18```
+
+> [!NOTE]
+> If you see a numpy incompatibility error, run:
+> ```
+> pip install 'numpy<2'
+> ```
+
+When you make changes to the dependencies run by CI, edit the
+`.ci/docker/requirements-docs.txt` file.
 
 ### Previous Versions
 

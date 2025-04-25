@@ -101,7 +101,7 @@ struct ArgumentSpec {
     const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
     arg.defined_ = t->defined();
     if (arg.defined_) {
-      arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
+      arg.requires_grad_ = with_grad && t->requires_grad();
       arg.dim_ = t->dim();
       at::Device device = t->device();
       arg.dev_type_ =
@@ -240,7 +240,7 @@ struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
-      : hash_code(0), ninputs(inputs.size()) {
+      : ninputs(inputs.size()) {
     int32_t all_dims = 0;
     const auto num_inputs = inputs.size();
     for (const auto i : c10::irange(num_inputs)) {
@@ -325,7 +325,7 @@ struct CompleteArgumentSpec {
   int64_t* sizes_strides() {
     return data.data() + ninputs;
   }
-  size_t hash_code; // precomputed on construction
+  size_t hash_code{0}; // precomputed on construction
   size_t ninputs;
   // layout is ninputs of TensorPOD (each 64-bit) followed by their size and
   // stride info for 3 tensors:

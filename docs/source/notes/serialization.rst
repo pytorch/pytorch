@@ -505,6 +505,7 @@ Config
     See :func:`~torch.serialization.set_crc32_options`.
   * ``use_pinned_memory_for_d2h``: for storages that are on an accelerator when passed to ``torch.save``, whether to
     move storage to pinned memory or pageable memory on CPU within ``torch.save``. (Default: ``False`` (i.e. pageable))
+  * ``storage_alignment``: alignment of storages in the checkpoint during ``torch.save`` in bytes. (Default ``64``)
 
 ``torch.utils.serialization.config.load`` contains options that control the behavior of ``torch.load``.
 
@@ -515,3 +516,6 @@ Config
     (Default : ``torch.serialization.LoadEndianness.NATIVE``)
   * ``mmap_flags``: See :class:`~torch.serialization.set_default_mmap_options`.
     (Default : ``MAP_PRIVATE``)
+  * ``calculate_storage_offsets``: If this config is set to ``True``, offsets for storages will be
+    calculated rather than read via random reads when using ``torch.load(mmap=True)``. This minimizes
+    random reads, which can be helpful when the file is being loaded over a network. (Default : ``False``)

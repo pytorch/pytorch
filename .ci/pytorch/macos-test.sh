@@ -18,6 +18,9 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
+# enable debug asserts in serialization
+export TORCH_SERIALIZATION_DEBUG=1
+
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
@@ -218,25 +221,39 @@ test_torchbench_smoketest() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  local backend=eager
-  local dtype=notset
   local device=mps
+  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam pytorch_unet stable_diffusion_text_encoder moco speech_transformer)
 
-  touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
-  touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+  for backend in eager inductor; do
 
-  echo "Setup complete, launching torchbench training performance run"
-  for model in hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152; do
-    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
-      --performance --only "$model" --backend "$backend" --training --devices "$device" \
-      --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
-  done
+    for dtype in notset float16 bfloat16; do
+      echo "Launching torchbench inference performance run for backend ${backend} and dtype ${dtype}"
+      local dtype_arg="--${dtype}"
+      if [ "$dtype" == notset ]; then
+          dtype_arg="--float32"
+      fi
+      touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+      for model in "${models[@]}"; do
+        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+          --performance --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+          --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
+      done
+    done
 
-  echo "Launching torchbench inference performance run"
-  for model in hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152; do
-    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
-      --performance --only "$model" --backend "$backend" --inference --devices "$device" \
-      --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+    for dtype in notset amp; do
+      echo "Launching torchbench training performance run for backend ${backend} and dtype ${dtype}"
+      touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv"
+      local dtype_arg="--${dtype}"
+      if [ "$dtype" == notset ]; then
+          dtype_arg="--float32"
+      fi
+      for model in "${models[@]}"; do
+        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+          --performance --only "$model" --backend "$backend" --training --devices "$device" "$dtype_arg" \
+          --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_training_${device}_performance.csv" || true
+      done
+    done
+
   done
 
   echo "Pytorch benchmark on mps device completed"
