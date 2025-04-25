@@ -397,7 +397,9 @@ Tensor maybeCopyTensor(
   bool force_move = copy.has_value() && !*copy;
 
   if (optional_dl_device.has_value()) {
-    auto device = at::getATenDevice(optional_dl_device->device_type, static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
+    auto device = at::getATenDevice(
+        optional_dl_device->device_type,
+        static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
 
     if (device != data.device()) {
       TORCH_CHECK(

@@ -616,6 +616,10 @@ class DistributedDataParallel(Module, Joinable):
                     as these named params will be ignored by DDP reducer.
         param_to_hook_all_reduce (torch.nn.Parameter): a parameter to hook delayed all reduce
                     of parameters specified in ``delay_all_reduce_named_params``.
+        skip_all_reduce_unused_params: When set to True, DDP will skip reducing unused parameters.
+                    This requires that unused parameters remain the same across all ranks throughout
+                    the entire training process. If this condition is not met, it may cause
+                    desynchronization and result in training hang.
 
 
     Attributes:
@@ -649,6 +653,7 @@ class DistributedDataParallel(Module, Joinable):
         param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
         device_mesh=None,
+        skip_all_reduce_unused_params=False,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -825,6 +830,8 @@ class DistributedDataParallel(Module, Joinable):
             )
             if self._delay_all_reduce_all_params:
                 return
+
+        self.skip_all_reduce_unused_params = skip_all_reduce_unused_params
 
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -1220,6 +1227,7 @@ class DistributedDataParallel(Module, Joinable):
                 if self.bucket_bytes_cap_default
                 else self.bucket_bytes_cap
             ),
+            self.skip_all_reduce_unused_params,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1510,7 +1518,8 @@ class DistributedDataParallel(Module, Joinable):
         work = Join.notify_join_context(self)
         if work:
             self.reducer._set_forward_pass_work_handle(
-                work, self._divide_by_initial_world_size  # type: ignore[arg-type]
+                work,
+                self._divide_by_initial_world_size,  # type: ignore[arg-type]
             )
 
         # Calling _rebuild_buckets before forward computation,
