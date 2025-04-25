@@ -287,7 +287,9 @@ class Tracer(TracerBase):
         # this captures both `math.sqrt()` and `from math import sqrt` automatically
         self._autowrap_function_ids: set[int] = {
             id(value)
-            for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
+            for name, value in chain.from_iterable(
+                m.__dict__.items() for m in autowrap_modules
+            )
             if not name.startswith("_") and callable(value)
         }
         self._autowrap_function_ids.update({id(f) for f in autowrap_functions})
@@ -818,7 +820,10 @@ class Tracer(TracerBase):
                     deduplicate=False,
                 )
                 patcher.patch_method(
-                    torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False
+                    torch.nn.Module,
+                    "__call__",
+                    module_call_wrapper,
+                    deduplicate=False,
                 )
                 _patch_wrapped_functions(patcher)
                 _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
@@ -835,6 +840,16 @@ class Tracer(TracerBase):
                 )
 
             self.submodule_paths = None
+        except RuntimeError as e:
+            if isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
+                partial_fx_graph = self.graph.python_code(
+                    root_module="self",
+                    verbose=True,
+                ).src
+                e.partial_fx_graph = partial_fx_graph  # type: ignore[attr-defined]
+                raise
+
+            raise
         finally:
             _is_fx_tracing_flag = old_is_fx_tracing_flag
         return self.graph

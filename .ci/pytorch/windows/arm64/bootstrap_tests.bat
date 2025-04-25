@@ -14,7 +14,7 @@ where python
 :: install dependencies
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install pytest numpy
+pip install pytest numpy protobuf expecttest hypothesis
 
 :: find file name for pytorch wheel
 for /f "delims=" %%f in ('dir /b "%PYTORCH_FINAL_PACKAGE_DIR%" ^| findstr "torch-"') do set "TORCH_WHEEL_FILENAME=%PYTORCH_FINAL_PACKAGE_DIR%\%%f"

@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
-from numbers import Number
+from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Uniform"]
@@ -28,6 +28,7 @@ class Uniform(Distribution):
         low (float or Tensor): lower range (inclusive).
         high (float or Tensor): upper range (exclusive).
     """
+
     # TODO allow (loc,scale) parameterization to allow independent constraints.
     arg_constraints = {
         "low": constraints.dependent(is_discrete=False, event_dim=0),
@@ -51,10 +52,15 @@ class Uniform(Distribution):
     def variance(self) -> Tensor:
         return (self.high - self.low).pow(2) / 12
 
-    def __init__(self, low, high, validate_args=None):
+    def __init__(
+        self,
+        low: Union[Tensor, float],
+        high: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.low, self.high = broadcast_all(low, high)
 
-        if isinstance(low, Number) and isinstance(high, Number):
+        if isinstance(low, _Number) and isinstance(high, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()

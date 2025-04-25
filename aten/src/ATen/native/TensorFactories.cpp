@@ -1094,31 +1094,13 @@ Tensor rand_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::rand_like(
-      self,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
-
-Tensor rand_like(
-    const Tensor& self,
-    std::optional<Generator> generator,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.uniform_(0, 1, std::move(generator));
+  return result.uniform_(0, 1, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1221,65 +1203,19 @@ Tensor randint_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randint_like(
-      self,
-      0,
-      high,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
-Tensor randint_like(
-    const Tensor& self,
-    int64_t high,
-    std::optional<Generator> generator,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randint_like(
-      self,
-      0,
-      high,
-      std::move(generator),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(0, high, std::nullopt);
 }
 
 Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randint_like(
-      self,
-      low,
-      high,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
-
-Tensor randint_like(
-    const Tensor& self,
-    int64_t low,
-    int64_t high,
-    std::optional<Generator> generator,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,
@@ -1291,7 +1227,7 @@ Tensor randint_like(
           pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.random_(low, high, std::move(generator));
+  return result.random_(low, high, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1374,31 +1310,13 @@ Tensor randn_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::randn_like(
-      self,
-      static_cast<std::optional<Generator>>(std::nullopt),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      optional_memory_format);
-}
-
-Tensor randn_like(
-    const Tensor& self,
-    std::optional<Generator> generator,
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device,
-    std::optional<bool> pin_memory,
-    std::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.normal_(0, 1, std::move(generator));
+  return result.normal_(0, 1, std::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2154,22 +2072,24 @@ Tensor vander(const Tensor& x, std::optional<int64_t> N, bool increasing) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename T>
-Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_backend(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_complex_cpu(
+    ArrayRef<T> values,
+    const TensorOptions& options) {
   return at::detail::tensor_complex_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_backend(
+static Tensor tensor_complex_backend(
     ArrayRef<T> values,
     const TensorOptions& options) {
   return at::detail::tensor_complex_backend(values, options);

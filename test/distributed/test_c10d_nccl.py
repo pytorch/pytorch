@@ -67,7 +67,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.utils.cpp_extension import load_inline
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -78,8 +77,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
-    (torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 11)
-    or torch.version.hip is not None
+    torch.version.cuda is not None or torch.version.hip is not None
 )
 
 
@@ -252,6 +250,15 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
         self._init_process_group(device_id=self.device)
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_scalable_init(self):
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
+        self._init_process_group(device_id=self.device)
+        x = torch.empty(1, device=self.device)
+        c10d.all_reduce(x)
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
 
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
@@ -492,6 +499,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
+        backend = pg._get_backend(torch.device("cuda"))
+
         device = self.rank_to_GPU[self.rank][0]
         # Cover different buffer sizes
         if type == torch.float64:
@@ -519,6 +528,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             nan_tensor = nan_tensor.to(type)
 
         output = torch.empty(self.world_size, *size, dtype=type, device=device)
+
+        # confirm enable/disable flag works
+        backend._set_enable_nan_check(False)
+        pg.allreduce(nan_tensor)
+
+        backend._set_enable_nan_check(True)
         with self.assertRaises(RuntimeError):
             # Note: using all-gather here bc FP8 types do not support reduce ops
             # at the moment
@@ -1999,7 +2014,7 @@ class DistributedDataParallelTest(
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
         layer_devs = dev0
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -2013,7 +2028,7 @@ class DistributedDataParallelTest(
         replica_devices = None
         # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
         layer_devs = [dev0] * 2 + [dev1] * 2
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -3104,40 +3119,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
-    def createNcclAllocator(self):
-        nccl_allocator_source = """
-        #include <torch/extension.h>
-        #include <nccl.h>
-        #include <iostream>
-
-        extern "C" {
-
-          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
-          C10_EXPORT void* nccl_alloc(size_t size, int device, void* stream) {
-            std::cout << "Using ncclMemAlloc" << std::endl;
-            void* ptr;
-            ncclResult_t err = ncclMemAlloc(&ptr, size);
-            return ptr;
-          }
-
-          C10_EXPORT void nccl_free(void* ptr, size_t size, int device, void* stream) {
-            std::cout << "Using ncclMemFree" << std::endl;
-            ncclResult_t err = ncclMemFree(ptr);
-          }
-        }
-        """
-        nccl_allocator_libname = "nccl_allocator"
-        nccl_allocator = load_inline(
-            name=nccl_allocator_libname,
-            cpp_sources=nccl_allocator_source,
-            with_cuda=True,
-            extra_ldflags=["-lnccl"],
-            is_python_module=False,
-            keep_intermediates=False,
-            verbose=True,
-        )
-        return nccl_allocator
-
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -3147,6 +3128,8 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         os.environ["NCCL_ALGO"] = "NVLS"
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
+        if torch.cuda.nccl.version() >= (2, 24, 3):
+            os.environ["NCCL_DEBUG_SUBSYS"] = "REG"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
         self._spawn_processes()
 
@@ -3170,13 +3153,9 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         pg = c10d.distributed_c10d._get_default_group()
         backend = pg._get_backend(torch.device(device))
-        allocator_path = self.createNcclAllocator()
-        allocator = torch.cuda.memory.CUDAPluggableAllocator(
-            allocator_path,
-            "nccl_alloc",
-            "nccl_free",
-        )
-        pool = torch.cuda.MemPool(allocator.allocator())
+
+        # Use NCCL memory allocator
+        pool = torch.cuda.MemPool(backend.mem_allocator)
 
         # allocate memory with ncclMemAlloc
         with torch.cuda.use_mem_pool(pool):
@@ -3198,8 +3177,13 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         with open(os.environ["NCCL_DEBUG_FILE"]) as f:
             nccl_debug_file_content = f.read()
             # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
-            # should show "local-registered" in stdout
-            self.assertRegex(nccl_debug_file_content, "local-registered")
+            # should show successful registration in debug output
+            if torch.cuda.nccl.version() >= (2, 24, 3):
+                self.assertRegex(
+                    nccl_debug_file_content, "successfully registered NVLS"
+                )
+            else:
+                self.assertRegex(nccl_debug_file_content, "local-registered")
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
@@ -3397,6 +3381,28 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
 
         c10d.destroy_process_group()
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 22), "Need NCCL 2.22+ for configuring estimate comm time"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate_nccl(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = torch.device(f"cuda:{self.rank:d}")
+        t = torch.full(
+            (1024,),
+            self.rank,
+        ).cuda()
+        with dist._time_estimator(group=process_group, device=device) as cm:
+            c10d.all_reduce(t, c10d.ReduceOp.SUM)
+        self.assertTrue(cm.estimated_time is not None)
+        self.assertTrue(cm.estimated_time > 0)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -4387,7 +4393,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.4")
+        self.assertEqual(ver, "2.7")
+        nccl_version = t["nccl_version"]
+        torch_nccl_version = torch.cuda.nccl.version()
+        self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -4889,8 +4898,48 @@ class NCCLTraceTest(NCCLTraceTestBase):
             else:
                 self.assertTrue("duration_ms" not in t["entries"][seq])
 
-    # TODO(whc) support and test coalesced collectives that use the c++ start/end group thingy instead of python
-    # coalescing manager
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("timing_enabled", [True, False])
+    def test_allgather_uneven(self, timing_enabled):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+
+        output_split_sizes = [i + 1 for i in range(self.world_size)]
+        sum_len = sum(output_split_sizes)
+        output_tensor = torch.zeros(sum_len, 2).to(self.rank)
+        expected_tensor = torch.ones(sum_len, 2).to(self.rank)
+        input_tensor = torch.ones(output_split_sizes[self.rank], 2).to(self.rank)
+
+        dist.all_gather(
+            list(torch.split(output_tensor, output_split_sizes)), input_tensor
+        )
+        torch.cuda.synchronize(device=self.rank)
+        self.assertEqual(output_tensor, expected_tensor)
+        if timing_enabled:
+            # wait for watchdog thread to process the queue of works
+            time.sleep(1)
+
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), self.world_size + 1)
+        for i in range(self.world_size):
+            self.assertEqual(t["entries"][i]["profiling_name"], "nccl:_broadcast_oop")
+            # collective_seq_id should be incremented once.
+            self.assertEqual(t["entries"][i]["collective_seq_id"], 1)
+            self.assertEqual(t["entries"][i]["input_sizes"], [[i + 1, 2]])
+            self.assertEqual(
+                t["entries"][i]["output_sizes"],
+                [[i + 1, 2]],
+            )
+            self.assertEqual(t["entries"][i]["state"], "scheduled")
+            # No event is recorded for individual ops
+            self.assertTrue("time_discovered_completed_ns" in t["entries"][i])
+        self.assertEqual(
+            t["entries"][self.world_size]["profiling_name"], "nccl:ALLGATHER_coalesced"
+        )
 
     # TODO(whc) test out other ops (And combinations of ops, if that's valid?)
     @requires_nccl()
