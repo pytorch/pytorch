@@ -66,6 +66,10 @@ static_assert(
 #define NCCL_HAS_MEM_ALLOC
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 26, 0)
+#define NCCL_HAS_QOS
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \

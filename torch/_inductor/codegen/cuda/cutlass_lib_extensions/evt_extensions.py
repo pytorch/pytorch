@@ -85,8 +85,8 @@ if try_import_cutlass():
             shape = tuple(int(x) for x in shape)
             stride = tuple(int(x) for x in stride)
 
-            is_column_major = is_contiguous_strides_for_shape(stride, shape)
-            is_row_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
+            is_row_major = is_contiguous_strides_for_shape(stride, shape)
+            is_column_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
 
             if not is_row_major and not is_column_major:
                 raise RuntimeError(
