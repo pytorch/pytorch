@@ -779,13 +779,15 @@ class Tracer(TracerBase):
             # values to the qualified name here for efficiency. This is used downstream
             # in create_arg
             self.tensor_attrs: dict[
-                _ConstantAttributeType,
+                Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],
                 str,
             ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: list[str]):
                 for k, v in m.__dict__.items():
-                    if isinstance(v, get_args(_ConstantAttributeType)):
+                    if isinstance(
+                        v, (torch.Tensor, torch.ScriptObject, FakeScriptObject)
+                    ):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])
