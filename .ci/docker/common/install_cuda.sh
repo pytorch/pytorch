@@ -31,8 +31,8 @@ function install_cudnn {
   cudnn_version=$2
   mkdir tmp_cudnn && cd tmp_cudnn
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
-  filepath="cudnn-linux-${arch_path}-${cudnn_version}_cuda${cuda_major_version}-archive
-  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-${arch_path}/${filepath}.tar.xz" -O cudnn-archive.tar.xz
+  filepath="cudnn-linux-${arch_path}-${cudnn_version}_cuda${cuda_major_version}-archive"
+  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-${arch_path}/${filepath}.tar.xz
   tar xf ${filepath}.tar.xz
   cp -a ${filepath}/include/* /usr/local/cuda/include/
   cp -a ${filepath}/lib/* /usr/local/cuda/lib64/
