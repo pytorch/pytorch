@@ -91,6 +91,12 @@ jobs:
     {%- endif %}
     steps:
 {%- if os == "windows-arm64" %}
+      - name: Find Visual Studio
+        shell: cmd
+        run: |
+          echo %VSINSTALLDIR%
+          echo %VCINSTALLDIR%
+          dir "C:\Program Files\Microsoft Visual Studio" /s /b
       - name: Populate binary env
         shell: cmd
         run: |

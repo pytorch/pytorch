@@ -66,6 +66,12 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
     steps:
+      - name: Find Visual Studio
+        shell: cmd
+        run: |
+          echo %VSINSTALLDIR%
+          echo %VCINSTALLDIR%
+          dir "C:\Program Files\Microsoft Visual Studio" /s /b
       - name: Populate binary env
         shell: cmd
         run: |
