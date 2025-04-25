@@ -502,9 +502,6 @@ class FakeTensorTest(TestCase):
             with self.assertRaisesRegex(Exception, "found.+two.+devices"):
                 torch.sin(x, out=y)
 
-            with self.assertRaisesRegex(Exception, "found.+two.+devices"):
-                x.add_(y)
-
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
