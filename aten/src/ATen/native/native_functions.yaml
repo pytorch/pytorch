@@ -2794,24 +2794,23 @@
   dispatch:
     CompositeExplicitAutograd: floor_divide_
   autogen: floor_divide.Scalar_out
-
 # Ceiling division operations
 - func: ceiling_divide(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, MPS: ceiling_divide
+    CPU, MPS: ceiling_divide
 
 - func: ceiling_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA, MPS: ceiling_divide_
+    CPU, MPS: ceiling_divide_
 
 - func: ceiling_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MPS: ceiling_divide_out
+    CPU, MPS: ceiling_divide_out
 
 - func: ceiling_divide.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator

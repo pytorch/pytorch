@@ -1,32 +1,29 @@
-#include <c10/core/Device.h>
+// Temporarily disabled CUDA implementation
+// Will require updating native_functions.yaml to properly support
 
-// Forward declarations to avoid all headers
-namespace at {
-class Tensor;
-namespace native {
-TORCH_API Tensor ceiling_divide_cpu(const Tensor& self, const Tensor& other);
-TORCH_API Tensor& ceiling_divide__cpu(Tensor& self, const Tensor& other);
-TORCH_API Tensor& ceiling_divide_out_cpu(const Tensor& self, const Tensor& other, Tensor& result);
-}
+/*
+// External definitions for our ceiling divide functions
+extern "C" {
+struct Tensor;
 }
 
-// This file only defines the CUDA-specific implementations
-namespace at::native {
+// We need to declare these symbols for linker
+extern "C" {
 
-// Simple CUDA stubs that just call the CPU versions
-Tensor ceiling_divide(const Tensor& self, const Tensor& other) {
-  // Just delegate to CPU implementation
-  return ceiling_divide_cpu(self, other);
+struct Tensor* ceiling_divide(const struct Tensor* self, const struct Tensor* other) {
+  // Empty implementation - just to satisfy the linker
+  return nullptr;
 }
 
-Tensor& ceiling_divide_(Tensor& self, const Tensor& other) {
-  // Just delegate to CPU implementation
-  return ceiling_divide__cpu(self, other);
+struct Tensor* ceiling_divide_(struct Tensor* self, const struct Tensor* other) {
+  // Empty implementation - just to satisfy the linker
+  return self;
 }
 
-Tensor& ceiling_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  // Just delegate to CPU implementation
-  return ceiling_divide_out_cpu(self, other, result);
+struct Tensor* ceiling_divide_out(const struct Tensor* self, const struct Tensor* other, struct Tensor* result) {
+  // Empty implementation - just to satisfy the linker
+  return result;
 }
 
-} // namespace at::native 
+} // extern "C"
+*/ 
