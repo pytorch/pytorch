@@ -529,6 +529,7 @@ def run_joint_graph_passes_on_hops(
 
     # Save the fw and bwd hop nodes. We will later in-place modify the graph
     # using these nodes.
+    found_backward_node = False
     fw_hop_nodes = []
     bw_hop_nodes = []
 
@@ -547,6 +548,7 @@ def run_joint_graph_passes_on_hops(
             if node.args[1].startswith("___forward"):
                 fw_hop_nodes.append(node)
             elif node.args[1].startswith("___backward"):
+                found_backward_node = True
                 bw_hop_nodes.append(node)
 
             # If partitioning already done for this identifier, skip. This saves
@@ -605,7 +607,7 @@ def run_joint_graph_passes_on_hops(
 
                 new_hop_graphs[identifier].partitioning_done = True
 
-    if not new_hop_graphs:
+    if not new_hop_graphs or not found_backward_node:
         return joint_gm
 
     # Step 3) Restitch the new fw and bw graphs back into the main graph.
@@ -921,9 +923,7 @@ def aot_dispatch_autograd(
                         if not isinstance(size, int)
                     }
                     if dynamic_dims:
-                        fw_metadata.dynamic_tensors_saved_for_backward[
-                            idx
-                        ] = dynamic_dims
+                        fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
 
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
