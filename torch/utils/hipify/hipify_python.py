@@ -41,8 +41,8 @@ from enum import Enum
 import functools
 import hashlib
 
-def _deprecated():
-    warnings.warn("do not use, hipify version 2.0.0 no longer uses this function", DeprecationWarning)
+def _deprecated(name):
+    warnings.warn(f"hipify version 2.0.0 no longer uses function {name}", FutureWarning, stacklevel=2)
 
 class CurrentState(Enum):
     INITIALIZED = 1
@@ -622,7 +622,7 @@ def is_out_of_place(rel_filepath):
 
 
 def is_pytorch_file(rel_filepath):
-    _deprecated()
+    _deprecated("is_pytorch_file")
     assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("aten/"):
         if rel_filepath.startswith("aten/src/ATen/core/"):
@@ -638,14 +638,14 @@ def is_pytorch_file(rel_filepath):
 
 
 def is_cusparse_file(rel_filepath):
-    _deprecated()
+    _deprecated("is_cusparse_file")
     if is_pytorch_file(rel_filepath):
         return "sparse" in rel_filepath.lower()
     return False
 
 
 def is_special_file(rel_filepath):
-    _deprecated()
+    _deprecated("is_special_file")
     if is_pytorch_file(rel_filepath):
         if "sparse" in rel_filepath.lower():
             return True
@@ -657,7 +657,7 @@ def is_special_file(rel_filepath):
 
 
 def is_caffe2_gpu_file(rel_filepath):
-    _deprecated()
+    _deprecated("is_caffe2_gpu_file")
     assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("c10/cuda"):
         return True
