@@ -3795,25 +3795,47 @@ latex_elements = {
     "tableofcontents": r"\pdfbookmark[0]{Contents}{toc}\tableofcontents",
     "preamble": r"""
        \usepackage{tocloft}
-       \setcounter{tocdepth}{4}
-       \setcounter{secnumdepth}{4}
+       \setcounter{tocdepth}{3}
+       \setcounter{secnumdepth}{3}
        \usepackage{etoolbox}
-       \pretocmd{\tableofcontents}{\pdfbookmark[0]{Contents}{toc}}{}{}
+       % Increase LaTeX memory limits
+       \usepackage{etex}
+       \reserveinserts{28}
+       \usepackage{luatex85}
+       % Fix for SVG images
+       \usepackage{graphicx}
+       \usepackage{svg}
+       \usepackage{ifxetex}
+       \ifxetex
+         \usepackage{letltxmacro}
+         \LetLtxMacro\SavedIncludeGraphics\includegraphics
+         \def\includegraphics#1#{% #1 catches optional stuff (star/opt. arg.)
+           \IncludeGraphicsAux{#1}%
+         }%
+         \newcommand*{\IncludeGraphicsAux}[2]{%
+           \ifpdf
+             \SavedIncludeGraphics#1{#2}%
+           \else
+             \SavedIncludeGraphics#1{#2}%
+           \fi
+         }%
+       \fi
     """,
     "fncychap": r"\usepackage[Bjornstrup]{fncychap}",
+    "maxlistdepth": "2",
+    "sphinxsetup": "verbatimwithframe=false",
+    "extraclassoptions": "oneside",
+    "babel": "\\usepackage{babel}",
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
+
+
 latex_documents = [
-    (
-        master_doc,
-        "pytorch.tex",
-        "PyTorch Documentation",
-        "Torch Contributors",
-        "manual",
-    ),
+    ('pytorch-api', 'pytorch_api.tex', 'PyTorch API Reference', 'Torch Contributors', 'manual'),
+    ('notes', 'pytorch_notes.tex', 'PyTorch Notes', 'Torch Contributors', 'manual'),
 ]
 
 
