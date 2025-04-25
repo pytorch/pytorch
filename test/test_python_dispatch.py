@@ -1631,6 +1631,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
     def test_ac_tracer_infra_mode_kay(self):
         count = [0]
+
         class InsertSin(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 kwargs = {} if kwargs is None else kwargs
