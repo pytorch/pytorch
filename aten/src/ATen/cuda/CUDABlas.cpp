@@ -378,7 +378,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 
 template <typename Dtype, typename C_Dtype = Dtype>
 static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-#ifdef USE_ROCM && ROCM_VERSION == 60400
+#if defined(USE_ROCM) && ROCM_VERSION == 60400
   // regression in ROCm 6.4, planned fixed in 6.4.1, hipblaslt TT fp32 calculation errors
   // best to disallow hipblaslt for this specific case
   if constexpr (std::is_same_v<Dtype, float>) {
