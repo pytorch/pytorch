@@ -154,7 +154,7 @@ def fn(accum, buf1, buf2):
             create_example_tensors,
         )
 
-        row_major_buf0 = MockNode("buf0", (3, 2, 1), (2, 1, 0), torch.float32)
+        row_major_buf0 = MockNode("buf0", (3, 4, 1), (4, 1, 0), torch.float32)
         col_major_buf1 = MockNode("buf1", (3, 2, 1), (1, 3, 0), torch.float32)
         read_names = ["buf0"]
         write_names = ["buf1"]
@@ -163,8 +163,8 @@ def fn(accum, buf1, buf2):
         result = create_example_tensors(
             read_names, write_names, buffer_renames, name_to_buffer
         )
-        self.assertEqual(result["acc"].shape, (3, 2, 1))
-        self.assertEqual(result["acc"].stride, (2, 1, 0))
+        self.assertEqual(result["acc"].shape, (3, 4, 1))
+        self.assertEqual(result["acc"].stride, (4, 1, 0))
         self.assertEqual(
             result["acc"].element, torch_dtype_to_cutlass_type(torch.float32)
         )
