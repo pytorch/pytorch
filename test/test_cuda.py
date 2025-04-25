@@ -5055,7 +5055,7 @@ class TestMemPool(TestCase):
             "dummy_alloc",
             "dummy_free",
         )
-        pool_do_not_use = torch.cuda.MemPool(allocator.allocator(), use_on_oom=False)
+        pool_do_not_use = torch.cuda.MemPool(allocator.allocator())
         pool_use = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
 
         nelem_1mb = 1024 * 1024 // 4
