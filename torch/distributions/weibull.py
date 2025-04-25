@@ -14,7 +14,7 @@ from torch.distributions.utils import broadcast_all
 __all__ = ["Weibull"]
 
 
-class WWeibulleibull(TransformedDistribution):
+class Weibull(TransformedDistribution):
     r"""
     Samples from a two-parameter Weibull distribution.
 
