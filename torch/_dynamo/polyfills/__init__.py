@@ -77,18 +77,24 @@ def radians(x):
 def accumulate_grad(x, new_grad):
     if new_grad is None:
         return
-    new_grad = torch.clone(new_grad)
+    new_grad_strided = torch.empty_like(x)
+    new_grad_strided.copy_(new_grad)
     if x.grad is None:
-        x.grad = new_grad
+        x.grad = new_grad_strided
     else:
-        x.grad.add_(new_grad)
+        x.grad.add_(new_grad_strided)
 
 
+# This mirrors
+# https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+    # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
+
+    # No more pairs to compare, so compare sizes.
     return op(len(left), len(right))
 
 

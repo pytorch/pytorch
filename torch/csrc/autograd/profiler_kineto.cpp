@@ -8,7 +8,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
-
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
@@ -20,8 +19,6 @@
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
-
-#include <ATen/Context.h>
 
 #include <stdexcept>
 #include <utility>
@@ -860,6 +857,22 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   return result;
 }
+namespace tracer = torch::profiler::impl::python_tracer;
+static std::unique_ptr<tracer::PythonMemoryTracerBase> memory_tracer;
+void startMemoryProfile() {
+  if (memory_tracer == nullptr) {
+    memory_tracer = tracer::PythonMemoryTracerBase::make();
+  }
+  memory_tracer->start();
+}
+
+void stopMemoryProfile() {
+  memory_tracer->stop();
+}
+
+void exportMemoryProfile(const std::string& filename) {
+  memory_tracer->export_memory_history(filename);
+}
 
 KinetoEvent::KinetoEvent(
     const std::shared_ptr<const torch::profiler::impl::Result>& result,
@@ -1036,6 +1049,7 @@ FORWARD_FROM_RESULT(startThreadId, start_tid_)
 FORWARD_FROM_RESULT(endThreadId, endTID())
 FORWARD_FROM_RESULT(activityType, kinetoType())
 FORWARD_FROM_RESULT(name, name())
+FORWARD_FROM_RESULT(overload_name, overload_name())
 FORWARD_FROM_RESULT(deviceType, deviceType())
 FORWARD_FROM_RESULT(startNs, start_time_ns_)
 FORWARD_FROM_RESULT(correlationId, correlationID())
