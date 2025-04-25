@@ -1256,7 +1256,7 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socker_power != "N/A":
             return socket_power
-        else
+        else:
             return 0
 
 
@@ -1269,7 +1269,7 @@ def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
         clock_rate = clock_info["clk"]
     if clock_rate != "N/A":
         return clock_rate
-    else
+    else:
         return 0
 
 
