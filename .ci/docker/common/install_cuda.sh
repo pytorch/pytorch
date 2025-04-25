@@ -5,38 +5,38 @@ set -ex
 arch_path=''
 targetarch=${TARGETARCH:-$(uname -m)}
 if [ ${targetarch} = 'amd64' ] || [ "${targetarch}" = 'x86_64' ]; then
-    arch_path='x86_64'
+  arch_path='x86_64'
 else
-    arch_path='sbsa'
+  arch_path='sbsa'
 fi
 
 function install_cuda {
-    version=$1
-    runfile=$2
-    major_minor=${version%.*}
-    rm -rf /usr/local/cuda-${major_minor} /usr/local/cuda
-    if [[ ${arch_path} == 'sbsa' ]]; then
-        runfile="${runfile}_sbsa"
-    fi
-    runfile="${runfile}.run"
-    wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
-    chmod +x ${runfile}
-    ./${runfile} --toolkit --silent
-    rm -f ${runfile}
-    rm -f /usr/local/cuda && ln -s /usr/local/cuda-${major_minor} /usr/local/cuda
+  version=$1
+  runfile=$2
+  major_minor=${version%.*}
+  rm -rf /usr/local/cuda-${major_minor} /usr/local/cuda
+  if [[ ${arch_path} == 'sbsa' ]]; then
+      runfile="${runfile}_sbsa"
+  fi
+  runfile="${runfile}.run"
+  wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
+  chmod +x ${runfile}
+  ./${runfile} --toolkit --silent
+  rm -f ${runfile}
+  rm -f /usr/local/cuda && ln -s /usr/local/cuda-${major_minor} /usr/local/cuda
 }
 
 function install_cudnn {
-    cuda_major_version=$1
-    cudnn_version=$2
-    mkdir tmp_cudnn && cd tmp_cudnn
-    # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
-    wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-${arch_path}/cudnn-linux-${arch_path}-${cudnn_version}_cuda${cuda_major_version}-archive.tar.xz -O cudnn-archive.tar.xz
-    tar xf cudnn-archive.tar.xz
-    cp -a cudnn-archive/include/* /usr/local/cuda/include/
-    cp -a cudnn-archive/lib/* /usr/local/cuda/lib64/
-    cd ..
-    rm -rf tmp_cudnn
+  cuda_major_version=$1
+  cudnn_version=$2
+  mkdir tmp_cudnn && cd tmp_cudnn
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-${arch_path}/cudnn-linux-${arch_path}-${cudnn_version}_cuda${cuda_major_version}-archive.tar.xz -O cudnn-archive.tar.xz
+  tar xf cudnn-archive.tar.xz
+  cp -a cudnn-archive/include/* /usr/local/cuda/include/
+  cp -a cudnn-archive/lib/* /usr/local/cuda/lib64/
+  cd ..
+  rm -rf tmp_cudnn
 }
 
 function install_118 {
