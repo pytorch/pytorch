@@ -6,6 +6,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/NumericUtils.h>
+#include <type_traits>
 
 namespace at::native {
 
@@ -22,13 +23,22 @@ void div_ceil_kernel_cuda(TensorIteratorBase& iter) {
         // For floating point, use std::ceil(a / b)
         return std::ceil(a / b);
       } else {
-        // For integers, we need to handle the ceiling division manually
-        if (std::is_unsigned<scalar_t>::value || (a >= 0 && b > 0) || (a <= 0 && b < 0)) {
-          // For unsigned types or when signs match, use ceiling division formula
+        // For integer types
+        if (std::is_unsigned<scalar_t>::value) {
+          // For unsigned types, always use ceiling division formula
           return (a + b - 1) / b;
         } else {
-          // For different signs, regular division gives the ceiling result
-          return a / b;
+          // For signed types, check sign relationship
+          const bool a_negative = a < 0;
+          const bool b_negative = b < 0;
+          
+          if (a_negative != b_negative) {
+            // Different signs - use regular division
+            return a / b;
+          } else {
+            // Same signs - use ceiling division formula
+            return (a + b - 1) / b;
+          }
         }
       }
     });
