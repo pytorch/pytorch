@@ -26,4 +26,4 @@ struct Tensor* ceiling_divide_out(const struct Tensor* self, const struct Tensor
 }
 
 } // extern "C"
-*/ 
+*/

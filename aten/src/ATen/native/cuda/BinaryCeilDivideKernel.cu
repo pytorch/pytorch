@@ -22,7 +22,7 @@ void div_ceil_kernel_cuda(TensorIteratorBase& iter) {
       if (b == 0) {
         return 0;
       }
-      
+
       if (std::is_floating_point<scalar_t>::value) {
         // For floating point, use std::ceil(a / b)
         return std::ceil(a / b);
@@ -35,7 +35,7 @@ void div_ceil_kernel_cuda(TensorIteratorBase& iter) {
           // For signed types, check sign relationship
           const bool a_negative = a < 0;
           const bool b_negative = b < 0;
-          
+
           if (a_negative != b_negative) {
             // Different signs - use regular division
             return a / b;
@@ -55,4 +55,4 @@ REGISTER_DISPATCH(div_ceil_stub, &div_ceil_kernel_cuda);
 // Do not add additional kernel definitions to this file to avoid long compile times
 
 } // namespace at::native
-*/ 
+*/
