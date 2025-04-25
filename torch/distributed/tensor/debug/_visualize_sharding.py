@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 import importlib.util
-from collections.abc import Sequence
 
 import numpy as np
+
 from torch._prims_common import ShapeType
-import torch.distributed.tensor as dt
 from torch.distributed.tensor._utils import _compute_local_shape_and_global_offset
+
 
 __all__ = ["visualize_sharding"]
 
@@ -13,7 +13,7 @@ Color = tuple[float, float, float] | str
 
 
 def _create_table(
-    shards: list[tuple[tuple[int, ...], tuple[int, ...], int]], device_kind: str = ""
+    shards: list[tuple[tuple[int, int], tuple[int, int], int]], device_kind: str = ""
 ):
     """
     Creates a tabulate table given row and column ranges with device name
@@ -45,10 +45,8 @@ def _create_table(
 
 def make_color_iter(color_map, num_rows, num_cols):
     num_colors = num_rows * num_cols
-    idx = 0
-    for _ in range(num_colors):
+    for idx in range(num_colors):
         yield color_map(idx)
-        idx += 1
 
 
 def _canonicalize_color(color: Color) -> str:
@@ -59,7 +57,7 @@ def _canonicalize_color(color: Color) -> str:
 
 
 def _get_text_color(color: str) -> str:
-    r, g, b = map(lambda x: int(x, 16), (color[1:3], color[3:5], color[5:7]))
+    r, g, b = map(lambda x: int(x, 16), (color[1:3], color[3:5], color[5:7]))  # noqa: C417
     if (r * 0.299 + g * 0.587 + b * 0.114) > 186:
         return "#000000"
     return "#ffffff"
@@ -67,7 +65,7 @@ def _get_text_color(color: str) -> str:
 
 def _create_rich_table(
     shape: ShapeType,
-    shards: list[tuple[tuple[int, ...], tuple[int, ...], str]],
+    shards: list[tuple[tuple[int, int], tuple[int, int], int]],
     device_kind: str = "",
     scale: float = 1.0,
     min_width: int = 9,
@@ -181,7 +179,7 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
         return
 
     device_coords = {
-        device_index.item(): coord
+        int(device_index.item()): list(coord)
         for coord, device_index in np.ndenumerate(
             np.array(dtensor.device_mesh.mesh.tolist())
         )
