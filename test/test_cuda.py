@@ -1094,6 +1094,24 @@ class TestCuda(TestCase):
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
+    def test_device_context_manager(self):
+        prev_device = torch.cuda.current_device()
+        with torch.accelerator.device_index(None):
+            self.assertEqual(torch.cuda.current_device(), prev_device)
+        self.assertEqual(torch.cuda.current_device(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.cuda.current_device(), 0)
+        self.assertEqual(torch.cuda.current_device(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_multi_device_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.cuda.set_device(src_device)
+        with torch.accelerator.device_index(dst_device):
+            self.assertEqual(torch.cuda.current_device(), 1)
+        self.assertEqual(torch.cuda.set_device(), src_device)
+
     def test_stream_context_manager(self):
         prev_stream = torch.cuda.current_stream()
         with torch.cuda.Stream() as stream:
