@@ -73,6 +73,7 @@ from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental.proxy_tensor import (
     get_proxy_slot,
     make_fx,
@@ -133,14 +134,7 @@ class ExportDynamoConfig:
 class ATenExportArtifact:
     gm: torch.fx.GraphModule
     sig: ExportGraphSignature
-    constants: dict[
-        str,
-        Union[
-            torch.Tensor,
-            FakeScriptObject,
-            torch.ScriptObject,
-        ],
-    ]
+    constants: dict[str, _ConstantAttributeType]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -382,7 +376,7 @@ def _preserve_requires_grad_pass(
     gm: torch.fx.GraphModule,
     sig: ExportGraphSignature,
     fake_params_buffers: dict[str, torch.Tensor],
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
     flat_fake_args: list[Any],
 ):
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]

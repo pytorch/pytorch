@@ -375,6 +375,11 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
                 type(op), method
             ) is not getattr(HigherOrderOperator, method)
 
+        # This is not accurate but we cannot generate a schema for hop here
+        # because # we don't have example inputs.
+        #
+        # The hop's functionalization key impl should filter out those case where the
+        # inputs are not mutated at all to avoid false positive.
         return _has_gen_schema(op)
 
     if not isinstance(op, OpOverload):
@@ -627,11 +632,11 @@ def do_auto_functionalize_v2(
     assert (
         "_all_bases" not in unwrapped_kwargs and "_ops_schema" not in unwrapped_kwargs
     ), (op, unwrapped_kwargs)
-    auto_func_kwargs = (
-        dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)
-        if isinstance(op, OpOverload)
-        else dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped, _op_schema=schema)
-    )
+    auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)
+    if isinstance(op, HigherOrderOperator):
+        pytree.register_constant(torch.FunctionSchema)
+        auto_func_kwargs.update({"_op_schema": pytree.tree_flatten(schema)[1]})
+
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
             op, **auto_func_kwargs  # type: ignore[arg-type]
@@ -834,7 +839,7 @@ def auto_functionalized_v2_dense(
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     schema = (
-        kwargs.pop("_op_schema", None)
+        pytree.tree_unflatten([], kwargs.pop("_op_schema"))
         if isinstance(_mutable_op, HigherOrderOperator)
         else _mutable_op._schema
     )
@@ -877,7 +882,7 @@ def auto_functionalized_v2_proxy(
     # We need to normalize the higher order op's input fn to graph module
     # this could happen e.g. we could receive FunctionWithNoFreeVars
     schema = (
-        kwargs.get("_op_schema", None)
+        pytree.tree_unflatten([], kwargs.get("_op_schema", None))
         if isinstance(_mutable_op, HigherOrderOperator)
         else _mutable_op._schema
     )  # type: ignore[assignment]
@@ -894,6 +899,8 @@ def auto_functionalized_v2_proxy(
         def fn(*args):
             return _invoke_op_with_kwargs_and_schema(_mutable_op, new_kwargs, schema)  # type: ignore[arg-type]
 
+        # We need to trace the higher order op in order to materilaize the callable inputs that
+        # are a callable (e.g. after functionalization key)
         gm = reenter_make_fx(fn)(pytree.tree_leaves(new_kwargs))
         hop_node = gm.graph.find_nodes(op="call_function", target=_mutable_op)[0]
         proxies = pytree.tree_leaves((hop_node.args, hop_node.kwargs))
@@ -909,44 +916,26 @@ def auto_functionalized_v2_proxy(
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)
 
-    def _maybe_create_proxy(val: Any):
-        if isinstance(val, torch.fx.GraphModule):
-            _, graph_name = unique_graph_id(mode, prefix="auto_functionalized_subgraph")
-            mode.tracer.root.register_module(graph_name, val)
-            return val
-        elif isinstance(val, torch._C.FunctionSchema):
-            _, attr_name = unique_graph_id(mode, prefix="functiona_schema")
-            setattr(mode.tracer.root, attr_name, val)
-            proxy = mode.tracer.create_proxy(
-                "get_attr",
-                attr_name,
-                tuple(),
-                {},
-            )
-            track_tensor_tree(val, proxy, constant=None, tracer=mode.tracer)
-            return proxy
-        elif isinstance(val, torch._higher_order_ops._invoke_quant.InvokeQuant):
-            _, attr_name = unique_graph_id(mode, prefix="invoke_quant")
-            setattr(mode.tracer.root, attr_name, val)
-            proxy = mode.tracer.create_proxy(
-                "get_attr",
-                attr_name,
-                tuple(),
-                {},
-            )
-            track_tensor_tree(val, proxy, constant=None, tracer=mode.tracer)
-            return proxy
-        return val
-
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
 
-    new_proxy_kwargs = pytree.tree_map(_maybe_create_proxy, proxy_kwargs)
+    if isinstance(_mutable_op, HigherOrderOperator):
+
+        def _maybe_register_subgraph(val: Any):
+            if isinstance(val, torch.fx.GraphModule):
+                _, graph_name = unique_graph_id(
+                    mode, prefix="auto_functionalized_subgraph"
+                )
+                mode.tracer.root.register_module(graph_name, val)
+                return val
+            return val
+
+        proxy_kwargs = pytree.tree_map(_maybe_register_subgraph, proxy_kwargs)
 
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         auto_functionalized_v2,
         (_mutable_op,),
-        new_proxy_kwargs,
+        proxy_kwargs,
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     return result

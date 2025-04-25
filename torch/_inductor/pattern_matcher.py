@@ -318,15 +318,7 @@ class Match:
                         ]
 
             else:
-                # TODO: cannot handle graph module input
-                def _map_arg(node: torch.fx.Node) -> Any:
-                    if node.op == "get_attr":
-                        assert isinstance(node.target, str)
-                        return getattr(node.graph._owning_module, node.target)
-                    else:
-                        return node.meta["val"]
-
-                example_vals = torch.fx.map_arg(args, _map_arg)
+                example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
                 replacement = trace_fn(replacement_fn, example_vals)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:

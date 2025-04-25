@@ -56,14 +56,7 @@ class CTypeGen:
     def from_example(obj: Any) -> Any:
         import torch
 
-        if isinstance(
-            obj,
-            (
-                torch.fx.GraphModule,
-                torch._higher_order_ops.base_hop.FunctionWithNoFreeVars,
-                torch._higher_order_ops._invoke_quant.InvokeQuant,
-            ),
-        ):
+        if isinstance(obj, torch.fx.GraphModule):
             return torch._C.AnyType.get()
         elif isinstance(obj, torch.SymInt):
             return torch._C.SymIntType.get()

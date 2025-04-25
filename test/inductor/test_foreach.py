@@ -49,6 +49,11 @@ def add_op(x, y):
     return torch.add(x, y)
 
 
+def add_inplace_op(x, y):
+    x.add_(y)
+    return x.sin()
+
+
 def addrecip_op(x, y):
     return torch.reciprocal(torch.add(x, y))
 
@@ -77,6 +82,7 @@ foreach_map_copy = foreach_map_wrapper(aten.copy)
 
 # More general functions
 foreach_map_add_fn = foreach_map_wrapper(add_op)
+foreach_map_add_inplace = foreach_map_wrapper(add_inplace_op)
 foreach_map_recipaddmul = foreach_map_wrapper(addrecip_op)
 foreach_map_addcmul = foreach_map_wrapper(addcmul_op)
 foreach_map_recipaddmul = foreach_map_wrapper(recipaddmul_op)
@@ -108,6 +114,12 @@ foreach_map_bin_ops_under_test = [
     foreach_map_clamp_max,
     foreach_map_clamp_min,
     foreach_map_add_fn,
+    # TODO: "Buffer mutation detected during lowering of aten.add_.Tensor. "
+    # After decomposing auto_functionalized, we're getting
+    # a subgraph with potential input mutations. It's safe to
+    # mutate the input because we're guaranteed mutated inputs
+    # will gets copied if they're used downstream.
+    foreach_map_add_inplace,
     foreach_map_max,
     foreach_map_min,
 ]
