@@ -2166,6 +2166,9 @@ def merge(
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
+    # Check for approvals
+    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+
     if skip_mandatory_checks:
         post_starting_merge_comment(repo, pr, explainer, dry_run)
         return pr.merge_into(
@@ -2174,9 +2177,6 @@ def merge(
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id,
         )
-
-    # Check for approvals
-    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
     if not has_required_labels(pr):
         raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
