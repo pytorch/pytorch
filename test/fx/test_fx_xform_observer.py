@@ -144,7 +144,7 @@ class TestGraphTransformObserver(TestCase):
                 return torch.neg(x)
 
         model = SimpleLinearModel()
-        gm = torch.export.export(model, (torch.rand(10),)).module()
+        gm = torch.export.export(model, (torch.rand(10),), strict=True).module()
 
         with GraphTransformObserver(gm, "test"):
             add_node = gm.graph.call_function(torch.ops.aten.add.default, (1, 1))
@@ -171,7 +171,7 @@ class TestGraphTransformObserver(TestCase):
                 return torch.neg(x)
 
         model = SimpleLinearModel()
-        gm = torch.export.export(model, (torch.rand(10),)).module()
+        gm = torch.export.export(model, (torch.rand(10),), strict=True).module()
 
         with GraphTransformObserver(gm, "test"):
             gm2 = copy.deepcopy(gm)

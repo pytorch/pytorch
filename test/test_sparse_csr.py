@@ -1495,7 +1495,8 @@ class TestSparseCSR(TestCase):
             res = csr.matmul(vec)
             expected = csr.to_dense().matmul(vec)
 
-            self.assertEqual(res, expected)
+            atol, rtol = (2e-3, 1e-3) if dtype == torch.half else (None, None)
+            self.assertEqual(res, expected, atol=atol, rtol=rtol)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
             err_msg = "size mismatch, got"
@@ -3763,9 +3764,11 @@ class TestSparseCompressedTritonKernels(TestCase):
             for scale in (None, 1. / 16):
                 if scale is None and query.size(-1) == 0:
                     scale = 1
+                # We cast to double here as this dispatches to the MATH backend which
+                # introduces additional rounding steps over the fused implementations
                 expected = torch.nn.functional.scaled_dot_product_attention(
-                    *broadcast_input(query, key, value, attn_mask), scale=scale
-                )
+                    *broadcast_input(query.double(), key.double(), value.double(), attn_mask), scale=scale
+                ).to(dtype)
 
                 for mask_dtype in (torch.bool, dtype):
                     res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)

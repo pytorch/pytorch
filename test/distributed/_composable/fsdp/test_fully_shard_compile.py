@@ -131,7 +131,6 @@ class TestFullyShardCompile(FSDPTest):
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
-    @skipIfRocm
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
@@ -169,7 +168,6 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
-    @skipIfRocm
     def test_trace_fsdp_copy_(self):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
@@ -751,7 +749,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
                         bwd_resize_count_before_inductor=48 if fwd_fullgraph else None,
-                    )
+                    ),
                 )
             if fwd_fullgraph:
                 self.assertEqual(
@@ -834,7 +832,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 *self._create_nested_fully_shard_factory_fns(fwd_fullgraph=False),
                 "inductor",
                 fwd_fullgraph=False,
-            )
+            ),
         )
         # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
         # there are several recompiles, need to figure out why.
@@ -978,7 +976,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
                         bwd_resize_count_before_inductor=76 if fwd_fullgraph else None,
-                    )
+                    ),
                 )
             if fwd_fullgraph:
                 self.assertEqual(
@@ -1071,7 +1069,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
-                    )
+                    ),
                 )
             # TODO: when fwd_fullgraph=False and there is graph break in FWD graph,
             # there are several recompiles, need to figure out why.
