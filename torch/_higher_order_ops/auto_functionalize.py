@@ -376,10 +376,10 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
             ) is not getattr(HigherOrderOperator, method)
 
         # This is not accurate but we cannot generate a schema for hop here
-        # because # we don't have example inputs.
+        # because we don't have example inputs.
         #
-        # The hop's functionalization key impl should filter out those case where the
-        # inputs are not mutated at all to avoid false positive.
+        # The hop's functionalization key impl shouldn't call auto_functionalize and
+        # filter out those case where none of inputs are mutated .
         return _has_gen_schema(op)
 
     if not isinstance(op, OpOverload):
