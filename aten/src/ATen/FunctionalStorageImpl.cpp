@@ -129,6 +129,24 @@ void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vec
   generation_++;
 }
 
+std::tuple<at::Tensor, at::Tensor> FunctionalStorageImpl::apply_minimal_update() {
+  at::AutoDispatchSkipFunctionalize guard;
+  // This is an optimization, which we will only do if there is 1 pending update on the input
+  if (updates_.size() != 1) {
+    return std::make_tuple(at::Tensor(), at::Tensor());
+  }
+  auto update = updates_[0];
+  auto new_val = update.new_val;
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(new_val));
+
+  at::Tensor old_val = base_;
+  for (size_t i = 0; i < update.view_metas.size(); ++i) {
+    old_val = update.view_metas[i].forward_fn(old_val, update.view_metas[i].out_index);
+  }
+
+  return std::make_tuple(old_val, new_val);
+}
+
 bool FunctionalStorageImpl::apply_updates() {
   // N.B:none of the tensors used in this function should be FunctionalTensorWrappers at this point.
   // The only reason we currently need the TLS exclude guard here is because of functorch's DynamicLayer stack.

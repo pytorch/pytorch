@@ -150,6 +150,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
   view_metas_.push_back(meta);
   maybe_mark_symbolic(meta);
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
+  generation_ = base->generation_;
 }
 
 
@@ -167,7 +168,7 @@ void FunctionalTensorWrapper::commit_update() {
   // doesn't result in an unnecessary materialization of the base.
   // This optimization results in the slice temporarily haven't incorrect
   // stride/storage_offset though, and DCE should handle that optimization anyway.
-  // generation_ = storage_impl->generation();
+  generation_ = storage_impl->generation();
 }
 
 bool FunctionalTensorWrapper::is_up_to_date() const {
@@ -358,6 +359,19 @@ void FunctionalTensorWrapper::_unsafe_reset_storage() {
   generation_ = 0;
   // Clear any pre-existing view metas so that base and value_ are semantically the same
   view_metas_.clear();
+}
+
+std::tuple<at::Tensor, at::Tensor> FunctionalTensorWrapper::minimal_sync_() {
+  if (is_up_to_date()) {
+    return std::make_tuple(at::Tensor(), at::Tensor());
+  }
+  auto storage_impl = functional_storage_impl();
+  auto out = storage_impl->apply_minimal_update();
+  // If the minimal update succeeded, we mark out tensor as up to date.
+  if (std::get<0>(out).defined()) {
+    generation_ = storage_impl->generation();
+  }
+  return out;
 }
 
 void FunctionalTensorWrapper::sync_() {

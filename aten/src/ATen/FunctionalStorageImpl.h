@@ -102,6 +102,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
       const Tensor& updated_val,
       const std::vector<ViewMeta>& view_metas);
   bool apply_updates();
+  std::tuple<at::Tensor, at::Tensor> apply_minimal_update();
   const Tensor& base() {
     return base_;
   }

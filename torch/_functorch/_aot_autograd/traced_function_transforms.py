@@ -538,7 +538,18 @@ def create_functionalized_fn(
                     if not isinstance(inpt_f, torch.Tensor):
                         continue
                     assert is_fun(inpt_f)
-                    inpt_new = from_fun(inpt_f)
+                    # If there was a vanilla input mutation on a small slice of a graph input,
+                    # we can't easily get at those views from here.
+                    # Instead, as functionalization to regenerate the view and mutation directly.
+                    mb_inp_new = from_fun(inpt_f, perform_optimized_input_mutation=True)
+                    if isinstance(mb_inp_new, tuple):
+                        assert mb_inp_new[1] == True
+                        inpt_new = mb_inp_new[0]
+                        optimized_input_mutation = True
+                    else:
+                        inpt_new = mb_inp_new
+                        optimized_input_mutation = False
+
                     if (
                         meta.input_info[i].mutation_type
                         == MutationType.MUTATED_IN_GRAPH
@@ -609,6 +620,8 @@ def create_functionalized_fn(
                         # We found an input that had a (data-only) mutation.
                         # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                         # so the compiler will see the input mutation in the graph.
+                        if optimized_input_mutation:
+                            continue
                         if (
                             meta.input_info[i].mutates_data
                             and meta.input_info[i].mutations_hidden_from_autograd
@@ -635,6 +648,7 @@ def create_functionalized_fn(
                             with torch.no_grad():
                                 inpt_old.copy_(inpt_new)
                         elif meta.input_info[i].mutates_data:
+                            print()
                             inpt_old.copy_(inpt_new)
 
                 # When an output tensor is a functionalized mutated input, and we

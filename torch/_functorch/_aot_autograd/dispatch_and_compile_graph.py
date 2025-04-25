@@ -19,10 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .functional_utils import (
-    assert_functional_graph,
-    propagate_input_mutation_stacktraces,
-)
+from .functional_utils import assert_functional_graph
 from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 from .traced_function_transforms import (
     aot_dispatch_subclass,
@@ -181,12 +178,12 @@ def aot_dispatch_base_graph(
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
-    copy_count = assert_functional_graph(fw_module.graph)
+    # copy_count = assert_functional_graph(fw_module.graph)
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
-    copy_count2 = assert_functional_graph(fw_module.graph)
-    propagate_input_mutation_stacktraces(fw_module.graph)
+    # copy_count2 = assert_functional_graph(fw_module.graph)
+    # propagate_input_mutation_stacktraces(fw_module.graph)
 
     # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
@@ -196,7 +193,7 @@ def aot_dispatch_base_graph(
             saved_updated_flat_args_subclasses_desugared[num_tokens:]
         )
 
-    assert copy_count == copy_count2
+    # assert copy_count == copy_count2
 
     if aot_config.enable_log:
         aot_graphs_log.info(

@@ -114,6 +114,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // Replay the views (if any) to regenerate the current tensor off of the
   // updated alias.
   void sync_();
+
+  std::tuple<at::Tensor, at::Tensor> minimal_sync_();
+
   // Performs step (1) of the sync. This is its own public API because it's
   // needed by view_inplace ops like transpose_. See Note [Functionalization
   // Pass - Inplace View Ops]

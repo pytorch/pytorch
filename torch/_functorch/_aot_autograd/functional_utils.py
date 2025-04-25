@@ -59,7 +59,15 @@ def sync_functional_tensor(t):
 
 # When subclasses are involved, t here will usually look something like:
 # SubclassA(SubclassB(FunctionalTensor(_to_fun_tensor(FakeTensor))))
-def from_fun(t):
+def from_fun(t, perform_optimized_input_mutation=False):
+    # TODO: we should support this fastpath on subclasses
+    if perform_optimized_input_mutation and isinstance(t, FunctionalTensor):
+        old_t, new_t = torch._functionalize_return_synced_view(t.elem)
+        if old_t is not None and new_t is not None:
+            old_t.copy_(new_t)
+            out = torch._from_functional_tensor(t.elem)
+            return out, True
+
     if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
         # See Note [Functionalization always runs last]
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper

@@ -717,6 +717,12 @@ void initTorchFunctions(PyObject* module) {
     auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
     return wrapper->was_storage_changed();
   });
+  py_module.def("_functionalize_return_synced_view", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto func_wrapper =
+        at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    return func_wrapper->minimal_sync_();
+  });
   py_module.def(
       "_functionalize_unsafe_set", [](at::Tensor& dst, const at::Tensor& src) {
         // Forcefully/unsafely dumps src.storage into dst.
