@@ -27,6 +27,7 @@ done < <(
     ':(exclude)**/*.svg' \
     ':(exclude)**/*.xml' \
     ':(exclude)**/third-party/**' \
+  | grep -v '@lint-ignore' \
   | grep -Ev 'https?://' \
   | sed -E \
       -e 's#([^:]+):\[[^]]+\]\(([^)]+)\)#\1:\2#' \
