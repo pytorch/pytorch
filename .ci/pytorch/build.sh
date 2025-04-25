@@ -117,6 +117,9 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_MKLDNN=0
   export BUILD_CUSTOM_PROTOBUF=0
 
+  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
