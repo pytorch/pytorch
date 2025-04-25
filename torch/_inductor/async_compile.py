@@ -477,13 +477,15 @@ class AsyncCompile:
             data = event_data["PyCodeCache.load_by_key_path"]
             if "triton_kernel_info" in data:
                 info = data["triton_kernel_info"]
+                # Sort by kernel name
+                sorted_info = dict(sorted(info.items()))
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
                         "name": f"triton_kernel_info",
                         "encoding": "json",
                     },
-                    payload_fn=lambda: json.dumps(data["triton_kernel_info"]),
+                    payload_fn=lambda: json.dumps(sorted_info),
                 )
         _compile_end()
 
