@@ -2260,7 +2260,7 @@ def _reduction_configs(
 
 
 def match_target_block_product(
-    size_hints, tiling_scores, target_block_product, min_block_size=4
+    size_hints, tiling_scores, target_block_product, min_block_size=1
 ):
     """
     Distribute block sizes across dimensions according to tiling scores,
