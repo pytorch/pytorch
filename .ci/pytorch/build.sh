@@ -115,6 +115,7 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_CUDA=0
   export USE_DISTRIBUTED=0
   export USE_MKLDNN=0
+  export BUILD_CUSTOM_PROTOBUF=0
 
 fi
 
