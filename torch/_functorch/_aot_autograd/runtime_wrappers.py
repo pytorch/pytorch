@@ -1907,7 +1907,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_indices: list[int],
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
-        lazy_backward_info: Optional[Union[AutogradLazyBackwardCompileInfo, CachedAutogradLazyBackwardCompileInfo]],
+        lazy_backward_info: Optional[
+            Union[
+                AutogradLazyBackwardCompileInfo, CachedAutogradLazyBackwardCompileInfo
+            ]
+        ],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
@@ -2014,9 +2018,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     for (
                         idx,
                         dims,
-                    ) in (
-                        CompiledFunction.metadata.dynamic_tensors_saved_for_backward.items()
-                    ):
+                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
                         maybe_mark_dynamic_helper(activations[idx], dims)
                     return activations
 
