@@ -7,6 +7,7 @@
 
 // ROCm 6.3 is planned to have these functions, but until then here they are.
 #if defined(USE_ROCM) && ROCM_VERSION >= 60201
+#include <device_functions.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
 
@@ -221,6 +222,145 @@ __device__ __forceinline__ void fastAtomicAdd(
     gpuAtomicAddNoReturn(tensor + index, value);
   }
 }
+
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+// This function implements warp-level opportunistic fastatomics
+// To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with a per-warp atomicAdd.
+// We identify all the threads within a warp that will perform an atomicAdd on the same destination
+// address and perform the addition on the CU. Each warp elects a leader thread which does the
+// atomicAdd to the destination address.
+template <class scalar_t, class index_t>
+__device__ __forceinline__ void opportunistic_fastAtomicAdd(
+    scalar_t* self_ptr,
+    index_t index,
+    const index_t numel,
+    scalar_t value) {
+
+    scalar_t* dst = self_ptr + index;
+
+    //pack coalseced bf16 and fp16
+    if constexpr (std::is_same<scalar_t, c10::BFloat16>::value || std::is_same<scalar_t, c10::Half>::value)
+    {
+        typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+        union ill { unsigned int i[2]; int64_t il; };
+        ill iil_, ill_oneUpDst, ill_oneDnDst = {};
+        iil_.il = (int64_t)dst;
+        ill_oneUpDst.i[0] = __builtin_amdgcn_mov_dpp(iil_.i[0], 0x130, 0xf, 0xf, 0);
+        ill_oneUpDst.i[1] = __builtin_amdgcn_mov_dpp(iil_.i[1], 0x130, 0xf, 0xf, 0);
+        ill_oneDnDst.i[0] = __builtin_amdgcn_mov_dpp(iil_.i[0], 0x138, 0xf, 0xf, 0);
+        ill_oneDnDst.i[1] = __builtin_amdgcn_mov_dpp(iil_.i[1], 0x138, 0xf, 0xf, 0);
+        union bfi {scalar_t bf; short s; } bfi_ = { .bf = value  }; bfi bfi_oneUpVal;
+
+        bfi_oneUpVal.s = __builtin_amdgcn_mov_dpp(bfi_.s, 0x130, 0xf, 0xf, 0);
+        auto oneUpVal = bfi_oneUpVal.bf;
+
+        __half* target_addr = reinterpret_cast<__half*>(self_ptr + index);
+        bool low_byte = (reinterpret_cast<std::uintptr_t>(target_addr) % sizeof(__half2) == 0);
+        bool canCombnUp = (bool)(__activemask()&(1<<(threadIdx.x+1))) &&
+                                 (low_byte && index < (numel - 1)) &&
+                                 (ill_oneUpDst.il - reinterpret_cast<int64_t>(dst) == sizeof(scalar_t));
+        bool canCombnDn = (__builtin_amdgcn_mov_dpp(canCombnUp, 0x138, 0xf, 0xf, 0));
+
+        if (__lane_id()%2==0)
+        {
+          if (canCombnUp) {
+            union bfvs { scalar_t bf[2]; vec_short2 vs2; __half2 df16; };
+            bfvs bfvs_ = {};
+            bfvs_.bf[0] = value;
+            bfvs_.bf[1] = oneUpVal;
+            if constexpr (std::is_same<scalar_t, c10::BFloat16>::value)
+              __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)dst, bfvs_.vs2);
+            else
+              __builtin_amdgcn_flat_atomic_fadd_v2f16((__half2*)dst, bfvs_.df16);
+            return;
+          }
+        }
+        else
+        {
+          if (canCombnDn)
+            return;
+        }
+    }
+
+    // not coalsced, so now let try to capture lane-matches...
+    // __activemask() -- finds the set of threads in the warp that are about to perform atomicAdd
+    // __match_any_sync() -- returns bit mask of the threads that have same dest addr
+    auto mask = __match_any_sync(__activemask(), (int64_t)dst);
+
+    // select a leader thread
+    int leader = __ffsll(mask) - 1;
+
+    scalar_t crnt_val = (scalar_t)0;
+    auto crnt_msk = mask >> (leader);
+    int crnt_idx = leader;
+
+    // __shfl is limited in the dtypes it accepts
+    // That's why, we need these if/else to correctly do the addition on the CU
+    if constexpr(sizeof(scalar_t) <= sizeof(int)) {
+     union punner { int l; scalar_t s; };
+     punner pnr = {};
+     pnr.s = value;
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = {};
+            add_val.l = __shfl(pnr.l ,crnt_idx);
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else if constexpr(sizeof(scalar_t) <= sizeof(long)) {
+     union punner { long l; scalar_t s; };
+     punner pnr = {};
+     pnr.s = value;
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = {};
+            add_val.l = __shfl(pnr.l ,crnt_idx);
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else if constexpr(sizeof(scalar_t) <= sizeof(long long)) {
+     union punner { long long l; scalar_t s; };
+     punner pnr = {};
+     pnr.s = value;
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = {};
+            add_val.l = __shfl(pnr.l ,crnt_idx);
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+    else {
+     union punner { long long l[2]; scalar_t s; };
+     punner pnr = {};
+     pnr.s = value;
+     while (crnt_msk != 0) {
+        if (crnt_msk & 1) {
+            punner add_val = {};
+            add_val.l[0] = __shfl(pnr.l[0] ,crnt_idx);
+            add_val.l[1] = __shfl(pnr.l[1] ,crnt_idx);
+            crnt_val += add_val.s;
+        }
+        crnt_idx++;
+        crnt_msk = crnt_msk >> 1;
+     }
+    }
+
+
+    //Once the correct crnt_val is determined, only the leader thread does the update to the dest addr
+    if (__lane_id() == leader) {
+      fastAtomicAdd(self_ptr, index, numel, crnt_val, true);
+    }
+}
+#endif
 
 #undef ATOMICADD
 #undef NATIVE_ZERO_BF16
