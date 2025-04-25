@@ -2167,7 +2167,7 @@ def merge(
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     # Check for approvals
-    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True, skip_internal_checks=True)
 
     if skip_mandatory_checks:
         post_starting_merge_comment(repo, pr, explainer, dry_run)
