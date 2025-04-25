@@ -12,7 +12,7 @@ from builtins import (  # noqa: F401
     str as _str,
 )
 from collections.abc import Sequence
-from typing import Any, IO, TYPE_CHECKING, Union
+from typing import Any, get_args, IO, TYPE_CHECKING, Union
 from typing_extensions import Self, TypeAlias
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
@@ -57,14 +57,14 @@ FloatLikeType: TypeAlias = Union[float, SymFloat]
 # bool or SymBool
 BoolLikeType: TypeAlias = Union[bool, SymBool]
 
-py_sym_types = (SymInt, SymFloat, SymBool)  # left un-annotated intentionally
 PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
+py_sym_types = get_args(PySymType)  # left un-annotated intentionally
 
 # Meta-type for "numeric" things; matches our docs
 Number: TypeAlias = Union[int, float, bool]
 # tuple for isinstance(x, Number) checks.
 # FIXME: refactor once python 3.9 support is dropped.
-_Number = (int, float, bool)
+_Number = get_args(Number)
 
 FileLike: TypeAlias = Union[str, os.PathLike[str], IO[bytes]]
 
