@@ -3159,7 +3159,7 @@ class TestQuantizedOps(TestCase):
             dqb = qb.dequantize()
             c_ref = dqa * dqb
             if output_dtype == torch.uint8:
-                c_ref = torch.quantize_per_tensor(c_ref, s_c, z_c, torch.quint8).int_repr()
+                c_ref = torch.ops.quantized_decomposed.quantize_per_tensor.default(c_ref, s_c, z_c, 0, 255, torch.uint8)
             c_ref = c_ref.to(output_dtype)
 
             a_int8 = qa.int_repr()
