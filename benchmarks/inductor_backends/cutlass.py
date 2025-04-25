@@ -219,7 +219,12 @@ def run_single_experiment_group(
         try:
             _ = compiled_op(*inputs)
         except Exception as e:
-            log.warning(f"Benchmark config {config.name()} failed: {e}")  # noqa: G004
+            import traceback
+
+            log.warning(
+                f"Benchmark config {config.name()} failed: {e}, "  # noqa: G004
+                f"traceback: {traceback.format_exc()}"
+            )
             results.append(
                 ExperimentResults(
                     name=config.name(),
