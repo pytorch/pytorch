@@ -3745,15 +3745,18 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    void* r = nullptr;
+    void* devPtr = nullptr;
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     if (forceUncachedAllocator() || !isEnabled()) {
-      r = uncached_allocate(nbytes);
+      devPtr = uncached_allocate(nbytes);
     } else {
-      c10::DeviceIndex device = 0;
-      C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-      malloc(&r, device, nbytes, stream);
+      malloc(&devPtr, device, nbytes, stream);
     }
-    return r;
+    if (TORCH_SDT_IS_ENABLED(malloc)) {
+      TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, nbytes, stream);
+    }
+    return devPtr;
   }
 
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access)
