@@ -21081,6 +21081,8 @@ op_db: list[OpInfo] = [
                          device_type='cuda', dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
                          device_type='cuda', dtypes=[torch.complex64]),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-5, rtol=4e-2)}),
+                         "TestConsistency", "test_output_match", device_type="mps"),
         ),
     ),
     ReductionOpInfo(
@@ -21268,6 +21270,8 @@ op_db: list[OpInfo] = [
             # possibly bad low precision reference in numpy
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
+                         "TestConsistency", "test_output_match", device_type="mps"),
         ),
     ),
     OpInfo(
