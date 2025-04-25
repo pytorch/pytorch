@@ -928,6 +928,8 @@ if torch.backends.mps.is_available():
             "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
+            # topk fails with duplicate indices
+            "topk": [torch.float16],
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
