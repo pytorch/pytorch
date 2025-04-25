@@ -9,33 +9,41 @@
 
 namespace at::native {
 
+// Helper template functions to handle different numeric types
+template <typename T, typename = std::enable_if_t<std::is_unsigned<T>::value>>
+__host__ __device__ inline T ceil_div_unsigned(T a, T b) {
+  // Handle special case to avoid division by zero
+  if (b == 0) return 0;
+  return (a + b - 1) / b;
+}
+
+template <typename T, typename = std::enable_if_t<std::is_signed<T>::value>>
+__host__ __device__ inline T ceil_div_signed(T a, T b) {
+  // Handle special case to avoid division by zero
+  if (b == 0) return 0;
+  
+  // Different sign case - regular division
+  if ((a < 0) != (b < 0)) return a / b;
+  
+  // Same sign case - ceiling division
+  return (a + b - 1) / b;
+}
+
+template <typename T, typename = std::enable_if_t<std::is_floating_point<T>::value>>
+__host__ __device__ inline T ceil_div_float(T a, T b) {
+  return std::ceil(a / b);
+}
+
 // CUDA implementation of ceiling division
 void div_ceil_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_ceil_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      // For integral types
-      if (std::is_integral<scalar_t>::value) {
-        // Handle division by zero
-        if (b == 0) {
-          return 0;
-        }
-        
-        // For unsigned types, we don't need to check for sign differences
-        if constexpr (std::is_unsigned<scalar_t>::value) {
-          return (a + b - 1) / b;
-        } else {
-          // For signed types, we need to handle negative values differently
-          if ((a < 0) != (b < 0)) {
-            // If signs are different, use regular division
-            return a / b;
-          } else {
-            // If signs are the same (both positive or both negative)
-            return (a + b - 1) / b;
-          }
-        }
+      if constexpr (std::is_floating_point<scalar_t>::value) {
+        return ceil_div_float(a, b);
+      } else if constexpr (std::is_unsigned<scalar_t>::value) {
+        return ceil_div_unsigned(a, b);
       } else {
-        // For floating point types, use std::ceil(a / b)
-        return std::ceil(a / b);
+        return ceil_div_signed(a, b);
       }
     });
   });

@@ -1,9 +1,10 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/core/TensorOptions.h>
 
 namespace at::native {
 
@@ -12,7 +13,8 @@ namespace at::native {
 // to the CUDA kernel we just implemented through div_ceil_stub
 
 Tensor ceiling_divide(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
+  auto out_options = self.options();
+  auto result = at::empty({0}, out_options);
   auto iter = at::TensorIteratorConfig()
       .add_output(result)
       .add_input(self)
