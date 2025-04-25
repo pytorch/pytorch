@@ -42,7 +42,6 @@ from .common import (
     KernelArgType,
     OpOverrides,
     PythonPrinter,
-    ShapeType,
     SizeArg,
     TensorArg,
 )
@@ -55,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..ops_handler import ReductionType, StoreMode
+    from ..shape_propagation import ShapeType
 
 log = logging.getLogger(__name__)
 
