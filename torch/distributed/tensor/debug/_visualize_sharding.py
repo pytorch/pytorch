@@ -215,7 +215,6 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
             dtensor.shape, shards, device_kind=dtensor.device_mesh.device_type
         )
     elif importlib.util.find_spec("tabulate"):
-        print(header)
         print(_create_table(shards, device_kind=dtensor.device_mesh.device_type))
     else:
         raise ValueError("`visualize_sharding` requires either `rich` or `tabulate`.")
