@@ -1130,7 +1130,7 @@ class MemPool(_MemPool):
             is ``None`` (default), memory allocation follows the default/
             current configuration of the CUDACachingAllocator.
         use_on_oom(bool, optional): a bool that indicates if this pool can be used
-            as a last resort if a memory allocation outside of the pool fails due 
+            as a last resort if a memory allocation outside of the pool fails due
             to Out Of Memory. This is False by default.
 
     """
