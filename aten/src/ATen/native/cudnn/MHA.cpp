@@ -1056,7 +1056,7 @@ auto build_graph_backward_nestedtensor(
                             .set_dim({b + 1, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_data_type(fe::DataType_t::INT32));
-
+  O_->set_ragged_offset(RAG_O_OFF_);
   Q_->set_ragged_offset(RAG_Q_OFF_);
   K_->set_ragged_offset(RAG_K_OFF_);
   V_->set_ragged_offset(RAG_V_OFF_);
