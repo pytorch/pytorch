@@ -15,7 +15,8 @@ Color = tuple[float, float, float] | str
 def _device_coords_in_mesh(mesh: DeviceMesh) -> dict[int, tuple[int, ...]]:
     """Given a device mesh, returns a dict from device index to coordinate."""
     return {
-        device_index: coord for coord, device_index in np.ndenumerate(np.array(mesh.mesh.tolist()))
+        device_index: coord
+        for coord, device_index in np.ndenumerate(np.array(mesh.mesh.tolist()))
     }
 
 
@@ -36,10 +37,10 @@ def _shard_info(
         if isinstance(placement, Shard):
             shard_dim = placement.dim
             local_offset = [0] * len(global_shape)
-            assert shard_dim < len(
-                local_shape
-            ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-            shard_size, shard_offset = placement._local_shard_size_on_dim(
+            assert shard_dim < len(local_shape), (
+                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+            )
+            shard_size, shard_offset = placement._local_shard_size_and_offset(
                 local_shape[shard_dim], mesh_dim_size, coord[idx], return_offset=True
             )
             local_shape[shard_dim] = shard_size
@@ -243,7 +244,9 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
     ]
 
     if _has_rich_and_matplotlib() and use_rich:
-        _create_rich_table(dtensor.shape, shards, device_kind=dtensor.device_mesh.device_type)
+        _create_rich_table(
+            dtensor.shape, shards, device_kind=dtensor.device_mesh.device_type
+        )
     elif _has_tabulate():
         print(header)
         print(_create_table(shards))
