@@ -34,7 +34,7 @@ while IFS=: read -r filepath url; do
   fi
 done < <(
   git --no-pager grep --no-color -I -P -o \
-    '(?<!git\+)(?<!\$\{)https?://(?![^\s<>\")]*[\{\}\$])[^[:space:]<>\")\[\]\(\\]+' \
+    '(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>\")\[\]\(\\]+' \
     -- '*' \
     ':(exclude).*' \
     ':(exclude)**/.*' \
@@ -45,7 +45,6 @@ done < <(
     ':(exclude)**/*gradle*' \
     ':(exclude)**/third-party/**' \
     ':(exclude)**/third_party/**' \
-  | grep -v '@lint-ignore' \
   | sed -E 's/[^/[:alnum:]]+$//' \
   | grep -Ev '://(0\.0\.0\.0|127\.0\.0\.1|localhost)([:/])' \
   | grep -Ev 'fwdproxy:8080' \
