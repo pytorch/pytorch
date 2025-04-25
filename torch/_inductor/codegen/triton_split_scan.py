@@ -137,19 +137,24 @@ class TritonSplitScanKernel(TritonKernel):
         value = cse_compute(
             f"{value}.to({compute_type})",
             dtype=dtype,
+            shape=value.shape,
         )
         value = cse_compute(
             f"tl.broadcast_to({value}, {self.dense_size_str()})",
             dtype=dtype,
+            shape=self.dense_size_list(),
         )
 
         combine_helper_fn = self._lift_helper(combine_fn, 1, (dtype,))
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
+        shape = list(self.dense_size_list())
+        del shape[dim]
 
         block_sum = cse_compute(
             f"tl.reduce({value}, {dim}, {combine_helper_fn})",
             dtype=dtype,
+            shape=shape,
         )
         exclusive_prefix = self.cse.newvar(
             dtype=dtype,
@@ -188,15 +193,18 @@ class TritonSplitScanKernel(TritonKernel):
         block_scan = cse_compute(
             f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
             dtype=dtype,
+            shape=shape,
         )
         combined_result = cse_compute(
             f"{combine_helper_fn}({exclusive_prefix}, {block_scan})",
             dtype=dtype,
+            shape=shape,
         )
         return (
             cse_compute(
                 f"tl.where(roffset == 0, {block_scan}, {combined_result})",
                 dtype=dtype,
+                shape=block_scan.shape,
             ),
         )
 

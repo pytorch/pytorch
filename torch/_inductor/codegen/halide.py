@@ -42,6 +42,7 @@ from .common import (
     KernelArgType,
     OpOverrides,
     PythonPrinter,
+    ShapeType,
     SizeArg,
     TensorArg,
 )
@@ -556,6 +557,7 @@ class HalideOverrides(OpOverrides):
             f"hl.cast({result.name}.type(), {halide_constant(other)})",
             [],
             bounds=ValueRanges.wrap(other),
+            shape=result.shape,
         )
         # TODO(jansel): look into removing the where in the same places triton does
         return ops.where(new_mask, result, other)
@@ -576,8 +578,9 @@ class HalideCSEVariable(CSEVariable):
         name,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: Optional[ShapeType] = None,
     ) -> None:
-        super().__init__(name, bounds, dtype)
+        super().__init__(name, bounds, dtype, shape=shape)
         self.used_dims: Optional[list[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
@@ -1196,12 +1199,13 @@ class HalideKernel(SIMDKernel):
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
         reduction_vars = OrderedSet(self.reduction_renames)
         result_var = self.newfunc(
-            [v for v in value.used_dims if v not in reduction_vars]
+            [v for v in value.used_dims if v not in reduction_vars],
         )
         if reduction_vars - OrderedSet(value.used_dims):
             value = self.genfunc(
                 f"{value}",
                 self.sort_used_dims(OrderedSet((*value.used_dims, *reduction_vars))),
+                shape=value.shape,
             )
         value_str = value.subs_str(self.reduction_renames)
         default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -1291,7 +1295,9 @@ class HalideKernel(SIMDKernel):
             else:
                 values.append(
                     self.genfunc(
-                        f"{value}", [*value.used_dims, [*self.reduction_renames][:1]]
+                        f"{value}",
+                        [*value.used_dims, [*self.reduction_renames][:1]],
+                        shape=value.shape,
                     )
                 )
             all_used_dims.update(value.used_dims)
@@ -1355,15 +1361,20 @@ class HalideKernel(SIMDKernel):
         return tuple(unpack_vars)
 
     def genfunc(
-        self, line, used_dims, *, bounds=ValueRanges.unknown()
+        self,
+        line,
+        used_dims,
+        *,
+        bounds=ValueRanges.unknown(),
+        shape=None,
     ) -> HalideCSEVariable:
-        var = self.cse.generate(self.body, line, bounds=bounds)
+        var = self.cse.generate(self.body, line, bounds=bounds, shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var
 
-    def newfunc(self, used_dims) -> HalideCSEVariable:
-        var = self.cse.newvar()
+    def newfunc(self, used_dims, *, shape=None) -> HalideCSEVariable:
+        var = self.cse.newvar(shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var

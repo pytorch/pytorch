@@ -74,6 +74,8 @@ if TYPE_CHECKING:
     # causes typing errors in subclasses (defined in other files).
     OpVarT = str
 
+    ShapeType = Optional[Sequence[Union[int, str]]]
+
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
 
@@ -1645,6 +1647,7 @@ class CSEVariable:
         name: str,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: Optional[ShapeType] = None,
     ):
         super().__init__()
         assert isinstance(bounds, ValueRanges)
@@ -1652,6 +1655,7 @@ class CSEVariable:
         self.bounds = bounds
         self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
+        self.shape = shape
 
     def __str__(self) -> str:
         return self.name
@@ -1761,6 +1765,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         write: bool = True,
         assignment: bool = True,
         dtype: Optional[torch.dtype] = None,
+        shape: Optional[ShapeType] = None,
     ) -> CSEVariableType:
         if isinstance(expr, OpsValue):
             expr = expr.value
@@ -1782,7 +1787,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             cache_key = expr
         var = self.try_get(cache_key)
         if not var:
-            var = self.newvar(bounds, dtype)
+            var = self.newvar(bounds, dtype, shape)
             self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
@@ -1828,9 +1833,10 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         self,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
+        shape: Optional[ShapeType] = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds, dtype)
+        var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
         self.varname_map[var_name] = var
         return var
 
@@ -1839,11 +1845,12 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         name: str,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
+        shape: Optional[ShapeType] = None,
     ) -> CSEVariableType:
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
-        var = V.kernel.create_cse_var(name, bounds, dtype)
+        var = V.kernel.create_cse_var(name, bounds, dtype, shape)
         self.varname_map[name] = var
         return var
 
@@ -2319,7 +2326,7 @@ class CSEProxy(DefaultHandler):
 
         output_idx = 0
 
-        def do_cse(v: str) -> CSEVariable:
+        def do_cse(v: Union[str, CSEVariable]) -> CSEVariable:
             # we tree_map over the output, so we need to fetch corresponding dtype
             nonlocal output_idx
             var_dtype: torch.dtype = (
@@ -2338,6 +2345,7 @@ class CSEProxy(DefaultHandler):
                 v,
                 bounds=bounds,
                 dtype=output_dtype,
+                shape=getattr(v, "shape", None),
             )
 
             csevar.update_on_args(name, args, kwargs)
@@ -2427,7 +2435,13 @@ class CSEProxy(DefaultHandler):
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
-            var = self.kernel.cse.generate(self.kernel.compute, stm, bounds=new_bounds)
+            var = self.kernel.cse.generate(
+                self.kernel.compute,
+                stm,
+                bounds=new_bounds,
+                dtype=var.dtype,
+                shape=var.shape,
+            )
 
         sympy_var = self.parent_handler.indirect_indexing(var, size, check)
         if generate_assert(check):
