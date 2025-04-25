@@ -1,9 +1,9 @@
 #define TORCH_ASSERT_NO_OPERATORS
-// Use lower-level headers to avoid dependencies on native_functions.yaml
+// Basic includes to avoid dependencies on native_functions.yaml
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorOptions.h>
-#include <ATen/TensorBase.h>
-#include <ATen/EmptyTensor.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Functions.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Dispatch.h>
@@ -16,11 +16,11 @@ namespace at::native {
 // to the CUDA kernel we just implemented through div_ceil_stub
 
 Tensor ceiling_divide(const Tensor& self, const Tensor& other) {
-  // Create empty output tensor
-  auto result = at::empty_like(self);
+  // Create output tensor with same properties as self
+  Tensor result = at::empty(self.sizes(), self.options());
   
   // Set up the iterator
-  auto iter = at::TensorIteratorConfig()
+  auto iter = TensorIteratorConfig()
       .add_output(result)
       .add_input(self)
       .add_input(other)
@@ -37,7 +37,7 @@ Tensor& ceiling_divide_(Tensor& self, const Tensor& other) {
 
 Tensor& ceiling_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
   // Set up the iterator
-  auto iter = at::TensorIteratorConfig()
+  auto iter = TensorIteratorConfig()
       .add_output(result)
       .add_input(self)
       .add_input(other)
