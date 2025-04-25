@@ -856,9 +856,6 @@ if torch.backends.mps.is_available():
 
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
-            # precision issues
-            "special.polygammaspecial_polygamma_n_0": [torch.float16],
-            "polygammapolygamma_n_0": [torch.float16],
             # Unimplemented ops
             "_segment_reduce": [torch.float16, torch.float32],
             "_chunk_cat": [torch.float16, torch.float32],
@@ -910,8 +907,6 @@ if torch.backends.mps.is_available():
             "equal": [torch.float16, torch.float32],
             # 'float' object is not iterable
             "item": [torch.float16, torch.float32],
-            # "mse_backward_cpu_out" not implemented for 'Half'
-            "nn.functional.mse_loss": [torch.float16],
             # "smooth_l1_backward_cpu_out" not implemented for 'Half'
             "nn.functional.smooth_l1_loss": [torch.float16],
             # cpu error: grad requires non-empty inputs
