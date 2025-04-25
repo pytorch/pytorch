@@ -91,12 +91,6 @@ jobs:
     {%- endif %}
     steps:
 {%- if os == "windows-arm64" %}
-      - name: Find Visual Studio
-        shell: cmd
-        run: |
-          echo %VSINSTALLDIR%
-          echo %VCINSTALLDIR%
-          dir "C:\Program Files\Microsoft Visual Studio" /s /b
       - name: Populate binary env
         shell: cmd
         run: |
@@ -118,10 +112,6 @@ jobs:
         with:
           path: "pytorch"
           submodules: recursive
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
@@ -215,10 +205,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |

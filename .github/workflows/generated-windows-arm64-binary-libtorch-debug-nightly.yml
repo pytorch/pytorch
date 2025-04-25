@@ -66,12 +66,6 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Find Visual Studio
-        shell: cmd
-        run: |
-          echo %VSINSTALLDIR%
-          echo %VCINSTALLDIR%
-          dir "C:\Program Files\Microsoft Visual Studio" /s /b
       - name: Populate binary env
         shell: cmd
         run: |
@@ -93,10 +87,6 @@ jobs:
         with:
           path: "pytorch"
           submodules: recursive
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
@@ -177,10 +167,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Build Tools
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
