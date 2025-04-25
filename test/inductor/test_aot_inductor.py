@@ -3838,7 +3838,7 @@ class AOTInductorTestsTemplate:
 
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         aot_inductor_module(x)
-        x_casted = x.to("cuda")
+        x_casted = x.to(GPU_TYPE)
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
