@@ -129,11 +129,7 @@ class LogRegistry:
 
     # flattens all the qnames together (TODO: consider memoizing?)
     def get_log_qnames(self) -> set[str]:
-        return {
-            qname
-            for qnames in self.log_alias_to_log_qnames.values()
-            for qname in qnames
-        }
+        return set(itertools.chain.from_iterable(self.log_alias_to_log_qnames.values()))
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
@@ -1298,7 +1294,7 @@ def dtrace_structured(
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
-    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
+    expect_trace_id: bool = False,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
 ):
     """

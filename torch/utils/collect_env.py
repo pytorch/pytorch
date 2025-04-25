@@ -445,6 +445,9 @@ def get_pip_packages(run_lambda, patterns=None):
     # People generally have pip as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     out = run_and_read_all(run_lambda, [sys.executable, '-mpip', 'list', '--format=freeze'])
+    if out is None:
+        return pip_version, out
+
     filtered_out = '\n'.join(
         line
         for line in out.splitlines()
@@ -456,6 +459,8 @@ def get_pip_packages(run_lambda, patterns=None):
 
 def get_cachingallocator_config():
     ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
+    if not ca_config:
+        ca_config = os.environ.get('PYTORCH_HIP_ALLOC_CONF', '')
     return ca_config
 
 
