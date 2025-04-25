@@ -420,21 +420,25 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 filtered_grad_outs.append(o)
         filtered_grad_outs = tuple(filtered_grad_outs)
 
-        # bw_graph is a joint graph with signature (*primals_and_tangents) and
-        # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs
-        # to extract the grads.
-        primals_and_tangents = primals + filtered_grad_outs
-
         # Check if we have already traced the bwd subgraph.
         bw_graph = None
         invoke_subgraph_cache = get_invoke_subgraph_cache()
-        if invoke_subgraph_cache:
-            bw_graph = invoke_subgraph_cache.get_lazy_bwd_entry(identifier)
 
+        if invoke_subgraph_cache:
+            bw_graph, prev_strides = invoke_subgraph_cache.get_lazy_bwd_entry(
+                identifier
+            )
+
+        cache_hit = False
         if bw_graph is None:
             with dynamo_timed(
                 "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
             ):
+                # bw_graph is a joint graph with signature (*primals_and_tangents) and
+                # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs
+                # to extract the grads.
+                primals_and_tangents = primals + filtered_grad_outs
+
                 bw_graph = trace_joint_graph_as_bwd(
                     subgraph,
                     len(primals),
@@ -443,8 +447,32 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                     ctx._fw_exclude_key_set,
                 )
 
-        if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_lazy_bwd_entry(identifier, bw_graph)
+                # NOTE - It is REALLY important to save the tangent_strides
+                # along with the bw_graph. For different invocations of the same
+                # invoke_subgraph, we can have different tangent strides, so it
+                # is necessary to save these strides and then later use them to
+                # re-stride new tangents.
+                tangent_strides = [t.stride() for t in filtered_grad_outs]
+        else:
+            cache_hit = True
+            assert prev_strides is not None
+
+            # NOTE - Re-stride the input tangents because the cached graph
+            # assumes a certain tangent strides.
+            new_tangents = []
+            for tangent, prev_stride in zip(filtered_grad_outs, prev_strides):
+                new_tangent = tangent
+                if tangent.stride() != prev_stride:
+                    new_tangent = tangent.as_strided(tangent.size(), stride=prev_stride)
+                new_tangents.append(new_tangent)
+
+            filtered_grad_outs = tuple(new_tangents)
+            primals_and_tangents = primals + filtered_grad_outs
+
+        if invoke_subgraph_cache and not cache_hit:
+            invoke_subgraph_cache.add_lazy_bwd_entry(
+                identifier, bw_graph, tangent_strides
+            )
 
         grads = invoke_subgraph(
             bw_graph, f"___backward_{identifier}", primals_and_tangents

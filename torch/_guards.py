@@ -684,7 +684,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
-        self.lazy_bwd_cache: dict[str, torch.fx.GraphModule] = {}
+        self.lazy_bwd_cache: dict[str, tuple[torch.fx.GraphModule, list[int]]] = {}
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str):
         self.dynamo_installed_submodules[fn_id].append(identifier)
@@ -704,11 +704,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_proxy_dispatch_entry(self, identifier: str):
         return self.proxy_dispatch_cache.get(identifier, None)
 
-    def add_lazy_bwd_entry(self, identifier: str, gmod: torch.fx.GraphModule):
-        self.lazy_bwd_cache[identifier] = gmod
+    def add_lazy_bwd_entry(
+        self,
+        identifier: str,
+        gmod: torch.fx.GraphModule,
+        tangent_strides: list[int],
+    ):
+        self.lazy_bwd_cache[identifier] = (gmod, tangent_strides)
 
     def get_lazy_bwd_entry(self, identifier: str):
-        return self.lazy_bwd_cache.get(identifier, None)
+        return self.lazy_bwd_cache.get(identifier, (None, None))
 
 
 class HopDispatchSetCache:
