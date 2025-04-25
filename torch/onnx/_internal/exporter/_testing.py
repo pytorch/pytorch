@@ -70,7 +70,7 @@ def assert_onnx_program(
     for output in torch_outputs:
         if not isinstance(output, torch.Tensor):
             torch_outputs_adapted.append(torch.tensor(output))
-        elif torch.is_complex(output)):
+        elif torch.is_complex(output):
             torch_outputs_adapted.append(torch.view_as_real(output))
         else:
             torch_outputs_adapted.append(output)
