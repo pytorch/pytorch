@@ -45,6 +45,33 @@ struct OpenRegHostAllocator final : at::HostAllocator {
     return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
         .cast<bool>();
   }
+
+  bool record_event(void* ptr, void* ctx, c10::Stream stream) override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "record_event is not implemented for OpenRegHostAllocator.");
+  }
+
+  void empty_cache() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "empty_cache is not implemented for OpenRegHostAllocator.");
+  }
+
+  HostStats get_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "get_stats is not implemented for OpenRegHostAllocator.");
+  }
+
+  void reset_accumulated_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "reset_accumulated_stats is not implemented for OpenRegHostAllocator.");
+  }
+
+  void reset_peak_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "reset_peak_stats is not implemented for OpenRegHostAllocator.");
+  }
 };
 
 static OpenRegHostAllocator global_host_alloc;
