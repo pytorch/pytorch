@@ -53,9 +53,9 @@ on:
         description: Permissions for pushing to the docs site.
 
 jobs:
-  check-urls:
+  lint-urls:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    name: check-urls
+    name: lint-urls
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PyTorch
@@ -64,10 +64,10 @@ jobs:
           submodules: false
           fetch-depth: -1
       - name: Run URL linter
-        run: bash ./scripts/check_urls.sh
+        run: bash ./scripts/lint_urls.sh
 
-  check-xrefs:
-    name: check-xrefs
+  lint-xrefs:
+    name: lint-xrefs
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PyTorch
@@ -76,7 +76,7 @@ jobs:
           submodules: false
           fetch-depth: -1
       - name: Run xref linter
-        run: bash ./scripts/check_xrefs.sh
+        run: bash ./scripts/lint_xrefs.sh
 
   build-docs:
     # Don't run on forked repos.
