@@ -234,7 +234,7 @@ GEMM_TEMPLATE = r"""
     {%- if is_woq_int4 %}
         {%- set tile_W = kernel.slice_nd(W, [("n_start", "n_start + n_size"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
         {%- set tile_qparam = kernel.slice_nd(
-            qscale_and_zeros, [("k_start / group_size", "k_end / group_size"), ("n_start", "n_start + n_size"), ()]) %}
+            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("n_start", "n_start + n_size"), ()]) %}
     {%- else %}
         {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
         {%- set tile_qparam = None %}
@@ -317,6 +317,16 @@ GEMM_TEMPLATE = r"""
     }
 }
 """
+
+
+def _is_int8_gemm(inputs):
+    return (
+        isinstance(inputs[0], ir.IRNode)
+        and inputs[0].get_dtype() in [torch.uint8, torch.int8]
+    ) or (
+        isinstance(inputs[0], torch.Tensor)
+        and inputs[0].dtype in [torch.uint8, torch.int8]
+    )
 
 
 def get_padded_n(n, block_n):
@@ -825,6 +835,18 @@ class CppGemmTemplate(CppTemplate):
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         act_mapping: Optional[dict[int, ir.IRNode]] = None,
     ):
+        """
+        Add choices for the GEMM template.
+        """
+        # Fast path to save the epilogue calculation when x_scale/x_zp/w_scale are constant
+        use_int8_fast_compensation_path = _is_int8_gemm(input_nodes) and all(
+            (
+                isinstance(input_nodes[idx], ir.TensorBox)
+                and isinstance(input_nodes[idx].data.data, ir.ConstantBuffer)
+            )
+            for idx in [1, 2, 4]
+        )
+
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
         only_one_input = (
@@ -937,7 +959,11 @@ class CppGemmTemplate(CppTemplate):
             if only_one_input and isinstance(new_inputs[0], torch.Tensor):
                 return new_inputs[1:], new_layout
             return cls.prep_weight(
-                new_inputs, new_layout, micro_gemm, pre_block_weights
+                new_inputs,
+                new_layout,
+                micro_gemm,
+                pre_block_weights,
+                use_int8_fast_compensation_path,
             )
 
         def postprocessor(output):
@@ -956,7 +982,12 @@ class CppGemmTemplate(CppTemplate):
                     *maybe_to_dense(new_input_nodes, layout)
                 )
                 new_input_nodes, _ = cls.prep_weight(
-                    new_input_nodes, new_layout, micro_gemm, pre_block_weights
+                    new_input_nodes,
+                    new_layout,
+                    micro_gemm,
+                    pre_block_weights,
+                    use_int8_fast_compensation_path,
+                    skip_int8_compensation=True,
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -1002,6 +1033,8 @@ class CppGemmTemplate(CppTemplate):
         layout: ir.Layout,
         micro_gemm: CppMicroGemm,
         should_block_weight: bool,
+        use_int8_fast_compensation_path: bool = False,
+        skip_int8_compensation: bool = False,
     ):
         """
         NOTE Weight prep consists of 2 separate steps:
@@ -1046,26 +1079,52 @@ class CppGemmTemplate(CppTemplate):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
 
-        def _is_int8_gemm(inputs):
-            return (
-                isinstance(inputs[0], ir.IRNode)
-                and inputs[0].get_dtype() in [torch.uint8, torch.int8]
-            ) or (
-                isinstance(inputs[0], torch.Tensor)
-                and inputs[0].dtype in [torch.uint8, torch.int8]
-            )
-
-        if _is_int8_gemm(new_inputs):
+        if not skip_int8_compensation and _is_int8_gemm(new_inputs):
             BCompensate = None
-            if isinstance(W, ir.IRNode):
+            x_w_scale = None
+
+            def _get_compensation_node(W, use_int8_fast_compensation_path):
                 BCompensate = V.graph.add_tensor_constant(
                     V.graph.constants[W.get_name() + "_BMatrixCompens"],
                     W.get_name() + "_BMatrixCompens",
                 )
+                x_w_scale = None
+                if use_int8_fast_compensation_path:
+                    x_w_scale = V.graph.add_tensor_constant(
+                        V.graph.constants[W.get_name() + "_x_w_compens"],
+                        W.get_name() + "_x_w_compens",
+                    )
+                return BCompensate, x_w_scale
+
+            if use_int8_fast_compensation_path:
+                # new_inputs has been reordered: [x, w, optional[bias], x_scale, x_zp, w_scale, w_zp]
+                x_scale = new_inputs[-4]
+                x_zp = new_inputs[-3]
+                w_scale = new_inputs[-2]
+                if isinstance(W, ir.IRNode):
+                    BCompensate, x_w_scale = _get_compensation_node(
+                        W, use_int8_fast_compensation_path
+                    )
+                else:
+                    # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
+                    assert all(
+                        isinstance(item, torch.Tensor)
+                        for item in (x_scale, x_zp, w_scale)
+                    )
+                    BCompensate = BCompensate * x_scale * w_scale * x_zp
+                    x_w_scale = x_scale * w_scale
+                new_inputs.append(BCompensate)
+                new_inputs.append(x_w_scale)
             else:
-                # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
-                BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
-            new_inputs.append(BCompensate)
+                if isinstance(W, ir.IRNode):
+                    BCompensate, _ = _get_compensation_node(
+                        W, use_int8_fast_compensation_path
+                    )
+                else:
+                    # Use the original W, not the blocked_w in new_inputs[1] to calculate BCompensate
+                    BCompensate = torch.sum(W.to_dense().to(torch.float), dim=0)  # type: ignore[assignment]
+                new_inputs.append(BCompensate)
         return new_inputs, layout
 
     @staticmethod
@@ -1115,6 +1174,12 @@ class CppGemmTemplate(CppTemplate):
 
     @classmethod
     def pack_vnni_weight(cls, W, micro_gemm, new_size):
+        # WOQ INT4 weights are reordered in microkernel so do not pack them here
+        should_pack = (
+            micro_gemm.get_b_layout() != LayoutType.NORMAL
+            and not micro_gemm.is_woq_int4()
+        )
+
         # These are separated into two methods to allow subclasses to override them separately
         if isinstance(W, ir.IRNode):
             if isinstance(W, ir.Buffer) and W.get_name() in V.graph.constants:
@@ -1122,7 +1187,7 @@ class CppGemmTemplate(CppTemplate):
             k = new_size[-2]
             if not isinstance(W, ir.TensorBox):
                 W = ir.TensorBox(W)
-            if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+            if should_pack:
                 permute_dims = list(range(len(new_size) + 1))
                 permute_dims[-1], permute_dims[-2] = permute_dims[-2], permute_dims[-1]
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
@@ -1139,7 +1204,7 @@ class CppGemmTemplate(CppTemplate):
         else:
             k = new_size[-2]
             # Apply VNNI packing to the weight tensor
-            if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+            if should_pack:
                 # TODO: Move VNNI weight packing for non-constant tensors into the template,
                 # to improve cache locality and avoid full-tensor copy.
                 layout_str = (
