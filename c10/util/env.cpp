@@ -7,11 +7,14 @@
 
 namespace c10::utils {
 
-static std::shared_mutex env_mutex;
+static std::shared_mutex& get_env_mutex() {
+  static std::shared_mutex env_mutex;
+  return env_mutex;
+}
 
 // Set an environment variable.
 void set_env(const char* name, const char* value, bool overwrite) {
-  std::lock_guard lk(env_mutex);
+  std::lock_guard lk(get_env_mutex());
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -46,7 +49,7 @@ void set_env(const char* name, const char* value, bool overwrite) {
 
 // Reads an environment variable and returns the content if it is set
 std::optional<std::string> get_env(const char* name) noexcept {
-  std::shared_lock lk(env_mutex);
+  std::shared_lock lk(get_env_mutex());
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
