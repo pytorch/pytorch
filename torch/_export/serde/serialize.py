@@ -35,9 +35,9 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.verifier import load_verifier
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
@@ -1607,7 +1607,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
         state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
+        constants: dict[str, _ConstantAttributeType]
         example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
     def __init__(self) -> None:
