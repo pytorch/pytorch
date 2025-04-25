@@ -102,7 +102,7 @@ if TYPE_CHECKING:
 
     from torch import Tensor
     from torch._subclasses.fake_tensor import FakeTensor
-    from torch.types import BoolLikeType, IntLikeType
+    from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 
 InputList = list
@@ -389,7 +389,7 @@ def is_concrete_int(a: IntLikeType) -> bool:
     return False
 
 
-def is_concrete_float(a: Union[float, SymFloat]) -> bool:
+def is_concrete_float(a: FloatLikeType) -> bool:
     r"""Utility to check if underlying object
     in SymInt is concrete value. Also returns
     true if integer is passed in.
@@ -1588,7 +1588,7 @@ def guard_int(a: IntLikeType) -> int:
     return a
 
 
-def guard_float(a: Union[SymFloat, float]) -> float:
+def guard_float(a: FloatLikeType) -> float:
     if isinstance(a, SymFloat):
         return a.node.guard_float("", 0)  # NB: uses Python backtrace
     assert isinstance(a, float), a
@@ -4325,7 +4325,7 @@ class ShapeEnv:
         *,
         hint: Optional[int],
         source: Optional[Source] = None,
-    ) -> Union[float, SymFloat]:
+    ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
@@ -4340,7 +4340,7 @@ class ShapeEnv:
         else:
             fx_node = None
 
-        out: Union[float, SymFloat]
+        out: FloatLikeType
         if isinstance(sym, sympy.Float):
             if hint is not None:
                 assert float(sym) == hint
@@ -5154,7 +5154,7 @@ class ShapeEnv:
                         constraint.warn_only, self._debug_name(source), msg
                     )
 
-        def track_symfloat(source: Source, val: Union[float, SymFloat]) -> None:
+        def track_symfloat(source: Source, val: FloatLikeType) -> None:
             log.debug("track_symfloat %s %s", LazyString(source.name), val)
             assert not isinstance(val, SymFloat) or is_symbolic(val)
 
