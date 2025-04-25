@@ -30,6 +30,7 @@ import re
 import shutil
 import sys
 import os
+import warnings
 
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
@@ -39,6 +40,9 @@ from collections.abc import Iterable, Iterator, Mapping
 from enum import Enum
 import functools
 import hashlib
+
+def _deprecated():
+    warnings.warn("do not use, hipify version 2.0.0 no longer uses this function", DeprecationWarning)
 
 class CurrentState(Enum):
     INITIALIZED = 1
@@ -178,7 +182,6 @@ def matched_files_iter(
                 dirs.append("third_party/nvfuser")
         for filename in filenames:
             filepath = _to_unix_path(os.path.join(abs_dirpath, filename))
-            rel_filepath = _to_unix_path(os.path.join(rel_dirpath, filename))
             # We respect extensions, UNLESS you wrote the entire
             # filename verbatim, in which case we always accept it
             if (
@@ -618,8 +621,8 @@ def is_out_of_place(rel_filepath):
     return True
 
 
-# deprecated
 def is_pytorch_file(rel_filepath):
+    _deprecated()
     assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("aten/"):
         if rel_filepath.startswith("aten/src/ATen/core/"):
@@ -634,15 +637,15 @@ def is_pytorch_file(rel_filepath):
     return False
 
 
-# deprecated
 def is_cusparse_file(rel_filepath):
+    _deprecated()
     if is_pytorch_file(rel_filepath):
         return "sparse" in rel_filepath.lower()
     return False
 
 
-# deprecated
 def is_special_file(rel_filepath):
+    _deprecated()
     if is_pytorch_file(rel_filepath):
         if "sparse" in rel_filepath.lower():
             return True
@@ -653,8 +656,8 @@ def is_special_file(rel_filepath):
     return False
 
 
-# deprecated
 def is_caffe2_gpu_file(rel_filepath):
+    _deprecated()
     assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("c10/cuda"):
         return True
