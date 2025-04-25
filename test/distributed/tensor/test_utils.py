@@ -144,17 +144,30 @@ class UtilTest(DTensorTestBase):
 
     @with_comms
     def test_compute_global_tensor_shape_1D(self):
-        one_d_placements = [[Shard(1)], [Replicate()]]
+        one_d_placements = [[Shard(1)], [Shard(0)], [Replicate()]]
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         for placements in one_d_placements:
             if isinstance(placements[0], Shard):
                 uneven_dim = list(range(self.world_size))
+                local_shape = (
+                    torch.Size([5, uneven_dim[device_mesh.get_rank()]])
+                    if placements[0].dim == 1
+                    else torch.Size([uneven_dim[device_mesh.get_rank()], 5])
+                )
+                expected_global_shape = (
+                    torch.Size([5, sum(uneven_dim)])
+                    if placements[0].dim == 1
+                    else torch.Size([sum(uneven_dim), 5])
+                )
                 global_shape = compute_global_tensor_shape(
-                    torch.Size([5, uneven_dim[device_mesh.get_rank()]]),
+                    local_shape,
                     device_mesh,
                     placements,
                 )
-                self.assertEqual(global_shape, torch.Size([5, sum(uneven_dim)]))
+                self.assertEqual(
+                    global_shape,
+                    expected_global_shape,
+                )
             else:
                 global_shape = compute_global_tensor_shape(
                     torch.Size([5, 5]), device_mesh, placements

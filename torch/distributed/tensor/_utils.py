@@ -251,12 +251,14 @@ def compute_global_tensor_shape(
 ) -> torch.Size:
     """
     Compute the global size of a DTensor from the given local tensor shape,
-    the mesh and placements.
+    the mesh and placements. Different from compute_global_tensor_info,
+    which assumed sharding is even, this util allgathers local shards' shapes
+    from all ranks and thus can support uneven sharding.
     NOTE: Currently this function only supports 1D mesh.
 
     Args:
         shape (:class:`torch.Size`):
-            Shape of the Local tensor
+            Shape of the local tensor
         mesh (:class:`DeviceMesh`):
             Object which describes the mesh topology
             of devices for the DTensor.
@@ -265,7 +267,7 @@ def compute_global_tensor_shape(
             on the mesh topology.
 
     Return:
-        tensor_shape: Shape of the glocal DTensor.
+        tensor_shape: Shape of the global DTensor.
     """
     if mesh.ndim > 1:
         raise NotImplementedError(
@@ -280,15 +282,15 @@ def compute_global_tensor_shape(
         return shape
     elif isinstance(placements[0], Shard):
         local_shape = torch.tensor(list(shape))
-        gathered_shapes = [None for _ in range(torch.distributed.get_world_size())]
-        torch.distributed.all_gather_object(gathered_shapes, local_shape)
+        gathered_shaped_tensors = [
+            torch.empty_like(local_shape, device=local_shape.device)
+            for _ in range(torch.distributed.get_world_size())
+        ]
+        torch.distributed.all_gather(gathered_shaped_tensors, local_shape)
         sharded_dim_sum = 0
-        for shape_tensor in gathered_shapes:
-            if shape_tensor is None:
-                raise RuntimeError(
-                    "Cannot find the shape of the DTensor on some ranks."
-                )
-            sharded_dim_sum += shape_tensor[placements[0].dim]
+        for shape_tensor in gathered_shaped_tensors:
+            shape_tensor_list = shape_tensor.tolist()
+            sharded_dim_sum += shape_tensor_list[placements[0].dim]
         global_shape = list(shape)
         global_shape[placements[0].dim] = sharded_dim_sum
         return torch.Size(global_shape)
