@@ -548,7 +548,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 return torch.nn.functional.group_norm(x, 4)
 
         x = torch.randn(1, 4, 4, 4, dtype=torch.float32)
-        onnx_program = self.export(Model(), (x,))
+        onnx_program = self.export(Model(), (x,), opset_version=21)
         # TODO(after ort support): As of ONNX Runtime 1.22, the operator is not implemented yet.
         # call assert_onnx_program after ort support
         self.assertIn(
