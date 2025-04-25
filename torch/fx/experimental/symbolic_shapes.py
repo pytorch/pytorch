@@ -408,7 +408,7 @@ def is_concrete_float(a: Union[float, SymFloat]) -> bool:
     return False
 
 
-def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
+def is_concrete_bool(a: BoolLikeType) -> bool:
     """
     Utility to check if underlying object
     in SymBool is concrete value. Also returns
@@ -1296,7 +1296,7 @@ def definitely_false(a: BoolLikeType) -> bool:
     return not bool(a)
 
 
-def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
+def _static_eval(x: BoolLikeType) -> Optional[bool]:
     if isinstance(x, SymBool):
         expr = x.node.expr
         shape_env = x.node.shape_env
@@ -1313,7 +1313,7 @@ def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
     return x
 
 
-def statically_known_true(x: Union[bool, SymBool]) -> bool:
+def statically_known_true(x: BoolLikeType) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
 
@@ -1331,9 +1331,7 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
         return result
 
 
-def sym_and(
-    x: Union[bool, SymBool], *others: Union[bool, SymBool]
-) -> Union[bool, SymBool]:
+def sym_and(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     and, but for symbolic expressions, without bool casting.
     """
@@ -1346,7 +1344,7 @@ def sym_and(
     return x
 
 
-def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
+def sym_eq(x: _T, y: _T) -> BoolLikeType:
     """
     Like ==, but when run on list/tuple, it will recursively test equality
     and use sym_and to join the results together, without guarding.
@@ -1363,9 +1361,7 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
         raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
 
 
-def sym_or(
-    x: Union[bool, SymBool], *others: Union[bool, SymBool]
-) -> Union[bool, SymBool]:
+def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     or, but for symbolic expressions, without bool casting.
     """
@@ -1563,7 +1559,7 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: Union[SymBool, bool], skip: int = 0) -> bool:
+def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1578,7 +1574,7 @@ def expect_true(a: Union[SymBool, bool], skip: int = 0) -> bool:
     return a
 
 
-def guard_bool(a: Union[SymBool, bool]) -> bool:
+def guard_bool(a: BoolLikeType) -> bool:
     if isinstance(a, SymBool):
         return a.node.guard_bool("", 0)  # NB: uses Python backtrace
     assert type(a) is bool, a
