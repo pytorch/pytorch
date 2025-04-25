@@ -50,6 +50,7 @@ torch.fx.experimental.symbolic_shapes
     constrain_unify
     canonicalize_bool_expr
     statically_known_true
+    has_static_value
     lru_cache
     check_consistent
     compute_unbacked_bindings

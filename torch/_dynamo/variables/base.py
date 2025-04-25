@@ -591,7 +591,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
-            return builder.VariableBuilder(tx, source)(value)
+            return variables.LazyVariableTracker.create(value, source)
 
     def __init__(
         self,
