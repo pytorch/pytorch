@@ -78,8 +78,8 @@ class RingAttentionTest(DTensorTestBase):
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
                 "dispatch_mode": [
-                    _DispatchMode.MONEKY_PATCHING,
-                    _DispatchMode.TORCH_FUNTION,
+                    _DispatchMode.MONKEY_PATCH,
+                    _DispatchMode.TORCH_FUNCTION,
                 ],
             },
             self._test_ring_attention_sdpa,
@@ -229,7 +229,7 @@ class RingAttentionTest(DTensorTestBase):
             cp_v.requires_grad = False
 
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.MONEKY_PATCHING
+            _DispatchMode.MONKEY_PATCH
         )
 
     def test_is_causal_behavior(self) -> None:

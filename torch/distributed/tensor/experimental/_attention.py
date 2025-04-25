@@ -41,12 +41,12 @@ logger = logging.getLogger(__name__)
 
 
 class _DispatchMode(Enum):
-    MONEKY_PATCHING = auto()
-    TORCH_FUNTION = auto()
+    MONKEY_PATCH = auto()
+    TORCH_FUNCTION = auto()
     TORCH_DISPATCH = auto()
 
 
-_dispatch_mode: _DispatchMode = _DispatchMode.MONEKY_PATCHING
+_dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
 
 
 @dataclass
@@ -300,18 +300,22 @@ class _AttentionOp(Protocol):
         key: torch.Tensor,
         value: torch.Tensor,
         **kwargs: object,
-    ) -> tuple[torch.Tensor, ...]: ...
+    ) -> tuple[torch.Tensor, ...]:
+        ...
 
 
 class _RingRotater(ABC):
     @abstractmethod
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None: ...
+    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
+        ...
 
     @abstractmethod
-    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None: ...
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
+        ...
 
     @abstractmethod
-    def next_buffer(self) -> torch.Tensor: ...
+    def next_buffer(self) -> torch.Tensor:
+        ...
 
 
 class _AllToAllRotater(_RingRotater):
@@ -1176,18 +1180,13 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
         return tuple(new_outputs)
 
-    # TODO: provide a more robust way to replace SDPA.
-    # Currently we use monkey patch to replace scaled_dot_product_attention with the
-    # wrapped fn. This is okay if users do `import torch.nn.functional` but will not
-    # work if users do `import torch.nn.functional.scaled_dot_product_attention`.
-
     class DistributeFunction(TorchFunctionMode):
         def __init__(
             self,
             fn: Callable,
             device_mesh: DeviceMesh,
-            input_fn: Optional[Callable],
-            output_fn: Optional[Callable],
+            input_fn: Optional[Callable] = None,
+            output_fn: Optional[Callable] = None,
         ):
             self._device_mesh = device_mesh
             self._input_fn = input_fn
@@ -1201,8 +1200,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             args: tuple[Any, ...] = (),
             kwargs: Optional[dict[str, Any]] = None,
         ):
-            if kwargs is None:
-                kwargs = {}
+            kwargs = kwargs or {}
 
             if func != self._fn:
                 return func(*args, **kwargs)
@@ -1211,13 +1209,10 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
             output = func(*args, **kwargs)
             if self._output_fn is not None:
-                try:
-                    output = self._output_fn(self._device_mesh, output)
-                except Exception as e:
-                    raise Exception(f"{func} {output}")
+                output = self._output_fn(self._device_mesh, output)
             return output
 
-    if _dispatch_mode == _DispatchMode.MONEKY_PATCHING:
+    if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
         _distribute_function(
             F.scaled_dot_product_attention,
             F,
@@ -1228,7 +1223,7 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
         with _enable_cp_dispatcher():
             yield
         _restore_function(F.scaled_dot_product_attention, F)
-    elif _dispatch_mode == _DispatchMode.TORCH_FUNTION:
+    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
         with DistributeFunction(
             F.scaled_dot_product_attention,
             mesh,
@@ -1246,13 +1241,15 @@ class _LoadBalancer(ABC):
     @abstractmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        ...
 
     @classmethod
     @abstractmethod
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        ...
 
 
 class _SequentialSharder(_LoadBalancer):
