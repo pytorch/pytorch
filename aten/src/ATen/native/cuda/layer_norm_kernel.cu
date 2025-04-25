@@ -508,6 +508,7 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   }
 }
 
+
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardSimpleCUDAKernel(
     int64_t M,
