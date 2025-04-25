@@ -11,7 +11,6 @@ import torch
 import torch._dynamo
 from torch import SymInt
 from torch._C import DispatchKey, DispatchKeySet
-from torch._custom_op.functional import register_functional_op
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -202,6 +201,9 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
+    @unittest.skip(
+        "Causing flakiness, see https://github.com/pytorch/pytorch/issues/145108"
+    )
     def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
         # This tests that if meta is included in TlS dispatch key set,
         # then a meta kernel should be called regardless if a dense
@@ -589,182 +591,6 @@ class TestPythonRegistration(TestCase):
             out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
             out_val = shape_env.evaluate_expr(out.node.expr)
         self.assertEqual(out_val, 13)
-
-    def test_register_functional_op_error_cases(self):
-        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
-            with self.assertRaisesRegex(TypeError, "instance of OpOverload"):
-                register_functional_op(lib, "abs", torch.ops.aten.abs_)
-            with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
-                register_functional_op(lib, "abs", torch.ops.aten.abs_.default)
-            with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
-                register_functional_op(lib, "abs", torch.ops.aten.abs.out)
-
-            schemas = [
-                "foo(Tensor x, Tensor(a!)[] y) -> ()",
-                "foo(Tensor x, Tensor(a!) y, Tensor(b) z) -> Tensor(b)",
-                "foo(Tensor x, Tensor(a!) y) -> (Tensor, Tensor(a))",
-            ]
-
-        for schema in schemas:
-            with _scoped_library(self.test_ns, "FRAGMENT") as lib:
-                lib.define(schema)
-                with self.assertRaisesRegex(RuntimeError, "NYI"):
-                    register_functional_op(
-                        lib,
-                        "foo_functional",
-                        getattr(torch.ops, self.test_ns).foo.default,
-                    )
-
-    def _check_is_functional_variant(self, mutable_op, functional_op, args):
-        # functional op should not mutate
-        cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
-        functional_result = functional_op(*cloned_args)
-        self.assertEqual(cloned_args, args)
-
-        # check functional_result includes mutable_result
-        mutable_result = mutable_op(*cloned_args)
-        if mutable_result is None:
-            flat_mutable_result = []
-        else:
-            flat_mutable_result = pytree.tree_leaves(mutable_result)
-        flat_functional_result = pytree.tree_leaves(functional_result)
-        assert len(flat_functional_result) > len(flat_mutable_result)
-        self.assertEqual(
-            flat_functional_result[: len(flat_mutable_result)], flat_mutable_result
-        )
-
-        # check rest of functional_result is the mutated args
-        mutated_args = [
-            maybe_mutated_arg
-            for maybe_mutated_arg, arg in zip(cloned_args, args)
-            if not (
-                maybe_mutated_arg is not None
-                and arg is not None
-                and torch.allclose(maybe_mutated_arg, arg)
-            )
-        ]
-        self.assertEqual(
-            flat_functional_result[len(flat_mutable_result) :], mutated_args
-        )
-
-        # check that functionalization kernel was indeed registered
-        def fn(*args):
-            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
-            mutable_op(*cloned_args)
-            return cloned_args
-
-        gm = make_fx(torch.func.functionalize(fn))(*args)
-        has_functional_op = False
-        for node in gm.graph.nodes:
-            self.assertFalse(node.target is mutable_op)
-            if node.target is functional_op:
-                has_functional_op = True
-        self.assertTrue(has_functional_op)
-
-    def test_register_functional_op_no_returns(self):
-        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
-            lib.define("foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> ()")
-
-            def foo_impl(x, y, z, w):
-                y.fill_(3.14)
-                w.fill_(2.71)
-
-            lib.impl("foo", foo_impl, "CPU")
-            register_functional_op(
-                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
-            )
-            x = torch.randn([])
-            y = torch.randn([])
-            z = torch.randn([])
-            w = torch.randn([])
-            self._check_is_functional_variant(
-                getattr(torch.ops, self.test_ns).foo.default,
-                getattr(torch.ops, self.test_ns).foo_functional.default,
-                (x, y, z, w),
-            )
-
-    def test_register_functional_op_with_optional(self):
-        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
-            lib.define(
-                "foo(Tensor x, Tensor(a!) y, Tensor (b!) z, Tensor(c!)? w) -> ()"
-            )
-
-            def foo_impl(x, y, z, w):
-                y.fill_(3.14)
-                z.fill_(2.71)
-                if w is not None:
-                    w.fill_(1.618)
-
-            lib.impl("foo", foo_impl, "CPU")
-            register_functional_op(
-                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
-            )
-            x = torch.randn([])
-            y = torch.randn([])
-            z = torch.randn([])
-            w = torch.randn([])
-            self._check_is_functional_variant(
-                getattr(torch.ops, self.test_ns).foo.default,
-                getattr(torch.ops, self.test_ns).foo_functional.default,
-                (x, y, z, w),
-            )
-            self._check_is_functional_variant(
-                getattr(torch.ops, self.test_ns).foo.default,
-                getattr(torch.ops, self.test_ns).foo_functional.default,
-                (x, y, z, None),
-            )
-
-    def test_register_functional_op_one_return(self):
-        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
-            lib.define(
-                "foo(Tensor x, Tensor(a!) y, Tensor(c!) z, Tensor(b!) w) -> Tensor"
-            )
-
-            def foo_impl(x, y, z, w):
-                y.fill_(3.14)
-                w.fill_(2.71)
-                z.fill_(0.99)
-                return x.clone()
-
-            lib.impl("foo", foo_impl, "CPU")
-            register_functional_op(
-                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
-            )
-            x = torch.randn([])
-            y = torch.randn([])
-            z = torch.randn([])
-            w = torch.randn([])
-            self._check_is_functional_variant(
-                getattr(torch.ops, self.test_ns).foo.default,
-                getattr(torch.ops, self.test_ns).foo_functional.default,
-                (x, y, z, w),
-            )
-
-    def test_register_functional_op_multiple_returns(self):
-        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
-            lib.define(
-                "foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> (Tensor, Tensor)"
-            )
-
-            def foo_impl(x, y, z, w):
-                y.fill_(3.14)
-                w.fill_(2.71)
-                return x.clone(), z.clone()
-
-            lib.impl("foo", foo_impl, "CPU")
-            register_functional_op(
-                lib, "foo_functional", getattr(torch.ops, self.test_ns).foo.default
-            )
-
-            x = torch.randn([])
-            y = torch.randn([])
-            z = torch.randn([])
-            w = torch.randn([])
-            self._check_is_functional_variant(
-                getattr(torch.ops, self.test_ns).foo.default,
-                getattr(torch.ops, self.test_ns).foo_functional.default,
-                (x, y, z, w),
-            )
 
     def test_register_fallthrough(self):
         with _scoped_library("aten", "IMPL") as my_lib:

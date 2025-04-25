@@ -1126,7 +1126,7 @@ of shape `(*, m, n)`, `(*, m, k)` respectively, it contains
 
 - `solution`: the least squares solution. It has shape `(*, n, k)`.
 - `residuals`: the squared residuals of the solutions, that is, :math:`\|AX - B\|_F^2`.
-  It has shape equal to the batch dimensions of :attr:`A`.
+  It has shape `(*, k)`.
   It is computed when `m > n` and every matrix in :attr:`A` is full-rank,
   otherwise, it is an empty tensor.
   If :attr:`A` is a batch of matrices and any matrix in the batch is not full rank,

@@ -24,6 +24,7 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
@@ -215,7 +216,7 @@
 
 namespace at::meta {
 
-inline c10::MemoryFormat cat_compute_output_memory_format(
+static inline c10::MemoryFormat cat_compute_output_memory_format(
     const MaterializedITensorListRef& inputs) {
   std::optional<c10::MemoryFormat> format = std::nullopt;
   for (const Tensor& t : inputs) {
@@ -399,7 +400,13 @@ Tensor& set_storage_meta__symint(
     c10::SymInt storage_offset,
     c10::SymIntArrayRef size,
     c10::SymIntArrayRef stride) {
-  checkSetStorage(result, storage, storage_offset, size, stride);
+  checkSetStorage(
+      result,
+      storage,
+      storage_offset,
+      size,
+      stride,
+      /*check_offset_in_bounds=*/false);
 
   c10::SymDimVector contiguous_strides;
   if (stride.data() == nullptr) {
@@ -1112,7 +1119,7 @@ std::vector<Tensor> tensor_split_sections_symint(
 }
 
 template <typename T>
-std::vector<Tensor> _tensor_split_indices(
+static std::vector<Tensor> _tensor_split_indices(
     const Tensor& self,
     ArrayRef<T> indices,
     int64_t dim) {
@@ -1233,8 +1240,7 @@ Tensor diagonal(
   auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
   NoNamesGuard no_names_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t diag_size;
+  int64_t diag_size = 0;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
   // for positive values of offset (above the main diagonal)
@@ -1411,7 +1417,7 @@ Tensor as_strided_tensorimpl(
 }
 
 template <typename T>
-inline void setStridedUnchecked(
+static inline void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
@@ -1615,9 +1621,7 @@ Tensor& narrow_copy_dense_cpu_out(
   const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
 
   const auto itemsize = self_contig->dtype().itemsize();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t src_nbytes = itemsize * self_contig->numel();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   size_t dst_nbytes = itemsize * output.numel();
 
   size_t src_block_size = unit * self_sizes[dim];
@@ -1918,7 +1922,7 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
 // templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
 //
 template <typename Vec>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,
     const Vec& strides) {
@@ -1954,7 +1958,7 @@ Tensor alias_with_sizes_and_strides(
 // SymIntArrayRef/ArrayRef<c10::SymInt> and
 // SmallVector<c10::SymInt>/SymDimVector
 template <template <typename...> typename Container>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Container<c10::SymInt>& sizes,
     const Container<c10::SymInt>& strides) {
@@ -2456,8 +2460,8 @@ Tensor index_select_sparse_cpu(
       // src is a source of indices to binary search in sorted
       Tensor sorted, sorted_idx, src;
       std::tie(sorted, sorted_idx, src) =
-          [&dim_indices, &nneg_index, &self, search_in_dim_indices, dim, nnz](
-              void) -> std::tuple<Tensor, Tensor, Tensor> {
+          [&dim_indices, &nneg_index, &self, search_in_dim_indices, dim, nnz]()
+          -> std::tuple<Tensor, Tensor, Tensor> {
         // sort dim_indices to binary search into it
         if (search_in_dim_indices) {
           // dim_indices is already sorted if self is coalesced and dim == 0
@@ -3286,7 +3290,7 @@ static inline std::vector<Tensor> get_stack_inputs(
   return inputs;
 }
 
-bool inline maybe_native_stack(
+static bool inline maybe_native_stack(
     Tensor& result,
     TensorList tensors,
     int64_t dim) {
@@ -3362,7 +3366,7 @@ static std::vector<Tensor> _pad_chunk(
     std::vector<int64_t> view_sizes(
         tensor_size.begin(), tensor_size.begin() + dim);
     view_sizes.insert(view_sizes.end(), {num_chunks, -1});
-    padded_tensors.push_back(padded_tensor.view(view_sizes));
+    padded_tensors.push_back(padded_tensor.reshape(view_sizes));
   }
   return padded_tensors;
 }
@@ -3606,11 +3610,11 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
   }
 
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
-  DimVector strides(self.strides().begin(), self.strides().end());
-  std::swap(strides[dim0], strides[dim1]);
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-  self.as_strided_(sizes, strides);
+  SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
+  std::swap(strides[dim0], strides[dim1]);
+  self.as_strided__symint(std::move(sizes), std::move(strides));
   return self;
 }
 
@@ -4017,7 +4021,7 @@ Tensor& squeeze_(Tensor& self, IntArrayRef dims) {
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
 
-inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
+static inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride =
       at::detail::computeStride(self.sizes(), self.strides(), inferred_size);
@@ -4891,56 +4895,67 @@ void split_copy_Tensor_out(
   }
 }
 
+namespace {
+
+void copy_tensor_array_to_out(
+    const char* name,
+    const std::vector<Tensor>& array,
+    at::TensorList out) {
+  TORCH_CHECK(
+      out.size() == array.size(),
+      name,
+      " expected an out= argument of size ",
+      array.size(),
+      ", got size ",
+      out.size());
+  for (const auto i : c10::irange(out.size())) {
+    if (resize_output_check(out[i], array[i].sizes())) {
+      out[i].resize_(array[i].sizes());
+    }
+    TORCH_CHECK(
+        out[i].dtype() == array[i].dtype(),
+        "Expected out tensor to have dtype ",
+        array[i].dtype(),
+        ", but got ",
+        out[i].dtype(),
+        " instead");
+    TORCH_CHECK(
+        out[i].device() == array[i].device(),
+        "Expected out tensor to have device ",
+        array[i].device(),
+        ", but got ",
+        out[i].device(),
+        " instead");
+    out[i].copy_(array[i]);
+  }
+}
+
+} // namespace
+
 void split_with_sizes_copy_out(
     const at::Tensor& self,
     at::IntArrayRef split_sizes,
     int64_t dim,
     at::TensorList out) {
-  auto tmp = self.split_with_sizes(split_sizes, dim);
-
-  TORCH_CHECK(
-      out.size() == tmp.size(),
-      "split_with_sizes_copy_out() expected an out= argument of size ",
-      tmp.size(),
-      ", got size ",
-      out.size());
-  for (const auto i : c10::irange(out.size())) {
-    if (resize_output_check(out[i], tmp[i].sizes())) {
-      out[i].resize_(tmp[i].sizes());
-    }
-    TORCH_CHECK(
-        out[i].dtype() == tmp[i].dtype(),
-        "Expected out tensor to have dtype ",
-        tmp[i].dtype(),
-        ", but got ",
-        out[i].dtype(),
-        " instead");
-    TORCH_CHECK(
-        out[i].device() == tmp[i].device(),
-        "Expected out tensor to have device ",
-        tmp[i].device(),
-        ", but got ",
-        out[i].device(),
-        " instead");
-    out[i].copy_(tmp[i]);
-  }
+  auto array = self.split_with_sizes(split_sizes, dim);
+  copy_tensor_array_to_out("split_with_sizes_copy_out", array, out);
 }
 
 void unbind_copy_int_out(
     const at::Tensor& self,
     int64_t dim,
     at::TensorList out) {
-  auto tmp = self.unbind(dim);
-
-  TORCH_CHECK(
-      out.size() == tmp.size(),
-      "unbind_copy_int_out() expected an out= argument of size ",
-      tmp.size(),
-      ", got size ",
-      out.size());
-  for (const auto i : c10::irange(out.size())) {
-    out[i].copy_(tmp[i]);
+  if (at::GradMode::is_enabled()) {
+    for (const auto i : c10::irange(out.size())) {
+      TORCH_CHECK(
+          !out[i].requires_grad(),
+          "unbind_copy(): functions with out=... arguments don't support automatic differentiation, "
+          "but one of the arguments requires grad.");
+    }
   }
+
+  auto array = self.unbind(dim);
+  copy_tensor_array_to_out("unbind_copy_int_out", array, out);
 }
 
 int64_t sparse_dim_default(const Tensor& self) {

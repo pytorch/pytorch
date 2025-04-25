@@ -3,8 +3,9 @@ r"""Implementation for Stochastic Weight Averaging implementation."""
 import itertools
 import math
 import warnings
+from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Callable, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import torch
 from torch import Tensor
@@ -28,7 +29,7 @@ __all__ = [
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 
-PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
+PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
@@ -253,8 +254,8 @@ class AveragedModel(Module):
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached: List[Optional[Tensor]] = []
-        model_param_detached: List[Optional[Tensor]] = []
+        self_param_detached: list[Optional[Tensor]] = []
+        model_param_detached: list[Optional[Tensor]] = []
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())

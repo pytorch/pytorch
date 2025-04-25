@@ -15,8 +15,8 @@ TORCH_API std::vector<pybind11::object> py_symbolize(
     std::vector<CapturedTraceback*>& to_symbolize);
 
 // requires GIL to be held, frees any pending free frames
-void freeDeadCapturedTracebackFrames();
+TORCH_PYTHON_API void freeDeadCapturedTracebackFrames();
 
-void installCapturedTracebackPython();
+TORCH_PYTHON_API void installCapturedTracebackPython();
 
 } // namespace torch

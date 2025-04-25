@@ -2,7 +2,7 @@
 import inspect
 import logging
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Optional
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -20,14 +20,14 @@ class Partition:
     def __init__(self, name: str):
         self.name: str = name
         self.submod_name = f"submod_{name}"
-        self.node_names: List[str] = []
-        self.inputs: Dict[str, None] = {}
-        self.outputs: Dict[str, None] = {}
-        self.dependencies: Dict[str, None] = {}
-        self.dependents: Dict[str, None] = {}
+        self.node_names: list[str] = []
+        self.inputs: dict[str, None] = {}
+        self.outputs: dict[str, None] = {}
+        self.dependencies: dict[str, None] = {}
+        self.dependents: dict[str, None] = {}
         self.graph: torch.fx.graph.Graph = torch.fx.graph.Graph()
-        self.environment: Dict[Node, Node] = {}
-        self.targets: Dict[str, Any] = {}
+        self.environment: dict[Node, Node] = {}
+        self.targets: dict[str, Any] = {}
 
     def __repr__(self) -> str:
         return (
@@ -55,7 +55,7 @@ def split_module(
     m: GraphModule,
     root_m: torch.nn.Module,
     split_callback: Callable[[Node], int],
-    qualname_map: Optional[Dict[str, str]] = None,
+    qualname_map: Optional[dict[str, str]] = None,
     keep_original_order: Optional[bool] = False,
     keep_original_node_name: Optional[bool] = False,
 ):
@@ -161,8 +161,8 @@ def split_module(
 
     def construct_graph(
         node: Node,
-        base_mod_env: Dict[str, Node],
-        base_mod_attrs: Dict[str, torch.fx.graph_module.GraphModule],
+        base_mod_env: dict[str, Node],
+        base_mod_attrs: dict[str, torch.fx.graph_module.GraphModule],
     ):
         if node.op == "placeholder":
             default_value = (
@@ -195,9 +195,9 @@ def split_module(
 
     import sympy
 
-    partitions: Dict[str, Partition] = {}
-    orig_nodes: Dict[str, Node] = {}
-    symbol_to_node: Dict[sympy.Symbol, Node] = {}
+    partitions: dict[str, Partition] = {}
+    orig_nodes: dict[str, Node] = {}
+    symbol_to_node: dict[sympy.Symbol, Node] = {}
 
     def record_cross_partition_use(def_node: Node, use_node: Optional[Node]):
         from torch.fx.experimental.symbolic_shapes import free_symbols
@@ -273,7 +273,7 @@ def split_module(
     # ------------------------
     # 1. first region: we do nothing
     # 2. subsequent regions: we insert the set_grad at the beginning
-    grad_regions: OrderedDict[Node, Set[int]] = OrderedDict()
+    grad_regions: OrderedDict[Node, set[int]] = OrderedDict()
 
     # For autocast regions:
     # ------------------------
@@ -282,8 +282,8 @@ def split_module(
     #    _enter at the beginning and _exit at the end
     # 3. last region: we will only insert _enter at the beginning
     # We will do so in the order in which the autocasts were instantiated.
-    autocast_regions: OrderedDict[Node, Set[int]] = OrderedDict()
-    autocast_exits: Dict[Node, Optional[Node]] = {}
+    autocast_regions: OrderedDict[Node, set[int]] = OrderedDict()
+    autocast_exits: dict[Node, Optional[Node]] = {}
 
     active_grad = None
     active_autocasts = set()
@@ -379,13 +379,13 @@ def split_module(
 
     original_partition_order = list(partitions.keys())
     # find partitions with no dependencies
-    root_partitions: List[str] = []
+    root_partitions: list[str] = []
     for partition_name, partition in partitions.items():
         if not len(partition.dependencies):
             root_partitions.append(partition_name)
 
     # check partitions for circular dependencies and create topological partition ordering
-    sorted_partitions: List[str] = []
+    sorted_partitions: list[str] = []
     while root_partitions:
         root_partition = root_partitions.pop()
         sorted_partitions.append(root_partition)
@@ -418,7 +418,7 @@ def split_module(
     # add placeholders to partition inputs
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
-        new_inputs: Dict[str, None] = {}
+        new_inputs: dict[str, None] = {}
         for inp in partition.inputs:
             orig_node = orig_nodes[inp]
             # We don't pass in get_attr nodes as inputs to the partition, but
@@ -507,11 +507,11 @@ def split_module(
                 )  # is it really a good idea to copy this?
 
     # original module environment dict mapping node names to nodes
-    orig_mod_env: Dict[str, Node] = {}
+    orig_mod_env: dict[str, Node] = {}
     # Set up values to construct base module
-    base_mod_env: Dict[str, Node] = {}
+    base_mod_env: dict[str, Node] = {}
     base_mod_graph: torch.fx.graph.Graph = torch.fx.graph.Graph()
-    base_mod_attrs: Dict[str, torch.fx.graph_module.GraphModule] = {}
+    base_mod_attrs: dict[str, torch.fx.graph_module.GraphModule] = {}
     if not keep_original_order:
         for node in m.graph.nodes:
             base_mod_env, base_mod_attrs = construct_graph(
@@ -559,7 +559,7 @@ def split_module(
 
         if keep_original_order:
             # first get the attr nodes required by this partition
-            orig_mod_attr_nodes: List[Node] = [
+            orig_mod_attr_nodes: list[Node] = [
                 orig_mod_env[key]
                 for key in partition.inputs
                 if key not in original_order

@@ -1,8 +1,14 @@
 # mypy: ignore-errors
 
+
+from collections import namedtuple
+
 import torch
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
+
+
+FancyNamedTuple = namedtuple("FancyNamedTuple", ["foo", "bar"])
 
 
 # A simple tensor subclass that holds a tensor with custom metadata and custom method
@@ -26,6 +32,9 @@ class ConstantExtraMetadataTensor(torch.Tensor):
     def __repr__(self):
         inner_repr = repr(self.elem)
         return f"CustomTensor({inner_repr})"
+
+    def get_complicated_metadata(self):
+        return FancyNamedTuple(self.constant_attribute, self.constant_attribute)
 
     def __tensor_flatten__(self):
         return ["elem"], self.constant_attribute
@@ -85,6 +94,9 @@ class CustomTensorPlainOut(torch.Tensor):
     def __init__(self, elem1, elem2):
         self.elem1 = elem1
         self.elem2 = elem2
+
+    def get_elem(self):
+        return self.elem1
 
     def __repr__(self):
         inner_repr_1 = repr(self.elem1)

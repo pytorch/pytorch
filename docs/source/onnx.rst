@@ -88,6 +88,8 @@ also be interested in reading our `development wiki <https://github.com/pytorch/
     :hidden:
 
     onnx_dynamo
+    onnx_ops
+    onnx_verification
     onnx_dynamo_onnxruntime_backend
     onnx_torchscript
 
@@ -99,6 +101,7 @@ also be interested in reading our `development wiki <https://github.com/pytorch/
 .. py:module:: torch.onnx.symbolic_helper
 .. py:module:: torch.onnx.symbolic_opset10
 .. py:module:: torch.onnx.symbolic_opset11
+.. py:module:: torch.onnx.symbolic_opset12
 .. py:module:: torch.onnx.symbolic_opset13
 .. py:module:: torch.onnx.symbolic_opset14
 .. py:module:: torch.onnx.symbolic_opset15
@@ -111,5 +114,3 @@ also be interested in reading our `development wiki <https://github.com/pytorch/
 .. py:module:: torch.onnx.symbolic_opset8
 .. py:module:: torch.onnx.symbolic_opset9
 .. py:module:: torch.onnx.utils
-.. py:module:: torch.onnx.verification
-.. py:module:: torch.onnx.symbolic_opset12

@@ -77,6 +77,7 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
@@ -1390,11 +1391,14 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(
-          py::init<std::string, bool>(),
+          py::init<std::string, bool, uint64_t>(),
           py::arg("file_name"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       .def(
-          py::init([](const py::object& buffer, bool compute_crc32 = true) {
+          py::init([](const py::object& buffer,
+                      bool compute_crc32 = true,
+                      uint64_t storage_alignment = 64) {
             auto writer_func = [=](const void* data, size_t size) {
               // Writing an empty file is a noop
               if (size == 0) {
@@ -1413,14 +1417,19 @@ void initJITBindings(PyObject* module) {
               return size;
             };
             return std::make_unique<PyTorchStreamWriter>(
-                std::move(writer_func), compute_crc32);
+                std::move(writer_func), compute_crc32, storage_alignment);
           }),
           py::arg("buffer"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       .def(
-          py::init<const std::function<size_t(const void*, size_t)>&, bool>(),
+          py::init<
+              const std::function<size_t(const void*, size_t)>&,
+              bool,
+              uint64_t>(),
           py::arg("writer_func"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file
@@ -1619,6 +1628,21 @@ void initJITBindings(PyObject* module) {
           "get_record_offset",
           [](PyTorchStreamReader& self, const std::string& key) {
             return self.getRecordOffset(key);
+          })
+      .def(
+          "get_record_header_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordHeaderOffset(key);
+          })
+      .def(
+          "get_record_offset_no_read",
+          [](PyTorchStreamReader& self,
+             size_t zipfile_header_offset,
+             const std::string filename,
+             size_t size,
+             uint64_t storage_alignment) {
+            return self.getRecordOffsetNoRead(
+                zipfile_header_offset, filename, size, storage_alignment);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -1913,6 +1937,13 @@ void initJITBindings(PyObject* module) {
         self.addArgumentValues(value_map);
       });
   py::class_<FunctionSchema>(m, "FunctionSchema")
+      .def(py::init<
+           std::string,
+           std::string,
+           std::vector<Argument>,
+           std::vector<Argument>,
+           bool,
+           bool>())
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
@@ -1970,6 +2001,13 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
+      .def(py::init<
+           std::string,
+           const TypePtr&,
+           std::optional<int32_t>,
+           std::optional<IValue>,
+           bool,
+           std::optional<AliasInfo>>())
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
       .def_property_readonly(
@@ -2009,6 +2047,7 @@ void initJITBindings(PyObject* module) {
         return self.kwarg_only();
       });
   py::class_<AliasInfo>(m, "_AliasInfo")
+      .def(py::init<bool, std::set<std::string>, std::set<std::string>>())
       .def_property_readonly(
           "is_write", [](AliasInfo& self) { return self.isWrite(); })
       .def_property_readonly(

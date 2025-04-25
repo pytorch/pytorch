@@ -23,9 +23,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    assert os.path.exists(
-        args.prefix
-    ), f"Assuming path {args.prefix} is the root of pytorch directory, but it doesn't exist."
+    assert os.path.exists(args.prefix), (
+        f"Assuming path {args.prefix} is the root of pytorch directory, but it doesn't exist."
+    )
 
     commit = schema_check.update_schema()
 
@@ -40,7 +40,9 @@ if __name__ == "__main__":
                 f"Treespec version downgraded from {commit.base['TREESPEC_VERSION']} to {commit.result['TREESPEC_VERSION']}."
             )
     else:
-        assert args.force_unsafe, "Existing schema yaml file not found, please use --force-unsafe to try again."
+        assert args.force_unsafe, (
+            "Existing schema yaml file not found, please use --force-unsafe to try again."
+        )
 
     next_version, reason = schema_check.check(commit, args.force_unsafe)
 
@@ -80,9 +82,9 @@ if __name__ == "__main__":
         print(yaml_content)
         print("\nWill write the above schema to" + args.prefix + commit.yaml_path)
     else:
-        with open(args.prefix + commit.yaml_path, "w") as f:
+        with open(os.path.join(args.prefix, commit.yaml_path), "w") as f:
             f.write(yaml_content)
-        with open(args.prefix + commit.cpp_header_path, "w") as f:
+        with open(os.path.join(args.prefix, commit.cpp_header_path), "w") as f:
             f.write(cpp_header)
-        with open(args.prefix + commit.thrift_schema_path, "w") as f:
+        with open(os.path.join(args.prefix, commit.thrift_schema_path), "w") as f:
             f.write(thrift_schema)

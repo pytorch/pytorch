@@ -6,14 +6,14 @@ from torch import Tensor
 aten = torch.ops.aten
 import inspect
 import warnings
-from typing import Callable, Dict, List, Optional, Set, TypeVar
+from typing import Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.types import Number
 
 
-decomposition_table: Dict[str, torch.jit.ScriptFunction] = {}
-function_name_set: Set[str] = set()
+decomposition_table: dict[str, torch.jit.ScriptFunction] = {}
+function_name_set: set[str] = set()
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -65,7 +65,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
 
 def register_decomposition(
     aten_op: torch._ops.OpOverload,
-    registry: Optional[Dict[str, torch.jit.ScriptFunction]] = None,
+    registry: Optional[dict[str, torch.jit.ScriptFunction]] = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def decomposition_decorator(f: Callable[_P, _T]) -> Callable[_P, _T]:
         nonlocal registry
@@ -99,12 +99,12 @@ def register_decomposition(
 @register_decomposition(aten.var.correction)
 def var_decomposition(
     input: Tensor,
-    dim: Optional[List[int]] = None,
+    dim: Optional[list[int]] = None,
     correction: Optional[Number] = None,
     keepdim: bool = False,
 ) -> Tensor:
     if dim is None:
-        dim_i: List[int] = []
+        dim_i: list[int] = []
         dim = dim_i
 
     if isinstance(dim, (tuple, list)) and len(dim) == 0:

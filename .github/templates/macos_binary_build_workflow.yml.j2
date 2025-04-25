@@ -41,9 +41,7 @@ on:
   workflow_dispatch:
 
 env:
-  # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: !{{ build_environment }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -113,11 +111,19 @@ jobs:
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
           # Create new "clean" conda environment for testing
-          conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
-          conda activate test_conda_env
 
+          SMOKE_TEST_PARAMS=""
+          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
+            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          else
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
+          fi
+          conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
-          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly
+
+          # shellcheck disable=SC2086
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
 {%- endif %}
       - uses: actions/upload-artifact@v4.4.0
         if: always()

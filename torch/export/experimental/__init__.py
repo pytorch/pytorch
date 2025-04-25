@@ -1,4 +1,6 @@
 import copy
+import functools
+import types
 import typing
 
 import torch
@@ -7,9 +9,7 @@ from torch.export.exported_program import _decompose_exported_program
 
 def _copy_graph_module_and_signature(
     ep: torch.fx.GraphModule,
-) -> typing.Tuple[
-    torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature
-]:
+) -> tuple[torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature]:
     # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),
     # and this can break placeholder names in some particular cases.
     # For example, node copying will avoid Python keywords like 'input', suffixing and renaming to 'input_1'.
@@ -60,8 +60,48 @@ def _export_forward_backward(
         cia_to_decomp={},
         python_decomp_table=core_aten_decompositions(),
         joint_loss_index=joint_loss_index,
+        # For serialization purpose, we don't want to decompose custom triton ops.
+        # If users would like to decompose custom triton ops, they could do it
+        # with run_decompositions() API.
+        decompose_custom_triton_ops=False,
     )
     gm, new_graph_signature = _copy_graph_module_and_signature(ep)
     _remove_detach_pass(gm, new_graph_signature)
 
     return ep._update(gm, new_graph_signature)
+
+
+@typing.no_type_check
+def _sticky_export(forward_func, dynamic_shapes_callback=None):
+    """
+    Lazily export the model on first forward call.
+    Usage:
+        model.forward = _sticky_export(model.forward, dynamic_shapes_callback=callback)
+    """
+    model = forward_func.__self__
+    original_forward = forward_func.__func__
+
+    @functools.wraps(forward_func)
+    def wrapper(*args, **kwargs):
+        # Unpatch forward to avoid recursion during export
+        model.forward = types.MethodType(original_forward, model)
+
+        dynamic_shapes_spec = None
+        if dynamic_shapes_callback:
+            dynamic_shapes_spec = dynamic_shapes_callback(*args, **kwargs)
+
+        try:
+            exported = torch.export.export(
+                model,
+                args,
+                kwargs,
+                dynamic_shapes=dynamic_shapes_spec,
+            ).module()
+            wrapper._exported_artifact = exported
+        finally:
+            # Restore the wrapper after export
+            model.forward = wrapper
+
+        return exported(*args, **kwargs)
+
+    return wrapper

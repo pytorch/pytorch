@@ -15,8 +15,9 @@ class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
 
     A CUDA stream is a linear sequence of execution that belongs to a specific
-    device, independent from other streams.  See :ref:`cuda-semantics` for
-    details.
+    device, independent from other streams. It supports with statement as a
+    context manager to ensure the operators within the with block are running
+    on the corresponding stream.  See :ref:`cuda-semantics` for details.
 
     Args:
         device(torch.device or int, optional): a device on which to allocate

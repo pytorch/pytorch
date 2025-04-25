@@ -2,7 +2,7 @@
 
 import hashlib
 from itertools import chain
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -150,10 +150,10 @@ if HAS_PYDOT:
         def get_submod_dot_graph(self, submod_name) -> pydot.Dot:
             return self._dot_graphs[f"{self._name}_{submod_name}"]
 
-        def get_all_dot_graphs(self) -> Dict[str, pydot.Dot]:
+        def get_all_dot_graphs(self) -> dict[str, pydot.Dot]:
             return self._dot_graphs
 
-        def _get_node_style(self, node: torch.fx.Node) -> Dict[str, str]:
+        def _get_node_style(self, node: torch.fx.Node) -> dict[str, str]:
             template = {
                 "shape": self.dot_graph_shape,
                 "fillcolor": "#CAFFE3",
@@ -165,7 +165,12 @@ if HAS_PYDOT:
             else:
                 # Use a random color for each node; based on its name so it's stable.
                 target_name = node._pretty_print_target(node.target)
-                target_hash = int(hashlib.md5(target_name.encode()).hexdigest()[:8], 16)
+                target_hash = int(
+                    hashlib.md5(
+                        target_name.encode(), usedforsecurity=False
+                    ).hexdigest()[:8],
+                    16,
+                )
                 template["fillcolor"] = _HASH_COLOR_MAP[
                     target_hash % len(_HASH_COLOR_MAP)
                 ]

@@ -1,9 +1,24 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides utilities for analyzing and optimizing Python bytecode.
+Key functionality includes:
+- Dead code elimination
+- Jump instruction optimization
+- Stack size analysis and verification
+- Live variable analysis
+- Line number propagation and cleanup
+- Exception table handling for Python 3.11+
+
+The utilities in this module are used to analyze and transform bytecode
+for better performance while maintaining correct semantics.
+"""
+
 import bisect
 import dataclasses
 import dis
 import sys
-from typing import Any, Set, Union
+from typing import Any, Union
 
 
 TERMINAL_OPCODES = {
@@ -12,8 +27,7 @@ TERMINAL_OPCODES = {
     dis.opmap["RAISE_VARARGS"],
     # TODO(jansel): double check exception handling
 }
-if sys.version_info >= (3, 9):
-    TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
+TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
@@ -133,9 +147,9 @@ def remove_extra_line_nums(instructions):
 
 @dataclasses.dataclass
 class ReadsWrites:
-    reads: Set[Any]
-    writes: Set[Any]
-    visited: Set[Any]
+    reads: set[Any]
+    writes: set[Any]
+    visited: set[Any]
 
 
 def livevars_analysis(instructions, instruction):
@@ -219,24 +233,11 @@ def stacksize_analysis(instructions) -> Union[int, float]:
 
         for inst, next_inst in zip(instructions, instructions[1:] + [None]):
             stack_size = stack_sizes[inst]
-            # CALL_FINALLY in Python 3.8 is handled differently when determining stack depth.
-            # See https://github.com/python/cpython/blob/3.8/Python/compile.c#L5450.
-            # Essentially, the stack effect of CALL_FINALLY is computed with jump=True,
-            # but the resulting stack depth is propagated to the next instruction, not the
-            # jump target.
-            is_call_finally = (
-                sys.version_info < (3, 9) and inst.opcode == dis.opmap["CALL_FINALLY"]
-            )
             if inst.opcode not in TERMINAL_OPCODES:
                 assert next_inst is not None, f"missing next inst: {inst}"
-                # total stack effect of CALL_FINALLY and END_FINALLY in 3.8 is 0
-                eff = (
-                    0
-                    if is_call_finally
-                    else stack_effect(inst.opcode, inst.arg, jump=False)
-                )
+                eff = stack_effect(inst.opcode, inst.arg, jump=False)
                 stack_sizes[next_inst].offset_of(stack_size, eff)
-            if inst.opcode in JUMP_OPCODES and not is_call_finally:
+            if inst.opcode in JUMP_OPCODES:
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )

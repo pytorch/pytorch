@@ -2,7 +2,6 @@
 
 import unittest
 from functools import partial
-from typing import List
 
 import numpy as np
 
@@ -117,7 +116,7 @@ def sample_inputs_fftshift(op_info, device, dtype, requires_grad, **kwargs):
 
 
 # Operator database
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     SpectralFuncInfo(
         "fft.fft",
         aten_name="fft_fft",
@@ -634,7 +633,7 @@ op_db: List[OpInfo] = [
     ),
 ]
 
-python_ref_db: List[OpInfo] = [
+python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft",
         torch_opinfo_name="fft.fft",

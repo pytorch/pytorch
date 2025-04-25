@@ -8,11 +8,12 @@ import math
 import operator
 import unittest
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 
 import torch
 from torch.testing import make_tensor
@@ -689,10 +690,10 @@ class OpInfo:
     # the following metadata are test directives for skipping or modifying tests
 
     # information about which tests to skip
-    skips: Tuple = ()
+    skips: tuple = ()
 
     # decorators to apply to generated tests
-    decorators: Tuple = ()
+    decorators: tuple = ()
 
     # the following are pointers to functions to generate certain classes of inputs
 
@@ -730,6 +731,25 @@ class OpInfo:
     dtypes: _dispatch_dtypes = None
 
     # the following dtypesIf... options override the dtypes value on their respective device types
+    # I.e. instead of writing multiple `dtypesIfCUDA`, `dtypesIfROCM`, etc one can simply define a dict
+    # dtypesIf = { 'cuda': (torch.float, torch.double), 'rocm': (torch.half, torch.bfloat16) }
+    dtypesIf: dict[str, _dispatch_dtypes] = field(default_factory=dict)
+
+    def __getattribute__(self, name: str) -> Any:
+        if name.startswith("dtypesIf") and name != "dtypesIf":
+            # TODO: Warn if used
+            dev_name = name.removeprefix("dtypesIf").lower()
+            return self.dtypesIf.get(dev_name)
+        return super().__getattribute__(name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # TODO: After migration, start adding warnings here
+        if name.startswith("dtypesIf") and name != "dtypesIf":
+            assert isinstance(value, (_dispatch_dtypes, type(None)))
+            dev_name = name.removeprefix("dtypesIf").lower()
+            self.dtypesIf[dev_name] = value
+            return
+        super().__setattr__(name, value)
 
     # dtypes this function is expected to work with on CUDA
     dtypesIfCUDA: _dispatch_dtypes = None
@@ -803,11 +823,11 @@ class OpInfo:
 
     # If `supports_cow_input_no_materialize_forward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_forward: List[Union[int, str]] = None
+    allow_cow_input_materialize_forward: list[Union[int, str]] = None
 
     # If `supports_cow_input_no_materialize_backward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_backward: List[Union[int, str]] = None
+    allow_cow_input_materialize_backward: list[Union[int, str]] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -853,13 +873,13 @@ class OpInfo:
     # a list of strings with node names that are expected to be in a
     # DifferentiableGraph when autodiffed. Ex: ['aten::add', 'aten::mm'],
     # default is populated to be ['aten::(name of Python operator)']
-    autodiff_nonfusible_nodes: List[str] = None
+    autodiff_nonfusible_nodes: list[str] = None
 
     # a list of strings with node names that are expected to be in FusionGroups
     # inside of DifferentiableGraphs when this operation is autodiffed.
     # Ex: ['aten::add', 'aten::mm'], defaults to an empty list
     # Note: currently no ops use fusible nodes
-    autodiff_fusible_nodes: List[str] = None
+    autodiff_fusible_nodes: list[str] = None
 
     # the following metadata relates to sparse support and is used in test_sparse.py
 
@@ -912,30 +932,26 @@ class OpInfo:
 
         assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
-        dtypes_args = (
-            self.dtypes,
-            self.dtypesIfCUDA,
-            self.dtypesIfROCM,
-            self.dtypesIfXPU,
-        )
-
         # Validates the dtypes are generated from the dispatch-related functions
-        for dtype_list in dtypes_args:
-            assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
+        for name, val in self.dtypesIf.items():
+            if val is not None:
+                assert isinstance(val, _dispatch_dtypes)
+                self.dtypesIf[name] = set(val)
 
         if self.aten_name is None:
             self.aten_name = self.name
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
-            isinstance(dtypes, utils._dynamic_dispatch_dtypes) for dtypes in dtypes_args
+            isinstance(dtypes, utils._dynamic_dispatch_dtypes)
+            for dtypes in self.dtypesIf.values()
         )
 
         if self.dynamic_dtypes:
             # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
             # This is because, below we set dtypesIfCUDA to dtypes if they are None.
             assert isinstance(self.dtypesIfCUDA, utils._dynamic_dispatch_dtypes), (
-                f"To use dynamic dypes for operator {self.name}, "
+                f"To use dynamic dtypes for operator {self.name}, "
                 "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
                 "This is to ensure that CUDA dtypes are acquired correctly as they"
                 "differ from CPU dtypes occasionally"
@@ -988,21 +1004,15 @@ class OpInfo:
             else self.dtypes
         )
 
-        self.dtypesIfCUDA = (
-            set(self.dtypesIfCUDA) if self.dtypesIfCUDA is not None else self.dtypes
-        )
-        self.dtypesIfROCM = (
-            set(self.dtypesIfROCM)
-            if self.dtypesIfROCM is not None
-            else self.dtypesIfCUDA
-        )
-        self.dtypesIfXPU = (
-            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
-        )
+        # Inherit from cpu
+        for dev_type in ["cuda", "hpu"]:
+            if self.dtypesIf.get(dev_type) is None:
+                self.dtypesIf[dev_type] = self.dtypes
 
-        self.dtypesIfHpu = (
-            set(self.dtypesIfHpu) if self.dtypesIfHpu is not None else self.dtypes
-        )
+        # Inherit from CUDA
+        for dev_type in ["rocm", "xpu"]:
+            if self.dtypesIf.get(dev_type) is None:
+                self.dtypesIf[dev_type] = self.dtypesIf["cuda"]
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if not self.op:
@@ -1524,13 +1534,9 @@ def test_foo(self, device, dtype, op):
         if device_type == "privateuse1":
             device_type = torch._C._get_privateuse1_backend_name()
         device_type = torch.device(device_type).type
-        if device_type == "cuda":
-            return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
-        if device_type == "xpu":
-            return self.dtypesIfXPU
-        if device_type == "hpu":
-            return self.dtypesIfHpu
-        return self.dtypes
+        if device_type == "cuda" and TEST_WITH_ROCM:
+            device_type = "rocm"
+        return self.dtypesIf.get(device_type, self.dtypes)
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:

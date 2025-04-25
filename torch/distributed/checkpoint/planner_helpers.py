@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import io
-from typing import Any, Callable, cast, Dict, List
+from typing import Any, Callable, cast
 
 import torch
 import torch.distributed as dist
@@ -33,7 +33,109 @@ from .resharding import (
 )
 
 
-__all__: List[str] = ["create_read_items_for_chunk_list"]
+__all__: list[str] = ["create_read_items_for_chunk_list"]
+
+
+def _compare_save_plans(plan: SavePlan, other_plan: SavePlan) -> bool:
+    """
+    Compare the two Save plans and return True if they are equal.
+
+    Args:
+        plan (SavePlan): First SavePlan to compare.
+        other_plan (SavePlan): Second SavePlan to compare.
+
+    Returns:
+       True if the two plans are equal, False otherwise.
+    """
+    if plan.usable != other_plan.usable:
+        return False
+
+    # Both the plans should have the same number of items
+    if len(plan.items) != len(other_plan.items):
+        return False
+
+    # Both the plans should have the same write items.
+    for plan_item, other_plan_item in zip(plan.items, other_plan.items):
+        # Write item type should be same
+        if plan_item.type != other_plan_item.type:
+            return False
+
+        plan_metadata_index = plan_item.index
+        other_plan_metadata_index = other_plan_item.index
+
+        # Write item metadata_index should be same
+        if (
+            plan_metadata_index.fqn != other_plan_metadata_index.fqn
+            or plan_metadata_index.offset != other_plan_metadata_index.offset
+            or plan_metadata_index.index != other_plan_metadata_index.index
+        ):
+            return False
+
+        # Write item tensor_data should be present in both the write items plans, if it exists in either of them.
+        tensor_data = plan_item.tensor_data
+        other_tensor_data = other_plan_item.tensor_data
+        if (tensor_data and not other_tensor_data) or (
+            not tensor_data and other_tensor_data
+        ):
+            return False
+
+        if tensor_data and other_tensor_data:
+            # Write item tensor_data size should be same
+            if tensor_data.size != other_tensor_data.size:
+                return False
+
+            # Write item tensor_data chunk should be present in both the write items, if it exists in either of them.
+            chunk = tensor_data.chunk
+            other_chunk = other_tensor_data.chunk
+            if (chunk and not other_chunk) or (not chunk and other_chunk):
+                return False
+
+            # Write item tensor_data chunk offsets and sizes should be same
+            if chunk and other_chunk:
+                if (
+                    chunk.offsets != other_chunk.offsets
+                    or chunk.sizes != other_chunk.sizes
+                ):
+                    return False
+
+    return True
+
+
+def _contains_usable_plan(delta_plans: list[SavePlan]) -> bool:
+    """
+    Check if any delta plan is usable, indicating the plan has changed.
+
+    Args:
+        delta_plans (List[SavePlan]): A list of delta plans to check.
+    Returns:
+        True if any delta plan is usable, False otherwise.
+    """
+    return any(delta_plan and delta_plan.usable for delta_plan in delta_plans)
+
+
+def _merge_delta_local_plans(
+    cached_plans: list[SavePlan],
+    delta_plans: list[SavePlan],
+) -> list[SavePlan]:
+    """
+    Merge a list of delta plans into a single plan.
+
+    Args:
+        cached_plans (List[SavePlan]): A list of cached plans.
+        delta_plans (List[SavePlan]): A list of delta plans to merge. It can contain empty plans
+
+    Returns:
+        A single merged plan. If a delta plan is not usable, use the cached plan. Otherwise, use the delta plan.
+    """
+    merged_plans = []
+
+    for cached_plan, delta_plan in zip(cached_plans, delta_plans):
+        if delta_plan and not delta_plan.usable:
+            merged_plans.append(cached_plan)
+        else:
+            merged_plans.append(delta_plan)
+
+    return merged_plans
 
 
 def _create_chunk_from_tensor(tensor: torch.Tensor) -> ChunkStorageMetadata:
@@ -149,8 +251,8 @@ def _create_read_item_for_tensor(
 def create_read_items_for_chunk_list(
     fqn: str,
     checkpoint_md: TensorStorageMetadata,
-    local_chunks: List[ChunkStorageMetadata],
-) -> List[ReadItem]:
+    local_chunks: list[ChunkStorageMetadata],
+) -> list[ReadItem]:
     """
     Create a list of ``ReadItem`` based on the checkpoint and local chunks.
 
@@ -218,7 +320,7 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     return SavePlan(requests)
 
 
-def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
+def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
     if hasattr(object, "__create_write_items__"):
         # DTensor implements _Checkpointable
         return object.__create_write_items__(fqn, object)
@@ -244,7 +346,7 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
-def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+def _create_chunk_list(tensor: torch.Tensor) -> list[ChunkStorageMetadata]:
     if hasattr(tensor, "__create_chunk_list__"):
         # DTensor implements _Checkpointable
         local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
@@ -263,7 +365,7 @@ def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
     return local_chunks
 
 
-def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
+def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> list[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
         try:
             local_chunks = _create_chunk_list(obj)
@@ -286,7 +388,7 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
         ]
 
 
-def _init_state_dict(state_dict: Dict[str, Any]) -> Any:
+def _init_state_dict(state_dict: dict[str, Any]) -> Any:
     """
     Initializes meta tensor if the meta tensor is DTensor or torch.Tensor.
     """

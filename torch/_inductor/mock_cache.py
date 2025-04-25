@@ -6,7 +6,7 @@ import contextlib
 import dataclasses
 import sys
 import threading
-from typing import Any, Callable, Dict, Optional, Type, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import override, Self
 from unittest.mock import patch
 
@@ -56,7 +56,7 @@ class Stats:
 
 
 class _GlobalItemStats(Stats):
-    cache: Dict[str, object]
+    cache: dict[str, object]
 
     def __init__(self) -> None:
         super().__init__()
@@ -266,7 +266,7 @@ class PatchCaches(contextlib.AbstractContextManager):
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:

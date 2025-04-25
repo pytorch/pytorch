@@ -103,7 +103,7 @@ import inspect
 import itertools
 import re
 import warnings
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from torch.hub import tqdm
@@ -937,7 +937,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     dump()
 
 
-_operation_device_version_data: Dict[Any, Dict] = {
+_operation_device_version_data: dict[Any, dict] = {
     # Warning: the data in between the BEGIN/END DATA comment lines
     # below is generated. It can be updated either manually or via
     # calling dump function defined above.

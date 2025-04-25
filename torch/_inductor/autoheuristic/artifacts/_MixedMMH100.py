@@ -61,7 +61,7 @@ class MixedMMH100(LearnedHeuristicDecision):
     def get_name(self) -> str:
         return 'mixed_mm'
 
-    def get_best_choices(self, context: AHContext) -> Optional[List[Tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> Optional[List[tuple[float, int]]]:
         if context.get_value('arith_intensity') <= 15.988086223602295:
             if context.get_value('n') <= 25280.0:
                 if context.get_value('n') <= 1344.0:

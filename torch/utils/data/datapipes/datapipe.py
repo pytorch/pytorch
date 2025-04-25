@@ -1,6 +1,7 @@
 import functools
 import pickle
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, TypeVar
+from collections.abc import Iterable, Iterator
+from typing import Callable, Optional, TypeVar
 
 from torch.utils._import_utils import import_dill
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -35,7 +36,7 @@ UNTRACABLE_DATAFRAME_PIPES = [
 ]
 
 
-class DataChunk(List[_T]):
+class DataChunk(list[_T]):
     def __init__(self, items: Iterable[_T]) -> None:
         items = list(items)
         super().__init__(items)
@@ -119,7 +120,7 @@ class IterDataPipe(IterableDataset[_T_co], metaclass=_IterDataPipeMeta):
             >>> next(it1)  # Further usage of `it1` will raise a `RunTimeError`
     """
 
-    functions: Dict[str, Callable] = {}
+    functions: dict[str, Callable] = {}
     reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
     str_hook: Optional[Callable] = None
@@ -274,7 +275,7 @@ class MapDataPipe(Dataset[_T_co], metaclass=_DataPipeMeta):
         [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
     """
 
-    functions: Dict[str, Callable] = {}
+    functions: dict[str, Callable] = {}
     reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
     str_hook: Optional[Callable] = None

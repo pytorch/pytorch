@@ -1,5 +1,4 @@
 import random
-from typing import List
 
 import operator_benchmark as op_bench
 
@@ -79,7 +78,7 @@ class StackBenchmark(op_bench.TorchBenchmarkBase):
         self.inputs = {"result": result, "inputs": inputs, "dim": dim}
         self.set_module_name("stack")
 
-    def forward(self, result: torch.Tensor, inputs: List[torch.Tensor], dim: int):
+    def forward(self, result: torch.Tensor, inputs: list[torch.Tensor], dim: int):
         return torch.stack(inputs, dim=dim, out=result)
 
 

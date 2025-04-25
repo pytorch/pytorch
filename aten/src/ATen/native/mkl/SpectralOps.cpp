@@ -206,7 +206,7 @@ Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
 #if AT_POCKETFFT_ENABLED()
 #include <pocketfft_hdronly.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 using namespace pocketfft;
@@ -327,7 +327,7 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return out;
 }
 
-}}
+}
 
 #elif AT_MKL_ENABLED()
 #include <ATen/Dispatch.h>

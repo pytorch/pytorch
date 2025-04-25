@@ -16,10 +16,11 @@
 // registered to FuncTorchVmapMode. This is because we need to interpose on
 // random operations even if they're not on a BatchedTensor.
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
+static Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
@@ -36,7 +37,7 @@ Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
 }
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
+static Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
@@ -107,7 +108,7 @@ static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor
 }
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
+static Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   auto const batch_size = maybe_layer->batchSize();
@@ -126,7 +127,7 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
 }
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extra_args) {
+static Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
@@ -152,7 +153,7 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
 }
 
 template<typename F, F Func, typename... ExtraArgs>
-Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args) {
+static Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
@@ -271,7 +272,7 @@ struct RandomBatchRuleHelper<F, Func, typelist<T1, T...>> {
 };
 
 template <typename F, F Func, typename... T>
-Tensor rand_int_wrapper(SymIntArrayRef shape, c10::SymInt high, T... extra_args) {
+static Tensor rand_int_wrapper(SymIntArrayRef shape, c10::SymInt high, T... extra_args) {
   return Func(high, shape, std::forward<T>(extra_args)...);
 }
 
@@ -298,7 +299,7 @@ struct RandIntBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
 };
 
 template <typename F, F Func, typename T0, typename T1, typename... T>
-Tensor rand_int_low_wrapper(SymIntArrayRef shape, T0 scalar0, T1 scalar1, T... extra_args) {
+static Tensor rand_int_low_wrapper(SymIntArrayRef shape, T0 scalar0, T1 scalar1, T... extra_args) {
   return Func(scalar0, scalar1, shape, std::forward<T>(extra_args)...);
 }
 
@@ -345,7 +346,7 @@ struct NormalPointwiseBatchRule<F, Func, typelist<A0, T...>> {
 };
 
 template<typename F, F Func, typename... T>
-Tensor normal_wrapper(const Tensor& tensor, double scalar, T... extra_args) {
+static Tensor normal_wrapper(const Tensor& tensor, double scalar, T... extra_args) {
   return Func(scalar, tensor, extra_args...);
 }
 
@@ -501,3 +502,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 }
 
 } // namespace at::functorch
+// NOLINTEND(bugprone-unchecked-optional-access)

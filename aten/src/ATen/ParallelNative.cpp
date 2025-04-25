@@ -86,14 +86,14 @@ TaskThreadPoolBase& _get_intraop_pool() {
 #endif // C10_MOBILE
 
 // Run lambda function `fn` over `task_id` in [0, `range`) with threadpool.
-// `fn` will be called with params: (thread_pool_task_id, task_id).
-void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
+// `fn` will be called with params: task_id.
+static void _run_with_pool(const std::function<void(size_t)>& fn, size_t range) {
 #ifndef C10_MOBILE
   for (const auto i : c10::irange(1, range)) {
-    _get_intraop_pool().run([fn, i]() { fn((int)i, i); });
+    _get_intraop_pool().run([fn, i]() { fn(i); });
   }
   // Run the first task on the current thread directly.
-  fn(0, 0);
+  fn(0);
 #else
   caffe2::PThreadPool* const pool = caffe2::pthreadpool();
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
@@ -102,7 +102,7 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
     // PThreadPool::run() is blocking.  A std::function [const] reference to
     // this lambda cannot go out of scope before PThreadPool::run() returns.
     [&fn](const size_t task_id) {
-      fn(0 /* unused */, task_id);
+      fn(task_id);
     }, range);
 #endif // C10_MOBILE
 }
@@ -113,6 +113,10 @@ struct ParallelRegionGuard {
     internal::set_thread_num(task_id);
     _set_in_parallel_region(true);
   }
+  ParallelRegionGuard(const ParallelRegionGuard&) = delete;
+  ParallelRegionGuard(ParallelRegionGuard&&) = delete;
+  ParallelRegionGuard& operator=(const ParallelRegionGuard&) = delete;
+  ParallelRegionGuard& operator=(ParallelRegionGuard&&) = delete;
 
   ~ParallelRegionGuard() {
     _set_in_parallel_region(false);
@@ -124,16 +128,16 @@ struct ParallelRegionGuard {
 
 namespace internal {
 
-inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
+static std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
     int64_t begin, int64_t end, int64_t grain_size) {
   if ((end - begin) < grain_size) {
     return std::make_tuple(1, std::max((int64_t)0, end - begin));
   }
   // Choose number of tasks based on grain size and number of threads.
-  size_t chunk_size = divup((end - begin), get_num_threads());
+  int64_t chunk_size = divup((end - begin), get_num_threads());
   // Make sure each task is at least grain_size size.
-  chunk_size = std::max((size_t)grain_size, chunk_size);
-  size_t num_tasks = divup((end - begin), chunk_size);
+  chunk_size = std::max(grain_size, chunk_size);
+  size_t num_tasks = static_cast<size_t>(divup((end - begin), chunk_size));
   return std::make_tuple(num_tasks, chunk_size);
 }
 
@@ -157,12 +161,12 @@ void invoke_parallel(
   } state;
 
   auto task = [f, &state, begin, end, chunk_size]
-      (int /* unused */, size_t task_id) {
-    int64_t local_start = begin + task_id * chunk_size;
+      (size_t task_id) {
+    int64_t local_start = static_cast<int64_t>(begin + task_id * chunk_size);
     if (local_start < end) {
-      int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
+      int64_t local_end = std::min(end, static_cast<int64_t>(chunk_size + local_start));
       try {
-        ParallelRegionGuard guard(task_id);
+        ParallelRegionGuard guard(static_cast<int>(task_id));
         f(local_start, local_end);
       } catch (...) {
         if (!state.err_flag.test_and_set()) {
