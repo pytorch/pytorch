@@ -1215,6 +1215,7 @@ main()
             out.sum().backward()
 
         # mark_dynamic should not cause ConstraintViolationError
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_torch_compile_api_dynamic_shapes(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
