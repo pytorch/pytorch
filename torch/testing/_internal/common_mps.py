@@ -312,6 +312,15 @@ if torch.backends.mps.is_available():
             "masked.cumsum": [torch.int64],
             "masked.cumprod": [torch.int64],
             "linalg.vander": [torch.int64],
+            # Fail with `Expected 1.0 but got nan.` for empty tensors
+            # Caused by sample input at index 23: SampleInput(
+            #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
+            #     args=(0),
+            #     kwargs={'mask': 'Tensor[size=(), device="mps:0", dtype=torch.bool]'},
+            #     broadcasts_input=False, name='')
+            "masked.softmin": [torch.float32, torch.float16],
+            "masked.softmax": [torch.float32, torch.float16],
+            "masked.log_softmax": [torch.float32, torch.float16],
         }
 
         MACOS_AFTER_13_1_XFAILLIST = {
