@@ -251,8 +251,8 @@ def compute_global_tensor_shape(
 ) -> torch.Size:
     """
     Compute the global size of a DTensor from the given local tensor shape,
-    the mesh and placements. Different from compute_global_tensor_info,
-    which assumed sharding is even, this util allgathers local shards' shapes
+    the mesh and placements. Different from `compute_global_tensor_info`,
+    which assumes sharding is even, this util allgathers local shards' shapes
     from all ranks and thus can support uneven sharding.
     NOTE: Currently this function only supports 1D mesh.
 
