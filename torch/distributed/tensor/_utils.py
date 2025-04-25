@@ -317,7 +317,9 @@ def _compute_global_tensor_shape(
             sharded_dim_sum += sub_shape[shard_placement.dim]
         global_shape[shard_placement.dim] = sharded_dim_sum
     else:
-        raise NotImplementedError(f"placement type {type(placements[0])} not supported.")
+        raise NotImplementedError(
+            f"placement type {type(placements[0])} not supported."
+        )
     return global_shape
 
 
