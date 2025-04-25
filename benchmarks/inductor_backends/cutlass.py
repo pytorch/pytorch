@@ -196,7 +196,7 @@ def get_inputs(
         return C, A, B
     elif op_name == "bmm":
         A = torch.randn(batch_size, M, K, dtype=dtype, device=device)
-        B = torch.randn(batch_size, K, N, dtype=dtype, device=device).permute(0, 2, 1)
+        B = torch.randn(batch_size, N, K, dtype=dtype, device=device).permute(0, 2, 1)
         return A, B
     else:
         raise ValueError(f"Unknown op {op_name}")
