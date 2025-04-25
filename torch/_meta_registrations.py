@@ -6769,10 +6769,12 @@ def meta__segment_reduce_backward(
 @register_meta([aten.kthvalue.default, aten.kthvalue.values])
 @out_wrapper("values", "indices")
 def kthvalue_meta(self, k, dim=-1, keepdim=False):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     dimSize = self.size(dim) if self.dim() > 0 else 1
     torch._check(
-        k >= 1 and k <= dimSize,
+        sym_and(k >= 1, k <= dimSize),
         lambda: f"kthvalue(): selected number k out of range for dimension {dim}",
     )
 
