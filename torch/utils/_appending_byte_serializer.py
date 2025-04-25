@@ -1,5 +1,5 @@
 import base64
-import hashlib
+import zlib
 from collections.abc import Iterable
 from typing import Callable, Generic, TypeVar
 
@@ -15,13 +15,13 @@ __all__ = ["AppendingByteSerializer"]
 # Helper classes
 #######################################
 
-SHA256_DIGEST_SIZE = 32
+CHECKSUM_DIGEST_SIZE = 4
 
 
 class BytesWriter:
     def __init__(self) -> None:
-        # Reserve SHA256_DIGEST_SIZE bytes for checksum
-        self._data = bytearray(SHA256_DIGEST_SIZE)
+        # Reserve CHECKSUM_DIGEST_SIZE bytes for checksum
+        self._data = bytearray(CHECKSUM_DIGEST_SIZE)
 
     def write_uint64(self, i: int) -> None:
         self._data.extend(i.to_bytes(8, byteorder="big", signed=False))
@@ -35,26 +35,30 @@ class BytesWriter:
         self._data.extend(b)
 
     def to_bytes(self) -> bytes:
-        digest = hashlib.sha256(self._data[SHA256_DIGEST_SIZE:]).digest()
-        assert len(digest) == SHA256_DIGEST_SIZE
-        self._data[0:SHA256_DIGEST_SIZE] = digest
+        digest = zlib.crc32(self._data[CHECKSUM_DIGEST_SIZE:]).to_bytes(
+            4, byteorder="big", signed=False
+        )
+        assert len(digest) == CHECKSUM_DIGEST_SIZE
+        self._data[0:CHECKSUM_DIGEST_SIZE] = digest
         return bytes(self._data)
 
 
 class BytesReader:
     def __init__(self, data: bytes) -> None:
         # Check for data corruption
-        assert len(data) >= SHA256_DIGEST_SIZE
-        digest = hashlib.sha256(data[SHA256_DIGEST_SIZE:]).digest()
-        assert len(digest) == SHA256_DIGEST_SIZE
-        if data[0:SHA256_DIGEST_SIZE] != digest:
+        assert len(data) >= CHECKSUM_DIGEST_SIZE
+        digest = zlib.crc32(data[CHECKSUM_DIGEST_SIZE:]).to_bytes(
+            4, byteorder="big", signed=False
+        )
+        assert len(digest) == CHECKSUM_DIGEST_SIZE
+        if data[0:CHECKSUM_DIGEST_SIZE] != digest:
             raise RuntimeError(
                 "Bytes object is corrupted, checksum does not match. "
-                f"Expected: {data[0:SHA256_DIGEST_SIZE]!r}, Got: {digest!r}"
+                f"Expected: {data[0:CHECKSUM_DIGEST_SIZE]!r}, Got: {digest!r}"
             )
 
         self._data = data
-        self._i = SHA256_DIGEST_SIZE
+        self._i = CHECKSUM_DIGEST_SIZE
 
     def is_finished(self) -> bool:
         return len(self._data) == self._i
