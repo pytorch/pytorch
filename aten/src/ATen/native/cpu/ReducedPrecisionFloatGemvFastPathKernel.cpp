@@ -9,6 +9,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/Unroll.h>
+#include <c10/util/irange.h>
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 #include <arm_neon.h>
@@ -68,7 +69,7 @@ float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
   int offset = kF16RegistersPerIteration;
   c10::ForcedUnroll<IntegerLog2(kF16RegistersPerIteration)>{}([&offset, &x](auto idx) {
     offset /= 2;
-    for (int i = 0; i < offset; ++i) {
+    for (const auto i : c10::irange(offset)) {
       x[i] = x[i] + x[offset + i];
     }
   });
@@ -87,7 +88,7 @@ float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
 
   const auto len_aligned = len & ~(kF16ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF16ElementsPerIteration) {
-    for (int k = 0; k < kF16RegistersPerIteration; ++k) {
+    for (const auto k : c10::irange(kF16RegistersPerIteration)) {
       const auto temp_x = vec::Vectorized<Half>::loadu(x + j + k * vec::Vectorized<Half>::size());
       const auto temp_a = vec::Vectorized<Half>::loadu(a + j + k * vec::Vectorized<Half>::size());
       sum[k] = vec::fmadd(temp_x, temp_a, sum[k]);
@@ -95,7 +96,7 @@ float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
   }
   auto reduced_sum = reduce(sum);
 
-  for (int j = len_aligned; j < len; ++j) {
+  for (const auto j : c10::irange(len_aligned, len)) {
     reduced_sum += x[j] * a[j];
   }
   return reduced_sum;
@@ -108,19 +109,19 @@ float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
 static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const Half* a, const int64_t lda, const Half *x, const float beta, Half* y, int incy) {
   if (beta == 0.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
-      for (int i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         y[i * incy] = fp16_dot_with_fp16_arith(x, a + lda * i, m);
       }
     });
   } else if (beta == 1.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
-      for (int i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         y[i * incy] += fp16_dot_with_fp16_arith(x, a + lda * i, m);
       }
     });
   } else {
     parallel_for(0, n, 1, [&](int begin, int end) {
-      for (int i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         y[i * incy] = beta * y[i * incy] + fp16_dot_with_fp16_arith(x, a + lda * i, m);
       }
     });
@@ -147,7 +148,7 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   int offset = kF32RegistersPerIteration;
   c10::ForcedUnroll<IntegerLog2(kF32RegistersPerIteration)>{}([&offset, &x](auto idx) {
     offset /= 2;
-    for (int i = 0; i < offset; ++i) {
+    for (const auto i : c10::irange(offset)) {
       x[i] = x[i] + x[offset + i];
     }
   });
@@ -366,7 +367,7 @@ static_assert(
   reduced_sum += reduce(tail_sum);                                      \
                                                                         \
   /* Second-tier tail fixup: handle all workloads. */                   \
-  for (int j = len_aligned_vec; j < len; ++j) {                         \
+  for (const auto j : c10::irange(len_aligned_vec, len)) {                         \
     /* Attempting to use Half here caused multiple test failures; */    \
     /* using float to unbreak. (Suspect we need a scalar FMA.) */       \
     float x1 = vec1[j];                                                 \
@@ -399,20 +400,20 @@ float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) 
 void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int64_t lda, const Half *x, const float beta, Half* y, int incy) {
   if (beta == 0.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
-      for (int i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         y[i * incy] = fp16_dot_with_fp32_arith(x, a + lda * i, m);
       }
     });
   } else if (beta == 1.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
-      for (int i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         // We need to accumulate in fp32; y[i * incy] += ... gets wrong results.
         y[i * incy] = static_cast<float>(y[i * incy]) + fp16_dot_with_fp32_arith(x, a + lda * i, m);
       }
     });
   } else {
     parallel_for(0, n, 1, [&](int begin, int end) {
-      for (int i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         y[i * incy] = beta * y[i * incy] + fp16_dot_with_fp32_arith(x, a + lda * i, m);
       }
     });
@@ -453,7 +454,7 @@ float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec
 // NB: lda must be long, otherwise it can cause int32 overflow
 void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int64_t lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
   parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
+    for (const auto i : c10::irange(begin, end)) {
       y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);
     }
   });
