@@ -1212,8 +1212,8 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
     def __hash__(self) -> int:
-        if self.num_children > 0:
-            raise NotImplementedError("Cannot hash none-leaf TreeSpec.")
+        if not isinstance(self.context, ConstantNode):
+            raise NotImplementedError("Cannot hash non-ConstantNode TreeSpec.")
         return hash((self.type, self.context))
 
 
