@@ -628,7 +628,6 @@ def _create_aot_dispatcher_function(
 
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
-
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )

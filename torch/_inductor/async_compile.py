@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import json
 import atexit
 import functools
 import logging
@@ -18,8 +19,11 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import (
     counters,
     dynamo_timed,
+    get_chromium_event_logger,
     get_metrics_context,
     set_feature_use,
+    CompileEventLogger,
+    CompileEventLogLevel,
 )
 from torch._inductor import config
 from torch._inductor.codecache import (
@@ -338,10 +342,22 @@ class AsyncCompile:
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
+
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                )
+                info = kernel.autotune_cache_info or {}
+                info["compile_time_us"] = elapsed_us
+                chromium_log = get_chromium_event_logger()
+                event_data = chromium_log.get_event_data().get("PyCodeCache.load_by_key_path", {})
+                kernel_info = event_data.get("triton_kernel_info", {})
+                kernel_info["is_backward"] = is_backward
+                kernel_info[kernel_name] = info
+                chromium_log.add_event_data(
+                    "PyCodeCache.load_by_key_path",
+                    triton_kernel_info=kernel_info
                 )
                 get_metrics_context().add_top_n(
                     "triton_kernel_compile_times_us", kernel_name, elapsed_us
@@ -369,6 +385,17 @@ class AsyncCompile:
                 elapsed_us = (time_ns() - start_ns) // 1000
                 get_metrics_context().add_top_n(
                     "triton_kernel_compile_times_us", kernel_name, elapsed_us
+                )
+                info = kernel.autotune_cache_info or {}
+                info["compile_time_us"] = elapsed_us
+                chromium_log = get_chromium_event_logger()
+                event_data = chromium_log.get_event_data().get("PyCodeCache.load_by_key_path", {})
+                kernel_info = event_data.get("triton_kernel_info", {})
+                kernel_info["is_backward"] = is_backward
+                kernel_info[kernel_name] = info
+                chromium_log.add_event_data(
+                    "PyCodeCache.load_by_key_path",
+                    triton_kernel_info=kernel_info
                 )
                 return kernel
 
@@ -445,6 +472,22 @@ class AsyncCompile:
             ):
                 self._wait_futures(scope)
 
+        # Log triton kernel info
+        chromium_log = get_chromium_event_logger()
+        event_data = chromium_log.get_event_data()
+        if "PyCodeCache.load_by_key_path" in event_data:
+            data = event_data["PyCodeCache.load_by_key_path"]
+            if "triton_kernel_info" in data:
+                info = data["triton_kernel_info"]
+                backward_str = "backward" if info["is_backward"] else "forward"
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": f"triton_kernel_info_{backward_str}",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: json.dumps(data["triton_kernel_info"]),
+                )
         _compile_end()
 
     def _wait_futures(self, scope: dict[str, Any]) -> None:
@@ -463,7 +506,8 @@ class AsyncCompile:
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
             try:
-                scope[key] = result.result()
+                kernel = result.result()
+                scope[key] = kernel
             except BrokenProcessPool as e:
                 raise RuntimeError(
                     "A compilation subprocess exited unexpectedly. This "
