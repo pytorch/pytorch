@@ -19,20 +19,20 @@ def _create_table(shards: list[tuple[tuple[int, ...], tuple[int, ...], int]]):
     from tabulate import tabulate
 
     # Extract unique row and column ranges
-    row_ranges = sorted({block["row_range"] for block in shards})
-    col_ranges = sorted({block["column_range"] for block in shards})
+    row_ranges = sorted({block[0] for block in shards})
+    col_ranges = sorted({block[1] for block in shards})
 
     # Create a matrix initialized with empty strings
     matrix = [["" for _ in col_ranges] for _ in row_ranges]
 
     # Fill the matrix with values
     for block in shards:
-        row_index = row_ranges.index(block["row_range"])
-        col_index = col_ranges.index(block["column_range"])
+        row_index = row_ranges.index(block[0])
+        col_index = col_ranges.index(block[1])
         if matrix[row_index][col_index] == "":
-            matrix[row_index][col_index] = str(block["device_index"])
+            matrix[row_index][col_index] = str(block[2])
         else:
-            matrix[row_index][col_index] += ", " + str(block["device_index"])
+            matrix[row_index][col_index] += ", " + str(block[2])
 
     # Prepare headers
     row_headers = [f"Row {r[0]}-{r[1]}" for r in row_ranges]
@@ -191,11 +191,11 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
     }
 
     shards = [
-        {
-            "row_range": (offset[0], offset[0] + shape[0] - 1),
-            "column_range": (offset[1], offset[1] + shape[1] - 1),
-            "device_index": device_index,
-        }
+        (
+            (offset[0], offset[0] + shape[0] - 1),
+            (offset[1], offset[1] + shape[1] - 1),
+            device_index,
+        )
         for device_index, (shape, offset) in device_shard_shape_and_offsets.items()
     ]
 
