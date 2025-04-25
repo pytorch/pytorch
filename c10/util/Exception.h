@@ -319,6 +319,12 @@ class C10_API DistNetworkError : public DistError {
   using DistError::DistError;
 };
 
+// Raised when a queue is empty and a non-blocking pop is called.
+// Translated to torch.distributed.QueueEmptyError in Python
+class C10_API DistQueueEmptyError : public DistStoreError {
+  using DistStoreError::DistStoreError;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
