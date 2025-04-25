@@ -114,11 +114,6 @@ foreach_map_bin_ops_under_test = [
     foreach_map_clamp_max,
     foreach_map_clamp_min,
     foreach_map_add_fn,
-    # TODO: "Buffer mutation detected during lowering of aten.add_.Tensor. "
-    # After decomposing auto_functionalized, we're getting
-    # a subgraph with potential input mutations. It's safe to
-    # mutate the input because we're guaranteed mutated inputs
-    # will gets copied if they're used downstream.
     foreach_map_max,
     foreach_map_min,
 ]
@@ -1063,6 +1058,11 @@ class ForeachTests(TestCase):
             [y.clone().detach().requires_grad_(False) for y in ref_inps[1]],
         )
 
+        # TODO: "Buffer mutation detected during lowering of aten.add_.Tensor. "
+        # After decomposing auto_functionalized, we're getting
+        # a subgraph with potential input mutations. It's safe to
+        # mutate the input because we're guaranteed mutated inputs
+        # will gets copied if they're used downstream.
         with self.assertRaisesRegex(
             torch._inductor.exc.InductorError,
             "Buffer mutation detected during lowering of aten.add_.Tensor",

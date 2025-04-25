@@ -882,7 +882,7 @@ def auto_functionalized_v2_proxy(
     # We need to normalize the higher order op's input fn to graph module
     # this could happen e.g. we could receive FunctionWithNoFreeVars
     schema = (
-        pytree.tree_unflatten([], kwargs.get("_op_schema", None))
+        pytree.tree_unflatten([], kwargs.get("_op_schema", None))  # type: ignore[arg-type]
         if isinstance(_mutable_op, HigherOrderOperator)
         else _mutable_op._schema
     )  # type: ignore[assignment]

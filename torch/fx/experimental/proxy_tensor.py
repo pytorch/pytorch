@@ -677,12 +677,6 @@ def track_tensor_tree(
             assert isinstance(proxy, Proxy)
             set_meta(proxy, e)
             e.proxy = proxy
-        elif isinstance(e, torch._C.FunctionSchema):
-            assert isinstance(proxy, Proxy)
-            set_meta(proxy, e)
-        elif isinstance(e, torch._higher_order_ops._invoke_quant.InvokeQuant):
-            assert isinstance(proxy, Proxy)
-            set_meta(proxy, e)
         else:
             # intentionally pass on primitives
             pass

@@ -1100,9 +1100,9 @@ def decompose_auto_functionalized(graph):
                 and node.op == "get_attr"
                 and "val" not in node.meta
             ):
-                const_attr = getattr(graph.owning_module, node.target)
+                const_attr = getattr(graph.owning_module, node.target)  # type: ignore[arg-type]
                 assert isinstance(
-                    const_attr, (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
+                    const_attr, (torch.fx.GraphModule, pytree.TreeSpec)
                 ), (type(const_attr), const_attr)
                 return const_attr
             return node
