@@ -7310,6 +7310,7 @@ def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
 
 
 @register_meta(aten.constant_pad_nd)
+@out_wrapper()
 def _constant_pad_nd_meta(input, pad, value=0):
     input_sizes = input.shape
     l_inp = len(input_sizes)
