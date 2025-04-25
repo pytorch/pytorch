@@ -23,6 +23,7 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
@@ -500,6 +501,29 @@ if HAS_CUDA:
                 exactly=True,
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+        def test_index_put(self):
+            def fn(x, y, z):
+                x = torch.zeros_like(x)
+                return x.index_put_([y], z, True)
+
+            fn_c = torch.compile(mode="reduce-overhead")(fn)
+
+            for i in range(3):
+
+                def args():
+                    x = torch.zeros((512, 512), dtype=torch.bool, device="cuda")
+                    y = torch.arange(512, dtype=torch.int64, device="cuda")
+                    z = torch.ones((512, 512), dtype=torch.bool, device="cuda")
+                    return x, y, z
+
+                if i == 0:
+                    out, code = run_and_get_code(fn_c, *args())
+                    FileCheck().check("aten.index_put_").check_same("True").run(code[0])
+                else:
+                    out = fn_c(*args())
+
+                self.assertEqual(fn(*args()), out)
 
         def test_function_compiled_multiple_times(self):
             def foo(x):
