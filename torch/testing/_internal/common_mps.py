@@ -589,9 +589,8 @@ if torch.backends.mps.is_available():
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
             # bfloat16 have weird issues with rounding
-            "divfloor_rounding": [torch.bfloat16],
-            "floor_divide": [torch.bfloat16],
-            "remainder": [torch.bfloat16],
+            # "divfloor_rounding": [torch.bfloat16],
+            # "floor_divide": [torch.bfloat16],
             # atomic operations not supported
             "_unsafe_masked_index_put_accumulate": [
                 torch.bool,

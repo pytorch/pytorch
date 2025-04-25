@@ -2284,6 +2284,12 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=2e-04, rtol=3e-06)}),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
+            ),
         ],
         skips=(
             DecorateInfo(

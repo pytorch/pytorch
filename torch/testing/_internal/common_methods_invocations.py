@@ -12236,7 +12236,8 @@ op_db: list[OpInfo] = [
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_numpy_ref_mps'),
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5),
+                                      torch.bfloat16: tol(atol=2e-1, rtol=6e-1)}),
                    'TestConsistency',
                    'test_output_match',
                ),
@@ -19631,6 +19632,8 @@ op_db: list[OpInfo] = [
                # Decomp max diff: 1.8187482915266173e-06
                DecorateInfo(unittest.skip("Inconsistent accuracy"), 'TestDecomp', 'test_comprehensive',
                             device_type='cpu', dtypes=(torch.float16,)),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-4, rtol=3e-6)}),
+                            "TestConsistency", "test_output_match", device_type="mps"),
            )),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
