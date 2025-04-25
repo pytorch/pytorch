@@ -356,6 +356,8 @@ class SubclassCreationMeta:
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
 # https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
+# NOTE: This class is saved in AOTAutogradCache, If you are adding elements, make sure
+# they are covered by warm cache tests.
 @dataclass(eq=False)
 class ViewAndMutationMeta:
     # length = # user inputs
@@ -571,9 +573,10 @@ class ViewAndMutationMeta:
         # Mark them as dynamic at the end of the runtime wrapper
         self.dynamic_outputs = any(o.dynamic_dims for o in self.output_info)
 
-        # Record dynamic outputs of the partitioned forward graph (original outputs + saved activations + ...)
-        # Mark them as dynamic
-        self.dynamic_tensors_saved_for_backward = {}
+        # Record the indices of dynamic outputs in the partitioned forward graph
+        # Mark them as dynamic in the runtime wrapper
+        # activation index -> dynamic dims indices
+        self.dynamic_saved_tensors_idxs: dict[int, set[int]] = {}
 
         # See Note: [AOTAutograd Backward Guards]
         # This is pre-computed for fast asserts on the types of our grad_outputs in the backward.
@@ -947,6 +950,11 @@ class AOTConfig:
     pre_dispatch: bool = False
     # Key to use for AOTAutogradCache
     cache_info: Optional[AOTAutogradCacheInfo] = None
+    # If we should ignore the shape_env in the ambient tracing_context.
+    # The net effect is that if dynamic shapes are on, we end up
+    # specializing on example_inputs.
+    # Used only by standalone_compile.
+    ignore_shape_env: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:

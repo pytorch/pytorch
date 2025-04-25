@@ -2006,9 +2006,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     for (
                         idx,
                         dims,
-                    ) in (
-                        CompiledFunction.metadata.dynamic_tensors_saved_for_backward.items()
-                    ):
+                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
                         maybe_mark_dynamic_helper(activations[idx], dims)
                     return activations
 
