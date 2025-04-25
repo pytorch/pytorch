@@ -4,39 +4,6 @@ set -ex
 
 CUDNN_VERSION=9.5.1.17
 
-function install_cusparselt_040 {
-    # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
-    mkdir tmp_cusparselt && pushd tmp_cusparselt
-    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.4.0.7-archive.tar.xz
-    tar xf libcusparse_lt-linux-x86_64-0.4.0.7-archive.tar.xz
-    cp -a libcusparse_lt-linux-x86_64-0.4.0.7-archive/include/* /usr/local/cuda/include/
-    cp -a libcusparse_lt-linux-x86_64-0.4.0.7-archive/lib/* /usr/local/cuda/lib64/
-    popd
-    rm -rf tmp_cusparselt
-}
-
-function install_cusparselt_062 {
-    # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
-    mkdir tmp_cusparselt && pushd tmp_cusparselt
-    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
-    tar xf libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
-    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/include/* /usr/local/cuda/include/
-    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/lib/* /usr/local/cuda/lib64/
-    popd
-    rm -rf tmp_cusparselt
-}
-
-function install_cusparselt_063 {
-    # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
-    mkdir tmp_cusparselt && pushd tmp_cusparselt
-    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.6.3.2-archive.tar.xz
-    tar xf libcusparse_lt-linux-x86_64-0.6.3.2-archive.tar.xz
-    cp -a libcusparse_lt-linux-x86_64-0.6.3.2-archive/include/* /usr/local/cuda/include/
-    cp -a libcusparse_lt-linux-x86_64-0.6.3.2-archive/lib/* /usr/local/cuda/lib64/
-    popd
-    rm -rf tmp_cusparselt
-}
-
 function install_118 {
     CUDNN_VERSION=9.1.0.70
     echo "Installing CUDA 11.8 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.4.0"
@@ -59,7 +26,7 @@ function install_118 {
 
     CUDA_VERSION=11.8 bash install_nccl.sh
 
-    install_cusparselt_040
+    CUDA_VERSION=11.8 bash install_cusparselt.sh
 
     ldconfig
 }
@@ -86,7 +53,7 @@ function install_124 {
 
   CUDA_VERSION=12.4 bash install_nccl.sh
 
-  install_cusparselt_062
+  CUDA_VERSION=12.4 bash install_cusparselt.sh
 
   ldconfig
 }
@@ -112,7 +79,7 @@ function install_126 {
 
   CUDA_VERSION=12.6 bash install_nccl.sh
 
-  install_cusparselt_063
+  CUDA_VERSION=12.6 bash install_cusparselt.sh
 
   ldconfig
 }
@@ -238,7 +205,7 @@ function install_128 {
 
   CUDA_VERSION=12.8 bash install_nccl.sh
 
-  install_cusparselt_063
+  CUDA_VERSION=12.8 bash install_cusparselt.sh
 
   ldconfig
 }
