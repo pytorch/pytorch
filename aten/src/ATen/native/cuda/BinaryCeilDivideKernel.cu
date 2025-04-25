@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <ATen/NumericUtils.h>
 
 namespace at::native {
 
@@ -14,15 +15,23 @@ void div_ceil_kernel_cuda(TensorIteratorBase& iter) {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       // For integral types
       if (std::is_integral<scalar_t>::value) {
+        // Handle division by zero
         if (b == 0) {
-          return 0; // Handle division by zero for integral types
+          return 0;
         }
-        // Calculate ceiling division for integers: (a + b - 1) / b
-        if ((a < 0) != (b < 0)) {
-          // If signs are different, use regular division
-          return a / b;
-        } else {
+        
+        // For unsigned types, we don't need to check for sign differences
+        if constexpr (std::is_unsigned<scalar_t>::value) {
           return (a + b - 1) / b;
+        } else {
+          // For signed types, we need to handle negative values differently
+          if ((a < 0) != (b < 0)) {
+            // If signs are different, use regular division
+            return a / b;
+          } else {
+            // If signs are the same (both positive or both negative)
+            return (a + b - 1) / b;
+          }
         }
       } else {
         // For floating point types, use std::ceil(a / b)
