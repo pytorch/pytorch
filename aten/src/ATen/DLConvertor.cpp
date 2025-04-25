@@ -414,7 +414,7 @@ Tensor maybeCopyTensor(
   }
 
   if (force_copy) {
-    return data.clone().detach();
+    return data.detach().clone();
   }
 
   return data;
