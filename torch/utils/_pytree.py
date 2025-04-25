@@ -1212,9 +1212,10 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
     def __hash__(self) -> int:
-        if not isinstance(self.context, ConstantNode):
-            raise NotImplementedError("Cannot hash non-ConstantNode TreeSpec.")
-        return hash((self.type, self.context))
+        if isinstance(self.context, ConstantNode):
+            return hash((self.type, self.context))
+        else:
+            return hash((self.type, tuple(self.context), tuple(self.children_specs)))
 
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
