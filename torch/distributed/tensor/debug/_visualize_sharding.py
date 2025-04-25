@@ -12,7 +12,9 @@ __all__ = ["visualize_sharding"]
 Color = tuple[float, float, float] | str
 
 
-def _create_table(shards: list[tuple[tuple[int, ...], tuple[int, ...], int]]):
+def _create_table(
+    shards: list[tuple[tuple[int, ...], tuple[int, ...], int]], device_kind: str = ""
+):
     """
     Creates a tabulate table given row and column ranges with device name
     """
@@ -30,9 +32,9 @@ def _create_table(shards: list[tuple[tuple[int, ...], tuple[int, ...], int]]):
         row_index = row_ranges.index(block[0])
         col_index = col_ranges.index(block[1])
         if matrix[row_index][col_index] == "":
-            matrix[row_index][col_index] = str(block[2])
+            matrix[row_index][col_index] = device_kind + ":" + str(block[2])
         else:
-            matrix[row_index][col_index] += ", " + str(block[2])
+            matrix[row_index][col_index] += "," + str(block[2])
 
     # Prepare headers
     row_headers = [f"Row {r[0]}-{r[1]}" for r in row_ranges]
@@ -209,6 +211,6 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
         )
     elif importlib.util.find_spec("tabulate"):
         print(header)
-        print(_create_table(shards))
+        print(_create_table(shards, device_kind=dtensor.device_mesh.device_type))
     else:
         raise ValueError("`visualize_sharding` requires either `rich` or `tabulate`.")
