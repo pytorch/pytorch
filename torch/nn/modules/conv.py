@@ -819,6 +819,8 @@ class _ConvTransposeNd(_ConvNd):
         return ret
 
 
+# TODO: update docs
+# TODO: update types for padding
 class ConvTranspose1d(_ConvTransposeNd):
     __doc__ = (
         r"""Applies a 1D transposed convolution operator over an input image
@@ -934,7 +936,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        padding = _single(padding)
+        padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
         output_padding = _single(output_padding)
         super().__init__(
@@ -958,7 +960,7 @@ class ConvTranspose1d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose1d"
             )
 
-        assert isinstance(self.padding, tuple)
+        assert isinstance(self.padding, (tuple, str))
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 1
@@ -1156,6 +1158,8 @@ class ConvTranspose2d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose2d"
             )
 
+        assert isinstance(self.padding, (tuple, str))
+
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 2
@@ -1316,7 +1320,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = _triple(padding)
+        padding = padding if isinstance(padding, str) else _triple(padding)
         dilation = _triple(dilation)
         output_padding = _triple(output_padding)
         super().__init__(
@@ -1340,7 +1344,7 @@ class ConvTranspose3d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose3d"
             )
 
-        assert isinstance(self.padding, tuple)
+        assert isinstance(self.padding, (tuple, str))
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 3

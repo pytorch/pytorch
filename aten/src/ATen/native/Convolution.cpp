@@ -1197,7 +1197,7 @@ static Tensor convolution_transpose_same(
 Tensor _convolution_transpose_mode_symint(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     SymIntArrayRef stride, std::string_view padding, SymIntArrayRef output_padding,
-  c10::SymInt groups, SymIntArrayRef dilation) {
+    c10::SymInt groups, SymIntArrayRef dilation) {
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
