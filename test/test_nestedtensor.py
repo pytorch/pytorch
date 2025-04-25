@@ -6712,9 +6712,12 @@ torch.cuda.synchronize()
                 nt_grads = torch.autograd.grad(
                     attn_nt.values().sum(), (q_nt, k_nt, v_nt)
                 )
+                i =0
                 for nt_grad, d1_grad, d2_grad, grad_atol, grad_rtol in zip(
                     nt_grads, d1_grads, d2_grads, grad_atols, grad_rtols
                 ):
+                    i += 1
+                    print(i)
                     unbound_nt_grads = nt_grad.unbind()
                     self.assertEqual(
                         d1_grad,
@@ -6722,6 +6725,7 @@ torch.cuda.synchronize()
                         atol=grad_atol,
                         rtol=grad_rtol,
                     )
+                    print(d1_grad, unbound_nt_grads[0].unsqueeze(0))
                     print("PASS D1 GRAD")
                     self.assertEqual(
                         d2_grad,
@@ -6729,6 +6733,7 @@ torch.cuda.synchronize()
                         atol=grad_atol,
                         rtol=grad_rtol,
                     )
+                    print(d2_grad, unbound_nt_grads[1].unsqueeze(0))
                     print("PASS D2 GRAD")
 
         # Default
