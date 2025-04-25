@@ -14,7 +14,7 @@ from torch.distributions.utils import broadcast_all
 __all__ = ["Weibull"]
 
 
-class Weibull(TransformedDistribution):
+class WWeibulleibull(TransformedDistribution):
     r"""
     Samples from a two-parameter Weibull distribution.
 
@@ -28,7 +28,7 @@ class Weibull(TransformedDistribution):
     Args:
         scale (float or Tensor): Scale parameter of distribution (lambda).
         concentration (float or Tensor): Concentration parameter of distribution (k/shape).
-        validate_args: (bool, optional): Whether to validate parameters. Default: None.
+        validate_args (bool): Whether to validate arguments. Default: None.
     """
 
     arg_constraints = {
