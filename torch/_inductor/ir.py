@@ -2257,7 +2257,9 @@ class Scan(Loops):
                 Pointwise.create(
                     device=device,
                     dtype=dtypes[output_index],
-                    inner_fn=lambda idx: inner_fns[output_index](idx, [0]),
+                    inner_fn=lambda idx, output_index=output_index: inner_fns[
+                        output_index
+                    ](idx, [0]),
                     ranges=size,
                 )
                 for output_index in range(len(dtypes))
