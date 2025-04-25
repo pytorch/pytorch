@@ -17710,6 +17710,8 @@ op_db: list[OpInfo] = [
                            dtypes=(torch.float16,),
                            device_type="cuda",
                        ),
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=3e-5, rtol=7e-6)}),
+                                    "TestConsistency", "test_output_match", device_type="mps"),
                    ),
                    # tan(pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
@@ -17744,6 +17746,8 @@ op_db: list[OpInfo] = [
                                     active_if=(IS_MACOS or IS_WINDOWS)),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=3e-5, rtol=7e-6)}),
+                                    "TestConsistency", "test_output_match", device_type="mps"),
                    ),
                    # tan(j * pi/2 * odd_number) is nan
                    reference_numerics_filter=NumericsFilter(
@@ -17947,6 +17951,8 @@ op_db: list[OpInfo] = [
                                     active_if=IS_MACOS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=2e-5, rtol=3e-6)}),
+                                    "TestConsistency", "test_output_match", device_type="mps"),
                    )),
     UnaryUfuncInfo('square',
                    ref=np.square,

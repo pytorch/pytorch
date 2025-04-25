@@ -656,7 +656,6 @@ if torch.backends.mps.is_available():
                 torch.int64,
                 torch.uint8,
                 torch.int8,
-                torch.bfloat16,
             ],
             # Failures due to random output that they generate using
             # Philox engine causing mismatch with CPU results
