@@ -155,7 +155,12 @@ def _create_rich_table(
 
 
 def visualize_sharding(dtensor, header="", use_rich: bool = False):
-    """Visualizes sharding in the terminal for :class:`DTensor` that are 1D or 2D."""
+    """
+    Visualizes sharding in the terminal for :class:`DTensor` that are 1D or 2D.
+
+    .. note:: This requires the ``tabulate`` package, or ``rich`` and ``matplotlib``.
+              No sharding info will be printed for empty tensors
+    """
     if dtensor.numel() == 0:  # Do not print empty dtensors.
         return
 
