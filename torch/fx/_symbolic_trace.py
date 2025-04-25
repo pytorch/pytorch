@@ -37,7 +37,7 @@ _proxyable_classes: dict[type, None] = {}
 _is_fx_tracing_flag = False
 
 _ConstantAttributeType: TypeAlias = Union[
-    torch.Tensor, torch.ScriptObject, FakeScriptObject, torch.utils._pytree.TreeSpec
+    torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
 ]
 
 
@@ -410,7 +410,7 @@ class Tracer(TracerBase):
                     base_name = "_tensor_constant"
                 elif isinstance(a, (FakeScriptObject, ScriptObject)):
                     base_name = "_torchbind_obj"
-                elif isinstance(a, torch.utils._pytree.TreeSpec):
+                elif isinstance(a, pytree.TreeSpec):
                     base_name = "_tree_spec_constant"
                 else:
                     raise RuntimeError(

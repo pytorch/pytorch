@@ -414,7 +414,7 @@ def _preserve_requires_grad_pass(
 def _remap_constants(
     orig_constant_attrs: ConstantAttrMap,
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
 ) -> None:
     """Rewrite the graph signature and constants table to use the FQN from the original module."""
     remap_table: dict[str, list[str]] = {}
@@ -915,7 +915,7 @@ def _rewrite_dynamo_tensor_constants(
     orig_mod_buffers: set[torch.Tensor],
     traced_mod_buffers: dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
 ) -> None:
     """
     Dynamo erroneously marks tensor attributes on modules as buffers.
@@ -936,7 +936,7 @@ def _rewrite_dynamo_tensor_constants(
 def _move_non_persistent_buffers_to_tensor_constants(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
 ) -> None:
     """
     Moves non-persistent buffers to tensor constants.
