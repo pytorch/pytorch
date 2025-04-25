@@ -21,7 +21,7 @@ def distributed_context():
         # dist.init_process_group(backend="nccl")
         yield local_device
     finally:
-        # dist.barrier()
+        dist.barrier()
         # dist.destroy_process_group()
         print(f"Rank {local_rank} finished")
 

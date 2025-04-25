@@ -4,63 +4,12 @@ from collections.abc import Sequence
 
 import numpy as np
 from torch._prims_common import ShapeType
-from torch.distributed.tensor import DeviceMesh
-from torch.distributed.tensor.placement_types import Placement, Shard
+import torch.distributed.tensor as dt
+from torch.distributed.tensor._utils import _compute_local_shape_and_global_offset
 
 __all__ = ["visualize_sharding"]
 
 Color = tuple[float, float, float] | str
-
-
-def _device_coords_in_mesh(mesh: DeviceMesh) -> dict[int, tuple[int, ...]]:
-    """Given a device mesh, returns a dict from device index to coordinate."""
-    return {
-        device_index: coord
-        for coord, device_index in np.ndenumerate(np.array(mesh.mesh.tolist()))
-    }
-
-
-def _shard_info(
-    global_shape: ShapeType,
-    mesh: DeviceMesh,
-    placements: tuple[Placement],
-    device_coords: dict[int, tuple[int, ...]],
-    device_index: int,
-) -> tuple[tuple[int, ...], tuple[int, ...], int]:
-    """Return shard shape, offset in the DTensor, and device name."""
-    coord = device_coords[device_index]
-    local_shape = list(global_shape)
-    global_offset = [0] * len(global_shape)
-
-    for idx, placement in enumerate(placements):
-        mesh_dim_size = mesh.size(idx)
-        if isinstance(placement, Shard):
-            shard_dim = placement.dim
-            local_offset = [0] * len(global_shape)
-            assert shard_dim < len(local_shape), (
-                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-            )
-            shard_size, shard_offset = placement._local_shard_size_and_offset(
-                local_shape[shard_dim], mesh_dim_size, coord[idx], return_offset=True
-            )
-            local_shape[shard_dim] = shard_size
-            local_offset[shard_dim] = shard_offset
-            # On a given dimension, if the local_offset[shard_dim] is smaller
-            # than global_offset[shard_dim], it means that this dimension has
-            # been already sharded in previous placement.  Therefore, we cannot
-            # simply replace the global_offset[shard_dim] with
-            # local_offset[shard_dim].  Instead, for the given shard_dim, we
-            # need to add local_offset[shard_dim] to existing
-            # global_offset[shard_dim].
-            if global_offset[shard_dim] <= local_offset[shard_dim]:
-                global_offset[shard_dim] = local_offset[shard_dim]
-            else:
-                global_offset[shard_dim] += local_offset[shard_dim]
-
-    # TODO(wyi): global_offset[1] may not exist!
-    row_range = (global_offset[0], global_offset[0] + local_shape[0] - 1)
-    column_range = (global_offset[1], global_offset[1] + local_shape[1] - 1)
-    return row_range, column_range, device_index
 
 
 def _create_table(shards: list[tuple[tuple[int, ...], tuple[int, ...], int]]):
@@ -70,24 +19,25 @@ def _create_table(shards: list[tuple[tuple[int, ...], tuple[int, ...], int]]):
     from tabulate import tabulate
 
     # Extract unique row and column ranges
-    row_ranges = sorted({block[0] for block in shards})
-    col_ranges = sorted({block[1] for block in shards})
+    row_ranges = sorted({block["row_range"] for block in shards})
+    col_ranges = sorted({block["column_range"] for block in shards})
 
     # Create a matrix initialized with empty strings
     matrix = [["" for _ in col_ranges] for _ in row_ranges]
 
     # Fill the matrix with values
     for block in shards:
-        row_index = row_ranges.index(block[0])
-        col_index = col_ranges.index(block[1])
+        row_index = row_ranges.index(block["row_range"])
+        col_index = col_ranges.index(block["column_range"])
         if matrix[row_index][col_index] == "":
-            matrix[row_index][col_index] = str(block[2])
+            matrix[row_index][col_index] = str(block["device_index"])
         else:
-            matrix[row_index][col_index] += "," + str(block[2])
+            matrix[row_index][col_index] += ", " + str(block["device_index"])
 
     # Prepare headers
     row_headers = [f"Row {r[0]}-{r[1]}" for r in row_ranges]
     col_headers = [f"Col {c[0]}-{c[1]}" for c in col_ranges]
+
     return tabulate(matrix, headers=col_headers, showindex=row_headers)
 
 
@@ -202,14 +152,6 @@ def _create_rich_table(
     console.print(table, end="\n\n")
 
 
-def _has_rich_and_matplotlib() -> bool:
-    return importlib.util.find_spec("rich") and importlib.util.find_spec("matplotlib")
-
-
-def _has_tabulate() -> bool:
-    return importlib.util.find_spec("tabulate")
-
-
 def visualize_sharding(dtensor, header="", use_rich: bool = False):
     """Visualizes sharding in the terminal for :class:`DTensor` that are 1D or 2D."""
     if dtensor.numel() == 0:  # Do not print empty dtensors.
@@ -231,23 +173,41 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
     if not local_rank_zero_on_all_dim:
         return
 
-    device_coords = _device_coords_in_mesh(dtensor.device_mesh)  # {dev_id:mesh_coord}
-    shards = [
-        _shard_info(
-            dtensor.shape,
-            dtensor.device_mesh,
-            dtensor.placements,
-            device_coords,
-            device_index,
+    device_coords = {
+        device_index.item(): coord
+        for coord, device_index in np.ndenumerate(
+            np.array(dtensor.device_mesh.mesh.tolist())
         )
-        for device_index in device_coords  # [rows, cols, dev_id]
+    }
+
+    device_shard_shape_and_offsets = {
+        device_index: _compute_local_shape_and_global_offset(
+            dtensor.shape,
+            dtensor.device_mesh.shape,
+            device_coords[device_index],
+            dtensor.placements,
+        )
+        for device_index in device_coords
+    }
+
+    shards = [
+        {
+            "row_range": (offset[0], offset[0] + shape[0] - 1),
+            "column_range": (offset[1], offset[1] + shape[1] - 1),
+            "device_index": device_index,
+        }
+        for device_index, (shape, offset) in device_shard_shape_and_offsets.items()
     ]
 
-    if _has_rich_and_matplotlib() and use_rich:
+    if (
+        importlib.util.find_spec("rich")
+        and importlib.util.find_spec("matplotlib")
+        and use_rich
+    ):
         _create_rich_table(
             dtensor.shape, shards, device_kind=dtensor.device_mesh.device_type
         )
-    elif _has_tabulate():
+    elif importlib.util.find_spec("tabulate"):
         print(header)
         print(_create_table(shards))
     else:
