@@ -160,8 +160,7 @@ def _unpack_list(list_value: _C.Value) -> list[_C.Value]:
     list_node = list_value.node()
     if list_node.kind() != "prim::ListConstruct":
         raise errors.SymbolicValueError(
-            f"ONNX symbolic expected node type prim::ListConstruct, "
-            f"got '{list_node}'.",
+            f"ONNX symbolic expected node type prim::ListConstruct, got '{list_node}'.",
             list_value,
         )
     return list(list_node.inputs())
@@ -412,9 +411,9 @@ def quantized_args(
             output = fn(g, *non_quantized_args, **kwargs)
 
             assert _scale is not None, "Bug: Scale must be set for quantized operator"
-            assert (
-                _zero_point is not None
-            ), "Bug: Zero point must be set for quantized operator"
+            assert _zero_point is not None, (
+                "Bug: Zero point must be set for quantized operator"
+            )
 
             if quantize_output:
                 return quantize_helper(g, output, _scale, _zero_point)

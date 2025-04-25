@@ -4,7 +4,7 @@ import json
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -27,11 +27,11 @@ class GitHubComment:
 def gh_fetch_url_and_headers(
     url: str,
     *,
-    headers: Optional[Dict[str, str]] = None,
-    data: Union[Optional[Dict[str, Any]], str] = None,
+    headers: Optional[dict[str, str]] = None,
+    data: Union[Optional[dict[str, Any]], str] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
-) -> Tuple[Any, Any]:
+) -> tuple[Any, Any]:
     if headers is None:
         headers = {}
     token = os.environ.get("GITHUB_TOKEN")
@@ -57,10 +57,10 @@ def gh_fetch_url_and_headers(
             print(
                 f"""{url}
                 Rate limit exceeded:
-                Used: {err.headers['X-RateLimit-Used']}
-                Limit: {err.headers['X-RateLimit-Limit']}
-                Remaining: {err.headers['X-RateLimit-Remaining']}
-                Resets at: {err.headers['x-RateLimit-Reset']}"""
+                Used: {err.headers["X-RateLimit-Used"]}
+                Limit: {err.headers["X-RateLimit-Limit"]}
+                Remaining: {err.headers["X-RateLimit-Remaining"]}
+                Resets at: {err.headers["x-RateLimit-Reset"]}"""
             )
         else:
             print(f"Error fetching {url} {err}")
@@ -70,8 +70,8 @@ def gh_fetch_url_and_headers(
 def gh_fetch_url(
     url: str,
     *,
-    headers: Optional[Dict[str, str]] = None,
-    data: Union[Optional[Dict[str, Any]], str] = None,
+    headers: Optional[dict[str, str]] = None,
+    data: Union[Optional[dict[str, Any]], str] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = json.load,
 ) -> Any:
@@ -82,25 +82,25 @@ def gh_fetch_url(
 
 def gh_fetch_json(
     url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
+    params: Optional[dict[str, Any]] = None,
+    data: Optional[dict[str, Any]] = None,
     method: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
         url += "?" + "&".join(
             f"{name}={quote(str(val))}" for name, val in params.items()
         )
     return cast(
-        List[Dict[str, Any]],
+        list[dict[str, Any]],
         gh_fetch_url(url, headers=headers, data=data, reader=json.load, method=method),
     )
 
 
 def _gh_fetch_json_any(
     url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
+    params: Optional[dict[str, Any]] = None,
+    data: Optional[dict[str, Any]] = None,
 ) -> Any:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -112,21 +112,21 @@ def _gh_fetch_json_any(
 
 def gh_fetch_json_list(
     url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    return cast(List[Dict[str, Any]], _gh_fetch_json_any(url, params, data))
+    params: Optional[dict[str, Any]] = None,
+    data: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    return cast(list[dict[str, Any]], _gh_fetch_json_any(url, params, data))
 
 
 def gh_fetch_json_dict(
     url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    return cast(Dict[str, Any], _gh_fetch_json_any(url, params, data))
+    params: Optional[dict[str, Any]] = None,
+    data: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
-def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
+def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
     rc = gh_fetch_url(
         "https://api.github.com/graphql",
         data={"query": query, "variables": kwargs},
@@ -136,12 +136,12 @@ def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
         raise RuntimeError(
             f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
         )
-    return cast(Dict[str, Any], rc)
+    return cast(dict[str, Any], rc)
 
 
 def _gh_post_comment(
     url: str, comment: str, dry_run: bool = False
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if dry_run:
         print(comment)
         return []
@@ -150,7 +150,7 @@ def _gh_post_comment(
 
 def gh_post_pr_comment(
     org: str, repo: str, pr_num: int, comment: str, dry_run: bool = False
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     return _gh_post_comment(
         f"{GITHUB_API_URL}/repos/{org}/{repo}/issues/{pr_num}/comments",
         comment,
@@ -160,7 +160,7 @@ def gh_post_pr_comment(
 
 def gh_post_commit_comment(
     org: str, repo: str, sha: str, comment: str, dry_run: bool = False
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     return _gh_post_comment(
         f"{GITHUB_API_URL}/repos/{org}/{repo}/commits/{sha}/comments",
         comment,
@@ -220,8 +220,8 @@ def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") ->
 
 
 def gh_query_issues_by_labels(
-    org: str, repo: str, labels: List[str], state: str = "open"
-) -> List[Dict[str, Any]]:
+    org: str, repo: str, labels: list[str], state: str = "open"
+) -> list[dict[str, Any]]:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues"
     return gh_fetch_json(
         url, method="GET", params={"labels": ",".join(labels), "state": state}

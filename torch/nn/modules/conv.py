@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import List, Optional, Union
+from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -788,8 +788,8 @@ class _ConvTransposeNd(_ConvNd):
                     f"or {num_non_spatial_dims + num_spatial_dims} elements (got {len(output_size)})"
                 )
 
-            min_sizes = torch.jit.annotate(List[int], [])
-            max_sizes = torch.jit.annotate(List[int], [])
+            min_sizes = torch.jit.annotate(list[int], [])
+            max_sizes = torch.jit.annotate(list[int], [])
             for d in range(num_spatial_dims):
                 dim_size = (
                     (input.size(d + num_non_spatial_dims) - 1) * stride[d]
@@ -811,7 +811,7 @@ class _ConvTransposeNd(_ConvNd):
                         f"from {min_sizes} to {max_sizes} (for an input of {input.size()[2:]})"
                     )
 
-            res = torch.jit.annotate(List[int], [])
+            res = torch.jit.annotate(list[int], [])
             for d in range(num_spatial_dims):
                 res.append(output_size[d] - min_sizes[d])
 
@@ -998,7 +998,10 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
-    * :attr:`stride` controls the stride for the cross-correlation.
+    * :attr:`stride` controls the stride for the cross-correlation. When stride > 1, ConvTranspose2d inserts zeros between input
+      elements along the spatial dimensions before applying the convolution kernel. This zero-insertion operation is the standard
+      behavior of transposed convolutions, which can increase the spatial resolution and is equivalent to a learnable
+      upsampling operation.
 
     * :attr:`padding` controls the amount of implicit zero padding on both
       sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
@@ -1140,6 +1143,14 @@ class ConvTranspose2d(_ConvTransposeNd):
         )
 
     def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+        """
+        Performs the forward pass.
+
+        Attributes:
+            input (Tensor): The input tensor.
+            output_size (list[int], optional): A list of integers representing
+                the size of the output tensor. Default is None.
+        """
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose2d"

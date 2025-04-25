@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from typing_extensions import Self
 
-    from torch.utils._cxx_pytree import PyTree
-
 
 __all__: list[str] = []
 
@@ -31,6 +29,9 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     import optree._C
 
     import torch.utils._cxx_pytree as cxx_pytree
+
+    if TYPE_CHECKING:
+        from torch.utils._cxx_pytree import PyTree
 
     @substitute_in_graph(
         optree._C.is_dict_insertion_ordered,
@@ -56,9 +57,10 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         "structseq_fields",
     ):
         __func = getattr(optree, __name)
-        substitute_in_graph(__func, can_constant_fold_through=True)(
+        globals()[__name] = substitute_in_graph(__func, can_constant_fold_through=True)(
             __func.__python_implementation__
         )
+        __all__ += [__name]  # noqa: PLE0604
         del __func
     del __name
 
@@ -105,6 +107,8 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     __all__ += ["tree_leaves"]
 
     class _Asterisk(str):
+        __slots__ = ()
+
         def __new__(cls) -> Self:
             return super().__new__(cls, "*")
 

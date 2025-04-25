@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import copy
-import json
 import traceback
 from contextlib import contextmanager
 from enum import Enum
@@ -224,9 +223,9 @@ def get_current_meta() -> dict[str, Any]:
 
 
 @compatibility(is_backward_compatible=False)
-def get_graph_provenance_json(graph: Graph) -> str:
+def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
     """
-    Given an fx.Graph, return a json string that contains the provenance information of each node.
+    Given an fx.Graph, return a json that contains the provenance information of each node.
     """
     provenance_tracking_json = {}
     for node in graph.nodes:
@@ -236,4 +235,4 @@ def get_graph_provenance_json(graph: Graph) -> str:
                 if "from_node" in node.meta
                 else []
             )
-    return json.dumps(provenance_tracking_json)
+    return provenance_tracking_json

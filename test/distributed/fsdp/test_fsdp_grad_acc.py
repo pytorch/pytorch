@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -61,7 +60,7 @@ class _GradAccConfig:
     def __repr__(self) -> str:
         # Override to remove any spaces in the string to appease the internal
         # build's test name parser
-        return f"(use_no_sync={self.use_no_sync}," f"num_iters={self.num_iters})"
+        return f"(use_no_sync={self.use_no_sync},num_iters={self.num_iters})"
 
 
 @dataclass
@@ -275,7 +274,6 @@ class TestGradAcc(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc_cpu_offload(
         self,

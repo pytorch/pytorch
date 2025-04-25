@@ -1,5 +1,4 @@
 # Owner(s): ["module: fx"]
-import json
 
 import torch
 from torch._inductor.compile_fx import aot_export_module
@@ -98,7 +97,6 @@ class TestFXNodeSource(TestCase):
         ep = torch.export.export(model, example_inputs, strict=True)
         gm = ep.module()
         provenance = get_graph_provenance_json(gm.graph)
-        provenance = json.loads(provenance)
         self.assertEqual(
             set(provenance.keys()), {"relu", "linear", "sigmoid", "linear_1"}
         )
@@ -130,7 +128,6 @@ class TestFXNodeSource(TestCase):
         )
 
         provenance = get_graph_provenance_json(gm.graph)
-        provenance = json.loads(provenance)
 
         self.assertEqual(
             set(provenance.keys()), {"t", "addmm", "relu", "t_1", "addmm_1", "sigmoid"}

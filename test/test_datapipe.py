@@ -1,34 +1,25 @@
 # mypy: ignore-errors
-# ruff: noqa: F841
 
 # Owner(s): ["module: dataloader"]
 
 import copy
 import itertools
+import importlib.util
 import os
 import os.path
 import pickle
 import pydoc
 import random
-import sys
 import tempfile
 import warnings
 from functools import partial
 from typing import (
     Any,
-    Generic,
     Optional,
-    TYPE_CHECKING,
     TypeVar,
     Union,
 )
 from collections.abc import Awaitable, Iterator
-
-if not TYPE_CHECKING:
-    # pyre isn't treating this the same as a typing.NamedTuple
-    from typing_extensions import NamedTuple
-else:
-    from typing import NamedTuple
 
 import operator
 from unittest import skipIf
@@ -74,12 +65,7 @@ from torch.utils.data.graph import traverse_dps
 dill = import_dill()
 HAS_DILL = TEST_DILL
 
-try:
-    import pandas  # type: ignore[import]  # noqa: F401 F403
-
-    HAS_PANDAS = True
-except ImportError:
-    HAS_PANDAS = False
+HAS_PANDAS: bool = importlib.util.find_spec("pandas") is not None
 skipIfNoDataFrames = skipIf(not HAS_PANDAS, "no dataframes (pandas)")
 
 skipTyping = skipIf(True, "TODO: Fix typing bug")
@@ -418,13 +404,13 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertTrue(inp[1].closed)
 
         cached = list(datapipe2)
-        with warnings.catch_warnings(record=True) as wa:
+        with warnings.catch_warnings(record=True):
             datapipe3 = dp.iter.RoutedDecoder(cached, _png_decoder)
         datapipe3.add_handler(decoder_basichandlers)
         _helper(cached, datapipe3)
 
         cached = list(datapipe2)
-        with warnings.catch_warnings(record=True) as wa:
+        with warnings.catch_warnings(record=True):
             datapipe4 = dp.iter.RoutedDecoder(cached, decoder_basichandlers)
         datapipe4.add_handler(_png_decoder)
         _helper(cached, datapipe4, channel_first=True)
@@ -779,7 +765,7 @@ class TestFunctionalIterDataPipe(TestCase):
         it1, it2 = iter(dp1), iter(dp2)
         _, _ = next(it1), next(it2)
         # Catch `fork`, `demux` "some child DataPipes are not exhausted" warning
-        with warnings.catch_warnings(record=True) as wa:
+        with warnings.catch_warnings(record=True):
             self._serialization_test_helper(dp1, use_dill)
             self._serialization_test_helper(dp2, use_dill)
 
@@ -788,7 +774,7 @@ class TestFunctionalIterDataPipe(TestCase):
         it1 = iter(dp1)
         _ = list(it1)  # fully read one child
         # Catch `fork`, `demux` "some child DataPipes are not exhausted" warning
-        with warnings.catch_warnings(record=True) as wa:
+        with warnings.catch_warnings(record=True):
             self._serialization_test_helper(dp1, use_dill)
             self._serialization_test_helper(dp2, use_dill)
 
@@ -1319,7 +1305,7 @@ class TestFunctionalIterDataPipe(TestCase):
             if n1 == 4:
                 break
         with warnings.catch_warnings(record=True) as wa:
-            i1 = iter(dp1)  # Reset all child DataPipes
+            iter(dp1)  # Reset all child DataPipes
             self.assertEqual(len(wa), 1)
             self.assertRegex(
                 str(wa[0].message), r"Some child DataPipes are not exhausted"
@@ -1899,7 +1885,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # Functional Test: filter function must return bool
         filter_dp = input_ds.filter(filter_fn=_non_bool_fn)
         with self.assertRaises(ValueError):
-            temp = list(filter_dp)
+            list(filter_dp)
 
         # Funtional Test: Specify input_col
         tuple_input_ds = dp.iter.IterableWrapper([(d - 1, d, d + 1) for d in range(10)])
@@ -1965,9 +1951,9 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(x, i)
 
         # RandomSampler
-        random_sampled_dp = dp.iter.Sampler(
+        dp.iter.Sampler(
             input_dp, sampler=RandomSampler, sampler_kwargs={"replacement": True}
-        )  # type: ignore[var-annotated] # noqa: B950
+        )
 
         # Requires `__len__` to build SamplerDataPipe
         input_dp_nolen = IDP_NoLen(range(10))
@@ -1998,7 +1984,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = dp.iter.IterableWrapper(list(range(10)))
 
         with self.assertRaises(AssertionError):
-            shuffle_dp = input_dp.shuffle(buffer_size=0)
+            input_dp.shuffle(buffer_size=0)
 
         # Functional Test: No seed
         shuffler_dp = input_dp.shuffle()
@@ -2035,7 +2021,6 @@ class TestFunctionalIterDataPipe(TestCase):
         # __len__ Test: returns the length of the input DataPipe
         shuffler_dp = input_dp.shuffle()
         self.assertEqual(10, len(shuffler_dp))
-        exp = list(range(100))
 
         # Serialization Test
         from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -2403,16 +2388,6 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(2, len(batch_dp_2))
 
 
-# Metaclass conflict for Python 3.6
-# Multiple inheritance with NamedTuple is not supported for Python 3.9
-_generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
-if _generic_namedtuple_allowed:
-
-    class InvalidData(NamedTuple, Generic[T_co]):
-        name: str
-        data: T_co
-
-
 class TestTyping(TestCase):
     def test_isinstance(self):
         class A(IterDataPipe):
@@ -2548,14 +2523,6 @@ class TestTyping(TestCase):
                 def __iter__(self) -> Iterator[tuple]:  # type: ignore[override]
                     yield (0,)
 
-        if _generic_namedtuple_allowed:
-            with self.assertRaisesRegex(
-                TypeError, r"is not supported by Python typing"
-            ):
-
-                class InvalidDP4(IterDataPipe["InvalidData[int]"]):  # type: ignore[type-arg, misc]
-                    pass
-
         class DP1(IterDataPipe[tuple[int, str]]):
             def __init__(self, length):
                 self.length = length
@@ -2679,7 +2646,7 @@ class TestTyping(TestCase):
         with self.assertRaisesRegex(
             TypeError, r"Expected type of argument 'dp' as a subtype"
         ):
-            dp1 = DP1(dp0)
+            DP1(dp0)
 
     @skipTyping
     def test_runtime(self):
@@ -2740,13 +2707,13 @@ class TestTyping(TestCase):
 
         # Invalid type
         with self.assertRaisesRegex(TypeError, r"'expected_type' must be a type"):
-            dp1 = DP(ds).reinforce_type(1)
+            DP(ds).reinforce_type(1)
 
         # Type is not subtype
         with self.assertRaisesRegex(
             TypeError, r"Expected 'expected_type' as subtype of"
         ):
-            dp2 = DP(ds).reinforce_type(float)
+            DP(ds).reinforce_type(float)
 
         # Invalid data at runtime
         dp3 = DP(ds).reinforce_type(str)
