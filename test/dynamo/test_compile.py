@@ -211,7 +211,7 @@ class InPlaceCompilationTests(TestCase):
         a = torch.randn(1, 1)
         out = torch.compile(fn)(a)
         self.assertEqual(out, a)
-    
+
     def test_to_sparse_to_dense_with_graph_break(self):
         def fn(x):
             x = x.to_sparse()
