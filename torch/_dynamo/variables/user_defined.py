@@ -503,6 +503,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self.source, self.value, var_cls, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
+
+            if "apply_ac_policy" in str(self.value):
+                # Since we aren't able to observe the side effect by the time
+                # we actually call __enter__, we need to set the policy here.
+                # cm_obj._ac_policy_fn = args[0].value
+                setattr(self.value, "policy_fn", args[0].value)
+
             return cm_obj
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)

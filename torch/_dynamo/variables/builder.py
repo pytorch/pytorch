@@ -2377,7 +2377,10 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             )
 
         options.update(specialized_props)
-        return target_cls(proxy, **options)
+        out_vt = target_cls(proxy, **options)
+        # See Note [Hopifying Context Managers]
+        tx.output.current_tracer.fx_node_name_to_vt[proxy.node.name] = out_vt
+        return out_vt
     elif (
         hasattr(proxy.node.target, "__name__")
         and proxy.node.target.__name__ == "set_state"

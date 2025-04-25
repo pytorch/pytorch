@@ -444,6 +444,14 @@ allow_empty_graphs = False
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
 
+# Any context manager class that is included in this list will be generically
+# hopified.
+#
+# WARNING: it probably won't actually work if you depend on __init__, e.g. you
+# do a setattr(self, "x", something) and expect on "x" to be available in
+# __enter__.
+_enable_hopify_generic_context_manager = set()
+
 
 def default_debug_dir_root():
     # [@compile_ignored: debug]

@@ -1109,6 +1109,7 @@ def _compile(
                     "ignore_logger_methods",
                     "traceable_tensor_subclasses",
                     "_custom_ops_profile",
+                    "_enable_hopify_generic_context_manager",
                 }
 
                 return {
