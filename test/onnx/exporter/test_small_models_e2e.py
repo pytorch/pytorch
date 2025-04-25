@@ -542,6 +542,21 @@ class DynamoExporterTest(common_utils.TestCase):
         # make sre the naming is working
         self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
 
+    def test_export_sym_not(self):
+        class SymNotModel(torch.nn.Module):
+            def forward(self, x):
+                comparison = x.shape[0] == x.shape[1]
+                return torch.sym_not(comparison)
+
+        inputs = (torch.zeros((2, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymNotModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Not",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
     def test_group_norm_opset_21(self):
         class Model(torch.nn.Module):
             def forward(self, x):
