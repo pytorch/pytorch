@@ -45,7 +45,7 @@
     "class CppKernelProxy": 601,
     "class CppOverrides": 429,
     "class CppScheduling": 777,
-    "class CppVecKernel": 855,
+    "class CppVecKernel": 857,
     "class OuterLoopFusedSchedulerNode": 159,
     "def CppKernel.codegen_loops_impl()": 144,
     "def CppKernelProxy.codegen_functions()": 183,
@@ -136,7 +136,7 @@
   "torch/_inductor/codegen/triton.py": {
     "class BlockPtrOptions": 272,
     "class TritonKernel": 2455,
-    "class TritonOverrides": 501,
+    "class TritonOverrides": 505,
     "class TritonPrinter": 172,
     "class TritonScheduling": 396,
     "def TritonKernel.codegen_kernel()": 222,
@@ -156,7 +156,7 @@
   },
   "torch/_inductor/codegen/wrapper.py": {
     "def PythonWrapperCodegen.benchmark_compiled_module()": 92,
-    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 252,
+    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 249,
     "def PythonWrapperCodegen.generate_example_arg_value()": 83,
     "def user_defined_kernel_grid_fn_code()": 96
   },
@@ -225,8 +225,8 @@
     "def FakeTensorUpdater.incremental_update()": 100
   },
   "torch/_inductor/graph.py": {
-    "class GraphLowering": 2024,
-    "def GraphLowering.call_function()": 108,
+    "class GraphLowering": 2032,
+    "def GraphLowering.call_function()": 116,
     "def GraphLowering.extract_autotune_inputs()": 90,
     "def GraphLowering.output()": 87,
     "def GraphLowering.placeholder()": 92,
@@ -327,7 +327,7 @@
   },
   "torch/_inductor/select_algorithm.py": {
     "class AlgorithmSelectorCache": 694,
-    "class TritonTemplate": 223,
+    "class TritonTemplate": 224,
     "class TritonTemplateKernel": 770,
     "def AlgorithmSelectorCache.log_results()": 92,
     "def AlgorithmSelectorCache.make_benchmark_fn[2]()": 145
@@ -336,7 +336,7 @@
     "class SizeVarAllocator": 780
   },
   "torch/_inductor/template_heuristics.py": {
-    "class ROCmConfigHeuristic": 142
+    "class ROCmConfigHeuristic": 212
   },
   "torch/_inductor/utils.py": {
     "class IndentedBuffer": 136
