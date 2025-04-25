@@ -175,18 +175,22 @@ class UtilTest(DTensorTestBase):
                 self.assertEqual(global_shape, torch.Size([5, 5]))
 
     @with_comms
-    def test_compute_global_tensor_shape_failure_2D(self):
-        placement_2D = [Shard(0), Shard(1)]
-        device_mesh_2D = init_device_mesh(self.device_type, (2, 2))
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "compute_global_tensor_shape only supports 1D mesh for now.",
-        ):
-            _ = compute_global_tensor_shape(
-                torch.Size([2, 2]),
-                device_mesh_2D,
-                placement_2D,
+    def test_compute_global_tensor_shape(self):
+        device_mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        global_tensor = torch.arange(441).view(7, 9, 7)
+        placements = [
+            [Shard(0), Shard(1), Shard(1)],
+            [Shard(0), Shard(1), Shard(2)],
+            [Shard(0), Shard(0), Shard(1)],
+            [Shard(0), Replicate(), Shard(1)],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+        for placement in placements:
+            dtensor = distribute_tensor(global_tensor, device_mesh, placement)
+            global_shape = compute_global_tensor_shape(
+                dtensor.to_local().shape, device_mesh, placement
             )
+            self.assertEqual(global_shape, dtensor.full_tensor().shape)
 
     @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):

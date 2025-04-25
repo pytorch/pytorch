@@ -254,7 +254,6 @@ def compute_global_tensor_shape(
     the mesh and placements. Different from `compute_global_tensor_info`,
     which assumes sharding is even, this util allgathers local shards' shapes
     from all ranks and thus can support uneven sharding.
-    NOTE: Currently this function only supports 1D mesh.
 
     Args:
         shape (:class:`torch.Size`):
@@ -269,35 +268,57 @@ def compute_global_tensor_shape(
     Return:
         tensor_shape: Shape of the global DTensor.
     """
-    if mesh.ndim > 1:
-        raise NotImplementedError(
-            "compute_global_tensor_shape only supports 1D mesh for now."
-        )
-    if len(placements) != 1:
-        raise NotImplementedError(
-            "compute_global_tensor_shape only supports 1 placement for now."
-        )
-
-    if isinstance(placements[0], Replicate):
+    if all(pl.is_replicate() for pl in placements):
         return shape
-    elif isinstance(placements[0], Shard):
-        local_shape = torch.tensor(list(shape))
-        gathered_shaped_tensors = [
-            torch.empty_like(local_shape, device=local_shape.device)
-            for _ in range(torch.distributed.get_world_size())
-        ]
-        torch.distributed.all_gather(gathered_shaped_tensors, local_shape)
-        sharded_dim_sum = 0
-        for shape_tensor in gathered_shaped_tensors:
-            shape_tensor_list = shape_tensor.tolist()
-            sharded_dim_sum += shape_tensor_list[placements[0].dim]
-        global_shape = list(shape)
-        global_shape[placements[0].dim] = sharded_dim_sum
-        return torch.Size(global_shape)
-    else:
-        raise NotImplementedError(
-            f"Placement type {type(placements[0])} not supported."
+
+    mesh_tensor = mesh.mesh
+    if mesh.ndim != len(placements):
+        raise RuntimeError(
+            "Expected one placement per mesh dim, "
+            f"but found {len(placements)} placements and {len(mesh_tensor)} mesh dims."
         )
+    local_shape = torch.tensor(list(shape))
+    gathered_shape_tensors = [
+        torch.empty_like(local_shape, device=local_shape.device)
+        for _ in range(torch.distributed.get_world_size())
+    ]
+    torch.distributed.all_gather(gathered_shape_tensors, local_shape)
+
+    global_shape = _compute_global_tensor_shape(
+        gathered_shape_tensors, mesh_tensor, placements
+    )
+    return torch.Size(global_shape)
+
+
+def _compute_global_tensor_shape(
+    local_shapes: Sequence[torch.Tensor],
+    mesh_tensor: torch.Tensor,
+    placements: Sequence[Placement],
+) -> Sequence[int]:
+    sub_shapes = []
+    if len(placements) > 1:
+        sub_dims = mesh_tensor.shape[0]
+        for i in range(sub_dims):
+            sub_shape = _compute_global_tensor_shape(
+                local_shapes, mesh_tensor[i], placements[1:]
+            )
+            sub_shapes.append(sub_shape)
+    elif len(placements) == 1:
+        for rank_id in mesh_tensor.tolist():
+            sub_shapes.append(local_shapes[rank_id].tolist())
+
+    global_shape = list(sub_shapes[0])
+    if placements[0].is_replicate():
+        return global_shape
+    elif placements[0].is_shard():
+        shard_placement = cast(Shard, placements[0])
+        sharded_dim_sum = 0
+        for sub_shape in sub_shapes:
+            sharded_dim_sum += sub_shape[shard_placement.dim]
+        global_shape[shard_placement.dim] = sharded_dim_sum
+    else:
+        raise RuntimeError(f"placement type {type(placements[0])} not supported!")
+    return global_shape
 
 
 def try_find_mesh_from_args(
