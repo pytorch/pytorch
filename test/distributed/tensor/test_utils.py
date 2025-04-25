@@ -193,6 +193,25 @@ class UtilTest(DTensorTestBase):
             self.assertEqual(global_shape, dtensor.full_tensor().shape)
 
     @with_comms
+    def test_compute_global_tensor_shape_uneven(self):
+        device_mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        local_shapes = [
+            (1, 3, 7),
+            (1, 3, 2),
+            (1, 2, 4),
+            (1, 2, 5),
+            (2, 4, 6),
+            (2, 4, 3),
+            (2, 1, 8),
+            (2, 1, 1),
+        ]
+        placement = [Shard(0), Shard(1), Shard(2)]
+        global_shape = compute_global_tensor_shape(
+            torch.Size(local_shapes[device_mesh.get_rank()]), device_mesh, placement
+        )
+        self.assertEqual(global_shape, torch.Size([3, 5, 9]))
+
+    @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]
 
