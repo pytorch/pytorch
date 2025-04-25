@@ -40,7 +40,7 @@ struct OpenRegHostAllocator final : at::HostAllocator {
         count);
   }
 
-  bool is_pinned(const void* data) override {
+  bool is_pinned(const void* data) const override {
     py::gil_scoped_acquire acquire;
     return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
         .cast<bool>();
