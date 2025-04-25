@@ -775,6 +775,7 @@ creation. If true, then the CUDACachingAllocator will be able to use memory in t
 a last resort instead of OOMing.
 
 .. code:: python
+
     pool = torch.cuda.MemPool(allocator, use_on_oom=True)
     with torch.cuda.use_mem_pool(pool):
         a = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
