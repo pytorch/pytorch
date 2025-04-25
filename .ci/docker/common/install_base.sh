@@ -99,9 +99,6 @@ install_centos() {
 
   ccache_deps="asciidoc docbook-dtds docbook-style-xsl libxslt"
   numpy_deps="gcc-gfortran"
-  # Note: protobuf-c-{compiler,devel} on CentOS are too old to be used
-  # for Caffe2. That said, we still install them to make sure the build
-  # system opts to build/use protoc and libprotobuf from third-party.
   yum install -y \
     $ccache_deps \
     $numpy_deps \
