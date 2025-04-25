@@ -314,7 +314,9 @@ class GraphLowering(torch.fx.Interpreter):
         self._shape_env = shape_env
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: dict[Optional[sympy.Symbol], list[RuntimeAssert]] = (
-            shape_env.deferred_runtime_asserts.copy()
+            shape_env.non_lowered_asserts
+            if shape_env.runtime_asserts_frozen
+            else (shape_env.deferred_runtime_asserts.copy())
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
@@ -1796,24 +1798,20 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Note [Backwards runtime asserts]
         # Backwards poses an interesting problem for deferred runtime
-        # asserts.  In the easy case, we may solely close over data
-        # dependent sized tensors, and there are no binding sites for
-        # unbacked SymInts.  In this case, we can just drop all the
-        # runtime asserts on the floor: no non-placeholder bindings, no
-        # problem.
+        # asserts.
         #
-        # However, it is *possible* for a fresh runtime assert to show up
+        # It is *possible* for a fresh runtime assert to show up
         # between forwards and backwards.  Right now, the freezing process
         # that happens when we lower forwards means that we will freeze
         # runtime asserts, and then the moment the backwards lowering
         # process attempts to add a new deferred runtime assert, we will
-        # fail.  Let's say you remove that assert.  Now when we get here,
-        # we need to make sure we actually emit these asserts (because we
-        # can't emit them in forwards, we already compiled it).  So we
-        # have to do something here.  But we don't want to reemit ALL
-        # deferred runtime asserts, we only want to emit the NEW ones.
-        # Therefore needing some sort of stratification in the ShapeEnv.
-        # This is all doable, it just hasn't been done yet.
+        # fail.
+        #
+        # If some runtime assertions were not emitted during the forward codegen
+        # we need to emit them during the backward, after forward codegen we set
+        # non_lowered_asserts to the remaining asserts that are not lowered in
+        # forward. Backward then will emit those assert. At the end of backward, we
+        # make sure there is no more asserts that not lowered.
 
         def make_assert(expr: SympyBoolean, msg: str) -> None:
             assert_op = ir.AssertScalar(expr, msg)

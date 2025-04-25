@@ -456,7 +456,6 @@ def default_partition(
     )
     saved_values = []
     saved_sym_nodes = []
-
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
@@ -511,7 +510,9 @@ def _size_of(node: fx.Node) -> int:
             return 0
         return _tensor_nbytes(hint_int(x.numel(), fallback=4096), x.dtype)
 
-    if "val" in node.meta:
+    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+        return 0
+    elif "val" in node.meta:
         val = node.meta["val"]
         if isinstance(val, py_sym_types):
             return 1
@@ -526,8 +527,7 @@ def _size_of(node: fx.Node) -> int:
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
-        return 0
+
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
     )

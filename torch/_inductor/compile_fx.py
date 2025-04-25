@@ -1227,6 +1227,7 @@ class _InProcessFxCompile(FxCompile):
                         is_backward=is_backward,
                         is_const_graph=True,
                     )
+
                     with V.set_graph_handler(const_graph):
                         assert cpp_wrapper, "AOT mode only supports C++ wrapper"
                         const_graph.run()
@@ -1258,6 +1259,11 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
+
+                # We are going to start code generating runtime asserts, so make sure
+                # you don't start adding new ones in the lowering process
+                graph.freeze_runtime_asserts()
+
                 with V.set_graph_handler(graph):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
@@ -1278,6 +1284,15 @@ class _InProcessFxCompile(FxCompile):
                             else:
                                 output_strides.append(None)
 
+                    # Check Note [Backwards runtime asserts]
+                    # runtime assers that are not lowered yet.
+                    remaining_ras = graph.ras_by_symbol
+                    # if lowering was done for backward assert that all runtime asserts has been lowered.
+                    if V.graph.is_backward:
+                        assert len(remaining_ras) == 0
+                    elif shape_env is not None:
+                        shape_env.set_non_lowered_asserts(remaining_ras)
+
                     _check_triton_bf16_support(graph)
 
                     # TODO: The switching between AOT mode and not here is a bit
@@ -1289,10 +1304,6 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
-                        # We are going to start code generating runtime asserts, so make sure
-                        # you don't start adding new ones in the lowering process
-                        graph.freeze_runtime_asserts()
-
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 

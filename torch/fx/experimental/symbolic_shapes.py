@@ -3466,6 +3466,11 @@ class ShapeEnv:
         self.deferred_runtime_asserts: dict[
             Optional[sympy.Symbol], list[RuntimeAssert]
         ] = {}
+        # After forward codegen, runtime assertions are frozen (no more can be added)
+        # and non_lowered_asserts is updated with the remaining runtime asserts that are
+        # not emitted during forwars. see Note [Backwards runtime asserts]
+        self.runtime_asserts_frozen = False
+        self.non_lowered_asserts: dict[Optional[sympy.Symbol], list[RuntimeAssert]] = {}
         # This exists so we can efficiently invalidate the cache (it's used as
         # part of the cache key); otherwise we'd have to iterate through
         # deferred_runtime_asserts to compute its length
@@ -3473,7 +3478,6 @@ class ShapeEnv:
         self.log = log
         self.log.info("create_env")
         self.frozen = False
-        self.runtime_asserts_frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
         self.counter: Counter[str] = collections.Counter()
         # Mapping from sympy.Symbol to the number of guards which mention this
@@ -3846,6 +3850,13 @@ class ShapeEnv:
         """
         # self.prefer_deferred_runtime_asserts_over_guards = False
         self.runtime_asserts_frozen = True
+
+    @record_shapeenv_event()
+    def set_non_lowered_asserts(
+        self, non_lowered_asserts: dict[Optional[sympy.Symbol], list[RuntimeAssert]]
+    ) -> None:
+        assert self.runtime_asserts_frozen
+        self.non_lowered_asserts = non_lowered_asserts
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
         if not self._translation_validation_enabled:
