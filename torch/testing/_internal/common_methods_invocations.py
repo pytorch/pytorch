@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and,
+    empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and, float8_types,
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -36,7 +36,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR
@@ -1933,6 +1933,10 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     if torch.cuda.is_available():
         inputs.append(((S,), get_val(dtype), {'device': 'cuda'}))
 
+    if not dtype.is_signed:
+        # For unsigned dtypes, negative values are converted.
+        inputs.append(((S,), -get_val(dtype), {}))
+
     for shape, fill_value, kwargs in inputs:
         t = make_tensor(shape, dtype=dtype, device=device,
                         low=None, high=None,
@@ -2298,6 +2302,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
     #        No requirements for (wrapped_dim, ...)-th dimension.
     # 3. Expect positive num_chunks
     # 4. Expect non-empty input tensor list and each input tensor should have at least 1 element
+    # 5. Non-contiguous input tensors are allowed.
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     same_ndim_cases = (
         (
@@ -2344,6 +2349,14 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
             tensors.append(make_arg(size))
         yield SampleInput(tensors, args=(dim, num_chunks))
 
+    # non-contiguous
+    for dim in range(max_dim):
+        tensors = []
+        for size in different_ndim_case:
+            # make the last 2 dims column-major (i.e. non-contiguous)
+            t = make_arg(size).transpose(-2, -1).contiguous().transpose(-2, -1)
+            tensors.append(t)
+        yield SampleInput(tensors, args=(dim, num_chunks))
 
 def error_inputs_chunk_cat(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
@@ -2775,7 +2788,7 @@ def error_inputs_ormqr(op_info, device, **kwargs):
     bool_3 = True
     bool_4 = True
     yield ErrorInput(SampleInput(tensor_0, args=(tensor_1, tensor_2, bool_3, bool_4)), error_type=RuntimeError,
-                     error_regex=r"tau.shape\[-1\] must be less than or equal to input.shape\[-1\]")
+                     error_regex=r"tau.shape\[-1\] must be equal to min\(other.shape\[-2\], input.shape\[-1\]\)")
 
 
 def error_inputs_diag(op_info, device, **kwargs):
@@ -7647,6 +7660,7 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
              ((S, S, S), (-1, 2)),
              ((S, S, S), (-1, -1)),
              ((S, S, S), (1, -1)),
+             ((S, S), (-1, 2)),
              ((S,), (0, 2))
              )
 
@@ -7794,6 +7808,10 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
     # NOTE that the OpInfo for where takes samples of the form a, cond, b
     yield SampleInput(a, args=(c, b))
+
+    # MPS does not support float64, which causes issues in the following tests
+    if torch.device(device).type == "mps":
+        return
 
     # type promoting
     # FIXME(rec): shouldn't other_dtype be used two lines below?
@@ -12696,10 +12714,26 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
            gradcheck_wrapper=gradcheck_wrapper_triangular_input_real_positive_diagonal,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[
+               skipCUDAIfNoMagma,
+               skipCPUIfNoLapack,
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float32: tol(atol=5e-03, rtol=1e-04)
+                   }),
+                   'TestCommon', device_type='cpu',
+               ),
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float32: tol(atol=5e-03, rtol=1e-04)
+                   }),
+                   'TestEagerFusionOpInfo', device_type='cpu',
+               ),
+           ],
            skips=(
                # Strides are not the same! Original strides were ((4, 2, 1),) and strides are now ((4, 1, 2),)
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),),
+           ),
     OpInfo('cholesky_solve',
            op=torch.cholesky_solve,
            dtypes=floating_and_complex_types(),
@@ -16200,7 +16234,7 @@ op_db: list[OpInfo] = [
     OpInfo(
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
-        dtypes=empty_types(),
+        dtypes=float8_types(),
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,
@@ -16208,12 +16242,20 @@ op_db: list[OpInfo] = [
         decorators=[skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cuda'),
-            # "mul_cuda" not implemented for float8_e4m3fn
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # "add_stub" not implemented for 'Float8_e4m3fn'
+            # "ufunc_add_CUDA" not implemented for 'Float8_e4m3fn'
             # https://github.com/pytorch/pytorch/issues/107256
-            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         dtypes=(torch.float8_e4m3fn,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+            # "mul_cuda" not implemented for float8_e4m3fn
+            # "mul_cpu_reduced_float" not implemented for 'Float8_e4m3fn'
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness'),
+            # aten::_scaled_mm hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                         dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
         )
     ),
     OpInfo(
@@ -18369,6 +18411,7 @@ op_db: list[OpInfo] = [
            ),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
+           inplace_variant=torch.Tensor.index_fill_,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18404,6 +18447,7 @@ op_db: list[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           inplace_variant=torch.Tensor.index_add_,
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18892,12 +18936,12 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('full_like',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16,
+                                            torch.uint16, torch.uint32),
            supports_out=False,
            sample_inputs_func=sample_inputs_full_like,
            supports_autograd=False,
-           skips=(
-           )),
+           ),
     OpInfo('new_zeros',
            op=lambda x, *args, **kwargs: x.new_zeros(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -19325,6 +19369,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           inplace_variant=torch.Tensor.scatter_add_,
            sample_inputs_func=sample_inputs_scatter_add,
            error_inputs_func=error_inputs_scatter_and_scatter_add,
            supports_forward_ad=True,
@@ -21489,6 +21534,7 @@ op_db: list[OpInfo] = [
     OpInfo(
         'scatter_reduce',
         variant_test_name='sum',
+        inplace_variant=torch.Tensor.scatter_reduce_,
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -23172,6 +23218,7 @@ python_ref_db = [
                 "test_python_ref",
                 dtypes=(torch.bfloat16,),
                 device_type="cpu",
+                active_if=not IS_S390X,
             ),
         ),
     ),

@@ -291,6 +291,11 @@ class FloorDiv(sympy.Function):
 
         return None
 
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
+        return f"floor({base}/{divisor})"
+
 
 class ModularIndexing(sympy.Function):
     """
@@ -529,6 +534,10 @@ class CeilToInt(sympy.Function):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
+
+    def _ccode(self, printer):
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"ceil({number})"
 
 
 class FloorToInt(sympy.Function):
@@ -1121,6 +1130,11 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(float(base) / float(divisor))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
+
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        return f"((int){base}/(int){divisor})"
 
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
