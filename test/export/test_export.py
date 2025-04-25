@@ -205,6 +205,7 @@ class Inp3:
 
 NON_STRICT_SUFFIX = "_nonstrict"
 STRICT_SUFFIX = "_strict"
+INLINE_AND_INSTALL_STRICT_SUFFIX = "_inline_and_install_strict"
 RETRACEABILITY_STRICT_SUFFIX = "_retraceability_strict"
 RETRACEABILITY_NON_STRICT_SUFFIX = "_retraceability_nonstrict"
 SERDES_SUFFIX = "serdes"
@@ -233,6 +234,10 @@ def is_legacy_test(test_name):
     return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX) or test_name.endswith(
         LEGACY_EXPORT_STRICT_SUFFIX
     )
+
+
+def is_inline_and_install_strict_test(test_name: str) -> bool:
+    return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
 
 
 def is_retracebility_test(test_name):
@@ -4301,7 +4306,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
+                # Could not guard on data-dependent expression Ne(Mod(u1, u2), 0)
                 return r.view(items[0], items[2])
 
         M = M_v0
@@ -4310,9 +4315,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
-            f".*{re.escape('torch._check(items[2] != (-1))')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in Eq(u2, -1) and its negation.)')}",
+            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}.*\n"
+            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
+            f".*{re.escape('or r.shape[1], `u2` with items[2] in Ne(Mod(u1, u2), 0) and its negation.')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -4320,59 +4326,12 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, t):
                 items = [t[i].item() for i in range(t.numel())]
                 r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
+                # TODO(pianpwk): this isn't the suggested fixes.
+                # fix issue with % being interpreted as PythonMod instead of Mod
+                torch._check(items[1] == items[2])
                 return r.view(items[0], items[2])
 
         M = M_v1
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('You can add either: torch._check_is_size(u2) or torch._check(u2>=0) Note: torch._check_is_size(u2) could prevent data dependent errors that happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning. See documentation on guard_size_oblivious for more details: https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html')}.*\n"
-            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v2(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                return r.view(items[0], items[2])
-
-        M = M_v2
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
-            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v3(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                torch._check(items[2] == r.shape[1])
-                return r.view(items[0], items[2])
-
-        M = M_v3
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
@@ -4413,23 +4372,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[
                 # Could not guard on data-dependent expression u0 < 0
                 "torch._check(i >= 0)",
-            ],
-        )
-
-        class cf_nomemo(torch.nn.Module):
-            def forward(self, x, y, fixes):
-                i = y[0].item()
-                eval(fixes)
-                return x.unsqueeze(1).expand(-1, i)
-
-        retry_export(
-            cf_nomemo(),
-            (torch.randn(8), torch.tensor([2])),
-            fixes=[
-                # Could not guard on data-dependent expression Eq(u0, 1)
-                "torch._check(i != 1)",
-                # Could not guard on data-dependent expression Ne(u0, -1)
-                "torch._check(i != (-1))",
             ],
         )
 
@@ -4483,6 +4425,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.arange(10), torch.tensor([0, 2, 5, 7, 10])),
             fixes=[],  # nothing to fix!
         )
+
+    def test_simple_unbacked_view(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                y = torch.empty(5, u0)
+                return y.view(u0, 5)  # [5, u0] -> [u0, 5]
+
+        ep = export(Foo(), (torch.tensor([9]),))
+        self.assertEqual(ep.module()(torch.tensor([8])).size(0), 8)
+        self.assertEqual(ep.module()(torch.tensor([5])).size(0), 5)
+
+        class Foov2(torch.nn.Module):
+            def forward(self, xs):
+                xsl = xs.tolist()
+                a, b = xsl
+                x = torch.zeros(a)
+                return x.reshape(b)
+
+        xs = torch.tensor([4, 4])
+        ep = export(Foov2(), (xs,))
+        self.assertEqual(ep.module()(xs).size(0), 4)
+        self.assertEqual(ep.module()(torch.tensor([5, 5])).size(0), 5)
 
     def test_no_suggested_fixes_for_data_dependent_errors(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -7374,9 +7339,23 @@ def forward(self, b_a_buffer, x):
             )
 
         else:
-            self.assertExpectedInline(
-                ep.graph_module.code.strip(),
-                """\
+            if is_inline_and_install_strict_test(self._testMethodName):
+                self.assertExpectedInline(
+                    ep.graph_module.code.strip(),
+                    """\
+def forward(self, b____modules__a____buffers__buffer, x):
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
+    gt = sym_size_int_1 > 4;  sym_size_int_1 = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b____modules__a____buffers__buffer));  gt = true_graph_0 = false_graph_0 = x = b____modules__a____buffers__buffer = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
+                )
+            else:
+                self.assertExpectedInline(
+                    ep.graph_module.code.strip(),
+                    """\
 def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
@@ -7385,7 +7364,7 @@ def forward(self, b_a_buffer, x):
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
-            )
+                )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
@@ -7549,22 +7528,19 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 2
             )
 
-    def test_check_is_size_error(self):
+    def test_no_check_is_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 a = x.item()
-                # We cannot automatically infer a is a size here because view
-                # accepts -1
                 return torch.randn(24).view(a, 4)
 
         f = Module()
-        if is_non_strict_test(self._testMethodName):
-            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-        else:
-            error = torch._dynamo.exc.UserError
-        error_msg = r"Could not guard on data-dependent expression"
-        with self.assertRaisesRegex(error, error_msg):
-            _ = export(f, (torch.tensor(6),))
+        ep = export(f, (torch.tensor(6),))
+        ep.module()(torch.tensor(6))
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for .* u.* 6"
+        ):
+            ep.module()(torch.tensor(5))
 
     def test_is_non_negative_check_function(self):
         import sympy as sp
@@ -7940,9 +7916,27 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             decomp_table={torch.ops.aten.linear.default: _decompose_linear_custom}
         )
 
-        self.assertExpectedInline(
-            str(ep_decompose_linear.graph_module.code).strip(),
-            """\
+        if is_inline_and_install_strict_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_bias, c_linear_weight, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
+    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_1,)""",
+            )
+
+        else:
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
@@ -7954,7 +7948,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
     add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add_1,)""",
-        )
+            )
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
@@ -7994,6 +7988,10 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
+    # TODO(pianpwk) blocker: https://github.com/pytorch/pytorch/issues/151809
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureCppSerDes
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -10266,6 +10264,47 @@ graph():
                 strict=strict,
             )
 
+    @testing.expectedFailureCppRuntime
+    def test_symint_input_additional_inputs(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        additional_inputs = torch.export.AdditionalInputs()
+        additional_inputs.add((5, 5))
+        additional_inputs.add((3, 5))
+        additional_inputs.add((5, 4))
+        ep = torch.export.export(
+            M(), (6, 7), dynamic_shapes=additional_inputs, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 5), 10)
+        self.assertEqual(ep.module()(3, 5), 8)
+        self.assertEqual(ep.module()(5, 4), 9)
+
+    @testing.expectedFailureCppRuntime
+    def test_symint_input_shapes_collection(self):
+        strict = False  # TODO: support strict=True
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        import torch.utils._pytree as pytree
+        from torch.export.dynamic_shapes import _IntWrapper
+
+        args = (_IntWrapper(5), _IntWrapper(5))
+        shapes_collection = torch.export.ShapesCollection()
+        shapes_collection[args[0]] = Dim.DYNAMIC
+        shapes_collection[args[1]] = Dim.DYNAMIC
+        ep = torch.export.export(
+            M(), args, dynamic_shapes=shapes_collection, strict=strict
+        )
+        self.assertEqual(ep.module()(5, 5), 10)
+        self.assertEqual(ep.module()(3, 5), 8)
+        self.assertEqual(ep.module()(5, 4), 9)
+
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
             def __init__(self):
@@ -11817,16 +11856,29 @@ def forward(self, x):
             torch.randn(4),
         )
         ep = export(Foo(), inputs)
-        expected_names = [  # user inputs should be prioritized, unprefixed
-            ("p_param_1", InputKind.PARAMETER),
-            ("b_alpha_1", InputKind.BUFFER),
-            ("b_beta_1", InputKind.BUFFER),
-            ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-            ("p_param", InputKind.USER_INPUT),
-            ("b_alpha", InputKind.USER_INPUT),
-            ("b_beta", InputKind.USER_INPUT),
-            ("c_gamma", InputKind.USER_INPUT),
-        ]
+        if is_inline_and_install_strict_test(self._testMethodName):
+            # when installed, prefix name
+            expected_names = [  # user inputs should be prioritized, unprefixed
+                ("p____parameters__param", InputKind.PARAMETER),
+                ("b____buffers__alpha", InputKind.BUFFER),
+                ("b____buffers__beta", InputKind.BUFFER),
+                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
+                ("p_param", InputKind.USER_INPUT),
+                ("b_alpha", InputKind.USER_INPUT),
+                ("b_beta", InputKind.USER_INPUT),
+                ("c_gamma", InputKind.USER_INPUT),
+            ]
+        else:
+            expected_names = [  # user inputs should be prioritized, unprefixed
+                ("p_param_1", InputKind.PARAMETER),
+                ("b_alpha_1", InputKind.BUFFER),
+                ("b_beta_1", InputKind.BUFFER),
+                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
+                ("p_param", InputKind.USER_INPUT),
+                ("b_alpha", InputKind.USER_INPUT),
+                ("b_beta", InputKind.USER_INPUT),
+                ("c_gamma", InputKind.USER_INPUT),
+            ]
         real_names = [
             (spec.arg.name, spec.kind) for spec in ep.graph_signature.input_specs
         ]
@@ -11997,8 +12049,12 @@ def forward(self, x, y):
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
-    le_1 = _local_scalar_dense <= 5;  _local_scalar_dense = None
+    le_1 = _local_scalar_dense <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u2 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
+    gt = _local_scalar_dense > 2
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u0 on node 'gt_1'");  gt = _assert_scalar_2 = None
+    lt = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u0 < 6 on node 'lt_1'");  lt = _assert_scalar_3 = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -12170,6 +12226,44 @@ def forward(self, x, y):
         self.assertTrue(placeholders[0].meta["val"].requires_grad)
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
+
+    def test_unbacked_expand(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                x = torch.empty(u0, u1, 1)
+                return x.expand(-1, u1, u2)
+
+        ep = export(Foo(), (torch.tensor([1, 2, 3]),))
+        self.assertEqual(
+            list(ep.module()(torch.tensor([3, 4, 5])).shape),
+            [3, 4, 5],
+        )
+        self.assertEqual(
+            list(ep.module()(torch.tensor([0, 1, 0])).shape),
+            [0, 1, 0],
+        )
+
+        class Bar(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.empty(u0)
+                return x.expand(u1)
+
+        ep = export(Bar(), (torch.tensor([2, 2]),))
+        self.assertEqual(
+            ep.module()(torch.tensor([5, 5])).shape[0],
+            5,
+        )
+        self.assertEqual(
+            ep.module()(torch.tensor([1, 1])).shape[0],
+            1,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(u0, u1\) .*",
+        ):
+            ep.module()(torch.tensor([1, 5]))
 
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607
@@ -12745,8 +12839,14 @@ graph():
             list(nn_module_stack.values())[-1][0]
             for nn_module_stack in nn_module_stacks
         ]
-        self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-        self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
+
+        if is_inline_and_install_strict_test(self._testMethodName):
+            # when inlined and install have same ID so reference same layer
+            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+            self.assertEqual(filtered_nn_module_stack[1], "sub_net.0")
+        else:
+            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+            self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
 
     def test_slice_nn_module_stack(self):
         class N(torch.nn.Module):
@@ -12779,8 +12879,16 @@ graph():
             list(nn_module_stack.values())[-1][0]
             for nn_module_stack in nn_module_stacks
         ]
-        self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2")
-        self.assertEqual(filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0")
+        if is_inline_and_install_strict_test(self._testMethodName):
+            self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
+            self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
+        else:
+            self.assertEqual(
+                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
+            )
+            self.assertEqual(
+                filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
+            )
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
@@ -13446,7 +13554,7 @@ def forward(self, x):
             node.target == torch.ops.aten._assert_scalar.default
             for node in ep.graph.nodes
         ].count(True)
-        self.assertEqual(num_asserts, 1)
+        self.assertEqual(num_asserts, 2)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
