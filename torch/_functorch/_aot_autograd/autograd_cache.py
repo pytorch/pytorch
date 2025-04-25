@@ -52,6 +52,7 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
+    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
