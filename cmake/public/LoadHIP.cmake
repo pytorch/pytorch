@@ -26,10 +26,10 @@ else()
   endif()
 endif()
 
-if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
-  set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
+if(NOT DEFINED ENV{ROCM_INCLUDE_DIR})
+  set(ROCM_INCLUDE_DIR ${ROCM_PATH}/include)
 else()
-  set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
+  set(ROCM_INCLUDE_DIR $ENV{ROCM_INCLUDE_DIR})
 endif()
 
 # MAGMA_HOME
@@ -72,6 +72,7 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+  list(APPEND ROCM_INCLUDE_DIRS ${${PACKAGE_NAME}_INCLUDE_DIR})
 endmacro()
 
 # Find the HIP Package
@@ -165,16 +166,14 @@ if(HIP_FOUND)
   endif()
   find_package_and_print_version(hipblaslt REQUIRED)
 
-  list(APPEND ROCM_INCLUDE ${rocthrust_INCLUDE_DIR})
-  list(APPEND ROCM_INCLUDE ${rocprim_INCLUDE_DIR})
-  list(APPEND ROCM_INCLUDE ${hipcub_INCLUDE_DIR})
-  list(APPEND ROCM_INCLUDE ${rocRAND_INCLUDE_DIR})
-  list(APPEND ROCM_INCLUDE ${INTERFACE_INCLUDE_DIRECTORIES})
-
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+  endif()
 
+  list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
+
+  if(UNIX)
     # roctx is part of roctracer
     find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 
