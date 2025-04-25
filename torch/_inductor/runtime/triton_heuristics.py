@@ -31,7 +31,6 @@ from typing import (
 
 import torch
 from torch._prims_common import compute_required_storage_length
-from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -816,18 +815,15 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with (
-            dynamo_timed(
-                "CachingAutotuner.benchmark_all_configs",
-                log_pt2_compile_event=True,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-                dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
-                log_waitcounter=True,
-                waitcounter_name_override="triton_autotuner",
-            ),
-            _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
+        with dynamo_timed(
+            "CachingAutotuner.benchmark_all_configs",
+            log_pt2_compile_event=True,
+            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
+            compile_id=self.compile_id,
+            is_backward=self.is_backward,
+            log_waitcounter=True,
+            waitcounter_name_override="triton_autotuner",
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -875,7 +871,11 @@ class CachingAutotuner(KernelInterface):
         )
 
         if self.save_cache_hook:
-            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
+            self.save_cache_hook(
+                launcher.config,
+                self.autotune_time_taken_ns,
+                triton_cache_hash=launcher.cache_hash,
+            )
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
@@ -1503,6 +1503,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = binary_shared
+        launcher.cache_hash = triton_hash_to_path_key(binary.hash)
         launcher.store_cubin = self.inductor_meta.get("store_cubin", False)
         # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
