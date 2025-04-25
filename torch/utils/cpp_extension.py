@@ -279,6 +279,7 @@ COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
+    '-DHIP_ENABLE_WARP_SYNC_BUILTINS=1'
 ]
 
 _COMMON_SYCL_FLAGS = [
@@ -2288,7 +2289,7 @@ def is_ninja_available():
 def verify_ninja_availability():
     """Raise ``RuntimeError`` if `ninja <https://ninja-build.org/>`_ build system is not available on the system, does nothing otherwise."""
     if not is_ninja_available():
-        raise RuntimeError("Ninja is required to load C++ extensions")
+        raise RuntimeError("Ninja is required to load C++ extensions (pip install ninja to get it)")
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
