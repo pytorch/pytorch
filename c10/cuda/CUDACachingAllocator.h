@@ -542,7 +542,6 @@ struct C10_CUDA_API MemPool {
   static std::atomic<CaptureId_t> uuid_;
   CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
-  bool use_on_oom_;
   MempoolId_t id_;
   c10::DeviceIndex device_;
 };

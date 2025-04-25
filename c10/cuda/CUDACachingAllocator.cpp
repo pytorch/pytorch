@@ -4087,9 +4087,7 @@ MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
     bool use_on_oom)
-    : allocator_(allocator),
-      is_user_created_(is_user_created),
-      use_on_oom_(use_on_oom) {
+    : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -4097,7 +4095,7 @@ MemPool::MemPool(
   }
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::ensureExistsAndIncrefPool(device_, id_);
-  CUDACachingAllocator::setUseOnOOM(device_, use_on_oom_, id_);
+  CUDACachingAllocator::setUseOnOOM(device_, use_on_oom, id_);
 }
 
 MemPool::~MemPool() {

@@ -4885,10 +4885,9 @@ class TestBlockStateAbsorption(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
     def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
-        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
         device = torch.device("cuda:0")
 
+        self.init_fraction = torch.cuda.get_per_process_memory_fraction()
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info(device)
@@ -4901,9 +4900,8 @@ class TestMemPool(TestCase):
         return device, dtype
 
     def _teardown_mempool_limited_memory_test(self):
-        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ""
         torch.cuda.memory.empty_cache()
-        torch.cuda.memory.set_per_process_memory_fraction(1.0)
+        torch.cuda.memory.set_per_process_memory_fraction(self.init_fraction)
 
     def test_mempool_id(self):
         pool1 = torch.cuda.graph_pool_handle()
@@ -5021,6 +5019,7 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_free.value, 321)
 
+    @serialTest()
     def test_mempool_limited_memory_with_allocator(self):
         from torch.utils.cpp_extension import load_inline
 
@@ -5056,8 +5055,8 @@ class TestMemPool(TestCase):
             "dummy_alloc",
             "dummy_free",
         )
-        pool_do_not_use = torch.cuda.MemPool(allocator.allocator(), useOnOOM=False)
-        pool_use = torch.cuda.MemPool(allocator.allocator(), useOnOOM=True)
+        pool_do_not_use = torch.cuda.MemPool(allocator.allocator(), use_on_oom=False)
+        pool_use = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
 
         nelem_1mb = 1024 * 1024 // 4
 
@@ -5105,6 +5104,19 @@ class TestMemPool(TestCase):
 
         # expect that we used same memory address for both a and c
         self.assertEqual(b_dataptr, c_dataptr)
+
+        # make sure we can still use mempool_use as intended after c is deleted
+        with torch.cuda.use_mem_pool(pool_use):
+            e = torch.randn(20 * nelem_1mb, device="cuda")
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [ee__] 40 mb
+        # default pool [] 0 mb
+
+        e_dataptr = e.data_ptr()
+        del e
+
+        self.assertEqual(e_dataptr, c_dataptr)
 
         # pool's destructor calls emptyCache()
         del pool_use, pool_do_not_use
