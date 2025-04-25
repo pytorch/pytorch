@@ -67,7 +67,9 @@ def assert_onnx_program(
     torch_outputs, _ = _pytree.tree_flatten(torch_module(*args, **kwargs))
     # ONNX outputs are always real, so we need to convert torch complex outputs to real representations
     torch_outputs = [
-        torch.view_as_real(output) if torch.is_complex(output) else output
+        torch.view_as_real(output)
+        if (isinstance(output, torch.Tensor) and torch.is_complex(output))
+        else output
         for output in torch_outputs
     ]
     onnx_outputs = program(*args, **kwargs)
