@@ -4382,24 +4382,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ],
         )
 
-        class cf_changevar(torch.nn.Module):
-            def forward(self, x, fixes):
-                i = x.item()
-                eval(fixes)
-                r = torch.arange(i // 2)
-                return r + r
-
-        retry_export(
-            cf_changevar(),
-            (torch.tensor(20),),
-            fixes=[
-                # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check((i // 2) != 0)",
-                # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check((i // 2) != 1)",
-            ],
-        )
-
         class cf_stacklist(torch.nn.Module):
             def forward(self, xs, y, fixes):
                 i = y.item()
