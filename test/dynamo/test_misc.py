@@ -1225,6 +1225,28 @@ utils_device.CURRENT_DEVICE == None""".split(
         )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_bound_shape_checks(self):
+        def f1(x, y):
+            b = x.item()
+            torch._check_is_size(b)
+            torch._check(b < y.shape[0])
+            return y[:b]
+
+        fn1 = torch.compile(f1, fullgraph=True, backend="eager")
+        fn1(torch.tensor(4), torch.ones(10))
+
+        def f2(x, index):
+            idx = index.item()
+            torch._check(idx >= 0)
+            torch._check(idx < x.size(0))
+            return x[idx]
+
+        A = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        index = torch.tensor(1, dtype=torch.int64)
+        fn2 = torch.compile(f2, fullgraph=True, backend="eager")
+        fn2(A, index)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_arange_length_with_float32_dtype(self):
         @torch.compile(fullgraph=True)
         def f(x):
@@ -1497,6 +1519,35 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(opt_fn3({"a": v1, "b": v2})[0], 300)
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 9)
+
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_user_code_statically_known(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            has_static_value,
+            statically_known_true,
+        )
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            # At this point, this isn't statically known, only the hint says so.
+            if statically_known_true(x.shape[0] > 9):
+                raise Exception()
+            torch._check(x.shape[0] >= 10)
+            # But now it is.
+            return statically_known_true(x.shape[0] > 9), has_static_value(x.shape[0])
+
+        x = torch.zeros(10)
+        torch._dynamo.mark_dynamic(x, 0)
+        self.assertEqual(f(x), (True, False))
+
+        @torch.compile(fullgraph=True, dynamic=True, backend="eager")
+        def g(x, y):
+            n = x.item()
+            torch._check(n == 3)
+            return has_static_value(4.0), has_static_value(n)
+
+        out = g(torch.tensor([3]), torch.zeros(1))
+        self.assertEqual(out, (True, True))
 
     def test_dictcomp(self):
         def fn1(inputs):
@@ -7582,6 +7633,25 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch.compile(dyn_fn, backend="eager")(y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_2d_expand(self):
+        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+        def func(a, b):
+            a.expand(b.shape)
+            return a * 10
+
+        a = torch.rand(1, 1)
+        b = torch.rand(2, 2)
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+        # TODO(laithsakka): update inductor runtime asserts to properly raise
+        func(a, b)
+        func(torch.rand(4, 5), torch.rand(4, 5))
+        func(torch.rand(1, 1), torch.rand(2, 1))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
         # Tests the following case:
         # Deferred runtime asserts adds sym_constrain_range(u0).
@@ -7840,6 +7910,20 @@ utils_device.CURRENT_DEVICE == None""".split(
         @torch.compile(dynamic=False, backend=counter)
         def fn(x, y):
             return x * y
+
+        fn(2, torch.randn(2))
+        fn(3, torch.randn(3))
+        fn(4, torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L\\['x.*'\\], L\\['y.*'\\]")
+    def test_dynamic_sources_dynamic_override_regex(self):
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x1, y1):
+            return x1 * y1
 
         fn(2, torch.randn(2))
         fn(3, torch.randn(3))
@@ -10876,13 +10960,18 @@ fn
             torch._check_is_size(u0)
             torch._check_is_size(u1)
             torch._check(u0 + u1 == 20)
+
+            y = 0
             if guard_size_oblivious(torch.sym_max(1, u0 + u1) == 20):
-                return torch.tensor(True)
-            else:
-                return torch.tensor(False)
+                y += 1
+            if guard_size_oblivious(torch.sym_max(1, u0**2 + u1 + 2) != 1):
+                y += 1
+            if guard_size_oblivious(torch.sym_min(1, u0) == 1):
+                y += 1
+            return y
 
         # Previously would have thrown guard on data dependent
-        cf(torch.tensor([10, 10])).item()
+        self.assertEqual(cf(torch.tensor([10, 10])), 3)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
