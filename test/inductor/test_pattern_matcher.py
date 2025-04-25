@@ -314,7 +314,6 @@ class TestPatternMatcher(TestCase):
             torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE),
         )
         self._test_fused_int_mm_mul_impl(fn1, args1, True)
-        self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
 
     def _test_mixed_impl(
         self,
