@@ -468,7 +468,7 @@ class BenchmarkRequest:
                 assert all(
                     getattr(output_tensor_meta[0], attr) == getattr(x, attr)
                     for x in output_tensor_meta
-                    for attr in ["device", "dtype", "size", "strides", "offset"]
+                    for attr in ["device", "dtype", "size", "stride", "offset"]
                 )
             output_tensor_meta = output_tensor_meta[0]
         self.output_tensor_meta = output_tensor_meta
