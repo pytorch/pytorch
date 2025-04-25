@@ -756,7 +756,7 @@ static DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim
     IntArrayRef dim_unwrapped = *dim_opt;
     dim.resize(dim_unwrapped.size());
     for (const auto i : c10::irange(dim.size())) {
-      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalars=*/false);
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalar=*/false);
     }
   } else {
     dim.resize(self.dim());

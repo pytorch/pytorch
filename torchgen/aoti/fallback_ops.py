@@ -51,6 +51,7 @@ inductor_fallback_ops = {
     "aten._thnn_fused_lstm_cell.default",
     "aten._to_sparse.default",
     "aten._trilinear.default",
+    "aten._weight_int4pack_mm.default",
     "aten._weight_int8pack_mm.default",
     "aten.adaptive_max_pool2d_backward.default",
     "aten.adaptive_max_pool2d.default",

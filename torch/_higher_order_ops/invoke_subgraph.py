@@ -298,7 +298,7 @@ def get_output_metadata(subgraph, operands):
 
 
 def trace_joint_graph_as_bwd(
-    fn, num_primals, joint_operands, include_key_set, exclude_key_set
+    subgraph, num_primals, joint_operands, include_key_set, exclude_key_set
 ):
     """
     Naively trace out a joint graph. This simplifies the reconstruction of joint
@@ -307,6 +307,17 @@ def trace_joint_graph_as_bwd(
     from torch._functorch.aot_autograd import create_joint
 
     dummy_aot_config = get_dummy_aot_autograd_config()
+
+    if isinstance(subgraph, torch.fx.GraphModule):
+
+        def graph_with_interpreter(*args):
+            # Running graph with interpreter is needed for propagating the stack_trace
+            with torch.fx.traceback.preserve_node_meta():
+                return torch.fx.Interpreter(subgraph).run(*args)
+
+        fn = graph_with_interpreter
+    else:
+        fn = subgraph
 
     # This joint_fn is inserted as the backward graph as is. This simplifies the
     # min-cut partitioner work later on.
@@ -388,6 +399,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx,
         *grad_outs,
     ):
+        from torch._dynamo.utils import dynamo_timed
+
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
@@ -419,13 +432,16 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             bw_graph = invoke_subgraph_cache.get_lazy_bwd_entry(identifier)
 
         if bw_graph is None:
-            bw_graph = trace_joint_graph_as_bwd(
-                subgraph,
-                len(primals),
-                primals_and_tangents,
-                ctx._fw_include_key_set,
-                ctx._fw_exclude_key_set,
-            )
+            with dynamo_timed(
+                "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
+            ):
+                bw_graph = trace_joint_graph_as_bwd(
+                    subgraph,
+                    len(primals),
+                    primals_and_tangents,
+                    ctx._fw_include_key_set,
+                    ctx._fw_exclude_key_set,
+                )
 
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_lazy_bwd_entry(identifier, bw_graph)
@@ -436,22 +452,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         return None, None, None, *grads
 
 
-@invoke_subgraph.py_impl(DispatchKey.Autograd)
+@invoke_subgraph.py_autograd_impl
 def _(subgraph, identifier, operands):
-    if not torch.is_grad_enabled():
-        with torch._C._AutoDispatchBelowAutograd():
-            return invoke_subgraph(subgraph, identifier, operands)
-
-    # A shortcut for the case where all inputs don't require gradient,
-    # we skip tracing the forward and backward graph.
-    if pytree.tree_all_only(
-        torch.Tensor,
-        lambda t: not t.requires_grad,  # type: ignore[union-attr]
-        operands,
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return invoke_subgraph(subgraph, identifier, operands)
-
     # Check if we have already traced the subgraph.
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:
@@ -498,7 +500,10 @@ def _(ctx, subgraph, identifier, operands):
 # Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
 @register_fake(invoke_subgraph)
 def _(subgraph, identifier, operands):
-    return subgraph(*operands)
+    from torch._dynamo.utils import dynamo_timed
+
+    with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
@@ -510,7 +515,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
         graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
 
     if graph is None:
-        graph = reenter_make_fx(subgraph)(*operands)
+        from torch._dynamo.utils import dynamo_timed
+
+        with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
+            graph = reenter_make_fx(subgraph)(*operands)
 
         from torch._guards import detect_fake_mode
 
