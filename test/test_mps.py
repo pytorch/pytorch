@@ -11841,6 +11841,8 @@ class TestConsistency(TestCaseMPS):
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "mps:0")
         include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
+        if op.name.endswith("svd") and MACOS_VERSION < 14.0 and dtype == torch.complex64:
+            raise unittest.SkipTest("Can't even generate complex samples on MacOS-13")
 
         def get_samples():
             return op.sample_inputs(

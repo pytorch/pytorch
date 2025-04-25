@@ -282,9 +282,16 @@ if torch.backends.mps.is_available():
         }
         # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
         MACOS_BEFORE_13_3_XFAILLIST = {
+            # float16 seems horribly wrong on MacOS13
+            "remainder": [torch.float16],
+            "floor_divide": [torch.float16],
+            "divfloor_rounding": [torch.float16],
             # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
             "tan": [torch.float32],
             "cdist": [torch.float32],
+            # MacOS-13.3 is just inaccurate
+            "mm": [torch.float32],
+            "bmm": [torch.float32],
             # CPU Error: cpu not giving nan for x/0.0
             "atan2": [
                 torch.bool,
@@ -596,9 +603,6 @@ if torch.backends.mps.is_available():
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
-            # bfloat16 have weird issues with rounding
-            # "divfloor_rounding": [torch.bfloat16],
-            # "floor_divide": [torch.bfloat16],
             # atomic operations not supported
             "_unsafe_masked_index_put_accumulate": [
                 torch.bool,
@@ -942,10 +946,13 @@ if torch.backends.mps.is_available():
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
-            # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+            # Failures due to precision issues (may be fast-math). These has been fixed in MacOS 14
             "masked.softmin": [torch.float32, torch.float16],
             "masked.softmax": [torch.float32, torch.float16],
             "masked.log_softmax": [torch.float32, torch.float16],
+            "atanh": [torch.float16],
+            "__rmod__": [torch.float16],
+            "triangular_solve": [torch.float32],
             # Unsupported Border padding mode, forward pass success as fallback to cpu
             "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
