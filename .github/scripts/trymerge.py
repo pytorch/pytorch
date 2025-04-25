@@ -2166,7 +2166,7 @@ def merge(
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
-    # Check for approvals
+    # Check for EasyCLA
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True, skip_internal_checks=True)
 
     if skip_mandatory_checks:
@@ -2177,6 +2177,9 @@ def merge(
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id,
         )
+
+    # Check for approvals
+    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
     if not has_required_labels(pr):
         raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
