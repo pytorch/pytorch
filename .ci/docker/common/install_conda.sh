@@ -87,6 +87,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
   fi
 
+  if [[ "$UBUNTU_VERSION" == "24.04"* ]] ; then
+    conda_install_through_forge libstdcxx-ng=14
+  fi
+
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 

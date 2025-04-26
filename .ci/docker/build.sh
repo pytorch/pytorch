@@ -52,6 +52,8 @@ fi
 
 if [[ "$image" == *-jammy* ]]; then
   UBUNTU_VERSION=22.04
+elif [[ "$image" == *-noble* ]]; then
+  UBUNTU_VERSION=24.04
 elif [[ "$image" == *ubuntu* ]]; then
   extract_version_from_image_name ubuntu UBUNTU_VERSION
 fi

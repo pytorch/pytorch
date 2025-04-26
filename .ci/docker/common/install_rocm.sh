@@ -8,9 +8,11 @@ ver() {
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 20.04 ]]; then
-      # gpg-agent is not available by default on 20.04
-      apt-get install -y --no-install-recommends gpg-agent
+    # gpg-agent is not available by default
+    apt-get install -y --no-install-recommends gpg-agent
+    if [[ $(ver $UBUNTU_VERSION) -ge $(ver 22.04) ]]; then
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
     fi
     apt-get install -y kmod
     apt-get install -y wget
