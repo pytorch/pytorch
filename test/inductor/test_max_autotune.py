@@ -1498,8 +1498,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )
@@ -1534,8 +1532,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )

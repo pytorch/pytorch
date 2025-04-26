@@ -205,6 +205,7 @@ class Inp3:
 
 NON_STRICT_SUFFIX = "_nonstrict"
 STRICT_SUFFIX = "_strict"
+INLINE_AND_INSTALL_STRICT_SUFFIX = "_inline_and_install_strict"
 RETRACEABILITY_STRICT_SUFFIX = "_retraceability_strict"
 RETRACEABILITY_NON_STRICT_SUFFIX = "_retraceability_nonstrict"
 SERDES_SUFFIX = "serdes"
@@ -233,6 +234,10 @@ def is_legacy_test(test_name):
     return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX) or test_name.endswith(
         LEGACY_EXPORT_STRICT_SUFFIX
     )
+
+
+def is_inline_and_install_strict_test(test_name: str) -> bool:
+    return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
 
 
 def is_retracebility_test(test_name):
@@ -7334,9 +7339,23 @@ def forward(self, b_a_buffer, x):
             )
 
         else:
-            self.assertExpectedInline(
-                ep.graph_module.code.strip(),
-                """\
+            if is_inline_and_install_strict_test(self._testMethodName):
+                self.assertExpectedInline(
+                    ep.graph_module.code.strip(),
+                    """\
+def forward(self, b____modules__a____buffers__buffer, x):
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
+    gt = sym_size_int_1 > 4;  sym_size_int_1 = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b____modules__a____buffers__buffer));  gt = true_graph_0 = false_graph_0 = x = b____modules__a____buffers__buffer = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
+                )
+            else:
+                self.assertExpectedInline(
+                    ep.graph_module.code.strip(),
+                    """\
 def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
@@ -7345,7 +7364,7 @@ def forward(self, b_a_buffer, x):
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
-            )
+                )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
@@ -7897,9 +7916,27 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             decomp_table={torch.ops.aten.linear.default: _decompose_linear_custom}
         )
 
-        self.assertExpectedInline(
-            str(ep_decompose_linear.graph_module.code).strip(),
-            """\
+        if is_inline_and_install_strict_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_bias, c_linear_weight, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
+    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_1,)""",
+            )
+
+        else:
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
@@ -7911,7 +7948,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
     add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add_1,)""",
-        )
+            )
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
@@ -7951,6 +7988,10 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
+    # TODO(pianpwk) blocker: https://github.com/pytorch/pytorch/issues/151809
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureCppSerDes
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -11815,16 +11856,29 @@ def forward(self, x):
             torch.randn(4),
         )
         ep = export(Foo(), inputs)
-        expected_names = [  # user inputs should be prioritized, unprefixed
-            ("p_param_1", InputKind.PARAMETER),
-            ("b_alpha_1", InputKind.BUFFER),
-            ("b_beta_1", InputKind.BUFFER),
-            ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-            ("p_param", InputKind.USER_INPUT),
-            ("b_alpha", InputKind.USER_INPUT),
-            ("b_beta", InputKind.USER_INPUT),
-            ("c_gamma", InputKind.USER_INPUT),
-        ]
+        if is_inline_and_install_strict_test(self._testMethodName):
+            # when installed, prefix name
+            expected_names = [  # user inputs should be prioritized, unprefixed
+                ("p____parameters__param", InputKind.PARAMETER),
+                ("b____buffers__alpha", InputKind.BUFFER),
+                ("b____buffers__beta", InputKind.BUFFER),
+                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
+                ("p_param", InputKind.USER_INPUT),
+                ("b_alpha", InputKind.USER_INPUT),
+                ("b_beta", InputKind.USER_INPUT),
+                ("c_gamma", InputKind.USER_INPUT),
+            ]
+        else:
+            expected_names = [  # user inputs should be prioritized, unprefixed
+                ("p_param_1", InputKind.PARAMETER),
+                ("b_alpha_1", InputKind.BUFFER),
+                ("b_beta_1", InputKind.BUFFER),
+                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
+                ("p_param", InputKind.USER_INPUT),
+                ("b_alpha", InputKind.USER_INPUT),
+                ("b_beta", InputKind.USER_INPUT),
+                ("c_gamma", InputKind.USER_INPUT),
+            ]
         real_names = [
             (spec.arg.name, spec.kind) for spec in ep.graph_signature.input_specs
         ]
@@ -11995,8 +12049,12 @@ def forward(self, x, y):
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
-    le_1 = _local_scalar_dense <= 5;  _local_scalar_dense = None
+    le_1 = _local_scalar_dense <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u2 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
+    gt = _local_scalar_dense > 2
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 2 < u0 on node 'gt_1'");  gt = _assert_scalar_2 = None
+    lt = _local_scalar_dense < 6;  _local_scalar_dense = None
+    _assert_scalar_3 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression u0 < 6 on node 'lt_1'");  lt = _assert_scalar_3 = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -12781,8 +12839,14 @@ graph():
             list(nn_module_stack.values())[-1][0]
             for nn_module_stack in nn_module_stacks
         ]
-        self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-        self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
+
+        if is_inline_and_install_strict_test(self._testMethodName):
+            # when inlined and install have same ID so reference same layer
+            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+            self.assertEqual(filtered_nn_module_stack[1], "sub_net.0")
+        else:
+            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+            self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
 
     def test_slice_nn_module_stack(self):
         class N(torch.nn.Module):
@@ -12815,8 +12879,16 @@ graph():
             list(nn_module_stack.values())[-1][0]
             for nn_module_stack in nn_module_stacks
         ]
-        self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2")
-        self.assertEqual(filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0")
+        if is_inline_and_install_strict_test(self._testMethodName):
+            self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
+            self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
+        else:
+            self.assertEqual(
+                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
+            )
+            self.assertEqual(
+                filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
+            )
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
