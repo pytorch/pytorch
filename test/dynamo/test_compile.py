@@ -225,6 +225,7 @@ class InPlaceCompilationTests(TestCase):
         c_output = c_fn(x)
         self.assertEqual(output, c_output)
 
+
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
 class PublicTorchCompilerTests(TestCase):
