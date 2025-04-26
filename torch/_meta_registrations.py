@@ -6902,6 +6902,8 @@ def meta_histc(input, bins=100, min=0, max=0):
             input.is_floating_point(),
             lambda: f"\"histogram_cpu\" not implemented for '{input.dtype}'",
         )
+    if device_hint(input) == "cuda" and input.is_floating_point():
+        utils.alert_not_deterministic("_histc_cuda with floating point input")
     torch._check(
         isinstance(bins, IntLike),
         lambda: f"{fn_name}: argument 'bins' must be int, not {type(bins)}",
