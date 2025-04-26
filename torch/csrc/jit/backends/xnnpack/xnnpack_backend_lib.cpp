@@ -15,7 +15,7 @@ namespace delegate {
 class XNNModelWrapper : public CustomClassHolder {
  public:
   XNNExecutor executor_;
-  XNNModelWrapper(XNNExecutor executor) : executor_(std::move(executor)){};
+  XNNModelWrapper(XNNExecutor executor) : executor_(std::move(executor)) {};
 
   XNNModelWrapper() = delete;
 
