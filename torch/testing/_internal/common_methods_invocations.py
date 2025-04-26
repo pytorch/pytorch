@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR
+    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -12335,7 +12335,15 @@ op_db: list[OpInfo] = [
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
-                            "TestCommon", "test_out")
+                            "TestCommon", "test_out"),
+               # Fast math on MacOS-13?
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-5, rtol=5e-6)}),
+                   'TestConsistency',
+                   'test_output_match',
+                   active_if=lambda _: MACOS_VERSION < 14.0,
+                   device_type='mps',
+                   dtypes=(torch.float32,)),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -13192,6 +13200,12 @@ op_db: list[OpInfo] = [
                                      'test_fn_grad',
                                      dtypes=(torch.float64,),
                                      device_type='cpu'),
+                        DecorateInfo(unittest.skip("Broken on MacOS13"),
+                                     'TestConsistency',
+                                     'test_output_match',
+                                     device_type='mps',
+                                     dtypes=(torch.float16,),
+                                     active_if=lambda _: MACOS_VERSION < 14.0),
                     )),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13420,6 +13434,12 @@ op_db: list[OpInfo] = [
                             "test_comprehensive",
                             device_type="cuda"
                         ),
+                        DecorateInfo(unittest.skip("Broken on MacOS13"),
+                                     'TestConsistency',
+                                     'test_output_match',
+                                     device_type='mps',
+                                     dtypes=(torch.float16,),
+                                     active_if=lambda _: MACOS_VERSION < 14.0),
                     )),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
@@ -16918,6 +16938,14 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
+               # Fast math on MacOS-13?
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-5, rtol=5e-6)}),
+                   'TestConsistency',
+                   'test_output_match',
+                   active_if=lambda _: MACOS_VERSION < 14.0,
+                   device_type='mps',
+                   dtypes=(torch.float32,)),
            )),
     OpInfo('mode',
            op=torch.mode,
