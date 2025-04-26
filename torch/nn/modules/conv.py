@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -930,7 +930,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: Union[str, _size_1_t] = 0,
+        padding: Union[Literal["valid", "same"], _size_1_t] = 0,
         output_padding: _size_1_t = 0,
         groups: int = 1,
         bias: bool = True,
@@ -1128,7 +1128,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         out_channels: int,
         kernel_size: _size_2_t,
         stride: _size_2_t = 1,
-        padding: Union[str, _size_2_t] = 0,
+        padding: Union[Literal["valid", "same"], _size_2_t] = 0,
         output_padding: _size_2_t = 0,
         groups: int = 1,
         bias: bool = True,
@@ -1330,7 +1330,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         out_channels: int,
         kernel_size: _size_3_t,
         stride: _size_3_t = 1,
-        padding: Union[str, _size_3_t] = 0,
+        padding: Union[Literal["valid", "same"], _size_3_t] = 0,
         output_padding: _size_3_t = 0,
         groups: int = 1,
         bias: bool = True,
