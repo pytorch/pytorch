@@ -608,6 +608,9 @@ class CompileEventLogger:
         method_fn(*args, **kwargs)
 
 
+_dynamo_timed_tls = threading.local()
+
+
 @contextmanager
 def dynamo_timed(
     key: str,
@@ -616,7 +619,6 @@ def dynamo_timed(
     log_pt2_compile_event: bool = False,
     metadata: Optional[dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
-    dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
     is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
@@ -655,9 +657,6 @@ def dynamo_timed(
     - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
       field to be logged to dyname_compile column. We expect all columns to be _us;
       therefore, the field name must end with "_us".
-    - dynamo_compile_runtime_column_us: Like 'dynamo_compile_column_us', but should
-      be used for those columns captured outside of a compile context, e.g.,
-      runtime autotuning.
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
@@ -666,13 +665,6 @@ def dynamo_timed(
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
-    # We're standardizing on microseconds for dynamo_compile timings.
-    if dynamo_compile_column_us is not None:
-        assert dynamo_compile_column_us.endswith("_us")
-
-    # Only one of these should be set.
-    assert dynamo_compile_column_us is None or dynamo_compile_runtime_column_us is None
-
     if phase_name:
         event_name = phase_name
         fn_name = key
@@ -697,21 +689,34 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
-    cx_managers: list[typing.Any] = [
+    cx_mgrs: list[typing.Any] = [
         torch.profiler.record_function(f"{key} (dynamo_timed)")
     ]
-    wait_counter_name = key
-    if waitcounter_name_override:
-        wait_counter_name = waitcounter_name_override
-
     if log_waitcounter:
-        cx_managers.append(
-            _WaitCounter(f"pytorch.wait_counter.{wait_counter_name}").guard()
-        )
+        wc_name = waitcounter_name_override if waitcounter_name_override else key
+        cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
+
+    is_compile_time = torch._guards.CompileContext.current_compile_id() is not None
+    if dynamo_compile_column_us:
+        # We're standardizing on microseconds for dynamo_compile timings.
+        assert dynamo_compile_column_us.endswith("_us")
+
+        # Track nested dynamo_timed calls that update CompilationMetrics so we can
+        # bump a total duration only for the outermost metric.
+        if not hasattr(_dynamo_timed_tls, "depth"):
+            _dynamo_timed_tls.depth = 0
+        _dynamo_timed_tls.depth += 1
+
+        # The corresponding WaitCounters that we bump for all overheads
+        if _dynamo_timed_tls.depth == 1:
+            cx_mgrs.append(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
+            if not is_compile_time:
+                runtime_wc = "pytorch.wait_counter.compile_runtime_overheads"
+                cx_mgrs.append(_WaitCounter(runtime_wc).guard())
 
     try:
         with contextlib.ExitStack() as stack:
-            for cx in cx_managers:
+            for cx in cx_mgrs:
                 stack.enter_context(cx)
             yield
     finally:
@@ -722,11 +727,6 @@ def dynamo_timed(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
         if dynamo_compile_column_us:
-            metrics_context = get_metrics_context()
-            if metrics_context.in_progress():
-                metrics_context.increment(
-                    dynamo_compile_column_us, time_spent_ns // 1000
-                )
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
             # CompilationMetrics (but note that we accumulate by the associated event
@@ -734,17 +734,27 @@ def dynamo_timed(
             # this way?
             cumulative_time_spent_ns[event_name] += time_spent_ns
 
-        if dynamo_compile_runtime_column_us:
-            get_runtime_metrics_context().increment(
-                dynamo_compile_runtime_column_us,
-                time_spent_ns // 1000,
-                extra={
-                    "compile_id": compile_id,
-                    "is_runtime": True,
-                    "is_forward": not is_backward,
-                },
-            )
-            cumulative_time_spent_ns[event_name] += time_spent_ns
+            # Bump the total duration for every outer event.
+            _dynamo_timed_tls.depth -= 1
+            is_outer_event = _dynamo_timed_tls.depth == 0
+
+            duration_us = time_spent_ns // 1000
+            if is_compile_time:
+                metrics_context = get_metrics_context()
+                if metrics_context.in_progress():
+                    metrics_context.increment(dynamo_compile_column_us, duration_us)
+                    if is_outer_event:
+                        metrics_context.increment("duration_us", duration_us)
+            else:
+                runtime_context = get_runtime_metrics_context()
+                runtime_context.increment(dynamo_compile_column_us, duration_us)
+                if is_outer_event:
+                    extra = {
+                        "compile_id": compile_id,
+                        "is_runtime": True,
+                        "is_forward": not is_backward,
+                    }
+                    runtime_context.increment("duration_us", duration_us, extra)
 
 
 @overload
@@ -1269,6 +1279,15 @@ class CompilationMetrics:
     python_version: Optional[str] = None
     pgo_put_remote_code_state_time_us: Optional[int] = None
     pgo_get_remote_code_state_time_us: Optional[int] = None
+    # The number of elements within parameters. This is classically what people
+    # think of when they think of parameters in a ML model.
+    param_numel: Optional[int] = None
+    # The number of elements counted by bytes - i.e. a float32 is 4 bytes
+    # per element.
+    param_bytes: Optional[int] = None
+    # The number of parameters counted by fields. This is mostly a proxy for
+    # the number of distinct type of params.
+    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1519,7 +1538,6 @@ def record_compilation_metrics(
         "compile_id": compile_id,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
-        "duration_us": (end_time_ns - start_time_ns) // 1000,
         "fail_type": exc_type.__qualname__ if exc_type else None,
         "fail_reason": str(exc_value) if exc_value else None,
         "structured_logging_overhead_us": to_int_us(
@@ -4123,6 +4141,8 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
+    # This emulates
+    # https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/disable_torch_function.cpp#L315-L323
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
@@ -4137,12 +4157,14 @@ def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool
     if vt.is_realized() or (
         hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
     ):
+        func = None
         if isinstance(vt, TensorWithTFOverrideVariable):
-            return True
+            func = getattr(vt.class_type, "__torch_function__", None)
 
-        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-            vt.value, "__torch_function__"
-        )
+        elif isinstance(vt, UserDefinedObjectVariable):
+            func = getattr(vt.value, "__torch_function__", None)
+
+        return func not in (None, torch._C._disabled_torch_function_impl)
 
     return False
 
@@ -4509,6 +4531,7 @@ def set_feature_use(feature: str, usage: bool):
 _ddp_optimization_mode: tuple[str, ...] = (
     "ddp_optimizer",
     "python_reducer",  # experimental mode
+    "python_reducer_without_compiled_forward",
     "no_optimization",
 )
 
