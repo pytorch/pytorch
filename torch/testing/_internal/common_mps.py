@@ -550,8 +550,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            # entr does not support boolean types
-            "special.entr": [torch.bool],
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
                 torch.int16,
