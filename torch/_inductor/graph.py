@@ -204,6 +204,7 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
+            aten._scaled_grouped_mm,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -366,7 +367,9 @@ class GraphLowering(torch.fx.Interpreter):
         from torch._inductor.extern_node_serializer import extern_node_json_serializer
 
         self.extern_node_serializer: Callable[[list[ir.ExternKernelNode]], Any] = (
-            extern_node_json_serializer
+            extern_node_serializer
+            if config.is_fbcode() and extern_node_serializer
+            else extern_node_json_serializer
         )
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
@@ -1808,35 +1811,9 @@ class GraphLowering(torch.fx.Interpreter):
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
 
-            for i0 in new_unbacked_defs:
-                ras = self.ras_by_symbol.pop(i0, [])
-                # NB: size-like not needed, we won't retrace
-                vr = shape_env.var_to_range[i0]
-                if not shape_env._default_unspecified_value_range().issubset(vr):
-
-                    def is_convertible(s: Expr) -> bool:
-                        if s in (int_oo, -int_oo):
-                            return False
-                        try:
-                            int(s)
-                            return True
-                        except TypeError:
-                            return False
-
-                    if is_convertible(vr.lower):
-                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
-                    if is_convertible(vr.upper):
-                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
-
-                for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
-                    if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
-                    else:
-                        make_assert(ra.expr, f"{ra.expr}")
-
+            # bound_unbacked_symbols tracks the symbols that are created so far,
+            # we use it to make sure that runtime assertions are added after all
+            # symbols used in them are defined.
             self.bound_unbacked_symbols |= new_unbacked_defs
 
             unbacked_bindings = resolve_unbacked_bindings(
@@ -1866,6 +1843,36 @@ class GraphLowering(torch.fx.Interpreter):
                 f"fx node is: {n.format_node()}\n"
                 f"new operations are:\n\n{format_new_defs()}"
             )
+
+            # Emit code for runtime asserts that can be inserted at this point.
+            for i0 in new_unbacked_defs:
+                ras = self.ras_by_symbol.pop(i0, [])
+                # NB: size-like not needed, we won't retrace
+                vr = shape_env.var_to_range[i0]
+                if not shape_env._default_unspecified_value_range().issubset(vr):
+
+                    def is_convertible(s: Expr) -> bool:
+                        if s in (int_oo, -int_oo):
+                            return False
+                        try:
+                            int(s)
+                            return True
+                        except TypeError:
+                            return False
+
+                    if is_convertible(vr.lower):
+                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
+                    if is_convertible(vr.upper):
+                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
+
+                for ra in ras:
+                    fvs = free_unbacked_symbols(ra.expr)
+                    missing = fvs - self.bound_unbacked_symbols
+                    if missing:
+                        i1 = min(missing, key=str)
+                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                    else:
+                        make_assert(ra.expr, f"{ra.expr}")
 
         return result
 

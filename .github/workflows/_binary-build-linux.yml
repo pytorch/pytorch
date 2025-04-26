@@ -62,6 +62,10 @@ on:
         required: true
         type: string
         description: Docker image to use
+      DOCKER_IMAGE_TAG_PREFIX:
+        required: true
+        type: string
+        description: Docker image tag to use
       LIBTORCH_CONFIG:
         required: false
         type: string
@@ -83,6 +87,9 @@ on:
       github-token:
         required: true
         description: Github Token
+
+permissions:
+  id-token: write
 
 jobs:
   build:
@@ -203,14 +210,40 @@ jobs:
               { config: "default" },
             ]}
 
+      - name: configure aws credentials
+        id: aws_creds
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' && startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          # If doing this in main or release branch, use docker.io. Otherwise
+          # use ECR
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: ${{ inputs.DOCKER_IMAGE }}
+          custom-tag-prefix: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+          # The build.sh script in this folder is not actually the correct one,
+          # this is just needed for sha calculation
+          docker-build-dir: .ci/docker
+          working-directory: pytorch
+
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ inputs.DOCKER_IMAGE }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Build PyTorch binary
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || format('{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) }}
         run: |
           set -x
           mkdir -p artifacts/
