@@ -11,7 +11,12 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_utils import IS_JETSON, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
@@ -280,6 +285,25 @@ class TestTorchDlPack(TestCase):
         # by element.
         new_tensor = torch.tensor(wrap)
         self.assertEqual(tensor, new_tensor)
+
+    @skipMeta
+    @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
+    @onlyNativeDeviceTypes
+    def test_max_version(self, device):
+        def test(device, **kwargs):
+            inp = make_tensor((5,), dtype=torch.float32, device=device)
+            out = torch.from_dlpack(inp.__dlpack__(**kwargs))
+            self.assertEqual(inp, out)
+
+        # Use the DLPack 0.X version implementation, since max_version=None.
+        test(device)
+        # Use the DLPack 0.X version implementation.
+        test(device, max_version=(0, 8))
+        # Current highest DLPack version implemented.
+        test(device, max_version=(1, 0))
+        # Newer DLPack version.
+        # Consumer should still be able to process a smaller version capsule.
+        test(device, max_version=(2, 0))
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
