@@ -38,7 +38,7 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   return compare;
 #elif defined(USE_ROCM)
   __atomic_compare_exchange_n(
-      addr, &compare, val, false, static_cast<int>Sem, __ATOMIC_RELAXED);
+      addr, &compare, val, false, static_cast<int>(Sem), __ATOMIC_RELAXED);
   return compare;
 #else
   CUDA_KERNEL_ASSERT(false);
