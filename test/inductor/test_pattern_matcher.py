@@ -307,12 +307,6 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
             torch.randn((8), dtype=torch.float32, device=GPU_TYPE),
         )
-
-        args2 = (
-            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
-            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
-            torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE),
-        )
         self._test_fused_int_mm_mul_impl(fn1, args1, True)
 
     def _test_mixed_impl(
