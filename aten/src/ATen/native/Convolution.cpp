@@ -1164,7 +1164,8 @@ static Tensor convolution_transpose_same(
     auto pad =
         conv_transpose_same_mode_padding_lr(effective_kernel, dim_stride);
 
-    common_pad_lr.push_back(pad.second);
+    auto min_pad = pad.second < pad.first ? pad.second : pad.first;
+    common_pad_lr.push_back(min_pad);
     extra_pad_left.push_back(pad.first - pad.second);
   }
 
@@ -1184,11 +1185,20 @@ static Tensor convolution_transpose_same(
   // the input size.
   // The output is not modified for symmetric convolutions, as extra_pad_left[i] = 0 for all i.
   for (auto i : c10::irange(dim)) {
-    if (extra_pad_left[i] > 0) {
+    if (extra_pad_left[i] > 0) { // Crop left
       // FIXME: Does this modify `convolution_result` inplace or creates a new
       // tensor? Should the previous tensor be freed?
       convolution_result = convolution_result.slice_symint(
           (int64_t)i + 2, extra_pad_left[i]);
+    } else if (extra_pad_left[i] < 0) { // Crop right
+      // NOTE: this section never runs, as stride == 1.
+      // NOTE: this section only runs when:
+      // right_pad > left_pad -> stride > effective_kernel.
+      // See [conv_transpose_same_mode_padding_lr]
+      convolution_result = convolution_result.slice_symint(
+          (int64_t)i + 2,
+          /*start=*/ 0,
+          /*end=*/ convolution_result.size((int64_t)i + 2) + extra_pad_left[i]);
     }
   }
   return convolution_result;
