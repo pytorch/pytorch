@@ -115,6 +115,7 @@ struct TraceEntry {
       size_t addr,
       size_t size,
       cudaStream_t stream,
+      MempoolId_t mempool,
       approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
@@ -122,7 +123,8 @@ struct TraceEntry {
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(size) {
+        size_(size),
+        mempool_(std::move(mempool)) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -131,6 +133,7 @@ struct TraceEntry {
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_{};
   size_t size_;
+  MempoolId_t mempool_;
   trace_time_ time_{};
 };
 
@@ -240,6 +243,17 @@ class CUDAAllocator : public Allocator {
         " does not yet support ensureExistsAndIncrefPool. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual void setUseOnOOM(
+      c10::DeviceIndex device,
+      bool use_on_oom,
+      MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support setUseOnOOM. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
@@ -454,6 +468,12 @@ inline void ensureExistsAndIncrefPool(
     MempoolId_t mempool_id) {
   get()->ensureExistsAndIncrefPool(device, mempool_id);
 }
+inline void setUseOnOOM(
+    c10::DeviceIndex device,
+    bool use_on_oom,
+    MempoolId_t mempool_id) {
+  get()->setUseOnOOM(device, use_on_oom, mempool_id);
+}
 
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
@@ -503,7 +523,8 @@ namespace c10::cuda {
 struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
-      bool is_user_created = true);
+      bool is_user_created = true,
+      bool use_on_oom = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
