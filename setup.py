@@ -1124,6 +1124,7 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
+        "pynvml>=11.4.1",
     ]
 
     if BUILD_PYTHON_ONLY:
