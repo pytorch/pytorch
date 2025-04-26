@@ -93,15 +93,11 @@ def early_config_prune(configs, named_args):
             config.num_warps,
             getattr(config, "num_consumer_groups", 0),
         )
-        G, M, N, M_IS_DYNAMIC, N_IS_DYNAMIC = (
-            named_args["G"],
-            named_args["M"],
-            named_args["N"],
-            named_args["M_IS_DYNAMIC"],
-            named_args["N_IS_DYNAMIC"],
+        M_PER_GROUP, N_PER_GROUP, G_TIMES_M_PER_GROUP = (
+            named_args["M_PER_GROUP"],
+            named_args["N_PER_GROUP"],
+            named_args["G_TIMES_M_PER_GROUP"],
         )
-        M_PER_GROUP = next_power_of_2(M) // G if M_IS_DYNAMIC else M
-        N_PER_GROUP = next_power_of_2(N) // G if N_IS_DYNAMIC else N
 
         # 1. make sure we have enough smem
         max_shared_memory = get_gpu_shared_memory()
@@ -135,11 +131,11 @@ def early_config_prune(configs, named_args):
         if (
             not use_warp_specialization
             and BLOCK_N > MIN_N_TILES
-            and G * M_PER_GROUP * N_TILES < num_sm
+            and G_TIMES_M_PER_GROUP * N_TILES < num_sm
         ):
             continue
         # 5. make sure we don't load N tiles that are too small
-        if BLOCK_N < 128 and G * M_PER_GROUP * N_TILES > 2 * num_sm:
+        if BLOCK_N < 128 and G_TIMES_M_PER_GROUP * N_TILES > 2 * num_sm:
             continue
 
         # 6. make sure we can partition for ws
@@ -160,34 +156,78 @@ def early_config_prune(configs, named_args):
 
 # Copied from fbgemm grouped_gemm.py
 triton_scaled_grouped_mm_source = r"""
-{% if M_IS_DYNAMIC or N_IS_DYNAMIC or K_IS_DYNAMIC %}
+{% if A_IS_2D or B_IS_2D %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr", "offsets_ptr")}}
 {% else %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr")}}
 {% endif %}
     tidx = tl.program_id(0)
 
+{% set M_IS_DYNAMIC = A_IS_2D and not B_IS_2D %}
+{% set N_IS_DYNAMIC = not A_IS_2D and B_IS_2D %}
+{% set K_IS_DYNAMIC = A_IS_2D and B_IS_2D %}
+
+{% if A_IS_2D %}
+{% if B_IS_2D %}
+    G = {{size("offsets_ptr", 0)}}
+{% else %}
+    G = {{size("b_ptr", 0)}}
+{% endif %}
+{% else %}
+{% if B_IS_2D %}
+    G = {{size("a_ptr", 0)}}
+{% else %}
+    G = {{size("a_ptr", 0)}}
+{% endif %}
+{% endif %}
+
+    # the b_ptr tensor is given with its last two dims transposed, revert here
+
+    M = {{size("a_ptr", -2)}}
+    N = {{size("b_ptr", -1)}}
+    K = {{size("a_ptr", -1)}}
+
+    A_STRIDE_M = {{stride("a_ptr", -2)}}
+    A_STRIDE_K = {{stride("a_ptr", -1)}}
+{% if not A_IS_2D %}
+    A_STRIDE_G = {{stride("a_ptr", 0)}}
+    SCALE_A_STRIDE_G = {{stride("scale_a_ptr", 0)}}
+{% endif %}
+    B_STRIDE_N = {{stride("b_ptr", -1)}}
+    B_STRIDE_K = {{stride("b_ptr", -2)}}
+{% if not B_IS_2D %}
+    B_STRIDE_G = {{stride("b_ptr", 0)}}
+    SCALE_B_STRIDE_G = {{stride("scale_b_ptr", 0)}}
+{% endif %}
+
+    # fixme: a_desc = tl.make_tensor_descriptor(
     a_desc = tl._experimental_make_tensor_descriptor(
         a_ptr,
 {% if A_IS_2D %}
-        shape=[A_SIZE_M, A_SIZE_K],
-        strides=[A_STRIDE_M, A_STRIDE_K],
+        shape=[M, K],
+        # fixme: strides=[A_STRIDE_M, A_STRIDE_K],
+        strides=[{{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
         block_shape=[BLOCK_M, BLOCK_K],
 {% else %}
-        shape=[A_SIZE_G, A_SIZE_M, A_SIZE_K],
-        strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
+        shape=[G, M, K],
+        # fixme: strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
+        strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
         block_shape=[1, BLOCK_M, BLOCK_K],
 {% endif %}
     )
+
+    # fixme: b_desc = tl.make_tensor_descriptor(
     b_desc = tl._experimental_make_tensor_descriptor(
         b_ptr,
 {% if B_IS_2D %}
-        shape=[B_SIZE_N, B_SIZE_K],
-        strides=[B_STRIDE_N, B_STRIDE_K],
+        shape=[N, K],
+        # fixme: strides=[B_STRIDE_N, B_STRIDE_K],
+        strides=[{{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
         block_shape=[BLOCK_N, BLOCK_K],
 {% else %}
-        shape=[B_SIZE_G, B_SIZE_N, B_SIZE_K],
-        strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
+        shape=[G, N, K],
+        # fixme: strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
+        strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
         block_shape=[1, BLOCK_N, BLOCK_K],
 {% endif %}
     )
@@ -212,9 +252,7 @@ triton_scaled_grouped_mm_source = r"""
 {% else %}
         m_start_offset = 0
         m_size = M
-{% if A_IS_2D %}
-        m_scale_start_offset = g.to(tl.int64) * M
-{% endif %}
+        m_scale_start_offset = g * M
 {% endif %}
 
         if m_size > 0:
@@ -227,9 +265,7 @@ triton_scaled_grouped_mm_source = r"""
 {% else %}
             n_start_offset = 0
             n_size = N
-{% if B_IS_2D %}
-            n_scale_start_offset = g.to(tl.int64) * N
-{% endif %}
+            n_scale_start_offset = g * N
 {% endif %}
 {% if K_IS_DYNAMIC %}
             # Move across groups
@@ -352,9 +388,7 @@ triton_scaled_grouped_mm_source = r"""
 {% else %}
                 idx_n = offs_bn[None, :]
 {% endif %}
-
                 mask = offs_am[:, None] < m_size and offs_bn[None, :] < n_size
-
 {% if M_IS_DYNAMIC or N_IS_DYNAMIC %}
                 {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
 {% else %}
@@ -433,12 +467,16 @@ def can_use_triton_kernel(
     mat_b: TensorBox,
     offs: Optional[TensorBox],
     bias: Optional[TensorBox],
+    scale_result: Optional[TensorBox],
 ) -> bool:
     if not has_triton_tma_device():
         return False
 
-    # The _scaled_grouped_mm() operator doesn't support bias yet.
+    # The _scaled_grouped_mm() operator doesn't support bias nor
+    # scale_result yet.
     if bias is not None:
+        return False
+    if scale_result is not None:
         return False
 
     m1_size = mat_a.get_size()
@@ -491,8 +529,6 @@ def tuned_scaled_grouped_mm(
     input_nodes: list[Any] = [mat_a, mat_b, scale_a, scale_b]
     if offs is not None:
         input_nodes.append(realize_inputs(offs))
-    if bias is not None:
-        input_nodes.append(realize_inputs(bias))
 
     aten_choice = aten__scaled_grouped_mm.bind(
         input_nodes,
@@ -507,66 +543,48 @@ def tuned_scaled_grouped_mm(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias):
+    if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
         if len(m1_size) == 2:
             if len(m2_size) == 2:
                 g = offs.layout.size[0]
                 m, k1 = m1_size
                 k2, n = m2_size
-                k = V.graph.sizevars.guard_equals(k1, k2)
-                m_is_dynamic, n_is_dynamic, k_is_dynamic = False, False, True
+                V.graph.sizevars.guard_equals(k1, k2)
+                a_is_2d, b_is_2d = True, True
             else:
+                g1 = offs.layout.size[0]
                 m, k1 = m1_size
-                g, k2, n = m2_size
-                k = V.graph.sizevars.guard_equals(k1, k2)
-                m_is_dynamic, n_is_dynamic, k_is_dynamic = True, False, False
+                g2, k2, n = m2_size
+                g = V.graph.sizevars.guard_equals(g1, g2)
+                V.graph.sizevars.guard_equals(k1, k2)
+                a_is_2d, b_is_2d = True, False
         else:
             if len(m2_size) == 2:
-                g, m, k1 = m1_size
+                g1 = offs.layout.size[0]
+                g2, m, k1 = m1_size
                 k2, n = m2_size
-                k = V.graph.sizevars.guard_equals(k1, k2)
-                m_is_dynamic, n_is_dynamic, k_is_dynamic = False, True, False
+                g = V.graph.sizevars.guard_equals(g1, g2)
+                V.graph.sizevars.guard_equals(k1, k2)
+                a_is_2d, b_is_2d = False, True
             else:
                 g1, m, k1 = m1_size
                 g2, k2, n = m2_size
                 g = V.graph.sizevars.guard_equals(g1, g2)
-                k = V.graph.sizevars.guard_equals(k1, k2)
-                m_is_dynamic, n_is_dynamic, k_is_dynamic = False, False, False
+                V.graph.sizevars.guard_equals(k1, k2)
+                a_is_2d, b_is_2d = False, False
 
         kwargs = {
-            "G": g,
-            "M": m,
-            "N": n,
-            "K": k,
-            "A_IS_2D": len(m1_size) == 2,
-            "B_IS_2D": len(m2_size) == 2,
-            "M_IS_DYNAMIC": m_is_dynamic,
-            "N_IS_DYNAMIC": n_is_dynamic,
-            "K_IS_DYNAMIC": k_is_dynamic,
+            "A_IS_2D": a_is_2d,
+            "B_IS_2D": b_is_2d,
+            "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
             "USE_TMA_LOAD": True,
-            "USE_FAST_ACCUM": use_fast_accum,
+            # fixme: remove these!
+            "M_PER_GROUP": next_power_of_2(m) // g if a_is_2d and not b_is_2d else m,
+            "N_PER_GROUP": next_power_of_2(n) // g if not a_is_2d and b_is_2d else n,
+            "G_TIMES_M_PER_GROUP": g
+            * (next_power_of_2(m) // g if a_is_2d and not b_is_2d else m),
         }
-
-        a_size = mat_a.get_size()
-        b_size = mat_b.get_size()
-        a_stride = mat_a.get_stride()
-        b_stride = mat_b.get_stride()
-        scale_a_stride = scale_a.get_stride()
-        scale_b_stride = scale_b.get_stride()
-        kwargs["A_SIZE_M"], kwargs["A_SIZE_K"] = a_size[-2], a_size[-1]
-        kwargs["A_STRIDE_M"], kwargs["A_STRIDE_K"] = a_stride[-2], a_stride[-1]
-        if len(a_size) == 3:
-            kwargs["A_SIZE_G"] = a_size[0]
-            kwargs["A_STRIDE_G"] = a_stride[0]
-            kwargs["SCALE_A_STRIDE_G"] = scale_a_stride[0]
-        # the b_mat is given with its last two dims transposed, revert here
-        kwargs["B_SIZE_N"], kwargs["B_SIZE_K"] = b_size[-1], b_size[-2]
-        kwargs["B_STRIDE_N"], kwargs["B_STRIDE_K"] = b_stride[-1], b_stride[-2]
-        if len(b_size) == 3:
-            kwargs["B_SIZE_G"] = b_size[0]
-            kwargs["B_STRIDE_G"] = b_stride[0]
-            kwargs["SCALE_B_STRIDE_G"] = scale_b_stride[0]
 
         for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
             triton_scaled_grouped_mm_template.maybe_append_choice(

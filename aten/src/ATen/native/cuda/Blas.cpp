@@ -1611,6 +1611,7 @@ bool use_fast_accum) {
 
 
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+  TORCH_CHECK(!scale_result.has_value(), "Scale result not supported yet");
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {

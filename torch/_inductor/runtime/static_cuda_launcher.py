@@ -90,7 +90,6 @@ class StaticallyLaunchedCudaKernel:
 
         assert hasattr(self, "cubin_path")
         assert self.cubin_path is not None
-
         (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
             self.cubin_path, self.name, self.shared, device
         )
@@ -204,7 +203,6 @@ class StaticallyLaunchedCudaKernel:
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
-
         _StaticCudaLauncher._launch_kernel(
             self.function,
             grid_x,
