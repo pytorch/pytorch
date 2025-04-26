@@ -314,8 +314,7 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
                 int ow_ = ow+pwstart;
                 const int64_t* ptr_top_mask = top_mask + oh_ * out_stride_h + ow_ * out_stride_w;
                 if (oh_ >= phend || ow_ >= pwend) {
-                  msk[oh][ow] = 0;
-                  tpd[oh][ow] = 0;
+                  msk[oh][ow] = ~index_shift;
                 } else {
                   msk[oh][ow] = ptr_top_mask[c*out_stride_c];
                   tpd[oh][ow] = top_diff[oh_ * out_stride_h + ow_ * out_stride_w + c*out_stride_c];
@@ -326,9 +325,6 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
             for(int oh = 0; oh < _MAXh; ++oh) {
 #pragma unroll
               for(int ow = 0; ow < _MAXw; ++ow) {
-                int ow_ = ow+pwstart;
-                int oh_ = oh+phstart;
-                if (oh_ >= phend || ow_ >= pwend) break;
                 if (msk[oh][ow] == index_shift) {
                   out_cached[cached_index] += static_cast<accscalar_t>(tpd[oh][ow]);
                 }
