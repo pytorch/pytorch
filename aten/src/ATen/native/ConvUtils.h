@@ -222,7 +222,7 @@ std::pair<T, T> _conv_transpose_same_mode_padding_lr(
     // The padding on the left is ceil(total_padding / 2)
     left_pad = (total_padding / 2) + (total_padding % 2);
   }
-  return {left_pad, total_padding - left_pad};
+  return {std::move(left_pad), std::move(total_padding - left_pad)};
 }
 
 inline std::pair<int64_t, int64_t> conv_transpose_same_mode_padding_lr(
