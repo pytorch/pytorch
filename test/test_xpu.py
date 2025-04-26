@@ -315,6 +315,24 @@ if __name__ == "__main__":
         with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
             torch.accelerator.current_stream(torch.accelerator.device_count())
 
+    def test_device_context_manager(self):
+        prev_device = torch.xpu.current_device()
+        with torch.accelerator.device_index(None):
+            self.assertEqual(torch.xpu.current_device(), prev_device)
+        self.assertEqual(torch.xpu.current_device(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.xpu.current_device(), 0)
+        self.assertEqual(torch.xpu.current_device(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_device_context_manager_with_set_device(self):
+        src_device = 0
+        dst_device = 1
+        torch.xpu.set_device(src_device)
+        with torch.accelerator.device_index(dst_device):
+            self.assertEqual(torch.xpu.current_device(), 1)
+        self.assertEqual(torch.xpu.set_device(), src_device)
+
     def test_stream_context_manager(self):
         prev_stream = torch.xpu.current_stream()
         with torch.xpu.Stream() as stream:

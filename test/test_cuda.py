@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
+    MI300_ARCH,
     parametrize,
     run_tests,
     serialTest,
@@ -67,6 +68,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -960,6 +962,22 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+    def test_events_elapsedtime(self):
+        event1 = torch.cuda.Event(enable_timing=False)
+        event2 = torch.cuda.Event(enable_timing=False)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
+        event1 = torch.cuda.Event(enable_timing=True)
+        event2 = torch.cuda.Event(enable_timing=True)
+        with self.assertRaisesRegex(
+            ValueError, "Both events must be recorded before calculating elapsed time"
+        ):
+            event1.elapsed_time(event2)
+
     def test_generic_stream_event(self):
         stream = torch.Stream("cuda")
         self.assertEqual(stream.device_index, torch.cuda.current_device())
@@ -1077,6 +1095,24 @@ class TestCuda(TestCase):
             try_realloc = torch.cuda.FloatTensor([10, 10])
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
+
+    def test_device_context_manager(self):
+        prev_device = torch.cuda.current_device()
+        with torch.accelerator.device_index(None):
+            self.assertEqual(torch.cuda.current_device(), prev_device)
+        self.assertEqual(torch.cuda.current_device(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.cuda.current_device(), 0)
+        self.assertEqual(torch.cuda.current_device(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_multi_device_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.cuda.set_device(src_device)
+        with torch.accelerator.device_index(dst_device):
+            self.assertEqual(torch.cuda.current_device(), 1)
+        self.assertEqual(torch.cuda.set_device(), src_device)
 
     def test_stream_context_manager(self):
         prev_stream = torch.cuda.current_stream()
@@ -4364,6 +4400,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -5967,8 +6004,191 @@ class TestCudaAutocast(TestAutocast):
         self.assertEqual(val, "LAZY")
 
 
+class TestCompileKernel(TestCase):
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel(self):
+        # Simple vector addition kernel
+        kernel_source = """
+        __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        """
+
+        # Compile the kernel
+        from torch.cuda import _compile_kernel
+
+        add_kernel = _compile_kernel(kernel_source, "add_tensors")
+
+        # Prepare data
+        N = 1024
+        a = torch.rand(N, device="cuda")
+        b = torch.rand(N, device="cuda")
+        c = torch.empty_like(a)
+
+        # Calculate grid and block dimensions
+        threads_per_block = 256
+        blocks_per_grid = (N + threads_per_block - 1) // threads_per_block
+
+        # Launch kernel
+        add_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a, b, c, N],
+        )
+
+        # Verify results
+        expected = a + b
+        self.assertEqual(c, expected)
+
+        # Test with different tensor types
+        a_int = torch.randint(0, 100, (N,), device="cuda", dtype=torch.int32)
+        b_int = torch.randint(0, 100, (N,), device="cuda", dtype=torch.int32)
+        c_int = torch.empty_like(a_int)
+
+        # Integer addition kernel
+        int_kernel_source = """
+        __global__ void add_int_tensors(const int* a, const int* b, int* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        """
+        from torch.cuda import _compile_kernel
+
+        add_int_kernel = _compile_kernel(int_kernel_source, "add_int_tensors")
+
+        # Launch kernel
+        add_int_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[a_int, b_int, c_int, N],
+        )
+
+        # Verify results
+        expected_int = a_int + b_int
+        torch.testing.assert_close(c_int, expected_int)
+
+        # Test with header code
+        header_code = """
+        #define SCALE_FACTOR 2.0f
+
+        __device__ float scale_value(float val) {
+            return val * SCALE_FACTOR;
+        }
+        """
+
+        scale_kernel_source = """
+        __global__ void scale_tensors(const float* input, float* output, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                output[i] = scale_value(input[i]);
+        }
+        """
+
+        scale_kernel = _compile_kernel(
+            scale_kernel_source, "scale_tensors", header_code=header_code
+        )
+
+        input_tensor = torch.rand(N, device="cuda")
+        output_tensor = torch.empty_like(input_tensor)
+
+        scale_kernel(
+            grid=(blocks_per_grid, 1, 1),
+            block=(threads_per_block, 1, 1),
+            args=[input_tensor, output_tensor, N],
+        )
+
+        # Verify scaling
+        expected_scaled = input_tensor * 2.0
+        torch.testing.assert_close(output_tensor, expected_scaled)
+
+        # Test error handling with invalid kernel
+        invalid_kernel_source = """
+        __global__ void invalid_kernel(float* a) {
+            undeclared_variable = 10; // This will cause a compilation error
+        }
+        """
+
+        with self.assertRaises(RuntimeError):
+            _compile_kernel(invalid_kernel_source, "invalid_kernel")
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_advanced(self):
+        # Test matrix multiplication
+        matmul_kernel_source = """
+        __global__ void matrix_multiply(const float* A, const float* B, float* C, int M, int N, int K) {
+            int row = blockIdx.y * blockDim.y + threadIdx.y;
+            int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+            if (row < M && col < N) {
+                float sum = 0.0f;
+                for (int i = 0; i < K; i++) {
+                    sum += A[row * K + i] * B[i * N + col];
+                }
+                C[row * N + col] = sum;
+            }
+        }
+        """
+        from torch.cuda import _compile_kernel
+
+        matmul_kernel = _compile_kernel(matmul_kernel_source, "matrix_multiply")
+
+        # Matrix dimensions
+        M, K, N = 64, 32, 48
+
+        # Create matrices
+        A = torch.rand((M, K), device="cuda")
+        B = torch.rand((K, N), device="cuda")
+        C = torch.zeros((M, N), device="cuda")
+
+        # Calculate grid and block dimensions
+        block_dim = (16, 16, 1)
+        grid_dim = (
+            (N + block_dim[0] - 1) // block_dim[0],
+            (M + block_dim[1] - 1) // block_dim[1],
+            1,
+        )
+
+        # Launch kernel
+        matmul_kernel(
+            grid=grid_dim,
+            block=block_dim,
+            args=[A.contiguous(), B.contiguous(), C, M, N, K],
+        )
+
+        # Verify results
+        expected = torch.matmul(A, B)
+        torch.testing.assert_close(C, expected, rtol=1e-5, atol=1e-5)
+
+        # Test with different compute capability if specified
+        device_props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        compute_cap = f"{device_props.major}{device_props.minor}"
+
+        # Recompile with explicit compute capability
+        matmul_kernel_explicit = _compile_kernel(
+            matmul_kernel_source, "matrix_multiply", compute_capability=compute_cap
+        )
+
+        C_explicit = torch.zeros((M, N), device="cuda")
+
+        # Launch kernel
+        matmul_kernel_explicit(
+            grid=grid_dim,
+            block=block_dim,
+            args=[A.contiguous(), B.contiguous(), C_explicit, M, N, K],
+        )
+
+        # Verify results
+        torch.testing.assert_close(C_explicit, expected, rtol=1e-5, atol=1e-5)
+
+
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
+instantiate_parametrized_tests(TestCompileKernel)
 instantiate_device_type_tests(TestCudaOptims, globals())
 
 if __name__ == "__main__":
