@@ -42,10 +42,8 @@ class ParseError(ValueError):
         self.token = token
 
 
-from .block import Block
 from .bracket_pairs import bracket_pairs
 from .file_linter import FileLinter
 from .file_summary import file_summary
 from .messages import LintResult
 from .python_file import PythonFile
-from .sets import LineWithSets
