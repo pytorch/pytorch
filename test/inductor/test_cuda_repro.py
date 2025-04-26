@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
@@ -920,6 +921,43 @@ class CudaReproTests(TestCase):
             out, torch.scatter_reduce(input_orig.clone(), 0, index, src, "sum")
         )
 
+    def test_libdevice_routing(self):
+        def foo(x):
+            return x.exp()
+
+        inp = torch.ones(64, device="cuda").to(torch.float64)
+
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        inp = inp.to(torch.float)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("libdevice.exp").check("tl_math.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
+            return x.sigmoid()
+
+        inp = torch.ones(64, device="cuda").to(torch.float64)
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check("libdevice.exp").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+    def test_uint_view_copy(self):
+        @torch.compile
+        def view_copy(target, source):
+            assert target.dtype == torch.bfloat16
+            assert source.dtype == torch.uint16
+            target.view(torch.uint16).copy_(source)
+
+        target = torch.ones(1024, dtype=torch.bfloat16, device="cuda")
+        source = torch.full_like(target, 4, dtype=torch.uint16)
+
+        out = target.view(torch.uint16).copy_(source).clone()
+        view_copy(target, source)
+        self.assertEqual(out, target.view(torch.uint16))
+
     def test_embedding_var_mean(self):
         def forward(arg0_1):
             full = torch.ops.aten.full.default(
@@ -1096,6 +1134,9 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
@@ -1922,6 +1963,32 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
         fc = FileCheck()
         fc.check("tl.atomic_add")
+        fc.run(bw_code)
+
+        self.assertEqual(f(x_ref, y_ref), out)
+
+    @unittest.skipIf(
+        not config.is_fbcode(),
+        "bfloat16 atomic add is only supported in fbcode today #97016",
+    )
+    @skipCUDAIf(
+        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+    )
+    @config.patch({"bfloat16_atomic_adds_enabled": False})
+    def test_atomic_add_bfloat16_config(self):
+        def f(x, y):
+            return torch.index_select(x, 0, y)
+
+        x = torch.randn(
+            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        y = torch.ones(713268, dtype=torch.int64, device="cuda")
+        x_ref = x.clone().detach().requires_grad_(True)
+        y_ref = y.clone().detach()
+
+        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
+        fc = FileCheck()
+        fc.check_not("tl.atomic_add")
         fc.run(bw_code)
 
         self.assertEqual(f(x_ref, y_ref), out)
