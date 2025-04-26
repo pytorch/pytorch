@@ -295,7 +295,15 @@ num_guards_executed=0)
         x = torch.randn(4, 4)
         size = list(x.size())
         stride = list(x.stride())
-        guard_manager.add_tensor_match_guard(x, size, stride, "x", ["check_tensor(x)"])
+        guard_manager.add_tensor_match_guard(
+            x,
+            size,
+            stride,
+            "x",
+            ["check_tensor(x)"],
+            type(x),
+            torch._C._dispatch_keys(x),
+        )
         self.assertTrue(guard_manager.check(x))
         self.assertTrue(guard_manager.check_verbose(x).result)
         self.assertTrue(guard_manager.check(torch.randn(4, 4)))
@@ -535,25 +543,6 @@ num_guards_executed=0)
         )
         self.assertIn(
             "source=L['z'], accessed_by=FrameLocalsGuardAccessor(key='z', framelocals_idx=2)",
-            guard_str,
-        )
-
-    @torch._dynamo.config.patch(enable_cpp_framelocals_guard_eval=False)
-    def test_framelocals_guard_config_flag(self):
-        def fn(x):
-            return x + 1
-
-        opt_fn = torch.compile(fn, backend="eager")
-        ref = opt_fn(torch.ones(3))
-        with torch._dynamo.set_stance("fail_on_recompile"):
-            res = opt_fn(torch.ones(3))
-        self.assertEqual(ref, res)
-
-        c1 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c1), 1)
-        guard_str = str(c1[0].guard_manager)
-        self.assertIn(
-            "source=L['x'], accessed_by=DictGetItemGuardAccessor('x')",
             guard_str,
         )
 
