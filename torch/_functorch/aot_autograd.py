@@ -488,11 +488,12 @@ def process_inputs(
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
+    ignore_shape_env: bool = False,
 ) -> FakifiedFlatArgs:
     with fake_mode:
 
         def convert(idx, x):
-            if shape_env is not None:
+            if shape_env is not None and not ignore_shape_env:
                 from torch._dynamo.source import ConstantSource
 
                 if isinstance(x, int):
@@ -540,13 +541,14 @@ def process_inputs(
                 # Dynamo
                 return fake_mode.from_tensor(x, static_shapes=True)
 
-            return fake_mode.from_tensor(
+            result = fake_mode.from_tensor(
                 x,
-                static_shapes=False,
+                static_shapes=ignore_shape_env,
                 symbolic_context=symbolic_context,
                 source=source,
                 trace=trace,
             )
+            return result
 
         return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
 
@@ -1073,6 +1075,7 @@ def aot_module_simplified(
     inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
+    ignore_shape_env: bool = False,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1140,9 +1143,12 @@ def aot_module_simplified(
         is_export=False,
         no_tangents=False,
         cache_info=None,
+        ignore_shape_env=ignore_shape_env,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
-    fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
+    fake_flat_args = process_inputs(
+        full_args, aot_config, fake_mode, shape_env, ignore_shape_env
+    )
 
     def dispatch_and_compile():
         functional_call = create_functional_call(mod, params_spec, params_len)
@@ -1658,6 +1664,7 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                     )
                 # TODO(avik): Assigning all other types are allowed right now.
                 # Maybe in the future we want to limit this to primitive types?
+            return v
 
         new_attrs = _get_attributes(mod)
         if len(new_attrs) != len(snapshot):
