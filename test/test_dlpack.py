@@ -8,6 +8,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    skipCUDAIfNotRocm,
     skipCUDAIfRocm,
     skipMeta,
 )
@@ -241,6 +242,31 @@ class TestTorchDlPack(TestCase):
         with self.assertRaises(TypeError):
             x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_cuda_per_thread_stream(self, device):
+        # Test whether we raise an error if we are trying to use per-thread default
+        # stream, which is currently not supported by PyTorch.
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(
+            BufferError, "per-thread default stream is not supported"
+        ):
+            torch.from_dlpack(x.__dlpack__(stream=2))
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_dlpack_invalid_streams(self, device):
+        # Test that we correctly raise errors on unsupported ROCm streams.
+        def test(x, stream):
+            with self.assertRaisesRegex(BufferError, r"unsupported stream \d for ROCm"):
+                torch.from_dlpack(x.__dlpack__(stream=stream))
+
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        test(x, stream=1)
+        test(x, stream=2)
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta
