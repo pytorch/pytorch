@@ -57,7 +57,7 @@ struct OpenRegHostAllocator final : at::HostAllocator {
         false, "empty_cache is not implemented for OpenRegHostAllocator.");
   }
 
-  HostStats get_stats() override {
+  at::HostStats get_stats() override {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, "get_stats is not implemented for OpenRegHostAllocator.");
   }
