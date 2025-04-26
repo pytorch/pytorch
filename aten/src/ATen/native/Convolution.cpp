@@ -1277,7 +1277,7 @@ at::Tensor conv_transpose2d_padding_symint(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose1d");
+  auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
   Tensor output;
   if (at::isComplexType(input_.scalar_type())) {
     output = complex_convolution_transpose_mode(input, weight, bias, stride, padding, output_padding, groups, dilation);
@@ -1294,7 +1294,7 @@ at::Tensor conv_transpose3d_padding_symint(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose1d");
+  auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose3d");
   Tensor output;
   if (at::isComplexType(input_.scalar_type())) {
     output = complex_convolution_transpose_mode(input, weight, bias, stride, padding, output_padding, groups, dilation);
