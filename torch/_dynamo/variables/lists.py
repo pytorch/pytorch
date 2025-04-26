@@ -373,9 +373,9 @@ class CommonListMethodsVariable(BaseListVariable):
         ):
             assert not kwargs
             (arg,) = args
-            seq = arg.force_unpack_var_sequence(tx)
-            tx.output.side_effects.mutation(self)
-            self.items.extend(seq)
+            arg.force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "append", [item], {})
+            )
             return ConstantVariable.create(None)
         elif name == "insert" and self.is_mutable():
             assert not kwargs
@@ -485,7 +485,28 @@ class ListVariable(CommonListMethodsVariable):
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
             if not all(k.is_python_constant() for k in keys):
-                unimplemented("sort with non-constant keys")
+                first_non_constant_key = None
+                for k in keys:
+                    if not k.is_python_constant():
+                        first_non_constant_key = k
+                assert first_non_constant_key is not None
+
+                try:
+                    python_type = first_non_constant_key.python_type()
+                except NotImplementedError:
+                    python_type = "unknown"
+
+                unimplemented_v2(
+                    gb_type="sort with non-constant keys",
+                    context=str(first_non_constant_key),
+                    explanation=(
+                        f"Cannot perform sort with non-constant key. "
+                        f"First non-constant key type: {python_type}. "
+                        f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
+                        f"sort ints."
+                    ),
+                    hints=["Use something else as the key."],
+                )
 
             tx.output.side_effects.mutation(self)
             sorted_items_with_keys = sorted(
@@ -614,9 +635,11 @@ class DequeVariable(CommonListMethodsVariable):
         ):
             assert len(args) == 1
             assert not kwargs
-            prefix = args[0].force_unpack_var_sequence(tx)
-            tx.output.side_effects.mutation(self)
-            self.items[:] = [*reversed(prefix), *self.items]
+            # NOTE this is inefficient, but the alternative is to represent self.items
+            # as a deque, which is a more intrusive change.
+            args[0].force_apply_to_var_sequence(
+                tx, lambda item: self.call_method(tx, "appendleft", [item], {})
+            )
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "popleft" and self.is_mutable():
