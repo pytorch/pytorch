@@ -1538,7 +1538,7 @@ def get_default_op_list() -> OpTypes:
         aten.argmax,
         aten.maximum,
         prims.iota,
-        prims._low_memory_max_pool2d_offsets_to_indices,
+        prims._low_memory_max_pool_offsets_to_indices,
     ]  # noqa: E501,B950
     # Natalia said that we should allow recomputing indexing :)
     default_recomputable_ops += [aten.index, aten.gather]

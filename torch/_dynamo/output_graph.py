@@ -79,6 +79,7 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
+from .device_interface import get_interface_for_device
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
@@ -240,6 +241,10 @@ class FakeRootModule(torch.nn.Module):
     def __repr__(self) -> str:
         return "FakeRootModule(...)"
 
+    def add_nn_modules(self, nn_modules: dict[str, torch.nn.Module]):
+        for k, v in nn_modules.items():
+            setattr(self, k, v)
+
 
 class WrapperBackend:
     def __init__(self, backend: CompilerFn):
@@ -267,7 +272,6 @@ class WrapperBackend:
                 return self.candidate
 
             raise RuntimeError(f"incorrect results of backend {self}")
-            return self.gm.forward
 
         except Exception:
             log.exception("error in verify_correctness")
@@ -279,7 +283,43 @@ class WrapperBackend:
 Scope = dict[str, object]
 
 
-class OutputGraph:
+@dataclass
+class OutputGraphGuardsState:
+    """
+    A base class containing fields that are considered "persistent" when we
+    want to save all the important state for reconstrucing guards in a different
+    process. Normally we don't need to add states here, but we may have to when
+    the information is needed to serialize the guards, so the fields here are
+    supposed to be serializable as a requirement.
+    """
+
+    local_scope: Scope
+    global_scope: Scope
+    # This records the initial torch function mode stack for guarding
+    torch_function_mode_stack: list[torch.overrides.TorchFunctionMode]
+    guard_on_key_order: set[str]
+    # Map from graph input's `Source` to sizes / strides metadata
+    input_source_to_sizes_strides: dict[Source, dict[str, Any]]
+    export: bool = False
+    export_constraints: bool = False
+
+    _guards: Optional[torch._guards.GuardsSet] = None
+    _aotautograd_guards: Optional[list[torch._guards.GuardEnvExpr]] = None
+
+    @property
+    def shape_env(self):
+        raise AssertionError(f"shape_env shouldn't be accessed from {type(self)}")
+
+    @property
+    def guards(self):
+        return self._guards
+
+    @property
+    def aotautograd_guards(self):
+        return self._aotautograd_guards
+
+
+class OutputGraph(OutputGraphGuardsState):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -305,7 +345,13 @@ class OutputGraph:
         f_code,
         torch_function_mode_stack,
     ):
-        super().__init__()
+        super().__init__(
+            local_scope,
+            global_scope,
+            torch_function_mode_stack,
+            guard_on_key_order=set(),
+            input_source_to_sizes_strides={},
+        )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -313,8 +359,6 @@ class OutputGraph:
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        # Map from graph input's `Source` to sizes / strides metadata
-        self.input_source_to_sizes_strides: dict[Source, dict[str, Any]] = {}
         self.cleanup_hooks: list[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
@@ -386,7 +430,7 @@ class OutputGraph:
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache = VariableTrackerCache()
         self.unique_var_id = itertools.count()
-        self.code_options = dict(code_options)
+        self.code_options: dict[str, Any] = dict(code_options)
         self.output_instructions: list[Instruction] = []
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
@@ -397,8 +441,6 @@ class OutputGraph:
 
         # Not checkpointed
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
-        self.global_scope = global_scope
-        self.local_scope = local_scope
         self.root_tx = root_tx
 
         # Given a source, what are the user stacks of all locations that
@@ -418,12 +460,8 @@ class OutputGraph:
         self.should_exit = False
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
 
-        # Note this returns true iff TF Mode and TF Subclasses are enabled
-        self.torch_function_enabled = torch._C._is_torch_function_enabled()
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
-        # This records the initial torch function mode stack for guarding
-        self.torch_function_mode_stack = torch_function_mode_stack
 
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
@@ -458,7 +496,7 @@ class OutputGraph:
         self.random_calls: list[
             tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
         ] = []
-        self.random_values_var = None
+        self.random_values_var: Any = None
 
         # Bytecode to insert right before we call the graph
         self.pregraph_bytecode: list[Instruction] = []
@@ -471,8 +509,6 @@ class OutputGraph:
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
-
-        self.guard_on_key_order: set[str] = set()
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
@@ -543,6 +579,19 @@ class OutputGraph:
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
 
+    def dump_guards_state(self):
+        return OutputGraphGuardsState(
+            local_scope=self.local_scope,
+            global_scope=self.global_scope,
+            torch_function_mode_stack=self.torch_function_mode_stack,
+            guard_on_key_order=self.guard_on_key_order,
+            input_source_to_sizes_strides=self.input_source_to_sizes_strides,
+            export=self.export,
+            export_constraints=self.export_constraints,
+            _guards=self.guards,
+            _aotautograd_guards=self.aotautograd_guards,
+        )
+
     def synthetic_graph_input(self, fn, args):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
@@ -562,6 +611,8 @@ class OutputGraph:
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
         result = VariableTracker.build(self.root_tx, example_value, source)
+        # Realize the VT because we will delete the guards on it in the next line.
+        result = result.realize()
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
@@ -667,6 +718,10 @@ class OutputGraph:
     def nn_modules(self) -> dict[str, Any]:
         return self.tracing_context.module_context.nn_modules
 
+    @property
+    def aotautograd_guards(self):
+        return self.tracing_context.guards_context.aotautograd_guards
+
     def save_global_state(self, out=None):
         """
         Saves to out if it is provided. Else saves to the tracing context's global_state.
@@ -680,16 +735,6 @@ class OutputGraph:
             ),
         )
 
-        # TODO - Consider having a torch level API for torch_function_state. As
-        # of now, we create a ref cycle by passing the
-        # output.set_torch_function_state to
-        # output.tracing_context.global_context.global_state. In the interim,
-        # the problem can be solved by manually set
-        # output.tracing_context.global_context.global_state to None at cleanup.
-        global_state["torch_function_enabled"] = (
-            self.set_torch_function_state,
-            self.torch_function_enabled,
-        )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
 
         global_state["autocast_enabled"] = (
@@ -884,7 +929,9 @@ class OutputGraph:
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
                 return VariableTracker.build(
-                    self, target, ConstantSource(source_name=module_key)
+                    self,  # type: ignore[arg-type]
+                    target,
+                    ConstantSource(source_name=module_key),
                 )
 
         for k, v in self.nn_modules.items():
@@ -1070,8 +1117,6 @@ class OutputGraph:
         for value in stack_values:
             value.realize()
 
-        output_replacements = self.dedup_pass()
-
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1120,7 +1165,10 @@ class OutputGraph:
             append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
-            rand_fn = disable(_get_gen_rand_values_fn(self.random_calls))
+            rand_fn = disable(
+                _get_gen_rand_values_fn(self.random_calls),
+                reason="do not trace into Dynamo rng recovery function",
+            )
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
             codegen = PyCodegen(tx, root, overridden_sources=overridden_sources)
             random_calls_instructions.extend(
@@ -1155,9 +1203,7 @@ class OutputGraph:
             append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
-                self.compile_and_call_fx_graph(
-                    tx, list(reversed(stack_values)), root, output_replacements
-                )
+                self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
             # restore all the live local vars
@@ -1190,9 +1236,7 @@ class OutputGraph:
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
-                    self.compile_and_call_fx_graph(
-                        tx, pass2.graph_output_vars(), root, output_replacements
-                    )
+                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
                 )
 
                 if len(pass2.graph_outputs) != 0:
@@ -1344,8 +1388,14 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
+            device_types = compile_pg._device_types
+            assert len(device_types) == 1, (
+                "Expect only one device type but got {}".format("+".join(device_types))
+            )
             with (
-                torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()),
+                get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
+                    compile_pg.rank() % torch.accelerator.device_count()
+                ),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states = [None] * compile_pg.size()
@@ -1356,7 +1406,7 @@ class OutputGraph:
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
-    def compile_and_call_fx_graph(self, tx, rv, root, replaced_outputs):
+    def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
@@ -1379,9 +1429,8 @@ class OutputGraph:
                 (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
                 {},
             )
-
-            for old_node, new_node in replaced_outputs.items():
-                old_node.replace_all_uses_with(new_node)
+            sub_gms = self.dedup_pass()
+            root.add_nn_modules(sub_gms)
 
             tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
@@ -1473,7 +1522,9 @@ class OutputGraph:
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
-            compiled_fn = disable(compiled_fn)
+            compiled_fn = disable(
+                compiled_fn, reason="do not trace Dynamo-compiled graph"
+            )
 
             counters["stats"]["unique_graphs"] += 1
             # This is safe because we pre-process name to be unique
@@ -1576,7 +1627,7 @@ class OutputGraph:
         if torch._dynamo.config.use_graph_deduplication:
             return apply_graph_deduplication(self)
         else:
-            return dict()
+            return {}
 
     def install_subgraph(self, name, sub_gm):
         next_name = get_unique_name_wrt(name, self.nn_modules, requires_suffix=True)
@@ -1735,6 +1786,11 @@ class OutputGraph:
                     )
                     update_used_symbols(used_symbols, fake)
 
+        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
+        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
+            for assertion in assertion_list:
+                used_symbols |= free_symbols(assertion.expr)
+
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
             symbol = placeholder_binds_symbol(node)
@@ -1845,9 +1901,6 @@ class OutputGraph:
         self.input_source_to_var.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
-
-    def set_torch_function_state(self, enabled: bool) -> None:
-        self.torch_function_enabled = enabled
 
     def add_graph_finalizer(
         self, register_finalizer: Callable[[fx.GraphModule], None]

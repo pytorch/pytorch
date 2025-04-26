@@ -43,11 +43,13 @@ class TORCH_API AOTIModelContainerRunner {
   void update_constant_buffer(
       std::unordered_map<std::string, at::Tensor>& tensor_map,
       bool use_inactive,
-      bool validate_full_updates);
+      bool validate_full_updates,
+      bool user_managed = false);
   void update_constant_buffer(
       const TensorConstantMap& const_map,
       bool use_inactive,
-      bool validate_full_updates);
+      bool validate_full_updates,
+      bool user_managed = false);
   void run_const_fold(
       bool use_inactive,
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
@@ -84,6 +86,8 @@ class TORCH_API AOTIModelContainerRunner {
       nullptr};
   decltype(&AOTInductorModelContainerExtractConstantsMap)
       extract_constants_map_func_{nullptr};
+  decltype(&AOTInductorModelContainerUpdateUserManagedConstantBuffer)
+      update_user_managed_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateConstantBuffer)
       update_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)

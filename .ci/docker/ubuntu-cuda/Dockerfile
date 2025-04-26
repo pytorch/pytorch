@@ -43,13 +43,6 @@ ARG CLANG_VERSION
 COPY ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
-# (optional) Install protobuf for ONNX
-ARG PROTOBUF
-COPY ./common/install_protobuf.sh install_protobuf.sh
-RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
-RUN rm install_protobuf.sh
-ENV INSTALLED_PROTOBUF ${PROTOBUF}
-
 # (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
@@ -157,6 +150,16 @@ ARG CUDA_VERSION
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 RUN bash install_cusparselt.sh
 RUN rm install_cusparselt.sh
+
+# Install NCCL
+ARG CUDA_VERSION
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+RUN bash install_nccl.sh
+RUN rm install_nccl.sh /ci_commit_pins/nccl-cu*
+ENV USE_SYSTEM_NCCL=1
+ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
+ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 # Install CUDSS
 ARG CUDA_VERSION

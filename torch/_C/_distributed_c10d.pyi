@@ -2,7 +2,7 @@
 # mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import Tensor
@@ -50,6 +50,7 @@ class Reducer:
         gradient_as_bucket_view: bool = ...,
         param_to_name_mapping: dict[int, str] = ...,
         first_bucket_types_cap: int = ...,  # kDefaultFirstBucketBytes in reducer.hpp
+        skip_all_reduce_unused_params: bool = ...,
     ) -> None: ...
     def prepare_for_forward(self) -> None: ...
     def prepare_for_backward(self, output: list[Tensor]) -> None: ...
@@ -139,6 +140,8 @@ class BroadcastOptions:
 class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
+    sparseIndices: Optional[Tensor]
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -147,6 +150,7 @@ class ReduceOptions:
     rootRank: int
     rootTensor: int
     timeout: timedelta
+    asyncOp: bool
 
 class AllgatherOptions:
     timeout: timedelta
@@ -155,6 +159,7 @@ class AllgatherOptions:
 class GatherOptions:
     rootRank: int
     timeout: timedelta
+    asyncOp: bool
 
 class ScatterOptions:
     rootRank: int
@@ -170,9 +175,11 @@ class BarrierOptions:
     device_ids: list[int]
     device: torch.device
     timeout: timedelta
+    asyncOp: bool
 
 class AllToAllOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class Store:
     def set(self, key: str, value: str): ...
@@ -191,6 +198,9 @@ class Store:
     def wait(self, keys: list[str]): ...
     @overload
     def wait(self, keys: list[str], timeout: timedelta): ...
+    def queue_pop(self, key: str, block: bool = True) -> bytes: ...
+    def queue_push(self, key: str, value: Union[bytes, str]) -> None: ...
+    def queue_len(self, key: str) -> int: ...
 
 class FileStore(Store):
     def __init__(self, path: str, numWorkers: int = ...) -> None: ...
@@ -564,9 +574,9 @@ class ProcessGroupGloo(Backend):
         timeout: timedelta,
     ) -> None: ...
     @staticmethod
-    def create_device(hostname="", interface="") -> Device: ...
+    def create_device(hostname="", interface="", lazy_init=None) -> Device: ...
     @staticmethod
-    def create_default_device() -> Device: ...
+    def create_default_device(lazy_init=None) -> Device: ...
     def _set_default_timeout(self, timeout) -> None: ...
 
 class _ProcessGroupWrapper(Backend):
