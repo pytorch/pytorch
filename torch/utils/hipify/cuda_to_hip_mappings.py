@@ -2,6 +2,12 @@ import collections
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents """
 
+_IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
+
+# FBCODE compiles against rccl sources instead of an installed rccl package.
+# The header location is src/rccl.h versus rccl/rccl.h, respectively.
+_RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
+
 # List of math functions that should be replaced inside device code only.
 MATH_TRANSPILATIONS = collections.OrderedDict([
     ("std::max", ("::max")),
@@ -282,7 +288,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", "hipsparse/hipsparse.h"),
     ("cufft.h", "hipfft/hipfft.h"),
     ("cufftXt.h", "hipfft/hipfftXt.h"),
-    ("<nccl.h>", "<rccl/rccl.h>"),
+    ("<nccl.h>", _RCCL_HEADER),
     ("nvrtc.h", "hip/hiprtc.h"),
     ("thrust/system/cuda", "thrust/system/hip"),
     ("cub/util_allocator.cuh", "hipcub/hipcub.hpp"),
