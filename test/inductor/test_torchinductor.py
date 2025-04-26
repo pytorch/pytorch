@@ -5875,7 +5875,6 @@ class CommonTemplate:
             ),
         )
 
-    @xfail_if_mps  # Expected `value` to be on same device as `a`
     def test_masked_fill_promotion(self):
         def fn(mask, value):
             return aten.masked_fill(value, mask, torch.tensor(3.5))
