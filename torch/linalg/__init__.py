@@ -329,7 +329,7 @@ Examples::
     tensor(0, dtype=torch.int32)
 
 .. _LAPACK's getrf:
-    https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
+    https://www.netlib.org/lapack/explore-html-3.6.1/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
 """,
 )
 
@@ -2513,7 +2513,7 @@ Returns:
     A named tuple `(LU, pivots, info)`.
 
 .. _LAPACK's getrf:
-    https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
+    https://www.netlib.org/lapack/explore-html-3.6.1/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
 """,
 )
 
