@@ -464,6 +464,18 @@ std::string getNcclVersion() {
   return versionString;
 }
 
+int getNcclVersionNumber() {
+  static int version = []() {
+    int version = 0;
+    ncclResult_t status = ncclGetVersion(&version);
+    if (status != ncclSuccess) {
+      return 0; // Error.
+    }
+    return version;
+  }();
+  return version;
+}
+
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
