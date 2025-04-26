@@ -1702,7 +1702,8 @@ class Tensor(torch._C.TensorBase):
             None (default), PyTorch will fallback to DLPack 0.8.
         """
         if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
+            args = (self, stream, max_version, dl_device, copy)
+            return handle_torch_function(Tensor.__dlpack__, (self,), *args)
 
         # DLPack capsules can't capture all of PyTorch's semantics,
         # so we prohibit exporting tensors that would lose their properties like
