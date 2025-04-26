@@ -15,6 +15,8 @@ import warnings
 import collections
 from pathlib import Path
 import errno
+import logging
+logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 import torch
 import torch._appdirs
@@ -113,8 +115,7 @@ def _find_cuda_home() -> Optional[str]:
             if not os.path.exists(cuda_home):
                 cuda_home = None
     if cuda_home and not torch.cuda.is_available():
-        print(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'",
-              file=sys.stderr)
+        warnings.warn(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'")
     return cuda_home
 
 def _find_rocm_home() -> Optional[str]:
@@ -136,8 +137,7 @@ def _find_rocm_home() -> Optional[str]:
             if os.path.exists(fallback_path):
                 rocm_home = fallback_path
     if rocm_home and torch.version.hip is None:
-        print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'",
-              file=sys.stderr)
+        warnings.warn(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'")
     return rocm_home
 
 def _find_sycl_home() -> Optional[str]:
@@ -159,8 +159,7 @@ def _find_sycl_home() -> Optional[str]:
                     sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
                     break
         except importlib.metadata.PackageNotFoundError:
-            print("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.",
-                  file=sys.stderr)
+            warnings.warn("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.")
     return sycl_home
 
 def _join_rocm_home(*paths) -> str:
@@ -386,6 +385,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     try:
         version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     except subprocess.CalledProcessError:
+        # If '-v' fails, try '--version'
         version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
         # Check for 'gcc' or 'g++' for sccache wrapper
@@ -1109,7 +1109,7 @@ class BuildExtension(build_ext):
                         # replace fist instance of "CUDA" with "HIP" in flag
                         modified_flag = flag.replace("CUDA", "HIP", 1)
                     modified_flags.append(modified_flag)
-                    print(f'Modified flag: {flag} -> {modified_flag}', file=sys.stderr)
+                    logging.info(f'Modified flag: {flag} -> {modified_flag}')
                 else:
                     modified_flags.append(flag)
             extension.extra_compile_args['nvcc'] = modified_flags
@@ -2088,8 +2088,7 @@ def _jit_compile(name,
     if version > 0:
         if version != old_version and verbose:
             print(f'The input conditions for extension module {name} have changed. ' +
-                  f'Bumping to version {version} and re-building as {name}_v{version}...',
-                  file=sys.stderr)
+                  f'Bumping to version {version} and re-building as {name}_v{version}...')
         name = f'{name}_v{version}'
 
     baton = FileBaton(os.path.join(build_directory, 'lock'))
@@ -2132,14 +2131,14 @@ def _jit_compile(name,
                         is_standalone=is_standalone)
             elif verbose:
                 print('No modifications detected for re-loaded extension '
-                      f'module {name}, skipping build step...', file=sys.stderr)
+                      f'module {name}, skipping build step...')
         finally:
             baton.release()
     else:
         baton.wait()
 
     if verbose:
-        print(f'Loading extension module {name}...', file=sys.stderr)
+        print(f'Loading extension module {name}...')
 
     if is_standalone:
         return _get_exec_path(name, build_directory)
@@ -2180,12 +2179,12 @@ def _write_ninja_file_and_compile_objects(
         with_sycl = any(map(_is_sycl_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
+        print(f'Emitting ninja build file {build_file_path}...')
 
     # Create build_directory if it does not exist
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating directory {build_directory}...', file=sys.stderr)
+            print(f'Creating directory {build_directory}...')
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2206,7 +2205,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda=with_cuda,
         with_sycl=with_sycl)
     if verbose:
-        print('Compiling objects...', file=sys.stderr)
+        print('Compiling objects...')
     _run_ninja_build(
         build_directory,
         verbose,
@@ -2244,12 +2243,12 @@ def _write_ninja_file_and_build_library(
         is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
+        print(f'Emitting ninja build file {build_file_path}...')
 
     # Create build_directory if it does not exist
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating directory {build_directory}...', file=sys.stderr)
+            print(f'Creating directory {build_directory}...')
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2269,7 +2268,7 @@ def _write_ninja_file_and_build_library(
         is_standalone=is_standalone)
 
     if verbose:
-        print(f'Building extension module {name}...', file=sys.stderr)
+        print(f'Building extension module {name}...')
     _run_ninja_build(
         build_directory,
         verbose,
@@ -2328,7 +2327,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
 
     if with_cuda:
         if verbose:
-            print('Detected CUDA files, patching ldflags', file=sys.stderr)
+            print('Detected CUDA files, patching ldflags')
         if IS_WINDOWS:
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
@@ -2403,10 +2402,20 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
-    if not _arch_list:
-        warnings.warn(
-            "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
-            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].")
+    # Support 'native' as a special value to automatically detect only current GPU arch
+    if _arch_list == 'native':
+        if torch.cuda.is_available():
+            capability = torch.cuda.get_device_capability(0)
+            arch = f'{capability[0]}.{capability[1]}'
+            arch_list = [f'{arch}+PTX']
+        else:
+            # If CUDA is not available, fall back to default behavior
+            arch_list = []
+    elif not _arch_list:
+        # Instead of a warning, use logging.info for regular information
+        warnings.warn("TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
+                    "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to 'native' "
+                    "to only use the current GPU's architecture, or to specific architectures.")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
@@ -2473,6 +2482,16 @@ def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     return flags
 
 def _get_build_directory(name: str, verbose: bool) -> str:
+    """
+    Get the build directory for an extension.
+    
+    Args:
+        name: The name of the extension
+        verbose: Whether to print verbose information
+        
+    Returns:
+        The path to the build directory
+    """
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
@@ -2485,12 +2504,12 @@ def _get_build_directory(name: str, verbose: bool) -> str:
             root_extensions_directory, build_folder)
 
     if verbose:
-        print(f'Using {root_extensions_directory} as PyTorch extensions root...', file=sys.stderr)
+        print(f'Using {root_extensions_directory} as PyTorch extensions root...')
 
     build_directory = os.path.join(root_extensions_directory, name)
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating extension directory {build_directory}...', file=sys.stderr)
+            print(f'Creating extension directory {build_directory}...')
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2501,13 +2520,11 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     max_jobs = os.environ.get('MAX_JOBS')
     if max_jobs is not None and max_jobs.isdigit():
         if verbose:
-            print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...',
-                  file=sys.stderr)
+            print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
         return int(max_jobs)
     if verbose:
         print('Allowing ninja to set a default number of workers... '
-              '(overridable by setting the environment variable MAX_JOBS=N)',
-              file=sys.stderr)
+              '(overridable by setting the environment variable MAX_JOBS=N)')
     return None
 
 
