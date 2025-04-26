@@ -2,6 +2,7 @@
 
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 #include <atomic>
 #include <cstddef>
@@ -80,14 +81,16 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static CUDAAllocatorConfig& instance() {
     static CUDAAllocatorConfig* s_instance = ([]() {
       auto inst = new CUDAAllocatorConfig();
-      const char* env = getenv("PYTORCH_CUDA_ALLOC_CONF");
+      auto env = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
 #ifdef USE_ROCM
       // convenience for ROCm users, allow alternative HIP token
-      if (!env) {
-        env = getenv("PYTORCH_HIP_ALLOC_CONF");
+      if (!env.has_value()) {
+        env = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
       }
 #endif
-      inst->parseArgs(env);
+      if (env.has_value()) {
+        inst->parseArgs(env.value().c_str());
+      }
       return inst;
     })();
     return *s_instance;
