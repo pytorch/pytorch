@@ -1080,7 +1080,6 @@ at::Tensor memset32_(
       "symm_mem::memset32_: val must be in the range of "
       "[0, 4294967295] (uint32_t).")
 
-  auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
       offset + count <= input.numel(),
       "symm_mem::memset32_: offset + count (",
@@ -1134,7 +1133,6 @@ at::Tensor stream_write_value32_(
       "symm_mem::stream_write_value32_: "
       "val must be in the range of [0, 4294967295] (uint32_t).")
 
-  auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
       offset < input.numel(),
       "symm_mem::stream_write_value32_: offset (",
