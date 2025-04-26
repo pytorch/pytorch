@@ -37,7 +37,8 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
   return compare;
 #elif defined(USE_ROCM)
-  __atomic_compare_exchange_n(addr, &compare, val, false, Sem, Sem);
+  __atomic_compare_exchange_n(
+      addr, &compare, val, false, static_cast<int>Sem, __ATOMIC_RELAXED);
   return compare;
 #else
   CUDA_KERNEL_ASSERT(false);
