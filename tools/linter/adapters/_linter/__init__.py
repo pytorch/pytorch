@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 
 __all__ = (
+    "Block",
     "EMPTY_TOKENS",
     "FileLinter",
     "file_summary",
@@ -38,6 +39,7 @@ class ParseError(ValueError):
         self.token = token
 
 
+from .block import Block
 from .file_linter import FileLinter
 from .file_summary import file_summary
 from .messages import LintResult
