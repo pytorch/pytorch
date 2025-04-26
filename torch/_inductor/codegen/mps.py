@@ -405,7 +405,7 @@ class MetalOverrides(OpOverrides):
         ]:
             setattr(cls, name, functools.partialmethod(cls._special_unary, name=name))
 
-        cls.lgamma = functools.partialmethod(cls._special_unary, name="log_gamma")
+        cls.lgamma = functools.partialmethod(cls._special_unary, name="log_gamma")  # type: ignore[assignment]
 
         # Unary special ops with forward in method name
         for name in [
@@ -420,7 +420,11 @@ class MetalOverrides(OpOverrides):
             "scaled_modified_bessel_k0",
             "scaled_modified_bessel_k1",
         ]:
-            setattr(cls, name, functools.partialmethod(cls._special_unary, name=name + "_forward"))
+            setattr(
+                cls,
+                name,
+                functools.partialmethod(cls._special_unary, name=name + "_forward"),
+            )
 
         # Binary special ops
         for name in [
@@ -438,7 +442,11 @@ class MetalOverrides(OpOverrides):
             "hermite_polynomial_h",
             "hermite_polynomial_he",
         ]:
-            setattr(cls, name, functools.partialmethod(cls._special_binary, name=name + "_forward"))
+            setattr(
+                cls,
+                name,
+                functools.partialmethod(cls._special_binary, name=name + "_forward"),
+            )
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")
