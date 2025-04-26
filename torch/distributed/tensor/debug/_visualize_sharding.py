@@ -9,7 +9,7 @@ from torch.distributed.tensor._utils import _compute_local_shape_and_global_offs
 
 __all__ = ["visualize_sharding"]
 
-Color = tuple[float, float, float] | str
+Color = tuple[float, float, float]
 
 
 def _create_table(
