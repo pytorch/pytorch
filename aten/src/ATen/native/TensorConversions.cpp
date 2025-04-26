@@ -1693,7 +1693,7 @@ static Tensor sparse_compressed_to_flipped(
 
   // Step 4:
   // Convert the COO indices to the CSC/BSC indices and form the output.
-  // We need to sort COO indices along the "tranposed" dim to satisfy the
+  // We need to sort COO indices along the "transposed" dim to satisfy the
   // invariant of sorted plain indices.
   // Hash coo indices by converting 2d indices to linear offsets with
   // more "weight" (aka stride) placed on the "transposed" dimension.
