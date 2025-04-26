@@ -171,19 +171,10 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "distributed/_shard/checkpoint/test_checkpoint"
-    "distributed/_shard/checkpoint/test_file_system_checkpoint"
-    "distributed/_shard/sharding_spec/test_sharding_spec",
-    "distributed/_shard/sharded_tensor/ops/test_embedding",
-    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
-    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
-    "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/tensor/test_attention",
 ]
 
 S390X_BLOCKLIST = [
@@ -277,6 +268,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
+    "test_openreg",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
@@ -1231,6 +1223,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
+    "test_openreg": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
 }
 
@@ -1521,10 +1514,14 @@ def get_selected_tests(options) -> list[str]:
 
     # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
-        selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
+        selected_tests = list(
+            filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
+        )
 
     if options.cpp:
-        selected_tests = [tname for tname in selected_tests if tname in CPP_TESTS]
+        selected_tests = list(
+            filter(lambda test_name: test_name in CPP_TESTS, selected_tests)
+        )
     else:
         # Exclude all C++ tests otherwise as they are still handled differently
         # than Python test at the moment
@@ -1541,6 +1538,7 @@ def get_selected_tests(options) -> list[str]:
             "test_view_ops",
             "test_nn",
             "inductor/test_mps_basic",
+            "inductor/test_torchinductor",
         ]
     else:
         # Exclude all mps tests otherwise

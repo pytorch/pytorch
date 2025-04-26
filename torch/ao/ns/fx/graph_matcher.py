@@ -465,6 +465,6 @@ of subgraphs."""
     # The subgraph pairs are originally created by traversing the two graphs
     # from the outputs to the inputs. Reverse the results to return the
     # subgraphs in their order of execution.
-    results = collections.OrderedDict(reversed(list(results.items())))
+    results = collections.OrderedDict(reversed(results.items()))
 
     return results

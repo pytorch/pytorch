@@ -52,9 +52,17 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 # Install cuda and cudnn
 ARG CUDA_VERSION
 COPY ./common/install_cuda.sh install_cuda.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
+COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu* install_cusparselt.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
+# No effect if cuda not installed
+ENV USE_SYSTEM_NCCL=1
+ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
+ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
+
 
 # (optional) Install UCC
 ARG UCX_COMMIT
@@ -66,13 +74,6 @@ ENV UCC_HOME /usr
 ADD ./common/install_ucc.sh install_ucc.sh
 RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
 RUN rm install_ucc.sh
-
-# (optional) Install protobuf for ONNX
-ARG PROTOBUF
-COPY ./common/install_protobuf.sh install_protobuf.sh
-RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
-RUN rm install_protobuf.sh
-ENV INSTALLED_PROTOBUF ${PROTOBUF}
 
 # (optional) Install vision packages like OpenCV
 ARG VISION

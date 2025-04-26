@@ -1283,6 +1283,7 @@ class TritonTemplate(KernelTemplate):
                 ),
                 "num_stages": num_stages,
                 "num_warps": num_warps,
+                "GROUP_M": kwargs.get("GROUP_M", -1),
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
@@ -2205,6 +2206,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+
+        strides = ", ".join([str(n.get_stride()) for n in input_nodes])
+        dtypes = ", ".join([str(n.get_dtype()) for n in input_nodes])
         if config.autotune_num_choices_displayed == 0:
             return
         # when autotune_num_choices_displayed is None, [:None] means all
@@ -2252,6 +2256,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
+        sys.stderr.write(f"strides: {strides}\n")
+        sys.stderr.write(f"dtypes: {dtypes}\n")
+
         for choice in top_k:
             result = timings[choice]
             if result:
