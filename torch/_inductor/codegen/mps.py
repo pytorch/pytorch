@@ -11,6 +11,7 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -391,16 +392,19 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed: CSEVariable, offset: CSEVariable) -> str:
+        V.kernel.headers.add("random")
         return f"c10::metal::rand({seed}, {offset})"
 
     @staticmethod
     def randn(seed: CSEVariable, offset: CSEVariable) -> str:
+        V.kernel.headers.add("random")
         return f"c10::metal::randn({seed}, {offset})"
 
     @staticmethod
     def randint64(
         seed: CSEVariable, offset: CSEVariable, low: CSEVariable, high: CSEVariable
     ) -> str:
+        V.kernel.headers.add("random")
         return f"c10::metal::randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
@@ -508,6 +512,7 @@ class MetalKernel(SIMDKernel):
     pexpr = PythonPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
+    headers: OrderedSet[str] = OrderedSet(["special_math", "utils"])
 
     def __init__(
         self,
@@ -545,6 +550,7 @@ class MetalKernel(SIMDKernel):
         if mode is None:
             line = f"{var}[{self.index_to_str(index)}] = {cast_val};"
         elif mode == "atomic_add":
+            self.headers.add("atomic")
             atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
             cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
             line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
@@ -632,6 +638,9 @@ class MetalKernel(SIMDKernel):
                 "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
             )
             return acc
+
+        self.headers.add("reduction_utils")
+
         if reduction_type in ["prod", "sum"]:
             acc_dtype = DTYPE_TO_COMPUTATION_DTYPE[src_dtype]
             acc_buf = self._new_idxvar(
@@ -803,17 +812,8 @@ class MetalKernel(SIMDKernel):
         code.writeline('compile_mps_shader("""')
         idx_vars = self.active_range_trees()
         with code.indent():
-            code.splice(
-                """
-            #include <c10/metal/atomic.h>
-            #include <c10/metal/random.h>
-            #include <c10/metal/special_math.h>
-            #include <c10/metal/utils.h>
-            """,
-                strip=True,
-            )
-            if self.inside_reduction:
-                code.writeline("#include <c10/metal/reduction_utils.h>")
+            for header in self.headers:
+                code.writeline(f"#include <c10/metal/{header}.h>")
             if self.inside_reduction:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
