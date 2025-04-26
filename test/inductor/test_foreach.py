@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+import unittest.mock as mock
 
 import torch
 import torch._inductor
@@ -1067,7 +1068,11 @@ class ForeachTests(TestCase):
             torch._inductor.exc.InductorError,
             "Buffer mutation detected during lowering of aten.add_.Tensor",
         ):
-            _ = run_fw_bw_and_get_code(lambda: torch.compile(fn)(*inps))
+            with mock.patch(
+                "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
+                True,
+            ):
+                _ = run_fw_bw_and_get_code(lambda: torch.compile(fn)(*inps))
 
     @requires_cuda
     @foreach_map_un_ops

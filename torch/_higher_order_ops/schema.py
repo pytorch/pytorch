@@ -19,7 +19,7 @@ class HopArgumentInfo:
     # Whether this arugment gets mutated in the hop subgraph.
     # For output, this should always be False
     is_mutated: bool
-    kw_only: bool = False
+    kw_only: bool
 
 
 class HopArgumentInfoGen:

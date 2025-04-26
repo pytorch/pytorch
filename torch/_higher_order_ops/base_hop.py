@@ -138,12 +138,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         from .schema import CFunctionSchemaGen, HopArgumentInfoGen
 
         if not isinstance(subgraph, torch.fx.GraphModule):
-            subgraph = materialize_as_graph(
-                subgraph,
-                operands,
-                include_key_set=torch._C._dispatch_tls_local_include_set(),
-                exclude_key_set=torch._C._dispatch_tls_local_exclude_set(),
-            )
+            subgraph = materialize_as_graph(subgraph, operands)
 
         assert isinstance(
             subgraph, torch.fx.GraphModule

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import unittest
+import unittest.mock as mock
 
 import torch
 import torch._dynamo.test_case
@@ -142,7 +143,11 @@ class GraphModule(torch.nn.Module):
         def f(x, y):
             return invoke_quant_test(inner, x, y, scheme="nf4")
 
-        torch.compile(f, backend=backend, fullgraph=True)(x.clone(), y)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
+            True,
+        ):
+            torch.compile(f, backend=backend, fullgraph=True)(x.clone(), y)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
             normalize_graph(backend.graphs[0]),
@@ -198,7 +203,12 @@ class GraphModule(torch.nn.Module):
         def f(x, y):
             return invoke_quant_test(inner, [x, y], scheme="nf4")
 
-        torch.compile(f, backend=bk, fullgraph=True)(x.clone(), y)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
+            True,
+        ):
+            torch.compile(f, backend=bk, fullgraph=True)(x.clone(), y)
+
         if backend == "eager":
             self.assertEqual(len(bk.graphs), 1)
             self.assertExpectedInline(
@@ -350,7 +360,11 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3, requires_grad=False)
         x_clone = x.clone()
         y = torch.randn(3, 3, requires_grad=True)
-        compiled_out = torch.compile(f, backend=backend, fullgraph=True)(x, y)
+        with mock.patch(
+            "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
+            True,
+        ):
+            compiled_out = torch.compile(f, backend=backend, fullgraph=True)(x, y)
         # assert x is not mutated
         self.assertEqual(x, x_clone)
         self.assertEqual(compiled_out, x + y + 1)
@@ -363,8 +377,9 @@ class GraphModule(torch.nn.Module):
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         _tree_spec_constant0 = self._tree_spec_constant0
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_quant_test, subgraph = auto_functionalized_subgraph_0, arg1 = primals_2, scheme = 'nf4', _arg0_base_index = 0, _all_bases = [primals_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = _tree_spec_constant0 = None
-        getitem: "f32[3, 3]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
-        return (getitem, primals_1, primals_2)
+        getitem: "f32[3, 3]" = auto_functionalized_v2[0]
+        getitem_1: "f32[3, 3]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        return (getitem, primals_1, primals_2, getitem_1)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
@@ -456,22 +471,21 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        x_clone = x.clone()
-        y_clone = y.clone()
 
         @torch.compile(backend="eager", fullgraph=True)
         def f(inner, x, y):
             return invoke_quant_test(inner, x, y, scheme="nf4")
 
-        compiled_f = torch.compile(f, backend="eager", fullgraph=True)
-
         with self.assertRaisesRegex(
             RuntimeError, "Encountered aliasing during higher order op tracing for HOP"
         ):
-            compiled_f(inner, x, y)
+            f(inner, x, y)
 
-        compiled_out = compiled_f(inner2, x, y)
-        self.assertEqual(compiled_out, f(inner2, x_clone, y_clone))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
+            f(inner2, x, y)
 
     def test_eager_call(self):
         def inner(x, y):
