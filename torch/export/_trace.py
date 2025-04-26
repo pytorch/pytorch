@@ -26,6 +26,7 @@ from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
     _NonStrictTorchFunctionHandler,
+    _override_builtin_ops,
     make_constraints,
     make_fake_inputs,
     produce_guards_and_solve_constraints,
@@ -90,6 +91,7 @@ from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
+from ._wrapper_utils import _WrapperModule
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -1299,15 +1301,6 @@ def _temp_disable_texpr_fuser():
         torch._C._jit_set_texpr_fuser_enabled(original_state)
 
 
-class _WrapperModule(torch.nn.Module):
-    def __init__(self, f):
-        super().__init__()
-        self.f = f
-
-    def forward(self, *args, **kwargs):
-        return self.f(*args, **kwargs)
-
-
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
     with _temp_disable_texpr_fuser():
         from torch.jit._trace import TopLevelTracedModule
@@ -1926,7 +1919,9 @@ def _non_strict_export(
             new_fake_kwargs,
             new_fake_constant_attrs,
             map_fake_to_real,
-        ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode):
+        ), _fakify_module_inputs(
+            fake_args, fake_kwargs, fake_mode
+        ), _override_builtin_ops():
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
                 new_fake_args,

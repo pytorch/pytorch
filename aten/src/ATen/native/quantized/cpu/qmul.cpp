@@ -277,6 +277,41 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   return out;
   }
 
+#if AT_MKLDNN_ENABLED()
+DEFINE_DISPATCH(qmul_tensor_cpu_stub);
+Tensor int8_mul_tensor_onednn(
+    const Tensor& self, double self_scale, int64_t self_zero_point,
+    const Tensor& other, double other_scale, int64_t other_zero_point,
+    double output_scale, int64_t output_zero_point, c10::ScalarType output_dtype) {
+  // Both inputs should have the same shape and both in uint8 dtype.
+  // If output_dtype is uint8, output is requantized with output scale/zero point.
+  // Otherwise, output scale should be 1 and zero point 0.
+  TORCH_CHECK(self.sizes() == other.sizes(),
+              "Quantized mul operands should have the same size.");
+  TORCH_CHECK(self.scalar_type() == at::kByte && other.scalar_type() == at::kByte,
+              "Quantized mul operands should be of type uint8, but got ",
+              self.scalar_type(), " and ", other.scalar_type());
+  TORCH_CHECK(output_dtype == at::kByte || output_dtype == at::kFloat || output_dtype == at::kBFloat16 || output_dtype == at::kHalf,
+              "Quantized mul output should be of type uint8, float, bfloat16 or float16, but got ",
+              output_dtype);
+  if (output_dtype != at::kByte) {
+    TORCH_CHECK(output_scale == 1.0 && output_zero_point == 0,
+                "Quantized mul output scale and zero point should be 1 and 0 for "
+                "output_dtype ", output_dtype, ", but got scale = ",
+                output_scale, " and zero point = ", output_zero_point);
+  }
+  at::Tensor out = at::empty_like(self, self.options().dtype(output_dtype));
+
+
+  qmul_tensor_cpu_stub(
+      self.device().type(), out, self, self_scale, self_zero_point,
+      other, other_scale, other_zero_point,
+      output_scale, output_zero_point);
+
+  return out;
+}
+#endif
+
 template <bool ReLUFused = false>
 class QMul final {
  public:
@@ -370,6 +405,24 @@ class QMulScalarTensorOut final {
   }
 };
 
+
+class QMulOnednn final {
+  public:
+  static Tensor run(
+    const Tensor self, double self_scale, int64_t self_zero_point,
+    const Tensor other, double other_scale, int64_t other_zero_point,
+    double output_scale, int64_t output_zero_point, c10::ScalarType output_dtype
+  ) {
+#if AT_MKLDNN_ENABLED()
+  return int8_mul_tensor_onednn(
+    self, self_scale, self_zero_point,
+    other, other_scale, other_zero_point,
+    output_scale, output_zero_point, output_dtype);
+#endif
+  TORCH_CHECK(false, "Unimplemented (int8 mul tensor with onednn)");
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::mul"),                 TORCH_FN(QMul</*ReLUFused=*/false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::mul.out"),             TORCH_FN(QMulOut</*ReLUFused=*/false>::run));
@@ -393,6 +446,10 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu.Tensor"), TORCH_FN(QMulScalarTensor</*ReLUFused=*/true>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_out.Tensor"), TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu_out.Tensor"), TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/true>::run));
+}
+
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qmul.tensor"), TORCH_FN(QMulOnednn::run));
 }
 
 }  // namespace
