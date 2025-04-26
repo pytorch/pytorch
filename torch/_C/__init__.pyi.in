@@ -1267,7 +1267,7 @@ def _should_allow_numbers_as_tensors(func_name: str) -> _bool: ...
 def _group_tensors_by_device_and_dtype(nested_tensorlists: List[List[Optional[Tensor]]], with_indices: _bool = False) -> Dict[Tuple[torch.device, torch.dtype], Tuple[List[List[Optional[Tensor]]], List[_int]]]: ...
 
 # NB: There is no Capsule type in typing, see
-# https://code.activestate.com/lists/python-dev/139675/
+# https://github.com/python/cpython/issues/109562
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _get_cpp_backtrace(

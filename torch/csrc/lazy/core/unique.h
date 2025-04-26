@@ -1,6 +1,6 @@
 /**
  * Unique in this file is adapted from PyTorch/XLA
- * https://github.com/pytorch/xla/blob/master/third_party/xla_client/unique.h
+ * https://github.com/pytorch/xla/blob/master/torch_xla
  */
 
 #pragma once
