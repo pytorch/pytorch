@@ -73,6 +73,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    TEST_MKL,
     TestCase,
     xfail_inherited_tests,
     xfailIfTorchDynamo,
@@ -6010,7 +6011,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod = torch.fx.GraphModule(tracer.root, graph)
 
         for node in mod.graph.nodes:
-            if node.op == "output":
+            if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert "test_aotdispatch.py" in node.stack_trace
@@ -6049,7 +6050,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod = torch.fx.GraphModule(tracer.root, graph)
 
         for node in mod.graph.nodes:
-            if node.op == "output":
+            if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert "test_aotdispatch.py" in node.stack_trace
@@ -6656,6 +6657,24 @@ aot_autograd_failures = {
     decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
+if not TEST_MKL:
+    aot_autograd_failures.update(
+        {
+            decorate(
+                "matmul",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "__rmatmul__",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+        }
+    )
+
 symbolic_aot_autograd_failures = {
     xfail("combinations", ""),  # aten.masked_select.default
     xfail(
@@ -7003,11 +7022,19 @@ class MockFXGraphCache:
         key, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
         if key not in self.cache:
             self.cache[key] = gm
-        gm, _ = self.load_with_key(key, [], inputs, None, None, None, None)
+        gm, _ = self.load_with_key(key, [], inputs, None, None, None, None, None)
         return gm
 
     def load_with_key(
-        self, key, debug_lines, inputs, local, remote_cache, is_backward, constants
+        self,
+        key,
+        debug_lines,
+        inputs,
+        local,
+        remote_cache,
+        is_backward,
+        constants,
+        evaluate_guards,
     ):
         gm = self.cache.get(key)
         if gm is not None:
