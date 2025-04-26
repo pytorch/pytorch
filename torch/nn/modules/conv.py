@@ -867,8 +867,8 @@ class ConvTranspose1d(_ConvTransposeNd):
     Note:
         ``padding='valid'`` is the same as no padding.
         ``padding='same'`` crops the output so that its shape matches the input.
-        Note that `padding='same'` only supports a stride of 1 and
-        requires `output_padding=0`.
+        Note that ``padding='same'`` only supports a stride of 1 and
+        requires ``output_padding=0``.
 
     Note:
         In some circumstances when using the CUDA backend with CuDNN, this operator
@@ -1049,8 +1049,8 @@ class ConvTranspose2d(_ConvTransposeNd):
     Note:
         ``padding='valid'`` is the same as no padding.
         ``padding='same'`` crops the output so that its shape matches the input.
-        Note that `padding='same'` only supports a stride of 1 and
-        requires `output_padding=0`.
+        Note that ``padding='same'`` only supports a stride of 1 and
+        requires ``output_padding=0``.
 
     Note:
         {cudnn_reproducibility_note}
@@ -1256,8 +1256,8 @@ class ConvTranspose3d(_ConvTransposeNd):
     Note:
         ``padding='valid'`` is the same as no padding.
         ``padding='same'`` crops the output so that its shape matches the input.
-        Note that `padding='same'` only supports a stride of 1 and
-        requires `output_padding=0`.
+        Note that ``padding='same'`` only supports a stride of 1 and
+        requires ``output_padding=0``.
 
     Note:
         {cudnn_reproducibility_note}
