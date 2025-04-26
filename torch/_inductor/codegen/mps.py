@@ -2,6 +2,7 @@
 # Just an early prototype that shows that one can compile elementwise ops into a Metal shader
 from __future__ import annotations
 
+import functools
 import itertools
 import logging
 import math
@@ -276,42 +277,6 @@ class MetalOverrides(OpOverrides):
         return f"metal::precise::cos({x})"
 
     @staticmethod
-    def i0(x: CSEVariable) -> str:
-        return f"c10::metal::i0({x})"
-
-    @staticmethod
-    def i0e(x: CSEVariable) -> str:
-        return f"c10::metal::i0e({x})"
-
-    @staticmethod
-    def i1(x: CSEVariable) -> str:
-        return f"c10::metal::i1({x})"
-
-    @staticmethod
-    def i1e(x: CSEVariable) -> str:
-        return f"c10::metal::i1e({x})"
-
-    @staticmethod
-    def erf(x: CSEVariable) -> str:
-        return f"c10::metal::erf({x})"
-
-    @staticmethod
-    def erfinv(x: CSEVariable) -> str:
-        return f"c10::metal::erfinv({x})"
-
-    @staticmethod
-    def lgamma(x: CSEVariable) -> str:
-        return f"c10::metal::log_gamma({x})"
-
-    @staticmethod
-    def polygamma(x: CSEVariable, y: CSEVariable) -> str:
-        return f"c10::metal::polygamma({x}, {y})"
-
-    @staticmethod
-    def digamma(x: CSEVariable) -> str:
-        return f"c10::metal::digamma({x})"
-
-    @staticmethod
     def tan(x: CSEVariable) -> str:
         return f"metal::tan({x})"
 
@@ -417,88 +382,67 @@ class MetalOverrides(OpOverrides):
         cast_b = f"static_cast<decltype({a}+{b})>({b})"
         return f"metal::pow({cast_a}, {cast_b})"
 
-    @staticmethod
-    def zeta(a: CSEVariable, b: CSEVariable) -> str:
-        return f"c10::metal::zeta({a}, {b})"
+    def _special_unary(self, a: CSEVariable, name: str) -> str:
+        V.kernel.headers.add("special_math")
+        return f"c10::metal::{name}({a})"
 
-    @staticmethod
-    def spherical_bessel_j0(x: CSEVariable) -> str:
-        return f"c10::metal::spherical_bessel_j0({x})"
+    def _special_binary(self, a: CSEVariable, b: CSEVariable, name: str) -> str:
+        V.kernel.headers.add("special_math")
+        return f"c10::metal::{name}({a}, {b})"
 
-    @staticmethod
-    def xlog1py(x: CSEVariable) -> str:
-        return f"c10::metal::xlog1py({x})"
+    @classmethod
+    def _initialize_special_ops(cls) -> None:
+        # Unary special ops
+        for name in [
+            "erf",
+            "erfinv",
+            "i0",
+            "i0e",
+            "i1",
+            "i1e",
+            "digamma",
+            "spherical_bessel_j0",
+        ]:
+            setattr(cls, name, functools.partialmethod(cls._special_unary, name=name))
 
-    @staticmethod
-    def entr(x: CSEVariable) -> str:
-        return f"c10::metal::entr({x})"
+        cls.lgamma = functools.partialmethod(cls._special_unary, name="log_gamma")
 
-    @staticmethod
-    def bessel_j0(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_j0_forward({x})"
+        # Unary special ops with forward in method name
+        for name in [
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+        ]:
+            setattr(cls, name, functools.partialmethod(cls._special_unary, name=name + "_forward"))
 
-    @staticmethod
-    def bessel_j1(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_j1_forward({x})"
+        # Binary special ops
+        for name in [
+            "polygamma",
+            "zeta",
+        ]:
+            setattr(cls, name, functools.partialmethod(cls._special_binary, name=name))
 
-    @staticmethod
-    def bessel_y0(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_y0_forward({x})"
-
-    @staticmethod
-    def bessel_y1(x: CSEVariable) -> str:
-        return f"c10::metal::bessel_y1_forward({x})"
-
-    @staticmethod
-    def modified_bessel_i0(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_i0_forward({x})"
-
-    @staticmethod
-    def modified_bessel_i1(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_i1_forward({x})"
-
-    @staticmethod
-    def modified_bessel_k0(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_k0_forward({x})"
-
-    @staticmethod
-    def modified_bessel_k1(x: CSEVariable) -> str:
-        return f"c10::metal::modified_bessel_k1_forward({x})"
-
-    @staticmethod
-    def scaled_modified_bessel_k0(x: CSEVariable) -> str:
-        return f"c10::metal::scaled_modified_bessel_k0_forward({x})"
-
-    @staticmethod
-    def scaled_modified_bessel_k1(x: CSEVariable) -> str:
-        return f"c10::metal::scaled_modified_bessel_k1_forward({x})"
-
-    @staticmethod
-    def chebyshev_polynomial_t(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_t_forward({x}, {n})"
-
-    @staticmethod
-    def chebyshev_polynomial_u(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_u_forward({x}, {n})"
-
-    @staticmethod
-    def chebyshev_polynomial_v(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_v_forward({x}, {n})"
-
-    @staticmethod
-    def chebyshev_polynomial_w(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_w_forward({x}, {n})"
-
-    @staticmethod
-    def hermite_polynomial_h(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::hermite_polynomial_h_forward({x}, {n})"
-
-    @staticmethod
-    def hermite_polynomial_he(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::hermite_polynomial_he_forward({x}, {n})"
+        # Binary special ops with forward in method name
+        for name in [
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_w",
+            "hermite_polynomial_h",
+            "hermite_polynomial_he",
+        ]:
+            setattr(cls, name, functools.partialmethod(cls._special_binary, name=name + "_forward"))
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")
+MetalOverrides._initialize_special_ops()
 
 
 class MetalKernel(SIMDKernel):
@@ -512,7 +456,7 @@ class MetalKernel(SIMDKernel):
     pexpr = PythonPrinter().doprint
     sexpr = MetalExprPrinter().doprint
     kexpr = sexpr
-    headers: OrderedSet[str] = OrderedSet(["special_math", "utils"])
+    headers: OrderedSet[str] = OrderedSet(["utils"])
 
     def __init__(
         self,
