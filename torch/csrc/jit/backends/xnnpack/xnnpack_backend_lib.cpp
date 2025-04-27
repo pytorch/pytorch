@@ -25,9 +25,8 @@ class XNNModelWrapper : public CustomClassHolder {
 class XNNPackBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  explicit XNNPackBackend() {}
-  virtual ~XNNPackBackend() override = default;
+  explicit XNNPackBackend() = default;
+  ~XNNPackBackend() override = default;
 
   bool is_available() override {
     return xnn_status_success == xnn_initialize(/*allocator=*/nullptr);
@@ -82,7 +81,7 @@ class XNNPackBackend : public PyTorchBackendInterface {
 
     std::vector<float*> input_pointers;
     for (int i = 0; i < inputs.size(); ++i) {
-      at::IValue val = inputs.get(i);
+      const at::IValue& val = inputs.get(i);
       TORCH_CHECK(val.isTensor(), "Non-tensor inputs not supported");
       input_pointers.push_back(val.toTensor().data_ptr<float>());
     }
