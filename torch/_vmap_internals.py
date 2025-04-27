@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
 from typing import Any, Callable, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_flatten, tree_unflatten
-from typing_extensions import deprecated
 
 
 in_dims_t = Union[int, tuple]
