@@ -1080,7 +1080,6 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     op(dst.data, dstOffset, dstNumel, &val);
   }
 }
-
 // Compare the stride between adjacent slices (sliceStride) with strides in the
 // other dimensions (i.e., strides *inside* each slice).
 //
@@ -1527,6 +1526,7 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
 // the number of indices chosen is small, then the
 // indexSelectSmallIndex kernel is a better choice to reduce memory
 // accesses.
+
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
           bool IndexIsMajor>
 __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
@@ -1539,9 +1539,14 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
                                       int64_t srcSelectDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < totalSize;
-       linearIndex += gridDim.x * blockDim.x) {
+  constexpr bool kPack4 = (sizeof(T) == 2);
+  constexpr int kElemsPerVec = kPack4 ? 4 : 1;
+
+  for (IndexType vecLinear = (blockIdx.x * blockDim.x + threadIdx.x) * kElemsPerVec;
+       vecLinear < totalSize;
+       vecLinear += gridDim.x * blockDim.x * kElemsPerVec) {
+
+    IndexType linearIndex = vecLinear;
     IndexType dstIndex, elementInSlice;
     if (IndexIsMajor) {
       dstIndex = linearIndex / innerSize;
@@ -1563,10 +1568,59 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
     IndexType srcOffset =
       cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcSelectDim];
+    // dst.data[dstOffset] = src.data[srcOffset];
+    if constexpr (kPack4) {
+      IndexType srcNextOffset = cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice + 1, src) + srcIndex * src.strides[srcSelectDim];
+      IndexType dstNextOffset = cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice + 1, dst) + dstIndex * dst.strides[dstSelectDim];
 
-    dst.data[dstOffset] = src.data[srcOffset];
+      bool inner_contiguous = (srcNextOffset - srcOffset == 1) && (dstNextOffset - dstOffset == 1);
+      bool slic_has_4 = (elementInSlice + 3 < innerSize);
+      bool aligned = (((uintptr_t)(dst.data + dstOffset) & 7)==0) && (((uintptr_t)(src.data + srcOffset) & 7)==0);
+
+      bool can_vectorize = IndexIsMajor && inner_contiguous && slic_has_4 && aligned;
+      #if defined(__CUDA_ARCH__)
+        bool warp_fast = __all_sync(0xffffffffu, can_vectorize);
+      #elif defined(__HIP_DEVICE_COMPILE__)
+        unsigned long long mask = __ballot(can_vectorize);
+        bool warp_fast = (mask == 0xffffffff);
+      #else
+        bool warp_fast = can_vectorize;
+      #endif
+
+      if (warp_fast) {
+        uint64_t tmp;
+        memcpy(&tmp, src.data + srcOffset, 8);
+        memcpy(dst.data + dstOffset, &tmp, 8);
+      } else {
+      #pragma unroll
+      for (int i = 0; i < kElemsPerVec; ++i) {
+        IndexType li = linearIndex + i;
+        if (li >= totalSize) break;
+
+        IndexType dstIndex2, elem2;
+        if (IndexIsMajor) {
+          dstIndex2 = li / innerSize;
+          elem2 = li % innerSize;
+        } else {
+          elem2 = li / innerSize;
+          dstIndex2 = li % innerSize;
+        }
+
+        IndexType srcIndex2 = indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(dstIndex2, indices)];
+        CUDA_KERNEL_ASSERT(srcIndex2 < srcSelectDimSize);
+
+        IndexType dstOffset2 = cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elem2, dst) + dstIndex2 * dst.strides[dstSelectDim];
+        IndexType srcOffset2 = cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elem2, src) + srcIndex2 * src.strides[srcSelectDim];
+        dst.data[dstOffset2] = src.data[srcOffset2];
+        }
+      }
+    }
+    else {
+      dst.data[dstOffset] = src.data[srcOffset];
+    }
   }
 }
+
 
 namespace {
 
@@ -1622,6 +1676,7 @@ void index_select_out_cuda_impl(
 
   bool indContig = index.is_contiguous();
 
+
   // The `self` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
   // total size of the tensor ignoring dimension `dim`;
@@ -1676,6 +1731,7 @@ void index_select_out_cuda_impl(
       auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<const index_t, unsigned int>(index));
       indicesInfo.collapseDims();
 
+      // bool indexIsMajor = indexShouldBeMajor(outInfo, outSelectDim);
       // A reasonable choice for when to have each thread iterate over
       // indices to choose
       if (numIndices <= 16) {
@@ -1706,7 +1762,13 @@ void index_select_out_cuda_impl(
             LARGE_INDEX(scalar_t, index_t, unsigned int, 3, 3, -2, false);
           }
         } else {
-          LARGE_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1, true);
+
+          if (indexIsMajor) {
+            LARGE_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1, true);
+          } else {
+            LARGE_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1, false);
+          }
+
         }
       }
     });
