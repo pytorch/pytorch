@@ -80,5 +80,4 @@ for pid in "${pids[@]}"; do
   fi
 done
 
-echo "DEBUG: final status=$status" >&2
 exit $status
