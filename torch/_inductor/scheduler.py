@@ -4560,7 +4560,7 @@ class Scheduler:
                     )
                     return False
             except CompilationError as e:
-                # workaround triton issue: https://github.com/openai/triton/issues/2151
+                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
                 if "Loop-carried variable" in str(e):
                     fusion_log.debug(
                         "ComboKernel benchmark: return True because of loop-carried variable"
@@ -4574,7 +4574,7 @@ class Scheduler:
         try:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
-            # workaround triton issue: https://github.com/openai/triton/issues/2151
+            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
             if "Loop-carried variable" in str(e):
                 fusion_log.debug(
                     "ComboKernel benchmark: return True because of loop-carried variable"
