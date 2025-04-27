@@ -1016,7 +1016,13 @@ class TestFlexDecoding(InductorTestCase):
             return kv >= q + offset_tensor
 
         block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S, device=device)
-        self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask, score_mod=score_mod)
+        self.run_test(
+            Q_S=Q_S,
+            KV_S=KV_S,
+            block_mask=block_mask,
+            score_mod=score_mod,
+            device=device,
+        )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
