@@ -494,9 +494,9 @@ class RingFlexAttentionTest(DTensorTestBase):
             device=self.device_type,
         )
 
-        out = flex_attention(q, k, v, block_mask=block_mask)
+        expect_out = flex_attention(q, k, v, block_mask=block_mask)
 
-        expect_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
 
         torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
 
@@ -522,14 +522,22 @@ class RingFlexAttentionTest(DTensorTestBase):
             KV_LEN=k_local.size(2),
             device=self.device_type,
         )
+        cp_q = q.detach().clone()
+        cp_k = k.detach().clone()
+        cp_v = v.detach().clone()
         # NOTE: flex_attention checks block_mask shape and input shape before
         # calling into flex_attention_hop.
-        with ContextParallelMode(
-            device_mesh, block_mask, sharder=FlexAttentionContiguousSharder()
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.TORCH_DISPATCH
+        )
+        with context_parallel(
+            device_mesh,
+            buffers=(cp_q, cp_k, cp_v),
+            buffer_seq_dims=(2, 2, 2),
+            block_mask=block_mask,
+            sharder=FlexAttentionContiguousSharder(),
         ):
-            out = flex_attention(
-                q_local, k_local, v_local, block_mask=block_mask_post_sharding
-            )
+            out = flex_attention(cp_q, cp_k, cp_v, block_mask=block_mask_post_sharding)
 
         # all-gather the output
         assert isinstance(out, torch.Tensor)
