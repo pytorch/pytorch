@@ -314,6 +314,8 @@ class AsyncCompile:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # Set reload_kernel_from_src properly based on source_code
             if isinstance(future, StaticAutotunerFuture):
+                # Remove the future now that we've cache hit
+                CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
             if is_parallel:
                 return future
