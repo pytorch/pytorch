@@ -7,11 +7,11 @@ from collections.abc import Iterator
 import logging
 import contextlib
 import itertools
+from torch.utils._dtype_abbrs import dtype_abbrs as _dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.weak import WeakTensorKeyDictionary
 import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
-from torch._utils import dtype_abbrs as _dtype_abbrs
 
 logger = logging.getLogger("LoggingTensor")
 
