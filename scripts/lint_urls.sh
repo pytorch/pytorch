@@ -24,10 +24,14 @@ while IFS=: read -r filepath url; do
         "https://check-host.net/check-http?host=$url&max_nodes=1&node=us3.node.check-host.net" \
         | jq -r .request_id)
       for _ in {1..3}; do
-        code=$(curl -sS -H 'Accept: application/json' \
+        new_code=$(curl -sS -H 'Accept: application/json' \
           "https://check-host.net/check-result/$request_id" \
-          | jq -r -e '.[][0][3]') || code=000
-        [[ "$code" =~ ^[0-9]+$ ]] || code=000
+          | jq -r -e '.[][0][3]') || new_code=000
+        [[ "$new_code" =~ ^[0-9]+$ ]] || new_code=000
+        if [ "$new_code" -ge 200 ] && [ "$new_code" -lt 400 ]; then
+          code=$new_code
+          break
+        fi
         sleep 3
       done
     fi
@@ -62,7 +66,7 @@ done < <(
   || true
 )
 for pid in "${pids[@]}"; do
-  if ! wait $pid; then
+  if ! wait "$pid" 2>/dev/null; then
     status=1
   fi
 done
