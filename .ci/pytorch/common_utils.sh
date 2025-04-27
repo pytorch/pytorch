@@ -81,14 +81,15 @@ function pip_install_whl() {
 
 function pip_install() {
   # retry 3 times
-  # old versions of pip don't have the "--progress-bar" flag
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
-  pip install "$@" || pip install "$@" || pip install "$@"
+  pip_install_pkg="python3 -m pip install --progress-bar off"
+  ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@"
 }
 
 function pip_uninstall() {
   # uninstall 2 times
-  pip uninstall -y "$@" || pip uninstall -y "$@"
+  pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
 function get_exit_code() {
@@ -104,30 +105,10 @@ function get_bazel() {
   # version of Bazelisk to fetch the platform specific version of
   # Bazel to use from .bazelversion.
   retry curl --location --output tools/bazel \
-    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py
+    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.23.0/bazelisk.py
   shasum --algorithm=1 --check \
-    <(echo 'd4369c3d293814d3188019c9f7527a948972d9f8  tools/bazel')
+    <(echo '01df9cf7f08dd80d83979ed0d0666a99349ae93c  tools/bazel')
   chmod u+x tools/bazel
-}
-
-# This function is bazel specific because of the bug
-# in the bazel that requires some special paths massaging
-# as a workaround. See
-# https://github.com/bazelbuild/bazel/issues/10167
-function install_sccache_nvcc_for_bazel() {
-  sudo mv /usr/local/cuda/bin/nvcc /usr/local/cuda/bin/nvcc-real
-
-  # Write the `/usr/local/cuda/bin/nvcc`
-  cat << EOF | sudo tee /usr/local/cuda/bin/nvcc
-#!/bin/sh
-if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
-  exec sccache /usr/local/cuda/bin/nvcc "\$@"
-else
-  exec external/local_cuda/cuda/bin/nvcc-real "\$@"
-fi
-EOF
-
-  sudo chmod +x /usr/local/cuda/bin/nvcc
 }
 
 function install_monkeytype {
@@ -179,7 +160,7 @@ function install_torchvision() {
 }
 
 function install_tlparse() {
-  pip_install --user "tlparse==0.3.25"
+  pip_install --user "tlparse==0.3.30"
   PATH="$(python -m site --user-base)/bin:$PATH"
 }
 
@@ -188,12 +169,35 @@ function install_torchrec_and_fbgemm() {
   torchrec_commit=$(get_pinned_commit torchrec)
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
+  fi
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
-  # See https://github.com/pytorch/pytorch/issues/106971
-  CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_uninstall fbgemm-gpu-nightly
+
+    pip_install tabulate  # needed for newer fbgemm
+    pip_install patchelf  # needed for rocm fbgemm
+    git clone --recursive https://github.com/pytorch/fbgemm
+    pushd fbgemm/fbgemm_gpu
+    git checkout "${fbgemm_commit}"
+    python setup.py install \
+      --package_variant=rocm \
+      -DHIP_ROOT_DIR="${ROCM_PATH}" \
+      -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
+      -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+    popd
+    rm -rf fbgemm
+  else
+    # See https://github.com/pytorch/pytorch/issues/106971
+    CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+  fi
 }
 
 function clone_pytorch_xla() {
@@ -222,9 +226,20 @@ function checkout_install_torchbench() {
     # to install and test other models
     python install.py --continue_on_fail
   fi
+
+  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
+  # is regressing speedup metric. This needs to be investigated further
+  pip install transformers==4.38.1
+
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd
+}
+
+function install_torchao() {
+  local commit
+  commit=$(get_pinned_commit torchao)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/ao.git@${commit}"
 }
 
 function print_sccache_stats() {

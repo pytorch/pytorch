@@ -6,7 +6,7 @@
 # return the same thing, ex checks for for rocm, CUDA, and changing the path
 # where sccache is installed, and not changing /etc/environment.
 
-set -ex
+set -ex -o pipefail
 
 install_binary() {
   echo "Downloading sccache binary from S3 repo"
