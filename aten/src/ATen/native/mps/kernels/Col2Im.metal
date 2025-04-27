@@ -6,26 +6,23 @@ kernel void col2im_kernel(
     device const T* data_col [[buffer(0)]],
     device T* data_im [[buffer(1)]],
     constant uint& col_batch_stride [[buffer(2)]],
-    constant uint& nbatch [[buffer(3)]],
-    constant uint& channels [[buffer(4)]],
-    constant uint& height [[buffer(5)]],
-    constant uint& width [[buffer(6)]],
-    constant uint& kernel_h [[buffer(7)]],
-    constant uint& kernel_w [[buffer(8)]],
-    constant uint& pad_h [[buffer(9)]],
-    constant uint& pad_w [[buffer(10)]],
-    constant uint& stride_h [[buffer(11)]],
-    constant uint& stride_w [[buffer(12)]],
-    constant uint& dilation_h [[buffer(13)]],
-    constant uint& dilation_w [[buffer(14)]],
-    constant uint& height_col [[buffer(15)]],
-    constant uint& width_col [[buffer(16)]],
-    constant uint& im_batch_stride [[buffer(17)]],
+    constant uint& channels [[buffer(3)]],
+    constant uint& height [[buffer(4)]],
+    constant uint& width [[buffer(5)]],
+    constant uint& kernel_h [[buffer(6)]],
+    constant uint& kernel_w [[buffer(7)]],
+    constant uint& pad_h [[buffer(8)]],
+    constant uint& pad_w [[buffer(9)]],
+    constant uint& stride_h [[buffer(10)]],
+    constant uint& stride_w [[buffer(11)]],
+    constant uint& dilation_h [[buffer(12)]],
+    constant uint& dilation_w [[buffer(13)]],
+    constant uint& height_col [[buffer(14)]],
+    constant uint& width_col [[buffer(15)]],
+    constant uint& im_batch_stride [[buffer(16)]],
     uint gid [[thread_position_in_grid]]) {
   uint n = channels * height * width;
-  if (gid >= nbatch * n)
-    return;
-  uint ibatch = gid / n;
+  uint batch_idx = gid / n;
   uint index = gid % n;
 
   uint w_im = (index % width) + pad_w;
@@ -43,12 +40,12 @@ kernel void col2im_kernel(
   uint h_col_end = min((h_im / stride_h + 1), height_col);
 
   float accumulator = 0.0;
-  uint col_batch_offset = ibatch * col_batch_stride;
+  uint col_batch_offset = batch_idx * col_batch_stride;
 
   for (uint h_col = h_col_start; h_col < h_col_end; h_col++) {
     for (uint w_col = w_col_start; w_col < w_col_end; w_col++) {
-      int h_k = h_im - (h_col * stride_h);
-      int w_k = w_im - (w_col * stride_w);
+      uint h_k = h_im - (h_col * stride_h);
+      uint w_k = w_im - (w_col * stride_w);
 
       if (h_k % dilation_h == 0 && w_k % dilation_w == 0) {
         h_k /= dilation_h;
@@ -66,7 +63,7 @@ kernel void col2im_kernel(
     }
   }
 
-  uint im_batch_offset = ibatch * im_batch_stride;
+  uint im_batch_offset = batch_idx * im_batch_stride;
   data_im[im_batch_offset + index] = static_cast<T>(accumulator);
 }
 
@@ -76,21 +73,20 @@ kernel void col2im_kernel(
       device const DTYPE* data_col [[buffer(0)]],             \
       device DTYPE* data_im [[buffer(1)]],                    \
       constant uint& col_batch_stride [[buffer(2)]],          \
-      constant uint& batch [[buffer(3)]],                     \
-      constant uint& channels [[buffer(4)]],                  \
-      constant uint& height [[buffer(5)]],                    \
-      constant uint& width [[buffer(6)]],                     \
-      constant uint& kernel_h [[buffer(7)]],                  \
-      constant uint& kernel_w [[buffer(8)]],                  \
-      constant uint& pad_h [[buffer(9)]],                     \
-      constant uint& pad_w [[buffer(10)]],                    \
-      constant uint& stride_h [[buffer(11)]],                 \
-      constant uint& stride_w [[buffer(12)]],                 \
-      constant uint& dilation_h [[buffer(13)]],               \
-      constant uint& dilation_w [[buffer(14)]],               \
-      constant uint& height_col [[buffer(15)]],               \
-      constant uint& width_col [[buffer(16)]],                \
-      constant uint& im_batch_stride [[buffer(17)]],          \
+      constant uint& channels [[buffer(3)]],                  \
+      constant uint& height [[buffer(4)]],                    \
+      constant uint& width [[buffer(5)]],                     \
+      constant uint& kernel_h [[buffer(6)]],                  \
+      constant uint& kernel_w [[buffer(7)]],                  \
+      constant uint& pad_h [[buffer(8)]],                     \
+      constant uint& pad_w [[buffer(9)]],                     \
+      constant uint& stride_h [[buffer(10)]],                 \
+      constant uint& stride_w [[buffer(11)]],                 \
+      constant uint& dilation_h [[buffer(12)]],               \
+      constant uint& dilation_w [[buffer(13)]],               \
+      constant uint& height_col [[buffer(14)]],               \
+      constant uint& width_col [[buffer(15)]],                \
+      constant uint& im_batch_stride [[buffer(16)]],          \
       uint gid [[thread_position_in_grid]]);
 
 INSTANTIATE_COL2IM(bool);

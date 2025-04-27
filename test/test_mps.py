@@ -5606,8 +5606,10 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(helper(x_cpu), helper(x))
 
     def test_col2im(self):
-        def helper(shapes, output_size, kernel_size, padding, stride, contiguous):
-            x_cpu = torch.rand(*shapes)
+        def helper(shapes, output_size, kernel_size, padding, stride, contiguous, dtype=torch.float32, test_bool=False):
+            x_cpu = torch.rand(*shapes, dtype=dtype)
+            if test_bool:
+                x_cpu = x_cpu > 0.5
             x_mps = x_cpu.clone().to('mps')
             if not contiguous:
                 x_cpu = x_cpu.mT
@@ -5642,6 +5644,9 @@ class TestMPS(TestCaseMPS):
         helper((4, 15, 1600), (40, 40), (3, 5), (1, 2), (1, 1), True)
         helper((4, 45, 187), (35, 33), (3, 5), (0, 1), (2, 3), True)
         helper((1600, 15), (40, 40), (3, 5), (1, 2), (1, 1), False)
+        helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.bfloat16)
+        helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
+        helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
 
     def test_select(self):
         def helper(n, c):
