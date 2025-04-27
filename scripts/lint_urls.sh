@@ -73,9 +73,7 @@ done < <(
 )
 
 for pid in "${pids[@]}"; do
-  if ! wait "$pid" 2>/dev/null; then
-    status=1
-  fi
+  wait "$pid" 2>/dev/null || ([ $? -eq 1 ] && status=1)
 done
 
 exit $status
