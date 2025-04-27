@@ -389,16 +389,27 @@ test_inductor_shard() {
   fi
 
   python tools/dynamo/verify_dynamo.py
-  python test/run_test.py --inductor \
-    --include test_modules test_ops test_ops_gradients test_torch \
-    --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
 
-  # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
-    --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
+  if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+    python test/run_test.py \
+      --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
+                inductor/test_codecache.py inductor/test_kernel_benchmark.py inductor/test_max_autotune.py \
+                inductor/test_mkldnn_pattern_matcher.py inductor/test_triton_kernels.py \
+                inductor/test_compile_subprocess.py inductor/test_compiled_optimizers.py inductor/test_compiled_autograd.py \
+      --shard "$1" "$NUM_TEST_SHARDS" \
+      --verbose
+  else
+    python test/run_test.py --inductor \
+      --include test_modules test_ops test_ops_gradients test_torch \
+      --shard "$1" "$NUM_TEST_SHARDS" \
+      --verbose
+
+    # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
+    python test/run_test.py \
+      --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor \
+      --shard "$1" "$NUM_TEST_SHARDS" \
+      --verbose
+  fi
 }
 
 test_inductor_aoti() {
@@ -1672,7 +1683,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build ]]; then
+    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build && "${BUILD_ENVIRONMENT}" != *xpu* ]]; then
       test_inductor_distributed
     fi
   fi
