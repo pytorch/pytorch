@@ -1333,6 +1333,11 @@ class _InProcessFxCompile(FxCompile):
                                     additional_files=[
                                         *dict.fromkeys(
                                             graph.wrapper_code.additional_files
+                                            + (
+                                                const_graph.wrapper_code.additional_files
+                                                if const_graph
+                                                else []
+                                            )
                                         )
                                     ],
                                 )

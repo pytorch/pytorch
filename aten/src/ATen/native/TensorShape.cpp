@@ -572,7 +572,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   // }
 
   // Then define for each sparse dim the number of reps for each nnz index/value
-  // due to broadcasting. Repetitions do not take into accout the current value
+  // due to broadcasting. Repetitions do not take into account the current value
   // of nnz - this will be taken care of later {
   auto nnz_repeats = c10::DimVector(res_sparse_dim);
   nnz_repeats.back() = res_sparse_dim_broadcast_mask.back();
@@ -3601,7 +3601,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   // in-place operations. For other sparse formats, the in-place
   // transpose would not be possible without shuffling the specified
   // values. So we don't support this as it would defeat the purpose
-  // of in-place opreations of being memory-efficient.
+  // of in-place operations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
