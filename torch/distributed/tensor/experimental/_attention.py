@@ -28,6 +28,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
 )
+from torch.overrides import TorchFunctionMode
 
 
 __all__ = ["context_parallel", "set_rotate_method"]
@@ -46,6 +47,15 @@ class _RotateMethod(Enum):
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+
+class _DispatchMode(Enum):
+    MONKEY_PATCH = auto()
+    TORCH_FUNCTION = auto()
+    TORCH_DISPATCH = auto()
+
+
+_dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
 
 
 @dataclass
@@ -1145,7 +1155,12 @@ class _AttentionContextParallel(ParallelStyle):
 
 
 @contextlib.contextmanager
-def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
+def _context_parallel(
+    seq_dim: int,
+    mesh: DeviceMesh,
+    block_mask: Optional[BlockMask] = None,
+    sharder: Optional[FlexAttentionSharder] = None,
+) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
 
     def attention_input_fn(
@@ -1175,22 +1190,62 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
         return tuple(new_outputs)
 
-    # TODO: provide a more robust way to replace SDPA.
-    # Currently we use monkey patch to replace scaled_dot_product_attention with the
-    # wrapped fn. This is okay if users do `import torch.nn.functional` but will not
-    # work if users do `import torch.nn.functional.scaled_dot_product_attention`.
-    _distribute_function(
-        F.scaled_dot_product_attention,
-        F,
-        mesh,
-        attention_input_fn,
-        attention_output_fn,
-    )
+    class DistributeFunction(TorchFunctionMode):
+        def __init__(
+            self,
+            fn: Callable,
+            device_mesh: DeviceMesh,
+            input_fn: Optional[Callable] = None,
+            output_fn: Optional[Callable] = None,
+        ):
+            self._device_mesh = device_mesh
+            self._input_fn = input_fn
+            self._output_fn = output_fn
+            self._fn = fn
 
-    with _enable_cp_dispatcher():
-        yield
+        def __torch_function__(
+            self,
+            func: Callable,
+            types: Any,
+            args: tuple[Any, ...] = (),
+            kwargs: Optional[dict[str, Any]] = None,
+        ) -> Any:
+            kwargs = kwargs or {}
 
-    _restore_function(F.scaled_dot_product_attention, F)
+            if func != self._fn:
+                return func(*args, **kwargs)
+
+            if self._input_fn is not None:
+                args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
+            output = func(*args, **kwargs)
+            if self._output_fn is not None:
+                output = self._output_fn(self._device_mesh, output)
+            return output
+
+    if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
+        _distribute_function(
+            F.scaled_dot_product_attention,
+            F,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
+        )
+        with _enable_cp_dispatcher():
+            yield
+        _restore_function(F.scaled_dot_product_attention, F)
+    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
+        with DistributeFunction(
+            F.scaled_dot_product_attention,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
+        ):
+            with _enable_cp_dispatcher():
+                yield
+    else:
+        with ContextParallelMode(mesh, block_mask, sharder):
+            with _enable_cp_dispatcher():
+                yield
 
 
 class _LoadBalancer(ABC):
@@ -1246,9 +1301,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -1262,9 +1317,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert cls.ROUND_ROBIN_CYCLE == 2, (
-            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
-        )
+        assert (
+            cls.ROUND_ROBIN_CYCLE == 2
+        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
 
@@ -1306,6 +1361,8 @@ def context_parallel(
     buffers: Optional[list[torch.Tensor]] = None,
     buffer_seq_dims: Optional[list[int]] = None,
     no_restore_buffers: Optional[set[torch.Tensor]] = None,
+    block_mask: Optional[BlockMask] = None,
+    sharder: Optional[FlexAttentionSharder] = None,
 ) -> Generator[None, None, None]:
     """
 
@@ -1357,7 +1414,9 @@ def context_parallel(
         buffer.resize_(chunk.shape)
         buffer.copy_(chunk)
 
-    with _context_parallel(seq_dim=2, mesh=mesh):
+    with _context_parallel(
+        seq_dim=2, mesh=mesh, block_mask=block_mask, sharder=sharder
+    ):
         yield
 
     for buffer, original_buffer in zip(buffers, original_buffers):
@@ -1499,10 +1558,18 @@ class ContextParallelMode(TorchDispatchMode):
     def __init__(
         self,
         device_mesh: DeviceMesh,
-        block_mask: BlockMask,
-        sharder: FlexAttentionSharder,
+        block_mask: Optional[BlockMask] = None,
+        sharder: Optional[FlexAttentionSharder] = None,
     ):
         super().__init__()
+        self._device_mesh = device_mesh
+
+        # if user has not specified the flex_attention components
+        if block_mask is None or sharder is None:
+            self._cp_block_mask = None
+            self._sharder = None
+            self._sharding_map = torch.empty(0)
+            return
 
         block_mask_tuple = block_mask.as_tuple()
         assert len(block_mask_tuple) == 13
@@ -1541,7 +1608,6 @@ class ContextParallelMode(TorchDispatchMode):
             BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
         )
 
-        self._device_mesh = device_mesh
         self._sharder = sharder
         self._sharding_map = sharding_map
         self._cp_block_mask = cp_block_mask
@@ -1608,6 +1674,12 @@ def cp_flex_attention_dispatch_mode(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    cp_block_mask = mode._cp_block_mask
+    assert cp_block_mask is not None, (
+        "flex_attention is called but cp_block_mask is not initialized. "
+        "Please pass the `block_mask` argument to `context_parallel`."
+    )
+
     sharding = Shard(2)
     k_dist = DTensor.from_local(key, mode._device_mesh, [sharding])
     v_dist = DTensor.from_local(value, mode._device_mesh, [sharding])
@@ -1616,14 +1688,17 @@ def cp_flex_attention_dispatch_mode(
 
     # TODO: add kv reorder
     sharding_map = mode._sharding_map
-    assert sharding_map is not None
+    assert sharding_map is not None, (
+        "flex_attention is called but sharding_map is not initialized. "
+        "Please pass the `sharder` argument to `context_parallel`."
+    )
 
     out, lse = flex_attention_hop(
         query,
         k_global,
         v_global,
         score_mod=score_mod,  # TODO: rewrite score_mod for cp
-        block_mask=mode._cp_block_mask.as_tuple(),
+        block_mask=cp_block_mask.as_tuple(),
         scale=scale,
         kernel_options=kernel_options,
         score_mod_other_buffers=score_mod_other_buffers,

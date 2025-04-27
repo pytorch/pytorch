@@ -6,10 +6,14 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._tensor.experimental._attention import (
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Shard
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental._attention import (
     _AttentionContextParallel,
     _CausalBehavior,
     _cp_options,
+    _DispatchMode,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
@@ -18,9 +22,6 @@ from torch.distributed._tensor.experimental._attention import (
     FlexAttentionContiguousSharder,
     set_rotate_method,
 )
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Shard
-from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
@@ -79,6 +80,10 @@ class RingAttentionTest(DTensorTestBase):
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
+                "dispatch_mode": [
+                    _DispatchMode.MONKEY_PATCH,
+                    _DispatchMode.TORCH_FUNCTION,
+                ],
             },
             self._test_ring_attention_sdpa,
         )
@@ -91,7 +96,10 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
         test_forward_only: bool,
+        dispatch_mode: _DispatchMode,
     ) -> None:
+        torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
+
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
                 with torch.no_grad():
@@ -222,6 +230,10 @@ class RingAttentionTest(DTensorTestBase):
             cp_q.requires_grad = False
             cp_k.requires_grad = False
             cp_v.requires_grad = False
+
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.MONKEY_PATCH
+        )
 
     def test_is_causal_behavior(self) -> None:
         _cp_options.enable_load_balance = False
