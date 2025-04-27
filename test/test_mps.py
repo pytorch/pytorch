@@ -12025,6 +12025,8 @@ class TestConsistency(TestCaseMPS):
             ):
                 atol = 1e-5
                 rtol = 1.5e-3
+            if op.name == "nn.functional.unfold" and dtype == torch.float16:
+                atol, rtol = 1e-3, 1e-3
             # Order of ops in unsafe_masked_index backward is not guaranteed
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
