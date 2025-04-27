@@ -764,16 +764,15 @@ def check_input_alias_and_mutation_return_ouputs(
                 shape_env=_get_shape_env(fake_args),
                 allow_non_fake_inputs=False,
             )
-            assert new_fake_mode.shape_env is not None  # to make linter happy
-            ignore_unbacked_ctx = (
-                new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            )
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             no_inference_mode_ctx = torch.inference_mode(False)
             ctx_stack.enter_context(new_fake_mode)
-            ctx_stack.enter_context(ignore_unbacked_ctx)
             ctx_stack.enter_context(no_inference_mode_ctx)
+            if new_fake_mode.shape_env is not None:
+                ctx_stack.enter_context(
+                    new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                )
 
             # create new fake tensors in new fake mode to avoid mutating original tensors
             cloned = [
