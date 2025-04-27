@@ -7,10 +7,7 @@
 #include <caffe2/torch/csrc/jit/backends/xnnpack/compiler/xnn_compiler.h>
 #include <torch/csrc/jit/backends/xnnpack/serialization/schema_generated.h>
 
-namespace torch {
-namespace jit {
-namespace xnnpack {
-namespace delegate {
+namespace torch::jit::xnnpack::delegate {
 
 class XNNModelWrapper : public CustomClassHolder {
  public:
@@ -80,8 +77,8 @@ class XNNPackBackend : public PyTorchBackendInterface {
     XNNExecutor& executor = model_wrapper->executor_;
 
     std::vector<float*> input_pointers;
-    for (int i = 0; i < inputs.size(); ++i) {
-      const at::IValue& val = inputs.get(i);
+    input_pointers.reserve(inputs.size());
+    for (const at::IValue& val : inputs) {
       TORCH_CHECK(val.isTensor(), "Non-tensor inputs not supported");
       input_pointers.push_back(val.toTensor().data_ptr<float>());
     }
@@ -89,8 +86,8 @@ class XNNPackBackend : public PyTorchBackendInterface {
     std::vector<at::Tensor> output_tensors;
     std::vector<float*> output_pointers;
     output_tensors.reserve(output_shapes.size());
-    for (int i = 0; i < output_shapes.size(); i++) {
-      auto o_shape = output_shapes.get(i).toIntVector();
+    for (const at::IValue& val : output_shapes) {
+      auto o_shape = val.toIntVector();
       auto output = at::empty(o_shape, c10::ScalarType::Float);
       output_tensors.push_back(output);
       output_pointers.push_back(output.data_ptr<float>());
@@ -111,7 +108,4 @@ constexpr auto backend_name = "xnnpack";
 static auto cls = torch::jit::backend<XNNPackBackend>(backend_name);
 } // namespace
 
-} // namespace delegate
-} // namespace xnnpack
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::xnnpack::delegate

@@ -12,8 +12,8 @@ size_t ComputeEditDistance(
     const char* word1,
     const char* word2,
     size_t maxEditDistance) {
-  size_t m = strlen(word1);
-  size_t n = strlen(word2);
+  size_t m = std::strlen(word1);
+  size_t n = std::strlen(word2);
 
   const unsigned small_buffer_size = 64;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)

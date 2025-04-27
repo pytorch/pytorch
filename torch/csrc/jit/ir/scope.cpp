@@ -89,9 +89,9 @@ std::string Scope::namesFromRoot(const std::string& separator) const {
     return out;
   }
   ScopePtr parent = this->parent_;
-  auto suffix = separator + out;
   while (!parent->isRoot()) {
-    out = std::string(parent->name_.toUnqualString()) + suffix;
+    // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+    out = std::string(parent->name_.toUnqualString()) + separator + out;
     parent = parent->parent_;
   }
   return out;
