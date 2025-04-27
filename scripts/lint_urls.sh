@@ -5,7 +5,7 @@ set -euo pipefail
 status=0
 green='\e[1;32m'; red='\e[1;31m'; cyan='\e[1;36m'; yellow='\e[1;33m'; reset='\e[0m'
 user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
-max_jobs=10
+max_jobs=5
 pids=()
 
 running_jobs() {
@@ -45,7 +45,7 @@ while IFS=: read -r filepath url; do
   ) &
   pids+=($!)
   while [ "$(running_jobs)" -ge "$max_jobs" ]; do
-    sleep 0.1
+    sleep 3
   done
 done < <(
   git --no-pager grep --no-color -I -P -o \
