@@ -27,7 +27,7 @@ void reset_buffers() {
   }
 }
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && !defined(_WIN32)
 TEST(TestLoops, HasSameArgTypes) {
   // This is a compile-time unit test. If this file compiles without error,
   // then the test passes and during runtime, we just need to return.

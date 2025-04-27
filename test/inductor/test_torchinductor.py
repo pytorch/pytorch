@@ -1728,7 +1728,7 @@ class CommonTemplate:
                 pass  # no device asserts in halide
             # TODO: remove once https://github.com/pytorch/pytorch/issues/144634
             # is fixed.
-            if is_mps_backend(self.device):
+            elif is_mps_backend(self.device):
                 pass  # no device asserts in MPS
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
@@ -2538,10 +2538,14 @@ class CommonTemplate:
         for i in inps:
             self.common(fn, (i,), check_lowp=False)
 
-    @xfail_if_mps
     def test_sum_dtype(self):
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("bfloat unsupported on MacOS-13")
+
+        sum_dtype = torch.double if self.device != "mps" else torch.bfloat16
+
         def fn(x):
-            return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
+            return x * x.sum(-1, dtype=sum_dtype) + x.sum(dtype=sum_dtype)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
@@ -3727,7 +3731,6 @@ class CommonTemplate:
 
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -3743,7 +3746,6 @@ class CommonTemplate:
 
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
@@ -3761,7 +3763,6 @@ class CommonTemplate:
 
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm3(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -3780,7 +3781,6 @@ class CommonTemplate:
         )
 
     @with_tf32_off
-    @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
             return torch.mm(
@@ -4383,13 +4383,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
-    @xfail_if_mps
     def test_to_dtype(self):
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("bfloat unsupported on MacOS-13")
+
+        new_dtype = torch.float64 if self.device != "mps" else torch.bfloat16
+
         def fn(a, b):
             return (
                 aten._to_copy(a, dtype=6),
                 aten._to_copy(b + 1, dtype=6),
-                aten.to(b, torch.float64),
+                aten.to(b, new_dtype),
                 aten.to(b, torch.bool),
             )
 
@@ -4397,7 +4401,7 @@ class CommonTemplate:
             fn,
             (
                 torch.randn([2, 2, 10]),
-                torch.randn([2, 2, 10], dtype=torch.float64),
+                torch.randn([2, 2, 10], dtype=new_dtype),
             ),
         )
 
@@ -13223,7 +13227,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
-    @xfail_if_mps
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
         fn = torch.special.polygamma
