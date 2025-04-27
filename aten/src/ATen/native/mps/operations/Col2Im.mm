@@ -57,31 +57,37 @@ static void col2im_out_mps_template(const Tensor& input,
   auto width_col = (output_width + 2 * pad_width - (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
 
   auto stream = getCurrentMPSStream();
-  auto numThreads = batch_size * n_output_plane * output_height * output_width;
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto col2imPSO = lib.getPipelineStateForFunc("col2im_kernel_" + mps::scalarToMetalTypeString(input));
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:col2imPSO];
-      mtl_setArgs(computeEncoder,
-                  col_tensor,
-                  output,
-                  input_batch_stride,
-                  n_output_plane,
-                  output_height,
-                  output_width,
-                  kernel_height,
-                  kernel_width,
-                  pad_height,
-                  pad_width,
-                  stride_height,
-                  stride_width,
-                  dilation_height,
-                  dilation_width,
-                  height_col,
-                  width_col,
-                  output_batch_stride);
-      mtl_dispatch1DJob(computeEncoder, col2imPSO, numThreads);
+      const uint32_t gridWidth = static_cast<uint32_t>(output_width);
+      const uint32_t gridHeight = static_cast<uint32_t>(output_height);
+      const uint32_t gridDepth = static_cast<uint32_t>(batch_size * n_output_plane);
+      MTLSize gridSize = MTLSizeMake(gridWidth, gridHeight, gridDepth);
+      const uint32_t maxThreadsPerGroup = col2imPSO.maxTotalThreadsPerThreadgroup;
+      const uint32_t threadExecutionWidth = col2imPSO.threadExecutionWidth;
+      uint32_t tgWidth = std::min(gridWidth, threadExecutionWidth);
+      uint32_t tgHeight = std::min(gridHeight, maxThreadsPerGroup / tgWidth);
+      MTLSize threadgroupSize = MTLSizeMake(tgWidth, tgHeight, 1);
+      mtl_setArgs(
+          computeEncoder,
+          col_tensor,
+          output,
+          input_batch_stride,
+          n_output_plane,
+          std::array<uint32_t, 2>{static_cast<uint32_t>(output_height), static_cast<uint32_t>(output_width)}, // im_hw
+          std::array<uint32_t, 2>{static_cast<uint32_t>(kernel_height),
+                                  static_cast<uint32_t>(kernel_width)}, // kernel_hw
+          std::array<uint32_t, 2>{static_cast<uint32_t>(pad_height), static_cast<uint32_t>(pad_width)}, // pad_hw
+          std::array<uint32_t, 2>{static_cast<uint32_t>(stride_height),
+                                  static_cast<uint32_t>(stride_width)}, // stride_hw
+          std::array<uint32_t, 2>{static_cast<uint32_t>(dilation_height),
+                                  static_cast<uint32_t>(dilation_width)}, // dilation_hw
+          std::array<uint32_t, 2>{static_cast<uint32_t>(height_col), static_cast<uint32_t>(width_col)}, // col_hw
+          output_batch_stride);
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     }
   });
   if (!batched_input) {
