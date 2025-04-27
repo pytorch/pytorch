@@ -83,9 +83,10 @@ find_package_and_print_version(HIP 1.0 MODULE)
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
 
+  find_package_and_print_version(hip REQUIRED CONFIG)
   # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
   find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h hip_version.h
-      HINTS ${ROCM_INCLUDE_DIRS}/rocm-core ${ROCM_INCLUDE_DIRS}/hip /usr/include)
+      HINTS ${ROCM_INCLUDE_DIR}/rocm-core ${hip_INCLUDE_DIR}/hip /usr/include)
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
   if(EXISTS ${ROCM_VERSION_HEADER_PATH})
@@ -142,7 +143,6 @@ if(HIP_FOUND)
   # Find ROCM components using Config mode
   # These components will be searced for recursively in ${ROCM_PATH}
   message("\n***** Library versions from cmake find_package *****\n")
-  find_package_and_print_version(hip REQUIRED CONFIG)
   find_package_and_print_version(amd_comgr REQUIRED)
   find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
