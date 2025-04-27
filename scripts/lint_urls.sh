@@ -32,10 +32,19 @@ echo "submit response: $submit"
 request_id=$(printf '%s\n' "$submit" | jq -r .request_id) || request_id=""
 echo "→ parsed request_id = '$request_id'"
 
-echo -e "\n-- check-host.net first poll --"
-curl -sS -H 'Accept: application/json' \
-  "https://check-host.net/check-result/$request_id"
-echo "→ poll exit $?"
+echo -e "\n-- check-host.net polling results --"
+sleep 3
+for i in {1..3}; do
+  result=$(curl -sS -H 'Accept: application/json' \
+    "https://check-host.net/check-result/$request_id")
+  code=$(printf '%s\n' "$result" | jq -r '.[].[][3] // empty')
+  echo "Attempt $i → raw: $result → code: '$code'"
+  if [[ "$code" =~ ^[0-9]+$ ]]; then
+    echo "→ final code: $code"
+    break
+  fi
+  sleep 3
+done
 
 set -euo pipefail
 exit 1
