@@ -2,6 +2,39 @@
 
 set -euo pipefail
 
+debug_url='https://web.maths.unsw.edu.au/~fkuo/sobol/new-joe-kuo-6.21201'
+echo "=== DEBUG: $debug_url ==="
+
+echo -e "\n-- HEAD (no UA) --"
+if ! curl -v -I "$debug_url"; then
+  echo "→ curl HEAD returned $?"
+fi
+
+echo -e "\n-- GET byte 0 (with UA) --"
+if ! curl -v -r 0-0 -A "$user_agent" -I "$debug_url"; then
+  echo "→ curl byte-0 returned $?"
+fi
+
+echo -e "\n-- check-host.net submit --"
+submit_resp=$(curl -sS -G -v \
+  -H 'Accept: application/json' \
+  --data-urlencode "host=$debug_url" \
+  --data-urlencode "max_nodes=1" \
+  --data-urlencode "node=us3.node.check-host.net" \
+  https://check-host.net/check-http) || echo "→ submit failed"
+
+echo "submit response:"
+echo "$submit_resp"
+
+req_id=$(echo "$submit_resp" | jq -r .request_id)
+echo "→ parsed request_id = $req_id"
+
+echo -e "\n-- check-host.net first result poll --"
+curl -v "https://check-host.net/check-result/$req_id" || echo "→ poll failed"
+
+echo "=== END DEBUG ==="
+exit 1
+
 status=0
 green='\e[1;32m'; red='\e[1;31m'; cyan='\e[1;36m'; yellow='\e[1;33m'; reset='\e[0m'
 user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
@@ -48,7 +81,7 @@ while IFS=: read -r filepath url; do
   ) &
   pids+=($!)
   while [ "$(running_jobs)" -ge "$max_jobs" ]; do
-    sleep 3
+    sleep 1
   done
 done < <(
   git --no-pager grep --no-color -I -P -o \
