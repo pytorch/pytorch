@@ -2146,7 +2146,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         module = nn.ConvTranspose1d(
             in_channels=1, out_channels=1, kernel_size=10, padding="same", dilation=2
         )
-        expect = F.conv_transpose1d(x, module.weight, module.bias, padding="same", dilation=2)
+        expect = F.conv_transpose1d(
+            x, module.weight, module.bias, padding="same", dilation=2
+        )
         self.assertEqual(expect, module(x))
 
         # Test connstruction with invalid padding string raises
@@ -2158,7 +2160,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # TODO: change/remove assertions below if we start to support strided transposed convolution
 
         # Test connstruction with same padding and strides raises
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose1d(
                 in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
             )
@@ -2195,11 +2199,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # TODO: remove tests below if we start to support strided transposed convolution
 
         # Test connstruction with same padding and strides raises
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose2d(
                 in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
             )
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose2d(
                 in_channels=3,
                 out_channels=33,
@@ -2207,7 +2215,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 padding="same",
                 stride=(1, 3),
             )
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose2d(
                 in_channels=3,
                 out_channels=33,
@@ -2248,11 +2258,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # TODO: remove tests below if we start to support strided transposed convolution
 
         # Test connstruction with same padding and strides raises
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose3d(
                 in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
             )
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose3d(
                 in_channels=3,
                 out_channels=33,
@@ -2260,7 +2274,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 padding="same",
                 stride=(1, 1, 3),
             )
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose3d(
                 in_channels=3,
                 out_channels=33,
@@ -2268,7 +2284,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 padding="same",
                 stride=(1, 4, 1),
             )
-        with self.assertRaisesRegex(ValueError, "^padding='same' is not supported for strided convolutions$"):
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
             module = nn.ConvTranspose3d(
                 in_channels=3,
                 out_channels=33,
@@ -2301,7 +2319,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         for in_size, k_size, dilation, stride in itertools.product(*test_args):
             input_ = torch.rand(1, 1, in_size, device=device, dtype=dtype)
             kernel = torch.rand(1, 1, k_size, device=device, dtype=dtype)
-            actual = F.conv_transpose1d(input_, kernel, padding="same", dilation=dilation, stride=stride)
+            actual = F.conv_transpose1d(
+                input_, kernel, padding="same", dilation=dilation, stride=stride
+            )
 
             # test output_size is equal to input_size
             self.assertEqual(actual.size(2), in_size)
@@ -2310,7 +2330,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             is_asymmetric_padding = effective_kernel_size % 2 == 1
             common_pad = effective_kernel_size // 2
 
-            expect = F.conv_transpose1d(input_, kernel, stride=stride, padding=common_pad, dilation=dilation)
+            expect = F.conv_transpose1d(
+                input_, kernel, stride=stride, padding=common_pad, dilation=dilation
+            )
 
             # asymmetric padding for transposed convolution removes the extra value on the right side
             if is_asymmetric_padding:
@@ -2332,7 +2354,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         # Compare F.conv_transpose2d padding='same' output against manual padding
         # Without strides/dilation
-        x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype) # Bsize, Cin, Hin, Win
+        x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype)  # Bsize, Cin, Hin, Win
         y = torch.rand(1, 1, 4, 5, device=device, dtype=dtype)
         # same convolution ensures that o = i
         # To satisfy this, p = (k - 1) / 2
@@ -2615,7 +2637,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
             subtest(arg_values=(3), name="conv_transpose3d"),
         ],
     )
-    def test_conv_transposeNd_same_padding_incompatible_with_output_padding(self, device, dtype, N):
+    def test_conv_transposeNd_same_padding_incompatible_with_output_padding(
+        self, device, dtype, N
+    ):
         conv_transposeNd = getattr(F, f"conv_transpose{N}d")
         if N == 1:
             x = torch.rand(1, 1, 10, device=device, dtype=dtype, requires_grad=True)
@@ -2642,12 +2666,16 @@ class TestConvolutionNNDeviceType(NNTestCase):
             raise ValueError(f"Test for {N=} undefined")
 
         # test int
-        with self.assertRaisesRegex(RuntimeError, "^padding='same' only supports output_padding=0$"):
+        with self.assertRaisesRegex(
+            RuntimeError, "^padding='same' only supports output_padding=0$"
+        ):
             conv_transposeNd(x, y, padding="same", output_padding=1)
 
         # test tuple
         for output_padding in output_paddings:
-            with self.assertRaisesRegex(RuntimeError, "^padding='same' only supports output_padding=0$"):
+            with self.assertRaisesRegex(
+                RuntimeError, "^padding='same' only supports output_padding=0$"
+            ):
                 conv_transposeNd(x, y, padding="same", output_padding=output_padding)
 
     @parametrize_test(
