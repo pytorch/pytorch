@@ -86,6 +86,7 @@ class XNNPackBackend : public PyTorchBackendInterface {
     std::vector<at::Tensor> output_tensors;
     std::vector<float*> output_pointers;
     output_tensors.reserve(output_shapes.size());
+    output_pointers.reserve(output_shapes.size());
     for (const at::IValue& val : output_shapes) {
       auto o_shape = val.toIntVector();
       auto output = at::empty(o_shape, c10::ScalarType::Float);
