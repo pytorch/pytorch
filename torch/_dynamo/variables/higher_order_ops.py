@@ -133,28 +133,30 @@ def _collect_fake_inputs(inputs):
     # Get the example values of the inputs.
     inputs_fake = []
     for inp in inputs:
-        if hasattr(inp, "node"):
-            val = inp.node.meta["example_value"]
-            if isinstance(val, torch.Tensor):
-                if torch._C._functorch.is_batchedtensor(
-                    val
-                ) or torch._C._functorch.is_functionaltensor(val):
-                    # This case is for batched or functional tensors
-                    # Unwrap the tensors
-                    while torch._C._functorch.is_batchedtensor(
+        if isinstance(inp, (torch.fx.proxy.Proxy, torch.fx.node.Node)):
+            inp = inp.node if isinstance(inp, torch.fx.proxy.Proxy) else inp
+            if hasattr(inp, "meta"):
+                val = inp.meta["example_value"]
+                if isinstance(val, torch.Tensor):
+                    if torch._C._functorch.is_batchedtensor(
                         val
                     ) or torch._C._functorch.is_functionaltensor(val):
-                        val = torch._C._functorch.get_unwrapped(val)
-                    assert isinstance(val, FakeTensor)
-                    inputs_fake.append(val)
+                        # This case is for batched or functional tensors
+                        # Unwrap the tensors
+                        while torch._C._functorch.is_batchedtensor(
+                            val
+                        ) or torch._C._functorch.is_functionaltensor(val):
+                            val = torch._C._functorch.get_unwrapped(val)
+                        assert isinstance(val, FakeTensor)
+                        inputs_fake.append(val)
+                    else:
+                        # This is the standard case of a TensorVariable
+                        assert isinstance(val, FakeTensor)
+                        inputs_fake.append(val)
                 else:
-                    # This is the standard case of a TensorVariable
-                    assert isinstance(val, FakeTensor)
+                    # This case is for SymInts and other non-Tensor elements
+                    assert not isinstance(val, torch.Tensor)
                     inputs_fake.append(val)
-            else:
-                # This case is for SymInts and other non-Tensor elements
-                assert not isinstance(val, torch.Tensor)
-                inputs_fake.append(val)
         else:
             # This case is for ints
             assert isinstance(inp, int)
@@ -1794,6 +1796,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_proxy = list(additional_inputs.as_proxy()) + list(
             combine_freevars_proxy
         )
+        proxy_vars = init_proxy, xs_proxy, additional_inputs_proxy
         y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)

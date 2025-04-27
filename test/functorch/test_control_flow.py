@@ -4113,7 +4113,7 @@ class AssociativeScanTests(TestCase):
     )
     def test_associative_scan_cond_in_combine_fn(self, compile_mode, reverse, device):
         def combine_fn(x, y):
-            val = cond(torch.sum(y) > 0.0, lambda y: y + 0.0, lambda y: 1.0 - y, (y,))
+            val = cond(torch.sum(y) > 0.0, lambda y: y.clone(), lambda y: 1.0 - y, (y,))
             return x * val
 
         inp = torch.randn(3, 10, 1, device=device)

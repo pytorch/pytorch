@@ -2743,11 +2743,13 @@ class SubgraphTracer(fx.Tracer):
         return MutationInfo(False, "")
 
     def has_aliasing(self):
+        from torch._dynamo.variables.higher_order_ops import _collect_fake_inputs
+        
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
 
         for node in self.graph.nodes:
             if node.op == "placeholder":
-                example_value = node.meta["example_value"]
+                example_value = _collect_fake_inputs([node])[0]
                 if isinstance(example_value, torch.Tensor):
                     storage = StorageWeakRef(example_value._typed_storage())
                     if storage in input_storages:
@@ -2761,16 +2763,17 @@ class SubgraphTracer(fx.Tracer):
         output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]
         for out_node in out_nodes.args[0]:
-            if out_node:
-                example_value = out_node.meta["example_value"]
-                assert not isinstance(example_value, list)
-                if isinstance(example_value, torch.Tensor):
-                    storage = StorageWeakRef(example_value._typed_storage())
-                    if storage in output_storages:
-                        # output-output aliasing
-                        msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
-                        return AliasingInfo(True, msg)
-                    output_storages[storage] = out_node
+            for out_node_val in pytree.tree_leaves(out_node):
+                if out_node_val:
+                    example_value = _collect_fake_inputs([out_node_val])[0]
+                    assert not isinstance(example_value, list)
+                    if isinstance(example_value, torch.Tensor):
+                        storage = StorageWeakRef(example_value._typed_storage())
+                        if storage in output_storages:
+                            # output-output aliasing
+                            msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
+                            return AliasingInfo(True, msg)
+                        output_storages[storage] = out_node
 
         intersected_storages = input_storages.keys() & output_storages.keys()
         if len(intersected_storages) > 0:
