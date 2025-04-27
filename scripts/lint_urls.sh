@@ -12,29 +12,31 @@ set +e
 debug_url='https://web.maths.unsw.edu.au/~fkuo/sobol/new-joe-kuo-6.21201'
 echo "=== DEBUG: $debug_url ==="
 
-out=$(curl -v -I "$debug_url" 2>&1); ec=$?
-echo "-- HEAD no UA → exit $ec"
-echo "$out"
+echo -e "\n-- HEAD (no UA) --"
+curl -v -I "$debug_url"
+echo "→ HEAD exit $?"
 
-out=$(curl -v -r 0-0 -A "$user_agent" "$debug_url" 2>&1); ec=$?
-echo "-- GET 0-byte with UA → exit $ec"
-echo "$out"
+echo -e "\n-- GET byte-0 (with UA) --"
+curl -v -r 0-0 -A "$user_agent" -I "$debug_url"
+echo "→ byte-0 exit $?"
 
-out=$(curl -sS -G -v \
+echo -e "\n-- check-host.net submit --"
+submit=$(curl -sS -G \
   -H 'Accept: application/json' \
   --data-urlencode "host=$debug_url" \
   --data-urlencode "max_nodes=1" \
   --data-urlencode "node=us3.node.check-host.net" \
-  https://check-host.net/check-http 2>&1); ec=$?
-echo "-- check-host submit → exit $ec"
-echo "$out"
+  https://check-host.net/check-http)
+echo "submit response: $submit"
 
-req_id=$(echo "$out" | jq -r .request_id)
-echo "-- parsed request_id = '$req_id'"
+request_id=$(printf '%s\n' "$submit" | jq -r .request_id) || request_id=""
+echo "→ parsed request_id = '$request_id'"
 
-poll=$(curl -v "https://check-host.net/check-result/$req_id" 2>&1); ec=$?
-echo "-- check-host poll → exit $ec"
-echo "$poll"
+echo -e "\n-- check-host.net first poll --"
+curl -sS -H 'Accept: application/json' \
+  "https://check-host.net/check-result/$request_id"
+echo "→ poll exit $?"
+
 set -euo pipefail
 exit 1
 
