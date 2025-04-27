@@ -37,7 +37,7 @@ sleep 3
 for i in {1..3}; do
   result=$(curl -sS -H 'Accept: application/json' \
     "https://check-host.net/check-result/$request_id")
-  code=$(printf '%s\n' "$result" | jq -r '.[].[][3] // empty')
+  code=$(printf '%s\n' "$result" | jq -r '.[ ][0][3] // empty')
   echo "Attempt $i → raw: $result → code: '$code'"
   if [[ "$code" =~ ^[0-9]+$ ]]; then
     echo "→ final code: $code"
