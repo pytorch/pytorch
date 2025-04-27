@@ -509,9 +509,4 @@ void apply_tf32_if_allowed(dnnl::primitive_attr& pattr) {
   }
 }
 
-bool enable_primitive_cache() {
-  auto& ctx = at::globalContext();
-  return ctx.enabledOneDNNPrimitiveCache();
-}
-
 } // namespace at::native::onednn

@@ -979,33 +979,6 @@ static PyObject* THPModule_allowTF32OneDNN(
 #endif
 }
 
-static PyObject* THPModule_setEnabledOneDNNPrimitiveCache(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "_set_onednn_enabled_primitive_cache expects a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setEnabledOneDNNPrimitiveCache(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_enabledOneDNNPrimitiveCache(
-    PyObject* _unused,
-    PyObject* noargs) {
-#ifdef USE_XPU
-  if (at::globalContext().enabledOneDNNPrimitiveCache())
-    Py_RETURN_TRUE;
-  else
-    Py_RETURN_FALSE;
-#else
-  Py_RETURN_NONE;
-#endif
-}
-
 static PyObject* THPModule_deterministicAlgorithms(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1588,8 +1561,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
     {"_get_onednn_allow_tf32", THPModule_allowTF32OneDNN, METH_NOARGS, nullptr},
     {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
-    {"_get_onednn_enabled_primitive_cache", THPModule_enabledOneDNNPrimitiveCache, METH_NOARGS, nullptr},
-    {"_set_onednn_enabled_primitive_cache", THPModule_setEnabledOneDNNPrimitiveCache, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_cudnn_deterministic",
