@@ -73,7 +73,12 @@ done < <(
 )
 
 for pid in "${pids[@]}"; do
-  wait "$pid" 2>/dev/null || ([ $? -eq 1 ] && status=1)
+  if ! wait "$pid"; then
+    if [ $? -eq 1 ]; then
+      status=1
+    fi
+  fi
 done
 
+echo "DEBUG: final status=$status" >&2
 exit $status
