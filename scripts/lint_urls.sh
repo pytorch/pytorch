@@ -20,8 +20,9 @@ while IFS=: read -r filepath url; do
       code=$(curl -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -r 0-0 -A "$user_agent" "$url") || code=000
     fi
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
+      encoded_url=$(jq -nr --arg s "$url" '$s|@uri')
       request_id=$(curl -sS -H 'Accept: application/json' \
-        "https://check-host.net/check-http?host=$url&max_nodes=1&node=us3.node.check-host.net" \
+        "https://check-host.net/check-http?host=$encoded_url&max_nodes=1&node=us3.node.check-host.net" \
         | jq -r .request_id)
       for _ in {1..3}; do
         new_code=$(curl -sS -H 'Accept: application/json' \
