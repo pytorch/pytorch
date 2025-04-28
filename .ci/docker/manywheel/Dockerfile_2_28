@@ -49,11 +49,9 @@ RUN bash ./install_mkl.sh && rm install_mkl.sh
 FROM base as magma
 ARG BASE_CUDA_VERSION=10.2
 # Install magma
-WORKDIR .ci/magma
-ENV cuda_version_nodot=$(echo $BASE_CUDA_VERSION | tr -d m.u)
-RUN make magma-cuda${cuda_version_nodot}
-# ADD ./common/install_magma.sh install_magma.sh
-# RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
+ADD ./common/install_magma_compile.sh install_magma_compile.sh
+COPY ../.ci/magma/* /magma/
+RUN bash ./install_magma_compile.sh ${BASE_CUDA_VERSION} && rm install_magma_compile.sh
 
 FROM base as jni
 # Install java jni header
