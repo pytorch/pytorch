@@ -289,6 +289,9 @@ REGISTER_BINARY_OP(hermite_polynomial_he, bfloat, bfloat);
 REGISTER_BINARY_OP(add, bfloat, bfloat);
 REGISTER_BINARY_OP(sub, bfloat, bfloat);
 REGISTER_BINARY_OP(lerp, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat);
 #endif
 
 // Complex binary functions
@@ -304,3 +307,9 @@ REGISTER_BINARY_OP(sub, float2, float2);
 REGISTER_BINARY_OP(sub, half2, half2);
 REGISTER_BINARY_OP(lerp, float2, float2);
 REGISTER_BINARY_OP(lerp, half2, half2);
+REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2);
+REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2);
