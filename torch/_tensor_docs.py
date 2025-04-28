@@ -4163,9 +4163,9 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 .. warning::
 
     :meth:`~Tensor.repeat` behaves differently from
-    `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
+    `numpy.repeat <https://numpy.org/doc/stable/reference/generated/numpy.repeat.html>`_,
     but is more similar to
-    `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+    `numpy.tile <https://numpy.org/doc/stable/reference/generated/numpy.tile.html>`_.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
