@@ -1157,6 +1157,7 @@ class SIMDScheduling(BaseScheduling):
 
             for n, node_name in zip((node1, node2), ("node1", "node2")):
                 if n.is_template():
+                    return True
                     # Only allow fusion for TritonTemplates for now.
                     # Fusion for CUDATemplates are not supported.
                     is_triton_template = isinstance(

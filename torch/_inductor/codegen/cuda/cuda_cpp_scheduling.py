@@ -207,8 +207,8 @@ class CUDACPPScheduling(BaseScheduling):
             )
             if last_epilogue_name not in additional_node.get_read_names():
                 return False
-        if additional_node.layout != cuda_template_buffer.layout:
-            return False
+        # if additional_node.layout != cuda_template_buffer.layout:
+        #    return False
 
         try:
             from torch._inductor.codegen.cuda.cutlass_python_evt import (

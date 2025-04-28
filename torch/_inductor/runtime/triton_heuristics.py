@@ -478,7 +478,7 @@ class CachingAutotuner(KernelInterface):
                 try:
                     launchers.append(result.make_launcher())
 
-                except (OutOfResources, PTXASError) as e:
+                except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
                     exc = e
         if len(launchers) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
@@ -871,11 +871,7 @@ class CachingAutotuner(KernelInterface):
         )
 
         if self.save_cache_hook:
-            self.save_cache_hook(
-                launcher.config,
-                self.autotune_time_taken_ns,
-                triton_cache_hash=launcher.cache_hash,
-            )
+            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
@@ -1278,7 +1274,10 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
-        self.kernel.load_kernel(self.compile_meta.get("device", 0))
+        device = self.compile_meta.get("device", 0)
+        if device is None:
+            device = 0
+        self.kernel.load_kernel(device)
         scope = {
             "runner": self.kernel.run,
         }
@@ -1473,7 +1472,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 "metadata",
                 *call_args,
             ]
-        else:  # args after CompiledKernel.launch_metadata: https://github.com/openai/triton/pull/3492
+        else:  # args after CompiledKernel.launch_metadata: https://github.com/triton-lang/triton/pull/3492
             # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
             # `bin.launch_metadata` is relatively expensive, and returns None unless a
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
@@ -1503,7 +1502,6 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = binary_shared
-        launcher.cache_hash = triton_hash_to_path_key(binary.hash)
         launcher.store_cubin = self.inductor_meta.get("store_cubin", False)
         # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
