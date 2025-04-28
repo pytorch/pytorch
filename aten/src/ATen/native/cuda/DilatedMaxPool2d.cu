@@ -323,7 +323,7 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
               }
             }
 
-	    accscalar_t acm = 0;
+            accscalar_t acm = 0;
 #pragma unroll
             for(int oh = 0; oh < _MAXh; ++oh) {
 #pragma unroll
