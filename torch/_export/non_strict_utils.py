@@ -488,11 +488,7 @@ def _constrain_user_specified_dimhint_range(
     )
 
     # warn on 0/1 specialization for Dim.AUTO; not an actual error
-    if (
-        dim.type == _DimHintType.AUTO
-        and trace_vr.is_singleton()
-        and hint in (0, 1)
-    ):
+    if dim.type == _DimHintType.AUTO and trace_vr.is_singleton() and hint in (0, 1):
         pathstr = f"inputs{pytree.keystr(keypath)}"
         if i is not None:
             pathstr += f".shape[{i}]"
