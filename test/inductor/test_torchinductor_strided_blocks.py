@@ -1189,12 +1189,12 @@ class CommonTemplate:
             if ynumel_exceed_ygrid_size:
                 # Only the y dimension should be boundary checked
                 # Loading a
-                self.assertTrue("boundary_check=[1]" in code)
+                self.assertIn("boundary_check=[1]", code)
                 # Loading b
                 self.assertTrue("boundary_check=[0]" in code)
             else:
                 # No boundary checking
-                self.assertTrue("boundary_check" not in code)
+                self.assertNotIn("boundary_check", code)
         else:
             # Loading a
             self.assertTrue("boundary_check=[0, 1]" in code)
