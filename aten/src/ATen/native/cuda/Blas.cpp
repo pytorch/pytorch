@@ -19,6 +19,7 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
+#include <ATen/cuda/tunable/GemmMxUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -89,7 +90,8 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     transpose_tensor = false;
     return resolve_conj_if_indicated(tensor, true);
-  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
+  } else if ((tensor_strides[1] == 1) &&
+    (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     transpose_tensor = true;
     return resolve_conj_if_indicated(tensor, true);
   } else {
@@ -1205,6 +1207,7 @@ ScalingType get_scaling_type(
 
 } // namespace
 
+
 // Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
@@ -1272,15 +1275,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (use_fast_accum) {
     TORCH_CHECK(mat1.scalar_type() != ScalarType::Float4_e2m1fn_x2 && mat2.scalar_type() != ScalarType::Float4_e2m1fn_x2, "`use_fast_accum` is not supported when `mat1` or `mat2` tensors have the `Float4_e2m1fn_x2` dtype.");
   }
+#ifdef USE_ROCM
+  if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2 || mat2.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float4_e2m1fn_x2 is only supported for ROCm 6.5 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
+    TORCH_CHECK(ROCM_VERSION >= 60000, "Float8_e5m2 is only supported for ROCm 6.5 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e4m3fn || mat2.scalar_type() == ScalarType::Float8_e4m3fn) {
+    TORCH_CHECK(ROCM_VERSION >= 60000, "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+  }
+#endif
   if (bias) {
     TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
     TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
-         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
-    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
-          bias->scalar_type() == ScalarType::BFloat16,
-          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
-          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+        "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
   }
   {
     auto bias_ = bias.value_or(Tensor());
@@ -1327,7 +1336,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #else
   if (scaling_choice == ScalingType::RowWise) {
-    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+    // For ROCm, match behavior of f8f8bf16_rowwise type checking
     Tensor b = mat2;
     if (_scaled_mm_is_fnuz()) {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
@@ -1335,9 +1344,29 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     else {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
     }
-    // Until more than bf16 is supported.
+    // Until more than bf16 is supported
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
-         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+         "hipblaslt rowwise _scaled_mm only supports BFloat16 output");
+  }
+  else if (scaling_choice == ScalingType::BlockWise) {
+    TORCH_CHECK(mat1.scalar_type() == at::kFloat8_e8m0fnu && 
+                mat2.scalar_type() == at::kFloat8_e8m0fnu,
+                "Block-wise scaling requires both matrices to be Float8_e8m0fnu type");
+    
+#if ROCM_VERSION >= 60500
+    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
+               "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+    
+    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
+               mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
+               "Matrix dimensions must be multiples of 32 for block-wise scaling");
+    
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 || 
+                out.scalar_type() == ScalarType::Half,
+                "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 6.5 or later");
+#endif
   }
 #endif
 
@@ -1416,10 +1445,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.k = args.k;
       params.a = args.mata->data_ptr();
       params.a_scale_ptr = scale_a.data_ptr();
+      params.a_scale_dtype = scale_a.scalar_type();
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
       params.b = args.matb->data_ptr();
       params.b_scale_ptr = scale_b.data_ptr();
+      params.b_scale_dtype = scale_b.scalar_type();
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
       params.bias_ptr = bias ? bias->data_ptr(): nullptr;
@@ -1476,6 +1507,27 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         out_dtype_,
         use_fast_accum,
         scaling_choice == ScalingType::RowWise);
+  }
+
+  // Add MX format validation for gfx950
+  if (scaling_choice == ScalingType::RowWise) {
+#ifdef USE_ROCM
+    if (_is_gfx950_supported()) {
+      // Validate matrix dimensions for MX format
+      TORCH_CHECK(at::cuda::tunable::ValidateMXFormatRequirements(mat1.size(0), mat2.size(1), mat1.size(1)),
+                 "For MX format on gfx950, matrix dimensions must be multiples of 32. ",
+                 "Got dimensions: ", mat1.sizes(), " x ", mat2.sizes());
+      
+      // Validate data types for MX format
+      TORCH_CHECK(mat1.scalar_type() == at::kFloat8_e8m0fnu && 
+                 mat2.scalar_type() == at::kFloat8_e8m0fnu,
+                 "MX format requires Float8_e8m0fnu type for both input matrices");
+      
+      TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 || 
+                 out.scalar_type() == ScalarType::Half,
+                 "MX format only supports BFloat16 or Half output types");
+    }
+#endif
   }
 
   return out;
@@ -1774,3 +1826,15 @@ Tensor& _addmm_dtype_out_cuda(const Tensor& self, const Tensor& mat1, const Tens
 
 
 } // namespace at::native
+
+#ifdef USE_ROCM
+namespace at::cuda::tunable {
+bool _is_gfx950_supported() {
+#if ROCM_VERSION >= 60500
+    return at::detail::getCUDAHooks().isGPUArch({"gfx950"});
+#else
+    return false;
+#endif
+}
+} // namespace at::cuda::tunable
+#endif
