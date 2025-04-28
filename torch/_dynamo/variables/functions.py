@@ -1349,10 +1349,11 @@ class SkipFunctionVariable(VariableTracker):
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
-                if self.value.__module__ in known_python_builtin_modules:
+                module_attr = getattr(self.value, "__module__", None)
+                if module_attr in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
-                        f"`{self.value.__module__}.{qualname}`."
+                        f"`{module_attr}.{qualname}`."
                     )
                     hints = [
                         "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
@@ -1361,10 +1362,10 @@ class SkipFunctionVariable(VariableTracker):
                         "so the PyTorch team can add support for it. ",
                     ]
                 elif (
-                    self.value.__module__ is not None
-                    and self.value.__module__.startswith("optree")
+                    module_attr is not None
+                    and module_attr.startswith("optree")
                 ):
-                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
+                    explanation = f"Dynamo cannot trace optree C/C++ function {module_attr}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
                         "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
@@ -1373,7 +1374,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
                     explanation = (
-                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
+                        f"Dynamo does not know how to trace the builtin `{module_attr}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
@@ -1398,7 +1399,7 @@ class SkipFunctionVariable(VariableTracker):
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented_v2(
                 gb_type="Attempted to call function marked as skipped",
-                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
+                context=f"module: {module_attr}, qualname: {qualname}, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
             )
