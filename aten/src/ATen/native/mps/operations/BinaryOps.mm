@@ -277,7 +277,7 @@ static void add_sub_lerp_template(const Tensor& self,
                             output,
                             getMPSScalar(alpha, commonDtype));
     } else {
-      mps::binary_op_kernel((self_complex || other_complex) ? "complex_" + op_name : op_name, self, other, output);
+      mps::binary_op_kernel(op_name, self, other, output);
     }
     return;
   }
