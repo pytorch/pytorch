@@ -40,6 +40,8 @@ _ConstantAttributeType: TypeAlias = Union[
     torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
 ]
 
+_constant_attribute_types = get_args(_ConstantAttributeType)
+
 
 def is_fx_tracing():
     return _is_fx_tracing_flag
@@ -400,7 +402,7 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, get_args(_ConstantAttributeType)):
+        if isinstance(a, _constant_attribute_types):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -779,15 +781,13 @@ class Tracer(TracerBase):
             # values to the qualified name here for efficiency. This is used downstream
             # in create_arg
             self.tensor_attrs: dict[
-                Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],
+                _ConstantAttributeType,
                 str,
             ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: list[str]):
                 for k, v in m.__dict__.items():
-                    if isinstance(
-                        v, (torch.Tensor, torch.ScriptObject, FakeScriptObject)
-                    ):
+                    if isinstance(v, _constant_attribute_types):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])
