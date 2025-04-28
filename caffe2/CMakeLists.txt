@@ -983,8 +983,8 @@ elseif(USE_CUDA)
   set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
 
   if(USE_NVSHMEM)
-    set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/src/include")
-    set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/src/lib")
+    set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
+    set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
 
     include_directories(${NVSHMEM_INCLUDE_DIR})
 
