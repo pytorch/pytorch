@@ -2112,6 +2112,36 @@ class AOTInductorTestsTemplate:
         self.assertTrue(same(result_cpu, result_gpu_0.cpu()))
         self.assertTrue(same(result_cpu, result_gpu_1.cpu()))
 
+    @requires_multigpu()
+    def test_load_package_multiple_gpus(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        weight = torch.randn(10, 10)
+        inputs = (torch.randn(10, 10), torch.randn(10, 10))
+        model = Model(weight)
+        result_cpu = model(*inputs)
+
+        package_path = AOTIRunnerUtil.compile(model, inputs)
+
+        # Load AOT package on gpu:N
+        device_interface = get_interface_for_device(GPU_TYPE)
+        for i in range(device_interface.device_count()):
+            with device_interface.device(i), torch.no_grad():
+                model_gpu = torch.inductor.aoti_load_package(
+                    package_path, device_index=i
+                )
+                result_gpu = model_gpu(*inputs)
+            self.assertTrue(same(result_cpu, result_gpu.cpu()))
+
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

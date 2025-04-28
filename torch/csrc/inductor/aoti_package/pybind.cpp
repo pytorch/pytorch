@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/utils/pybind.h>
+#include <c10/core/Device.h>
 
 namespace torch::inductor {
 
@@ -18,12 +19,14 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
       const std::string& model_package_path,
       const std::string& model_name,
       const bool run_single_threaded,
-      const size_t num_runners)
+      const size_t num_runners,
+      const c10::DeviceIndex device_index)
       : AOTIModelPackageLoader(
             model_package_path,
             model_name,
             run_single_threaded,
-            num_runners) {}
+            num_runners,
+            device_index) {}
 
   py::list boxed_run(py::list& inputs, void* stream_handle = nullptr) {
     std::vector<at::Tensor> input_tensors;
