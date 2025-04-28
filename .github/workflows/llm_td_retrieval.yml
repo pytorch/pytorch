@@ -26,38 +26,12 @@ jobs:
     continue-on-error: true
     needs: get-label-type
     steps:
-
       - name: Clone PyTorch
         uses: actions/checkout@v4
         with:
           repository: pytorch/pytorch
-          fetch-depth: 1
-          submodules: false
+          fetch-depth: 0
           path: pytorch
-
-      - name: Setup Linux
-        uses: ./pytorch/.github/actions/setup-linux
-
-      - name: Test
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cat /etc/os-release
-          python3 --version
-
-      - name: Install python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.9"
-          cache: "pip"
-
-      - name: Test python
-        shell: bash
-        run: |
-          set -euxo pipefail
-          python --version
-          pip --version
-
 
       - name: Clone CodeLlama
         uses: actions/checkout@v4
@@ -77,9 +51,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          pip install -r llm-target-determinator/requirements.txt
+          python --version
+          python3 -m pip install -r llm-target-determinator/requirements.txt
           cd "${GITHUB_WORKSPACE}/codellama"
-          pip install -e .
+          python3 -m pip install -e .
 
       - name: Fetch CodeLlama Checkpoint
         shell: bash
@@ -98,7 +73,7 @@ jobs:
           shell: bash
           command: |
             set -euxo pipefail
-            python -m pip install awscli==1.29.40
+            python3 -m pip install awscli==1.29.40
             cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
             aws s3 cp "s3://target-determinator-assets/indexes/latest" . --recursive
 
