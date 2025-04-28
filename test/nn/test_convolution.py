@@ -375,11 +375,11 @@ class TestConvolutionNN(NNTestCase):
 
         # Test connstruction with same padding and strides raises
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
             )
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3,
                 out_channels=33,
                 kernel_size=10,
@@ -387,7 +387,7 @@ class TestConvolutionNN(NNTestCase):
                 stride=(1, 1, 3),
             )
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3,
                 out_channels=33,
                 kernel_size=10,
@@ -395,7 +395,7 @@ class TestConvolutionNN(NNTestCase):
                 stride=(1, 4, 1),
             )
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3,
                 out_channels=33,
                 kernel_size=10,
