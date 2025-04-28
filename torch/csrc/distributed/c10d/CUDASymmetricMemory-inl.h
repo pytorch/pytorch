@@ -13,34 +13,18 @@
 #include <cuda/atomic>
 #endif
 #endif
+#include <ATen/native/cuda/MemoryAccess.cuh>
+
 namespace c10d::symmetric_memory {
 
-template <typename T>
-__inline__ size_t get_alignment(T ptr_or_size) {
-  auto val = reinterpret_cast<uintptr_t>(ptr_or_size);
-  if (val % 16 == 0) {
-    return 16;
-  } else if (val % 8 == 0) {
-    return 8;
-  } else if (val % 4 == 0) {
-    return 4;
-  } else if (val % 2 == 0) {
-    return 2;
-  } else {
-    return 1;
-  }
-}
+template <int Size>
+using Vec = at::native::memory::Vec<Size>;
 
-template <>
-__inline__ size_t get_alignment<size_t>(size_t size) {
-  return get_alignment(reinterpret_cast<void*>(size));
-}
+template <class... T>
+inline constexpr bool dependent_false =
+    at::native::memory::dependent_false<T...>;
 
-template <bool Value, class... Args>
-inline constexpr bool dependent_bool_value = Value;
-
-template <class... Args>
-inline constexpr bool dependent_false = dependent_bool_value<false, Args...>;
+using at::native::memory::get_alignment;
 
 template <std::memory_order Sem>
 __device__ __forceinline__ uint32_t
@@ -170,33 +154,6 @@ __device__ __forceinline__ void sync_remote_blocks<std::memory_order_acq_rel>(
   }
 }
 
-template <int Size>
-union Vec;
-
-template <>
-union Vec<4> {
-  uint16_t u16[2];
-  uint32_t u32, as_scalar;
-  float f32;
-};
-
-template <>
-union Vec<8> {
-  uint16_t u16[4];
-  uint32_t u32[2];
-  uint64_t u64, as_scalar;
-  float f32[2];
-};
-
-template <>
-union alignas(16) Vec<16> {
-  uint16_t u16[8];
-  uint32_t u32[4];
-  uint64_t u64[2];
-  uint4 u128, as_scalar;
-  float f32[4];
-};
-
 template <typename T>
 struct MultimemLdReduce {
   template <int Alignment>
@@ -287,58 +244,6 @@ __device__ __inline__ void multimem_st(T* mc_ptr, Vec<Alignment>& vec) {
 #endif
 }
 
-template <int Alignment, typename T>
-__device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  Vec<Alignment> vec;
-  if constexpr (Alignment == 16) {
-    asm("ld.global.v4.u32 {%0,%1,%2,%3}, [%4];"
-        : "=r"(vec.u32[0]), "=r"(vec.u32[1]), "=r"(vec.u32[2]), "=r"(vec.u32[3])
-        : "l"(addr)
-        : "memory");
-  } else if constexpr (Alignment == 8) {
-    asm("ld.global.v2.u32 {%0,%1}, [%2];"
-        : "=r"(vec.u32[0]), "=r"(vec.u32[1])
-        : "l"(addr)
-        : "memory");
-  } else if constexpr (Alignment == 4) {
-    asm("ld.global.u32 %0, [%1];" : "=r"(vec.u32) : "l"(addr) : "memory");
-  } else {
-    static_assert(dependent_false<T>);
-  }
-  return vec;
-#endif
-}
-
-template <int Alignment, typename T>
-__device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  if constexpr (Alignment == 16) {
-    asm("st.global.v4.u32 [%0], {%1,%2,%3,%4};"
-        :
-        : "l"(addr),
-          "r"(vec.u32[0]),
-          "r"(vec.u32[1]),
-          "r"(vec.u32[2]),
-          "r"(vec.u32[3])
-        : "memory");
-  } else if constexpr (Alignment == 8) {
-    asm("st.global.v2.u32 [%0], {%1,%2};"
-        :
-        : "l"(addr), "r"(vec.u32[0]), "r"(vec.u32[1])
-        : "memory");
-  } else if constexpr (Alignment == 4) {
-    asm("st.global.u32 [%0], %1;" : : "l"(addr), "r"(vec.u32) : "memory");
-  } else {
-    static_assert(dependent_false<T>);
-  }
-#endif
-}
-
 #if defined(USE_ROCM)
 using __nv_bfloat162 = uint32_t;
 #endif
@@ -405,7 +310,8 @@ load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
 #pragma unroll k_world_size
   for (size_t step = 0; step < k_world_size; ++step) {
     size_t remote_rank = (rank + step) % k_world_size;
-    vecs[remote_rank] = ld_vec<alignment>(ptrs[remote_rank] + offset);
+    vecs[remote_rank] =
+        at::native::memory::ld_vec<alignment>(ptrs[remote_rank] + offset);
   }
   auto acc = vecs[0];
 #pragma unroll k_world_size - 1
@@ -422,7 +328,7 @@ __device__ inline std::enable_if_t<(k_world_size <= 0), Vec<alignment>>
 load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
   Vec<alignment> acc{};
   for (size_t step = 0; step < world_size; ++step) {
-    auto vec = ld_vec<alignment>(ptrs[step] + offset);
+    auto vec = at::native::memory::ld_vec<alignment>(ptrs[step] + offset);
     acc = add_vec<alignment, T>(acc, vec);
   }
   return acc;
