@@ -668,7 +668,7 @@ void TCPStore::queuePush(
   buffer.flush();
 }
 
-std::vector<uint8_t> TCPStore::queuePop(const std::string& key) {
+std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
   TORCH_CHECK_WITH(
       NotImplementedError,
       usingLibUv_,
@@ -678,14 +678,16 @@ std::vector<uint8_t> TCPStore::queuePop(const std::string& key) {
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
 
-  doWait(keyPrefix_ + key, timeout_);
+  if (block) {
+    doWait(keyPrefix_ + key, timeout_);
+  }
+
   detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_POP);
   buffer.appendString(keyPrefix_ + key);
   buffer.flush();
 
   auto keys = client_->receiveValue<int64_t>();
-  C10D_CHECK_WITH(
-      QueueEmptyError, keys > 0, "expected one key to be ready in queuePop");
+  TORCH_CHECK_WITH(DistQueueEmptyError, keys > 0, "queue is empty");
 
   return client_->receiveBits();
 }

@@ -15,6 +15,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -510,22 +511,61 @@ class CommonTemplate:
         # Expect 2 block pointers: input and output
         run_and_compare(self, foo, view, expected_num_block_pointers=2)
 
-    def test_dynamic_shapes_generic(self):
+    @parametrize(
+        "nd_tiling,num_block_pointers",
+        [
+            (True, 2),  # With tiling, the index is affine.
+            (False, 1),  # We can't infer that the load is a power of 2.
+        ],
+    )
+    def test_dynamic_shapes_pointwise(self, nd_tiling: bool, num_block_pointers: int):
         """
-        Test a generic strided block with dynamic shapes. Block pointers are not
-        expected. This only checks that the analysis doesn't break this case.
+        Test a pointwise kernel with dynamic shapes.
         """
 
-        device = torch.device(self.device)
-        full_size = (8, 8)
         view_size = (4, 4)
-        full = torch.randn(full_size).to(device)
-        view = torch.as_strided(full, view_size, full.stride())
+        view = self._discontiguous_tensor(view_size, self.device)
 
-        run_and_compare(self, torch.div, view, view, compile_kwargs={"dynamic": True})
+        run_and_compare(
+            self,
+            torch.div,
+            view,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            config_patches={"triton.prefer_nd_tiling": nd_tiling},
+            compile_kwargs={"dynamic": True},
+        )
+
+    @parametrize(
+        "with_tiling,num_block_pointers",
+        [
+            (True, 1),  # With tiling, the index is affine.
+            (False, 0),  # We can't infer that the load is a power of 2.
+        ],
+    )
+    @skipIfXpu(msg="Remove this after Intel triton issue #4000 resolved.")
+    def test_dynamic_shapes_reduction(self, with_tiling: bool, num_block_pointers: int):
+        """
+        Test a reduction kernel with dynamic shapes.
+        """
+
+        view_size = (4, 4)
+        view = self._discontiguous_tensor(view_size, self.device)
+
+        run_and_compare(
+            self,
+            torch.prod,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            config_patches={
+                "triton.prefer_nd_tiling": with_tiling,
+                "triton.tile_reductions": with_tiling,
+            },
+            compile_kwargs={"dynamic": True},
+        )
 
     @unittest.skip(reason="Dynamo tracing error")
-    def test_dynamic_shapes_multiple_max_block(self):
+    def test_dynamic_shapes_pointwise_multiple_max_block(self):
         """
         Test dynamic shapes, where we know the shape is a multiple of the max block
         size. We should be able to generate a block pointer for this case.
