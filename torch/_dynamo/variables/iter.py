@@ -131,11 +131,11 @@ class ItertoolsVariable(VariableTracker):
                         acc = func(tx, [acc, item], {})
                     except Exception as e:
                         unimplemented_v2(
-                            gb_type="Unexpected failure",
+                            gb_type="Unexpected failure during itertools.accumulate() iteration",
                             context=f"call_function {self} {args} {kwargs}",
                             explanation="Unexpected failure in invoking function during accumulate. "
                             f"Failed running func {func}({item}{acc})",
-                            hints=[*graph_break_hints.SUPPORTABLE],
+                            hints=[*graph_break_hints.DIFFICULT],
                             from_exc=e,
                         )
                 items.append(acc)
@@ -230,7 +230,7 @@ class ItertoolsVariable(VariableTracker):
                     )
             except Exception as e:
                 unimplemented_v2(
-                    gb_type="Unexpected failure",
+                    gb_type="Unexpected failure during itertools.groupby() iteration",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Unexpected failure in invoking function during groupby",
                     hints=[*graph_break_hints.SUPPORTABLE],
@@ -375,7 +375,7 @@ class CycleIteratorVariable(IteratorVariable):
                     unimplemented_v2(
                         gb_type="input iterator to itertools.cycle has too many items",
                         context=f"next({self})",
-                        explanation=f"Has reached max iterator limit: {MAX_ITERATOR_LIMIT}",
+                        explanation=f"Has reached internal Dynamo max iterator limit: {MAX_ITERATOR_LIMIT}",
                         hints=[],
                     )
                 tx.output.side_effects.mutation(self)
