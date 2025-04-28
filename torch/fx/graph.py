@@ -19,8 +19,8 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch.utils._dtype_abbrs import dtype_abbrs
 from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
