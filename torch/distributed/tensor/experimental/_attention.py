@@ -1752,9 +1752,27 @@ def cp_flex_attention_backward_dispatch_mode(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
-    print(
-        f"query={query.shape}, key={key.shape}, value={value.shape}, out={out.shape}, logsumexp={logsumexp.shape}, grad_out={grad_out.shape}, grad_logsumexp={grad_logsumexp.shape}"
+    cp_block_mask = mode._cp_block_mask
+    assert cp_block_mask is not None, (
+        "flex_attention is called but cp_block_mask is not initialized. "
+        "Please pass the `block_mask` argument to `context_parallel`."
     )
+
+    # TODO: save global KV in forward
+    # all-gather KV
+    sharding = Shard(2)
+    k_dist = DTensor.from_local(key, mode._device_mesh, [sharding])
+    v_dist = DTensor.from_local(value, mode._device_mesh, [sharding])
+    k_global = k_dist.full_tensor()
+    v_global = v_dist.full_tensor()
+
+    # TODO: add kv reorder
+    sharding_map = mode._sharding_map
+    assert sharding_map is not None, (
+        "flex_attention is called but sharding_map is not initialized. "
+        "Please pass the `sharder` argument to `context_parallel`."
+    )
+
     (
         grad_query,
         grad_key,
@@ -1762,18 +1780,27 @@ def cp_flex_attention_backward_dispatch_mode(
         grad_score_mod_captured,
     ) = flex_attention_backward_hop(
         query,
-        key,
-        value,
+        k_global,  # key
+        v_global,  # value
         out,
         logsumexp,
         grad_out,
         grad_logsumexp,
         fw_graph,
         joint_graph,
-        block_mask,
+        cp_block_mask.as_tuple(),  # block_mask
         scale,
         kernel_options,
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+
+    # reduce-scatter KV grads
+    grad_key = ft_c.reduce_scatter_tensor(
+        grad_key, reduceOp="sum", scatter_dim=2, group=mode._device_mesh
+    )
+    grad_value = ft_c.reduce_scatter_tensor(
+        grad_value, reduceOp="sum", scatter_dim=2, group=mode._device_mesh
+    )
+
     return grad_query, grad_value, grad_key, grad_score_mod_captured
