@@ -410,7 +410,7 @@ torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GuardEnvExpr:
     pass
 
@@ -421,7 +421,7 @@ input_pos_a and input_pos_b are input positions we have deduped.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DuplicateInputs(GuardEnvExpr):
     input_source_a: Source
     input_source_b: Source
@@ -444,7 +444,7 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
