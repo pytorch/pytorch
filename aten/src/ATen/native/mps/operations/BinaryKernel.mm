@@ -50,7 +50,6 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   lib.exec_binary_kernel(iter, "complex_mul");
 }
 
-// When alpha = 1, binary alpha ops can call into a binary kernel for reduced overhead, see BinaryOps.mm
 void binary_op_kernel(const std::string func_name,
                       const Tensor& input,
                       const Tensor& other,
