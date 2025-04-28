@@ -191,8 +191,13 @@ class ItertoolsVariable(VariableTracker):
                     gb_type="Unsupported arguments for itertools.groupby",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Dynamo does not know how to trace "
-                    f"itertools.groupby with args: {args}",
-                    hints=[*graph_break_hints.USER_ERROR],
+                    f"itertools.groupby with args: {args} and kwargs: {kwargs}. "
+                    "itertools.groupby expects an iterable to group and an "
+                    "optional key function to determine groupings.",
+                    hints=[
+                        "Make sure the arguments to itertools.groupby are correct.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
             if "key" in kwargs:
