@@ -1153,7 +1153,7 @@ class CommonTemplate:
         [
             # No boundary check in all dimensions
             [True, False, True],
-            # no xdim boundary check, ydim is checked since > max_ygrid
+            # No xdim boundary check, ydim is checked since > max_ygrid
             # z dim can be used since its not included
             [True, True, False],
             # Boundary check in all dimensions
@@ -1182,6 +1182,7 @@ class CommonTemplate:
         if ynumel_exceed_ygrid_size:
             shape.y = math.ceil(get_max_y_grid()) * shape.y + shape.y
 
+        # Use fixed block sizes to avoid having to generate very large input tensors
         class FixedBlockSizeChoices(InductorChoices):
             def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
                 block_sizes = {

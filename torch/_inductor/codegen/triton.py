@@ -448,7 +448,7 @@ class BlockPtrOptions:
         # Also see Note: Constant mask optimisation
         # if ynumel / YBLOCK > max_ygrid, then the z dimension is used to handle
         # the remaining programs that cannot fit into the y dimension. This means
-        # its possible that more than the required number of programs are launched,
+        # it's possible that more than the required number of programs are launched,
         # possibly leading to out-of-bounds accesses. So even if ynumel divides YBLOCK,
         # boundary checking is required in the dimensions that are based on YBLOCK
         # e.g. for [YBLOCK // 16, YBLOCK, XBLOCK] dimensions 0 and 1 need boundary
