@@ -6,6 +6,7 @@
 #include <c10/core/alignment.h>
 #include <c10/core/impl/COWDeleter.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/ParallelGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
 
@@ -75,7 +76,7 @@ static void check_clone_between_devices(
       "'.");
 }
 
-static c10::optional<at::DataPtr> lazy_clone_storage_data_ptr(
+static std::optional<at::DataPtr> lazy_clone_storage_data_ptr(
     StorageImpl& storage) {
   const at::DataPtr& data_ptr = storage.data_ptr();
 
@@ -126,7 +127,7 @@ static c10::optional<at::DataPtr> lazy_clone_storage_data_ptr(
   } else {
     // Case 3) There is a context and it's not copy-on-write. Nothing
     // we can do here.
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr_opt.has_value());
@@ -134,7 +135,7 @@ static c10::optional<at::DataPtr> lazy_clone_storage_data_ptr(
 }
 
 c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
-  c10::optional<at::DataPtr> new_data_ptr_opt =
+  std::optional<at::DataPtr> new_data_ptr_opt =
       lazy_clone_storage_data_ptr(storage);
   if (!new_data_ptr_opt.has_value()) {
     return nullptr;
@@ -154,7 +155,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage,
     c10::Device device,
     c10::Allocator& allocator) {
-  c10::optional<at::DataPtr> new_data_ptr_opt =
+  std::optional<at::DataPtr> new_data_ptr_opt =
       lazy_clone_storage_data_ptr(storage);
   if (!new_data_ptr_opt.has_value()) {
     return nullptr;
