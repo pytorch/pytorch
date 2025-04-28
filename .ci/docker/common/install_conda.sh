@@ -83,11 +83,19 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   else
     CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
 
-    if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
-      conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
-    else
-      conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
-    fi
+    case "$ANACONDA_PYTHON_VERSION" in 
+      3.11|3.12)
+        NUMPY_SPEC="numpy=1.26.*"          # allowed upper‑bound in PyTorch
+        ;;
+      3.10)
+        NUMPY_SPEC="numpy>=1.24,<1.27"     # first series with Py3.10 wheels
+        ;;
+      *)
+        NUMPY_SPEC="numpy=1.21.2"          # Py3.7–3.9 builds
+        ;;
+      esac
+      conda_install ${NUMPY_SPEC} ${CONDA_COMMON_DEPS}
+      
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
