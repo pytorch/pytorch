@@ -1106,7 +1106,7 @@ def _process_dynamic_shapes(
                 and not torch.fx.experimental._config.backed_size_oblivious
             ):
                 msg = (
-                    f"dimension inputs{keystr(path)}.shape[{idx}] is likely to 0/1 specialize; Dim.AUTO "
+                    f"dimension inputs{keystr(path)}.shape[{idx}] is likely to 0/1 specialize; Dim.{dim.type.name} "
                     + f"was specified along with a sample input with shape = {tensor.size(idx)}."
                 )
                 log.warning(msg)

@@ -13151,6 +13151,14 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
+    def test_dim_auto_01(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+        
+        ep = export(Foo(), (torch.randn(1, 1),), dynamic_shapes={"x": [Dim.AUTO]*2})
+        print(ep)
+
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
