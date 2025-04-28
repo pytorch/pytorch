@@ -2132,6 +2132,8 @@ class SIMDScheduling(BaseScheduling):
             tiling_score = cls.create_tiling(pw_score, red_score)
             tilings.append((candidate, tiling_score))
 
+        default_tiling = cls.create_tiling([pointwise_numel], [reduction_numel])
+
         for cand, tiling_score in sorted(tilings, key=lambda t: -t[0].score):
             if cls.tiling_is_compatible(
                 node_schedule, pointwise_numel, reduction_numel, cand.tiling
@@ -2147,7 +2149,12 @@ class SIMDScheduling(BaseScheduling):
 
                 return cand.tiling, tiling_score
 
-        raise RuntimeError("One tiling should have been compatible")
+            # surprisingly, the default tiling is not always read as compatible by `tiling_is_compatible`
+            # TODO - look into, occurs with dynamic shapes often
+            if cand.tiling == default_tiling:
+                return cand.tiling, tiling_score
+
+        return default_tiling, None
 
     @classmethod
     def tiling_is_compatible(

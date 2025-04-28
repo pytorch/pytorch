@@ -6,12 +6,15 @@ from typing import Optional, TYPE_CHECKING, Union
 import sympy
 
 import torch
+from torch._inductor import config
 from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+from .virtualized import V
 
 
 if TYPE_CHECKING:
@@ -130,11 +133,20 @@ def find_coalesced_var(
             return v
 
     # Approximate analysis by evaluating at 1 and 0
-    variables = dict.fromkeys(index.free_symbols, 0)
+    variables: dict[sympy.Symbol, int] = {}
+    for v in index.free_symbols:
+        if v in var_ranges:
+            variables[v] = 0
+        else:
+            variables[v] = get_hint(v)
+
     zero_index = sympy_subs(index, variables)
     for v in var_ranges.keys():
         variables[v] = 1
-        new_val = sympy_subs(index, variables)
+        try:
+            new_val = sympy_subs(index, variables)
+        except ZeroDivisionError:
+            continue
         if new_val - zero_index == 1:
             return v
         variables[v] = 0
@@ -297,7 +309,9 @@ def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
             var_sizes.append(v_size)
     from .virtualized import V
 
-    return V.graph.sizevars.size_hint(sympy_product(var_sizes))
+    return V.graph.sizevars.atomically_apply_size_hint(
+        sympy_product(var_sizes), fallback=config.unbacked_symint_fallback
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -309,6 +323,13 @@ class VarTiling:
     var: sympy.Symbol
     tiling_factor: int
     score: int
+
+
+def get_hint(v: Union[sympy.Expr, int]) -> int:
+    if isinstance(v, int):
+        return v
+    else:
+        return V.graph.sizevars.size_hint(v, fallback=config.unbacked_symint_fallback)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -365,6 +386,9 @@ def analyze_memory_coalescing(
     for uncoalesced_expr, addr_score in uncoalesced_addrs.items():
         expr_subs = dict.fromkeys(uncoalesced_expr.free_symbols, 0)
         for v in uncoalesced_expr.free_symbols:
+            # skip non iter/reduce var variables
+            if v not in var_ranges:
+                continue
             del expr_subs[v]
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
@@ -379,7 +403,7 @@ def analyze_memory_coalescing(
             tiling_factor = int(tiling_factor)
             MIN_TILING_BLOCK = 4
             if any(
-                (b < MIN_TILING_BLOCK)
+                (get_hint(b) < MIN_TILING_BLOCK)
                 for b in (tiling_factor, var_ranges[v] // tiling_factor)
             ):
                 continue
