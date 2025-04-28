@@ -90,14 +90,18 @@ inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
 
 inline void assert_inf_and_nan(
     const std::string& tensor_name,
-    at::Tensor& check_tensor) {
+    at::Tensor& check_tensor,
+    bool skip_check_inf) {
   auto isnan_tensor = check_tensor.isnan();
   if (isnan_tensor.any().item<bool>()) {
     throw std::runtime_error("At least one NaN in " + tensor_name);
   }
-  auto isinf_tensor = check_tensor.isinf();
-  if (isinf_tensor.any().item<bool>()) {
-    throw std::runtime_error("At least one INF in " + tensor_name);
+
+  if (!skip_check_inf) {
+    auto isinf_tensor = check_tensor.isinf();
+    if (isinf_tensor.any().item<bool>()) {
+      throw std::runtime_error("At least one INF in " + tensor_name);
+    }
   }
 }
 

@@ -1032,11 +1032,12 @@ AOTITorchError aoti_torch_repeat_interleave_Tensor(
 // Function to check existence of inf and NaN
 AOTITorchError aoti_torch_check_inf_and_nan(
     const char* tensor_name,
-    AtenTensorHandle tensor) {
+    AtenTensorHandle tensor,
+    bool skip_check_inf) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* check_tensor = tensor_handle_to_tensor_pointer(tensor);
 
-    assert_inf_and_nan(tensor_name, *check_tensor);
+    assert_inf_and_nan(tensor_name, *check_tensor, skip_check_inf);
   });
 }
 

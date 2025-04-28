@@ -1049,6 +1049,9 @@ class PythonWrapperCodegen(CodeGen):
 
             line = f"assert not {name}.isnan().any().item()"
             self.prefix.writeline(line)
+            if buf.dtype == torch.float8_e4m3fn or buf.dtype == torch.float8_e4m3fnuz:
+                # FP8 E4M3 cannot represent inf
+                continue
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
 

@@ -3835,13 +3835,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         _, call_args, arg_signatures, _ = self.args.python_argdefs()
         for arg, arg_signature in zip(call_args, arg_signatures):
             if isinstance(arg_signature, TensorArg):
+                arg_dtype = arg_signature.dtype
+                # FP8 E4M3 cannot represent inf
+                skip_check_inf = (
+                    arg_dtype == torch.float8_e4m3fn
+                    or arg_dtype == torch.float8_e4m3fnuz
+                )
                 if V.graph.cpp_wrapper:
                     wrapper.writeline(
-                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
+                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}, {skip_check_inf}));'
                     )
                 else:
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
+                    if skip_check_inf:
+                        continue
                     line = f"assert not {arg}.isinf().any().item()"
                     wrapper.writeline(line)
 
