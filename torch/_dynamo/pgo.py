@@ -35,7 +35,6 @@ from torch._dynamo.utils import (
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
 
 if TYPE_CHECKING:
@@ -493,6 +492,20 @@ def get_cache_key() -> Optional[str]:
     return None
 
 
+def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+    """
+    The PGO cache artifact key for a MAST job contains the job name and the version.
+    When we want to use the cache artifact on a different MAST job, we need to
+    update the key to use the new MAST job's name and version.
+    """
+    if not original_key.startswith("mast:"):
+        # if original_key is overriden, then dont change it
+        return original_key
+    if (new_key := get_cache_key()) is not None:
+        return new_key
+    return original_key
+
+
 # This solely controls local PGO
 def code_state_path(cache_key: str) -> Optional[str]:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
@@ -576,6 +589,8 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
+
+    from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
     # Attempt local
     path = code_state_path(cache_key)
@@ -697,6 +712,8 @@ def put_local_code_state(cache_key: str) -> None:
         assert _CODE_STATE is not None
 
         pickled_code = pickle.dumps(_CODE_STATE)
+
+        from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
         CacheArtifactManager.record_artifact(
             CacheArtifactType.PGO, cache_key, pickled_code

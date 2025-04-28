@@ -89,6 +89,8 @@ void store_barrier(
     int rank,
     int world_size);
 
+// Teturns a pointer of virtual address that is mapped to the physical memory
+// held by the handle.
 void map_block(
     void** ptr,
     c10d::symmetric_memory::HandleType handle,
