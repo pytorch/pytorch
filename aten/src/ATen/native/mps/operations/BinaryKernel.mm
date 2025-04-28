@@ -51,7 +51,11 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
 }
 
 // When alpha = 1, binary alpha ops can call into a binary kernel for reduced overhead, see BinaryOps.mm
-void binary_op_kernel(const std::string func_name, const Tensor& input, const Tensor& other, const Tensor& output) {
+void binary_op_kernel(const std::string func_name,
+                      const Tensor& input,
+                      const Tensor& other,
+                      const Tensor& output,
+                      const std::optional<MPSScalar>& alpha) {
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
@@ -64,7 +68,11 @@ void binary_op_kernel(const std::string func_name, const Tensor& input, const Te
   auto iter =
       TensorIteratorConfig().add_output(output).add_input(input).add_input(other).check_all_same_dtype(false).build();
 
-  lib.exec_binary_kernel(iter, func_name);
+  if (alpha) {
+    lib.exec_binary_alpha_kernel(iter, func_name, *alpha);
+  } else {
+    lib.exec_binary_kernel(iter, func_name);
+  }
 }
 
 } // namespace mps

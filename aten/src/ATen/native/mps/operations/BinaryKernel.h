@@ -5,7 +5,8 @@ void binary_op_kernel(
     const std::string func_name,
     const Tensor& input,
     const Tensor& other,
-    const Tensor& output);
+    const Tensor& output,
+    const std::optional<MPSScalar>& alpha = std::nullopt);
 void complex_mul_out(
     const Tensor& input,
     const Tensor& other,
