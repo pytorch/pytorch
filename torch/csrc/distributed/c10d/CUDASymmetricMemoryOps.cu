@@ -8,8 +8,6 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -17,9 +15,12 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
+
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
@@ -72,7 +73,7 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
   const size_t min_alignment = std::max(4l, input.element_size());
   // Only check the offset since the multicast address is always at least
   // 128-bit aligned
-  const size_t ptr_alignment = get_alignment(
+  const size_t ptr_alignment = at::native::memory::get_alignment(
       static_cast<size_t>(input.storage_offset() * input.element_size()));
   TORCH_CHECK(
       ptr_alignment >= min_alignment,
@@ -84,7 +85,7 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
       "-byte aligned.");
 
   const size_t size_alignment =
-      get_alignment(static_cast<size_t>(input.numel() * input.element_size()));
+      at::native::memory::get_alignment(static_cast<size_t>(input.numel() * input.element_size()));
   TORCH_CHECK(
       size_alignment >= min_alignment,
       op_name,
@@ -225,7 +226,7 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
   for (size_t i = offset; i < numel; i += stride) {
     auto vec = multimem_ld_reduce_add<alignment>(input_mc_ptr + i);
-    st_vec<alignment>(output_ptr + i, vec);
+    at::native::memory::st_vec<alignment>(output_ptr + i, vec);
   }
 
   __syncthreads();
@@ -318,7 +319,7 @@ static __global__ void multimem_all_gather_kernel(
   auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * alignment;
   auto stride = blockDim.x * gridDim.x * alignment;
   for (size_t i = offset; i < bytes_per_rank; i += stride) {
-    auto vec = ld_vec<alignment>(input_ptr + i);
+    auto vec = at::native::memory::ld_vec<alignment>(input_ptr + i);
     multimem_st<alignment>(output_mc_ptr + start + i, vec);
   }
 
@@ -418,8 +419,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
   if (input_ptr) {
     for (size_t i = offset; i < numel; i += stride) {
-      Vec<alignment> vec_st = ld_vec<alignment>(input_ptr + i);
-      st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
+      Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
+      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
     }
   }
   // TODO make it sync with one block for no-copy case
@@ -429,7 +430,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   for (size_t i = offset; i < numel; i += stride) {
     auto vec = load_and_reduce<T, alignment, k_world_size>(
         input_ptrs, rank, world_size, input_offset + i);
-    st_vec<alignment>(output_ptr + i, vec);
+    at::native::memory::st_vec<alignment>(output_ptr + i, vec);
   }
 
   __syncthreads();
@@ -606,9 +607,9 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
         input_ptrs, rank, world_size, input_offset + start + idx);
     // store to local buffer or to output
     if constexpr (reduce_scatter) {
-      st_vec<alignment>(output_ptr + i, vec);
+      at::native::memory::st_vec<alignment>(output_ptr + i, vec);
     } else {
-      st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
+      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
     }
   }
 
@@ -627,7 +628,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       if (remote_start + i >= numel) {
         continue;
       }
-      tmp[step] = ld_vec<alignment>(
+      tmp[step] = at::native::memory::ld_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + remote_start + i);
     }
 #pragma unroll k_world_size
@@ -637,7 +638,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       if (remote_start + i >= numel) {
         continue;
       }
-      st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
+      at::native::memory::st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
     }
   }
   // need to make sure all blocks exit simultaneously so that the data
@@ -675,7 +676,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
         input_ptrs, rank, world_size, input_offset + start + i);
     for (size_t step = 0; step < world_size; ++step) {
       size_t remote_rank = (rank + step) % world_size;
-      st_vec<alignment>(
+      at::native::memory::st_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + start + i, vec);
     }
   }
@@ -947,7 +948,104 @@ at::Tensor reduce_scatter_out(
   return output;
 }
 } // namespace
-#endif // #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
+namespace {
+at::Tensor multimem_all_reduce_(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_all_reduce_: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor multimem_one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor multimem_one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor multimem_all_gather_out(
+    const at::Tensor& input,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_all_gather_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_copy_out(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor one_shot_all_reduce_copy(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "two_shot_all_reduce_: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_out(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor output) {
+  TORCH_CHECK(false, "two_shot_all_reduce_out: requires CUDA 12.3+.");
+  return output;
+}
+
+at::Tensor reduce_scatter_out(
+    at::Tensor input,
+    std::string group_name,
+    bool split_last_dim,
+    at::Tensor output) {
+  TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
+  return output;
+}
+} // namespace
+#endif // #if defined(CUDART_VERSION) && CUDART_VERSION < 12030
 
 namespace {
 
@@ -1061,7 +1159,7 @@ at::Tensor stream_write_value32_(
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+#if defined(CUDART_VERSION)
   m.impl("multimem_all_reduce_", ::multimem_all_reduce_);
 
   // NOTE: [multimem_one_shot_all_reduce]

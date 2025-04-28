@@ -391,7 +391,7 @@ class CondAutogradOp(torch.autograd.Function):
 # As long as one of the tensors in pred or operands requires grad,
 # all the output would require grad with backward fn set to be the CondAutogradOp.
 # This is consistent with autograd.Function's semantic.
-@cond_op.py_impl(DispatchKey.Autograd)
+@cond_op.py_autograd_impl
 def cond_autograd(pred, true_fn, false_fn, operands):
     return CondAutogradOp.apply(
         pred,
