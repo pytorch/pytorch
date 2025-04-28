@@ -11,6 +11,8 @@ on:
       - release/*
       - landchecks/*
   workflow_dispatch:
+  schedule:
+    - cron: '0 10 * * *'  # Runs daily at 2 AM PST
 
 permissions: read-all
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
@@ -294,11 +296,14 @@ jobs:
       submodules: false
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        if ! ./scripts/lint_urls.sh; then
+        ./scripts/lint_urls.sh $(
+          [ "${{ github.event_name }}" = "pull_request" ] \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+        ) || {
           echo
-          echo "URL lint failed. If this is a transient outage, you can bypass it by adding the `skip-url-lint` label to your PR."
+          echo "URL lint failed. If this is a transient outage, you can bypass it by adding the \`skip-url-lint\` label to your PR."
           exit 1
-        fi
+        }
 
   lint-xrefs:
     name: Lint Xrefs
@@ -312,7 +317,10 @@ jobs:
       submodules: false
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        ./scripts/lint_xrefs.sh
+        ./scripts/lint_xrefs.sh $(
+          [ "${{ github.event_name }}" = "pull_request" ] \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+        )
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
