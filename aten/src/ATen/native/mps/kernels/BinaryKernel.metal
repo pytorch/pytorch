@@ -219,13 +219,6 @@ struct complex_sub_alpha_functor {
   }
 };
 
-struct complex_sub_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return T(a.x - b.x, a.y - b.y);
-  }
-};
-
 struct complex_lerp_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
@@ -350,12 +343,12 @@ REGISTER_BINARY_OP(make_complex, float, float2);
 REGISTER_BINARY_OP(make_complex, half, half2);
 REGISTER_BINARY_OP(complex_mul, float2, float2);
 REGISTER_BINARY_OP(complex_mul, half2, half2);
-REGISTER_BINARY_OP(complex_add, float2, float2);
-REGISTER_BINARY_OP(complex_add, half2, half2);
-REGISTER_BINARY_OP(complex_sub, float2, float2);
-REGISTER_BINARY_OP(complex_sub, half2, half2);
-REGISTER_BINARY_OP(complex_lerp, float2, float2);
-REGISTER_BINARY_OP(complex_lerp, half2, half2);
+REGISTER_BINARY_OP(add, float2, float2);
+REGISTER_BINARY_OP(add, half2, half2);
+REGISTER_BINARY_OP(sub, float2, float2);
+REGISTER_BINARY_OP(sub, half2, half2);
+REGISTER_BINARY_OP(lerp, float2, float2);
+REGISTER_BINARY_OP(lerp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(complex_add_alpha, float2, float2);
 REGISTER_BINARY_ALPHA_OP(complex_add_alpha, half2, half2);
 REGISTER_BINARY_ALPHA_OP(complex_sub_alpha, float2, float2);
