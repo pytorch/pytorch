@@ -1,4 +1,5 @@
 import collections
+import os
 
 """ Mapping of CUDA functions, include files, constants, and types to ROCm/HIP equivalents """
 
