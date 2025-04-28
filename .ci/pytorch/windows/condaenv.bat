@@ -21,10 +21,10 @@ FOR %%v IN (%DESIRED_PYTHON%) DO (
 endlocal
 
 :: Install libuv
-curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o %CONDA_HOME%\libuv-1.40.0-h8ffe710_0.tar.bz2
-tar -xvf %CONDA_HOME%\libuv-1.40.0-h8ffe710_0.tar.bz2 -C %CONDA_HOME%
+curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o libuv-1.40.0-h8ffe710_0.tar.bz2
+tar -xvf libuv-1.40.0-h8ffe710_0.tar.bz2 -C %CONDA_HOME%
 set libuv_ROOT=%CONDA_HOME%\Library
-echo libuv_ROOT=%libuv_ROOT%
+:: echo libuv_ROOT=%libuv_ROOT%
 
 
 :: conda install -y -q -c conda-forge libuv=1.39
