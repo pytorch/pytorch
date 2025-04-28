@@ -25,6 +25,27 @@ struct lerp_functor {
   }
 };
 
+struct add_alpha_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    return static_cast<T>(a + (alpha * b));
+  }
+};
+
+struct sub_alpha_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    return static_cast<T>(a - (alpha * b));
+  }
+};
+
+struct lerp_alpha_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b, const T alpha) {
+    return static_cast<T>(a + (alpha * (b - a)));
+  }
+};
+
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -227,6 +248,30 @@ REGISTER_BINARY_OP(lerp, short, short);
 REGISTER_BINARY_OP(lerp, uchar, uchar);
 REGISTER_BINARY_OP(lerp, char, char);
 REGISTER_BINARY_OP(lerp, bool, bool);
+REGISTER_BINARY_ALPHA_OP(add_alpha, long, long);
+REGISTER_BINARY_ALPHA_OP(add_alpha, int, int);
+REGISTER_BINARY_ALPHA_OP(add_alpha, float, float);
+REGISTER_BINARY_ALPHA_OP(add_alpha, half, half);
+REGISTER_BINARY_ALPHA_OP(add_alpha, short, short);
+REGISTER_BINARY_ALPHA_OP(add_alpha, uchar, uchar);
+REGISTER_BINARY_ALPHA_OP(add_alpha, char, char);
+REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, long, long);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, int, int);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, float, float);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, half, half);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, short, short);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, uchar, uchar);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, char, char);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, bool, bool);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, half);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(copysign, bfloat, bfloat);
