@@ -33,6 +33,9 @@ jobs:
           fetch-depth: 0
           path: pytorch
 
+      - name: Setup Linux
+        uses: ./pytorch/.github/actions/setup-linux
+
       - name: Clone CodeLlama
         uses: actions/checkout@v4
         with:
