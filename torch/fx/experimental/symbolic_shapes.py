@@ -4659,10 +4659,6 @@ class ShapeEnv:
         sloc = self._get_sloc()
 
         if val in (0, 1) and specialize_zero_one:
-            from torch._dynamo.source import TensorProperty
-
-            if source.prop == TensorProperty.SIZE:
-                log.warning(f"create_symbol 0/1 specialized for {source.name()}; a hint of {val} was provided.")
             if val == 0:
                 return sympy.S.Zero
             else:
