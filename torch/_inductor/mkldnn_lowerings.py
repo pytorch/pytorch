@@ -707,8 +707,8 @@ def register_onednn_fusion_ops():
             assert x_zp.get_numel() == 1, "x_zp is incompatible with oneDNN qlinear"
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
-            # Refer to https://github.com/pytorch/pytorch/blob
-            # /f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
+            # Refer to
+            # https://github.com/pytorch/pytorch/blob/f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577  # noqa: B950
             if w_zp is None:
                 # If w_zp is None, then it's a dummy tensor created to denote the
                 # absence of a zero point, and thus w is int8 symmetrically quantized.
@@ -1018,8 +1018,8 @@ def register_onednn_fusion_ops():
                 x_zp.realize()
 
             # When channels less than 8, w_scale/w_zp is Pointwise instead of ConstantBuffer
-            # Refer to https://github.com/pytorch/pytorch/blob
-            # /f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577
+            # Refer to
+            # https://github.com/pytorch/pytorch/blob/f353d17755ed23b02924c962a86ff99a3405fe10/torch/_inductor/graph.py#L570-L577  # noqa: B950
             w_scale.realize()
             w_zp.realize()
             if w_zp.get_dtype() != torch.int32 and isinstance(

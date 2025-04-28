@@ -9,8 +9,20 @@ from __future__ import annotations
 from onnxscript.onnx_opset import opset18 as op
 
 import torch
-from torch.onnx._internal.exporter._torchlib._tensor_typing import BOOL
+from torch.onnx._internal.exporter._torchlib._tensor_typing import BOOL, IntType
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
+
+
+@onnx_impl(torch.sym_max, trace_only=True)
+def sym_max(x: IntType, y: IntType) -> IntType:
+    """sym_max(SymInt x, SymInt y) -> SymInt"""
+    return op.Max(x, y)
+
+
+@onnx_impl(torch.sym_min, trace_only=True)
+def sym_min(x: IntType, y: IntType) -> IntType:
+    """sym_min(SymInt x, SymInt y) -> SymInt"""
+    return op.Min(x, y)
 
 
 @onnx_impl(torch.sym_not, trace_only=True)

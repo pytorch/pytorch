@@ -390,7 +390,7 @@ def ceildiv(
 def _type_of(key: Optional[torch.dtype]) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
-    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # https://github.com/triton-lang/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
     if key is None:
         return "*i8"
@@ -1981,7 +1981,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
-        # Triton API change in https://github.com/openai/triton/pull/2293
+        # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
         sm_clock = max_clock_rate()
