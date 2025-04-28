@@ -54,6 +54,7 @@ from .codegen.triton import (
     TritonKernel,
     TritonScheduling,
 )
+from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
@@ -2091,7 +2092,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def benchmark_choice_in_current_process(
             choice: ChoiceCaller, autotune_args: AutotuneArgs
         ) -> float:
-            is_extern = isinstance(choice, ExternKernelCaller)
+            is_extern = isinstance(choice, ExternKernelCaller) or isinstance(choice, SubgraphChoiceCaller)
             benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
             inpts, output = benchmark_tensors.unpack()
             output.zero_()

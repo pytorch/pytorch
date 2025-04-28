@@ -7,6 +7,7 @@ from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.virtualized import V
+import itertools
 
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         super().__init__(name, input_nodes, layout, description)
         self.gm = gm
         self.example_inputs = example_inputs
+
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -63,6 +65,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
                 bm_func = mod.call
+
                 bm_func([*args])
 
         return benchmarker.benchmark_gpu(lambda: bm_func([*args]))
@@ -75,6 +78,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     str(arg.shape)
                     for arg in self.example_inputs
                     if isinstance(arg, torch.Tensor)
+                ],
+                *[
+                    str(arg.stride()) for arg in self.example_inputs if isinstance(arg, torch.Tensor)
                 ],
                 str(self.gm.graph),
             ]
@@ -111,6 +117,8 @@ class SubgraphTemplate(KernelTemplate):
     optimal implementations for complex operations.
     """
 
+    index_counter = itertools.count()
+
     def __init__(
         self,
         name: str,
@@ -123,7 +131,7 @@ class SubgraphTemplate(KernelTemplate):
             name: The name of this template
             graph: The FX graph
         """
-        self.name = name
+        self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
         self.make_fx_graph = make_fx_graph
 
     def generate(  # type: ignore[override]

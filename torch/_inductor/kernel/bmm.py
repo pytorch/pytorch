@@ -202,6 +202,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
     if use_triton_template(layout):
+        # TODO: add out_dtype support for Triton Template
+        assert out_dtype is None, "out_dtype is not supported for Triton"
         for config in bmm_configs(
             m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
         ):

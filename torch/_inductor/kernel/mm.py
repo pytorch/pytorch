@@ -38,6 +38,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    get_k_splits,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
@@ -591,14 +592,15 @@ def check_supported_striding(mat_a, mat_b) -> None:
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
-def decomposeK(a, b, kPartitions):
+def decomposeK(a, b, k_splits):
     m = a.shape[0]
     n = b.shape[1]
     k = a.shape[1]
 
-    B = k // kPartitions
-    a_reshaped = torch.permute(a.reshape(m, B, kPartitions), (1, 0, 2))
-    b_reshaped = b.reshape(B, kPartitions, n)
+    k_parts = k // k_splits
+    B = k_splits
+    a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
+    b_reshaped = b.reshape(B, k_parts, n)
     result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
     reduced_buf = torch.sum(result, 0)
     return reduced_buf.to(a.dtype)
@@ -673,30 +675,24 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
                 )
-
         # Only do split-k optimization if K is much larger than m, n and m, n are small
         if use_decompose_k_choice(m, n, k):
             from torch._dispatch.python import enable_python_dispatcher
 
             from ..decomposition import select_decomp_table
 
-            kPartitions = [
-                16,
-                64,
-                256,
-            ]
-
-            for kPart in kPartitions:
-                if not V.graph.sizevars.evaluate_expr(sympy.Eq(sympy.Mod(k, kPart), 0)):
+            k_splits = get_k_splits(k)
+            for k_split in k_splits:
+                if not V.graph.sizevars.evaluate_expr(sympy.Eq(sympy.Mod(k, k_split), 0)):
                     continue
 
                 with enable_python_dispatcher():
                     decompositions = select_decomp_table()
 
                     decompose_k_subgraph_template = SubgraphTemplate(
-                        name=f"decompose_k_mm_{kPart}",
+                        name=f"decompose_k_mm_{k_split}_split",
                         make_fx_graph=make_fx(
-                            functools.partial(decomposeK, kPartitions=kPart),
+                            functools.partial(decomposeK, k_splits=k_split),
                             decompositions,
                         ),
                     )

@@ -1521,15 +1521,32 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
             return False
     return res
 
+decompose_k_threshold = 16
 
 def use_decompose_k_choice(m: int, n: int, k: int) -> bool:
     from torch._inductor.virtualized import V
 
-    decompose_k_threshold = 16
-
     return V.graph.sizevars.evaluate_expr(
         sympy.Ge(k, decompose_k_threshold * m)
     ) and V.graph.sizevars.evaluate_expr(sympy.Ge(k, decompose_k_threshold * n))
+
+def get_k_splits(k: Union[int, sympy.Expr]) -> list[int]:
+    default_splits = [16, 32, 64, 128, 256]
+    
+    if isinstance(k, int) or (isinstance(k, sympy.Expr) and k.is_number):
+        return default_splits
+
+    k_splits_limit = 5
+    min_split, max_split = 16, 512
+
+    # Get all divisors of k, k has to be divisible by kPart
+    divisors = sympy.divisors(k)
+
+    k_splits = [divisor for divisor in divisors if divisor <= max_split and divisor >= min_split]
+    if len(k_splits) > k_splits_limit:
+        k_splits = k_splits[:: len(k_splits) // k_splits_limit]
+    
+    return k_splits
 
 
 @functools.lru_cache(None)

@@ -1129,31 +1129,48 @@ class TestMaxAutotune(TestCase):
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
     @parametrize("dynamic", (True, False))
+    @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000)))
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
     )
-    def test_max_autotune_decompose_k(self, dynamic):
+    def test_max_autotune_decompose_k(self, sizes, dynamic):
+        M, N, K = sizes
         a = torch.randn(
-            32, 32768, dtype=torch.float16, device="cuda", requires_grad=True
+            M, K, dtype=torch.float16, device="cuda", requires_grad=True
         )
         b = torch.randn(
-            32768, 32, dtype=torch.float16, device="cuda", requires_grad=True
+            K, N, dtype=torch.float16, device="cuda", requires_grad=True
         )
 
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
         torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
-        FileCheck().check("extern_kernels.bmm_dtype").check(
-            "triton_red_fused_0.run"
+        FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+            "triton_.*_fused_0.run"
         ).check("decompose_k").run(code[0])
 
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
+        out, code = run_and_get_code(compiled_func, a, b)
+        FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+            "triton_.*_fused_0.run"
+        ).check("decompose_k").run(code[0])
         torch.testing.assert_close(
             compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+        )
+
+        # Test adding reinterpret view before subgraph
+        a = a.transpose(0, 1)
+        compiled_func = torch.compile(lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic)
+        out, code = run_and_get_code(compiled_func, a, b)
+        FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+            "triton_.*_fused_0.run"
+        ).check("decompose_k").run(code[0])
+        torch.testing.assert_close(
+            compiled_func(a, b), (a.transpose(0, 1) @ b).relu(), atol=1e-2, rtol=1e-2
         )
 
 

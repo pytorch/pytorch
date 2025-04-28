@@ -5720,6 +5720,7 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+
             wrapper.writeline(
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
@@ -6015,7 +6016,6 @@ class SubgraphBuffer(ExternKernel):
         self.subgraph = V.graph.make_subgraph(
             self.gm, self.example_inputs, subgraph_name
         )
-
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
@@ -6032,6 +6032,10 @@ class SubgraphBuffer(ExternKernel):
             def __init__(self, graph: GraphLowering):
                 self.graph = graph
                 self.name = graph.name
+        outer_inputs = [t.codegen_reference() for t in self.inputs]
+
+        for i, inp in enumerate(outer_inputs):
+            wrapper.writeline(f"{self.inputs[i].get_name()} = {inp}")
 
         wrapper.codegen_subgraph(
             CodegenGraph(self.subgraph),
