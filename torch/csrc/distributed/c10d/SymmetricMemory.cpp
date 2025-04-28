@@ -6,6 +6,7 @@ using namespace c10d::symmetric_memory;
 
 static bool is_finalizing_ = false;
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class AllocatorMap {
  public:
   AllocatorMap(const AllocatorMap&) = delete;
@@ -212,16 +213,16 @@ namespace {
 
 at::Tensor one_shot_all_reduce_meta(
     const at::Tensor& input,
-    std::string reduce_op,
-    std::string group_name) {
+    const std::string& reduce_op,
+    const std::string& group_name) {
   return at::empty_like(input);
 }
 
 at::Tensor one_shot_all_reduce_copy_meta(
     const at::Tensor& symm_buffer,
     const at::Tensor& local_input,
-    std::string reduce_op,
-    std::string group_name) {
+    const std::string& reduce_op,
+    const std::string& group_name) {
   return at::empty_like(local_input);
 }
 

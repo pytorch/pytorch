@@ -13,8 +13,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
-namespace c10d {
-namespace symmetric_memory {
+namespace c10d::symmetric_memory {
 
 bool device_has_multicast_support(int device_idx) {
   if (c10::utils::check_env("TORCH_SYMM_MEM_DISABLE_MULTICAST") == true) {
@@ -41,11 +40,13 @@ std::string getSymmMemBackendCUDA() {
   }
 }
 
-IpcChannel::IpcChannel() : socket_name_(get_socket_name(getpid())) {
+IpcChannel::IpcChannel()
+    : socket_name_(get_socket_name(getpid())),
+      socket_(socket(AF_UNIX, SOCK_DGRAM, 0)) {
+  // On success, a file descriptor for the new socket is returned.
+  //  On error, -1 is returned, and errno is set to indicate the error.
   TORCH_CHECK(
-      (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
-      "Failed to create socket: ",
-      c10::utils::str_error(errno));
+      socket_ != -1, "Failed to create socket: ", c10::utils::str_error(errno));
 
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
@@ -62,12 +63,16 @@ IpcChannel::~IpcChannel() {
 }
 
 void IpcChannel::send_fd(int dst_pid, int fd) {
+  // Because file descriptors are process-local kernel objects, and we can’t
+  // pass them via normal socket payloads (like write() or send()).  Unix domain
+  // sockets provide a mechanism to pass actual FDs via sendmsg()/recvmsg().
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   auto socket_name = get_socket_name(dst_pid);
   std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
 
   struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
 
+  // NOLINTNEXTLINE(*array*)
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
 
@@ -77,6 +82,9 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
     .msg_controllen = sizeof(cbuf)
   };
 
+  // This points to the first control message header
+  // With SCM_RIGHTS we let the kernel know that we are passing file
+  // descriptors.
   auto cmsg = CMSG_FIRSTHDR(&msg);
   cmsg->cmsg_len = CMSG_LEN(sizeof(int));
   cmsg->cmsg_level = SOL_SOCKET;
@@ -98,9 +106,11 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
 }
 
 int IpcChannel::recv_fd() {
+  // NOLINTNEXTLINE(*array*)
   char buf[2];
   struct iovec io = {.iov_base = (void*)buf, .iov_len = sizeof(buf)};
 
+  // NOLINTNEXTLINE(*array*)
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
 
@@ -120,10 +130,9 @@ int IpcChannel::recv_fd() {
   }
 
   auto cmsg = CMSG_FIRSTHDR(&msg);
-  TORCH_CHECK(cmsg != NULL);
+  TORCH_CHECK(cmsg != nullptr);
   TORCH_CHECK(cmsg->cmsg_len == CMSG_LEN(sizeof(int)));
-  TORCH_CHECK(
-      cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS);
+  TORCH_CHECK(cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS);
   return *reinterpret_cast<int*>(CMSG_DATA(cmsg));
 }
 
@@ -131,12 +140,12 @@ std::vector<int> IpcChannel::all_gather_fds(
     int rank,
     const std::vector<int>& pids,
     int fd) {
-  size_t world_size = pids.size();
+  int world_size = (int)pids.size();
   std::vector<int> fds(pids.size());
   fds[rank] = fd;
 
   int dst_rank = (rank + 1) % world_size;
-  for (size_t step = 1; step < world_size; ++step) {
+  for (int step = 1; step < world_size; ++step) {
     int src_rank = (rank + world_size - step) % world_size;
     send_fd(pids[dst_rank], fd);
     fd = recv_fd();
@@ -150,7 +159,7 @@ int IpcChannel::broadcast_fds(
     int src_rank,
     const std::vector<int>& pids,
     int fd) {
-  size_t world_size = pids.size();
+  int world_size = (int)pids.size();
 
   if (rank == src_rank) {
     for (int dst_rank = 0; dst_rank < (int)world_size; ++dst_rank) {
@@ -192,10 +201,13 @@ void map_block(
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   auto dev_ptr = reinterpret_cast<CUdeviceptr*>(ptr);
+  // Allocate virtual address space
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMemAddressReserve_(dev_ptr, size, 0ULL, 0, 0ULL));
+  // Map the physical memory to the virtual address
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemMap_(*dev_ptr, size, 0, handle, 0ULL));
 
+  // Set access permissions
   CUmemAccessDesc desc;
   desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -208,5 +220,4 @@ void map_block(
 #endif
 }
 
-} // namespace symmetric_memory
-} // namespace c10d
+} // namespace c10d::symmetric_memory
