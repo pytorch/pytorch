@@ -26,6 +26,29 @@ jobs:
     continue-on-error: true
     needs: get-label-type
     steps:
+      - name: Test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "Running on $RUNNER_OS"
+          echo "Running on $RUNNER_ARCH"
+          echo "Running on $RUNNER_NAME"
+          echo "Running on $RUNNER_LABELS"
+          echo "Running on $RUNNER_WORKSPACE"
+          cat /etc/os-release
+      - name: Install python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+          cache: "pip"
+
+      - name: Test python
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python --version
+          pip --version
+
       - name: Clone PyTorch
         uses: actions/checkout@v4
         with:
@@ -50,18 +73,6 @@ jobs:
           ref: v0.0.2
           path: llm-target-determinator
 
-      - name: Install python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.9"
-          cache: "pip"
-
-      - name: Test python
-        shell: bash
-        run: |
-          set -euxo pipefail
-          python --version
-          pip --version
 
       - name: Install requirements
         shell: bash
