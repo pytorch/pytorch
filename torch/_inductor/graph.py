@@ -49,12 +49,12 @@ from . import config, ir, metrics
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
+    FileBackedGraphModule,
     get_backend_features,
     get_device_op_overrides,
     get_wrapper_codegen_for_device,
     init_backend_registration,
     WorkspaceArg,
-    WrapperGraphModule,
 )
 from .exc import (
     CppWrapperCodegenError,
@@ -118,7 +118,7 @@ if TYPE_CHECKING:
     from .codegen.wrapper import PythonWrapperCodegen
     from .scheduler import BaseSchedulerNode
 
-    CompiledModule = Union[ModuleType, WrapperGraphModule]
+    CompiledModule = Union[ModuleType, FileBackedGraphModule]
 
 from torch._inductor.codecache import output_code_log
 
@@ -2221,7 +2221,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if isinstance(wrapper_code, ValueWithLineMap):
             mod = self._compile_to_module_lines(wrapper_code)
-        elif isinstance(wrapper_code, WrapperGraphModule):
+        elif isinstance(wrapper_code, FileBackedGraphModule):
             mod = wrapper_code
         else:
             raise NotImplementedError(

@@ -89,7 +89,7 @@ def data_type_logger(msg: str) -> None:
 
 
 @dataclasses.dataclass
-class WrapperGraphModule:
+class FileBackedGraphModule:
     """
     Output of FX wrapper codegen. Exposes the same methods as ModuleType, but these
     map back to a GraphModule instead of Python source.

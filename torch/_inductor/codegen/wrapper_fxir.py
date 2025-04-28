@@ -20,7 +20,7 @@ from torch.fx import GraphModule
 
 from .. import ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
-from .common import WorkspaceArg, WorkspaceZeroMode, WrapperGraphModule
+from .common import FileBackedGraphModule, WorkspaceArg, WorkspaceZeroMode
 from .wrapper import (
     AllocateLine,
     BufferLike,
@@ -82,7 +82,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     supports_caching = False
 
-    def _generate(self, is_inference: bool) -> tuple[WrapperGraphModule, None]:
+    def _generate(self, is_inference: bool) -> tuple[FileBackedGraphModule, None]:
         self.run_wrapper_ir_passes(is_inference)
 
         prologue = "\n".join(
@@ -94,7 +94,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         gm = FxConverter(lines=self.lines, prologue=prologue).generate()
         compiled_fn = self.compile_graph(gm)
 
-        return WrapperGraphModule(gm, compiled_fn), None
+        return FileBackedGraphModule(gm, compiled_fn), None
 
     def compile_graph(self, gm: GraphModule) -> Callable[..., Any]:
         """
