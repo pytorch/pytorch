@@ -423,9 +423,7 @@ def dim_view_as_real(shape: Shape) -> DimMap:
     return tuple(results)
 
 
-def dim_reduction(
-    ndim: int, dim_or_dims: Optional[Union[int, Sequence[int]]], keepdim: bool
-) -> DimMap:
+def dim_reduction(ndim: int, dim_or_dims: Optional[DimsType], keepdim: bool) -> DimMap:
     """
     General fallback for reduction ops where Partial() does not apply.
 
