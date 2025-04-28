@@ -98,8 +98,10 @@ class ItertoolsVariable(VariableTracker):
                     unimplemented_v2(
                         gb_type="Unsupported `func` in itertools.accumulate",
                         context=f"call_function {self} {args} {kwargs}",
-                        explanation="itertools.accumulate can only accept "
-                        "one of: `func` kwarg, pos 2 arg",
+                        explanation="Dynamo does not know how to get the "
+                        "function to use for itertools.accumulate. "
+                        "itertools.accumulate expects the `func` as the second "
+                        "argument or as a keyword argument.",
                         hints=[*graph_break_hints.USER_ERROR],
                     )
             else:
