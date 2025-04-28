@@ -23,7 +23,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, requires_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -968,6 +968,8 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @requires_cuda
+    @requires_triton
     def test_compile_selective_checkpoint_list_ops(self, device):
         def selective_checkpointing_context_fn():
             # recompute everything
