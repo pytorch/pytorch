@@ -6092,7 +6092,7 @@ def div_mode(a, b, rounding_mode=None):
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
-    # see the discussion at https://github.com/openai/triton/issues/605
+    # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
         return floordiv(a, b) if both_integer else floor(div(a, b))
