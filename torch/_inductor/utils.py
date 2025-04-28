@@ -67,7 +67,15 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
+    from .ir import (
+        Buffer,
+        ExternKernel,
+        ExternKernelOut,
+        IRNode,
+        Layout,
+        Operation,
+        ReinterpretView,
+    )
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -382,7 +390,7 @@ def ceildiv(
 def _type_of(key: Optional[torch.dtype]) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
-    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # https://github.com/triton-lang/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
     if key is None:
         return "*i8"
@@ -1347,7 +1355,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 60  # 3080
+    min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1973,7 +1981,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
-        # Triton API change in https://github.com/openai/triton/pull/2293
+        # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
         sm_clock = max_clock_rate()
@@ -2830,24 +2838,39 @@ def get_donated_idxs() -> Optional[list[int]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Sequence[BaseSchedulerNode], kernel_name: str
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
+    kernel_name: str,
+    is_extern: bool = False,
 ) -> None:
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+    from .ir import ExternKernelOut
     from .virtualized import V
 
-    for snode in node_schedule:
-        if snode not in (EnableReduction, DisableReduction):
-            if snode.node is not None:
-                curr_node_info = (
-                    V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+    if is_extern:
+        assert isinstance(node_schedule, ExternKernelOut)
+        curr_node_info = (
+            V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                kernel_name, []
+            )
+        )
+        curr_node_info.extend(
+            origin.name
+            for origin in node_schedule.origins
+            if origin.name not in curr_node_info
+        )
+    else:
+        assert isinstance(node_schedule, list)
+        for snode in node_schedule:
+            if snode not in (EnableReduction, DisableReduction):
+                if snode.node is not None:
+                    curr_node_info = V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
                         kernel_name, []
                     )
-                )
-                curr_node_info.extend(
-                    origin.name
-                    for origin in snode.node.origins  # type: ignore[attr-defined]
-                    if origin.name not in curr_node_info
-                )
+                    curr_node_info.extend(
+                        origin.name
+                        for origin in snode.node.origins
+                        if origin.name not in curr_node_info
+                    )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):
