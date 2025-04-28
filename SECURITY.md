@@ -41,7 +41,7 @@ Important Note: The trustworthiness of a model is not binary. You must always de
 
 ### TorchScript models
 
-TorchScript models should treated the same way as locally executable code from an unknown source. Only run TorchScript models if you trust the provider. Please note, that tools for introspecting TorchScript models(such as `torch.utils.model_dump`) may also execute partial or full code stored in those models, therefore they should be used in your trust the provider of the binary you are about to load.
+TorchScript models should treated the same way as locally executable code from an unknown source. Only run TorchScript models if you trust the provider. Please note, that tools for introspecting TorchScript models (such as `torch.utils.model_dump`) may also execute partial or full code stored in those models, therefore they should be used only if you trust the provider of the binary you are about to load.
 
 ### Untrusted inputs during training and prediction
 
