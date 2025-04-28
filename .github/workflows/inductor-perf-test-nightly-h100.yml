@@ -78,13 +78,13 @@ jobs:
 
   # NB: Keep this in sync with trunk.yml
   build:
-    name: cuda12.4-py3.10-gcc9-sm90
+    name: cuda12.6-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm90
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
@@ -110,12 +110,12 @@ jobs:
     secrets: inherit
 
   test-nightly:
-    name: cuda12.4-py3.10-gcc9-sm90
+    name: cuda12.6-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 1-6'
     with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm90
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
@@ -125,12 +125,12 @@ jobs:
     secrets: inherit
 
   test-weekly:
-    name: cuda12.4-py3.10-gcc9-sm90
+    name: cuda12.6-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 0'
     with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm90
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
@@ -140,12 +140,12 @@ jobs:
     secrets: inherit
 
   test:
-    name: cuda12.4-py3.10-gcc9-sm90
+    name: cuda12.6-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm90
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm90
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}

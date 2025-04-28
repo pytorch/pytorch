@@ -44,7 +44,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, NoReturn, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -81,7 +81,15 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented_v2, Unsupported
+from .exc import (
+    ArgsMismatchError,
+    BackendCompilerFailed,
+    collapse_resume_frames,
+    format_graph_break_message,
+    get_stack_above_dynamo,
+    unimplemented_v2,
+    Unsupported,
+)
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
@@ -101,6 +109,7 @@ from .utils import (
     counters,
     get_fake_value,
     get_instruction_source_311,
+    get_metrics_context,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -151,6 +160,8 @@ from .variables.torch_function import (
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
+    UserDefinedExceptionClassVariable,
+    UserDefinedExceptionObjectVariable,
     UserDefinedObjectVariable,
 )
 
@@ -372,9 +383,11 @@ class BlockStackEntry:
             and hasattr(self.with_context, "target_values")
             and self.with_context.target_values
         ):
-            return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
+            return ReenterWith(
+                self.stack_index - 1, tuple(self.with_context.target_values)
+            )
         else:
-            return ReenterWith(self.stack_index)
+            return ReenterWith(self.stack_index - 1)
 
     def exit(self, tx, is_graph_break):
         assert self.with_context is not None
@@ -483,7 +496,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
     if user_stack is None:
         user_stack = torch._guards.TracingContext.extract_stack()
 
-    # TODO: Also report the traceback from the parent frame
     try:
         frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
     except IndexError:
@@ -493,16 +505,35 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_firstlineno"],
         )
 
+    stack_above_dynamo_formatted = ""
+    if config.verbose:
+        stack_above_dynamo = get_stack_above_dynamo()
+        stack_above_dynamo_formatted = "".join(
+            traceback.format_list(stack_above_dynamo)
+        )
+    else:
+        user_stack = get_stack_above_dynamo() + user_stack
+        user_stack = collapse_resume_frames(user_stack)
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
-        "Graph break in user code at %s:%s\nGraph Break Reason: %s\nUser code traceback:\n%s"  # noqa: UP031
-        % (
-            frame_loc[0],
-            frame_loc[1],
-            reason,
-            user_stack_formatted,
-        )
+        f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
+        f"Graph Break Reason: {reason}\n"
+        "User code traceback:\n"
     )
+
+    if config.verbose:
+        user_stack_trace += (
+            f"{stack_above_dynamo_formatted}\n"
+            "========== most recent `torch.compile` tracing attempt started here ==========\n\n"
+            f"{user_stack_formatted}\n"
+            "NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! "
+            "This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another "
+            "Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python "
+            "function, which Dynamo intercepts as a top-level frame.\n"
+        )
+    else:
+        user_stack_trace += str(user_stack_formatted)
+
     torch._logging.trace_structured(
         "artifact",
         metadata_fn=lambda: {
@@ -538,17 +569,28 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
 
 
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
+    # graph break message fields for data dependent branching
+    _gb_type = "Data-dependent branching"
+    _explanation = (
+        "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
+        "Dynamo does not support tracing dynamic control flow."
+    )
+    _hints = [
+        *graph_break_hints.FUNDAMENTAL,
+        "Use `torch.cond` to express dynamic control flow.",
+    ]
+
     def jump_graph_break(self, inst, value, extra_msg=""):
-        log_graph_break(self.code_options, reason="Data-dependent branching")
-        if not self.should_compile_partial_graph():
-            unimplemented_v2(
-                gb_type="Should not compile partial graph (data-dependent branching)",
-                context="",
-                explanation="Dynamo has determined when encountering data-dependent "
-                "branching (e.g. `if my_tensor.item() > 0:`) that it should not "
-                "compile the partial graph.",
-                hints=[],
-            )
+        log_graph_break(
+            self.code_options,
+            reason=format_graph_break_message(
+                gb_type=_gb_type,
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=_hints,
+            ),
+        )
+        assert self.should_compile_partial_graph()
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
             msg = (
@@ -577,9 +619,9 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # 3.13 requires stack[-1] to be bool type
             self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
-        self.output.add_output_instructions(
-            [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
-        )
+        jump_inst = create_instruction(inst.opname, target=if_jump[0])
+        jump_inst.copy_positions(inst)
+        self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
@@ -592,8 +634,24 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if value.is_python_constant():
                 if bool(value.as_python_constant()):
                     return self.jump(inst)
-                else:
+                elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
+                else:
+                    unimplemented_v2(
+                        gb_type="Data-dependent assertion failed (cannot compile partial graph)",
+                        context=f"value: {value}",
+                        explanation="Dynamo has determined when encountering a data-dependent assert failure "
+                        "that it should not compile the partial graph.",
+                        hints=[
+                            *graph_break_hints.FUNDAMENTAL,
+                            "Use `torch._assert()` to raise a hard AssertionError when the check fails. "
+                            "This error will propagate back the user code "
+                            "that called the compiled function (i.e. Dynamo wil not trace any exception handling).",
+                            "Remove the assert statement.",
+                            "Move the assert statement outside of any context managers in order to graph break with "
+                            "partial graph compilation (if fullgraph=False).",
+                        ],
+                    )
 
             # TODO maybe should respect DtoH sync intention of users later??
             # Manually insert torch._assert_async instead of python assert and jump over
@@ -747,11 +805,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         self.push(value)
                     self.jump(inst)
             else:
-                raise exc.UserError(
-                    exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                    "Dynamic control flow is not supported at the moment. Please use "
-                    "torch.cond to explicitly capture the control flow.",
-                    case_name="cond_operands",
+                unimplemented_v2(
+                    gb_type=_gb_type,
+                    context=f"attempted to jump with {value}",
+                    explanation=_explanation,
+                    hints=_hints,
                 )
 
     return inner
@@ -768,15 +826,19 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.generic_context_manager_depth > 0:
+                if self.active_generic_context_managers:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
                     unimplemented_v2(
                         gb_type="Graph break under GenericContextWrappingVariable",
-                        context="",
-                        explanation="Attempted to graph break in an active context manager that doesn't support graph breaking.",
-                        hints=[],
+                        context=f"Active generic context managers: {self.active_generic_context_managers}",
+                        explanation="Attempted to graph break in an active context manager(s) that doesn't support graph breaking.",
+                        hints=[
+                            "Move the offending context manager(s) to outside the compiled region.",
+                            *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                        ],
+                        from_exc=excp,
                     )
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
@@ -843,9 +905,9 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
-                self.output.add_output_instructions(
-                    create_call_function(inst.arg, False)
-                )
+                call_insts = create_call_function(inst.arg, False)
+                call_insts[-1].copy_positions(inst)
+                self.output.add_output_instructions(call_insts)
             else:
                 # copy instruction, but without exception table data
                 assert inst.target is None
@@ -888,9 +950,13 @@ class BytecodeDistpatchTableMeta(type):
         def _missing(opname, *args):
             unimplemented_v2(
                 gb_type="Missing bytecode handler",
-                context=opname,
-                explanation=f"Dynamo does not know how to handle the bytecode instruction {opname}",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                context=f"{opname} with args {args}",
+                explanation=f"Dynamo does not know how to handle the bytecode instruction `{opname}`.",
+                hints=[
+                    f"Do not trace code that produces the `{opname}` bytecode instruction "
+                    "(see https://docs.python.org/3/library/dis.html for bytecode semantics).",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         dispatch_table = {
@@ -898,6 +964,100 @@ class BytecodeDistpatchTableMeta(type):
             for opname, op in dis.opmap.items()
         }
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
+
+
+@dataclasses.dataclass
+class ExceptionStack:
+    """
+    Exception stack that it is shared among all InstructionTranslator instances
+    """
+
+    # Exception handling in CPython is a bit confusing and some of the bytecode
+    # have a slightly different behavior than what is is documented. While reading
+    # the documentation, is important to notice that the terms "current exception"
+    # and "stack" sometimes refers to a C variable with the same name and the
+    # exception stack, respectively.
+    #
+    # The lifetime of an exception is (Python 3.11+):
+    #  + tx._raise_exception_variable(...) := sets the current_exception variable
+    #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
+    #  + POP_EXCEPT := pops TOS from the *exception stack*
+
+    _exc_stack: list[VariableTracker] = dataclasses.field(default_factory=list)
+    _current_exception: Optional[VariableTracker] = dataclasses.field(default=None)
+
+    def clear_current_exception(self):
+        self._current_exception = None
+
+    def set_current_exception(self, val):
+        self._set_context_and_break_context_reference_cycle(val)
+        self._current_exception = val
+
+    def move_current_exception_to_stack(self):
+        assert self._current_exception is not None
+        self.append(self._current_exception)
+        self.clear_current_exception()
+
+    def get_current_exception(self):
+        assert self._current_exception is not None
+        return self._current_exception
+
+    def _set_context_recursive(self, val, prev_idx):
+        if (ctx := val.__context__) and type(ctx) is not ConstantVariable:
+            return val
+        if len(self._exc_stack) + prev_idx > 0:
+            prev = self._exc_stack[prev_idx]
+            self._set_context_recursive(prev, prev_idx - 1)
+            val.set_context(prev)
+        return val
+
+    def _break_context_reference_cycle(self, val):
+        # See test_exceptions::test_raise_does_not_create_context_chain_cycle
+        # Based on https://github.com/python/cpython/blob/e635bf2e49797ecb976ce45a67fce2201a25ca68/Python/errors.c#L207-L228
+        # As noted on CPython, this is O(chain length) but the context chains
+        # are usually very small
+        o = slow_o = val
+        slow_update_toggle = False  # floyd's algorithm for detecting cycle
+        while True:
+            context = o.__context__
+            if type(context) is ConstantVariable:  # context not set
+                break
+
+            if context is val:
+                o.set_context(ConstantVariable(None))
+                break
+
+            o = context
+            if o is slow_o:
+                # pre-existing cycle - all exceptions on the path were
+                # visited and checked
+                break
+
+            if slow_update_toggle:
+                slow_o = slow_o.__context__  # visited all exceptions
+            slow_update_toggle = not slow_update_toggle
+
+    def _set_context_and_break_context_reference_cycle(self, val):
+        # set Exception.__context__
+        self._set_context_recursive(val, len(self._exc_stack) - 1)
+        self._break_context_reference_cycle(val)
+
+    def pop(self):
+        return self._exc_stack.pop()
+
+    def append(self, val):
+        self._exc_stack.append(val)
+
+    def __len__(self):
+        return len(self._exc_stack)
+
+    def __getitem__(self, index):
+        return self._exc_stack[index]
+
+    def __str__(self):
+        return f"{self._exc_stack=} - {self._current_exception=}"
+
+    __repr__ = __str__
 
 
 class InstructionTranslatorBase(
@@ -919,9 +1079,10 @@ class InstructionTranslatorBase(
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: list[Any]
-    exn_vt_stack: list[VariableTracker]
+    exn_vt_stack: ExceptionStack
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
+    start_point: Optional[int]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1180,6 +1341,7 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
+                self.start_point = self.instruction_pointer
                 while self.step():
                     pass
             except TensorifyScalarRestartAnalysis:
@@ -1187,16 +1349,14 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except RuntimeError as e:
-                if hasattr(e, "msg") and "data-dependent" in e.msg:
-                    print(
-                        "\n"
-                        + torch.fx.GraphModule(
-                            self.output.nn_modules, self.output.graph
-                        ).print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                        file=sys.stderr,
+                if hasattr(e, "msg") and "Data-dependent" in e.msg:
+                    readable_graph = torch.fx.GraphModule(
+                        self.output.nn_modules, self.output.graph
+                    ).print_readable(
+                        print_output=False, include_stride=True, include_device=True
                     )
+                    e.partial_fx_graph = readable_graph  # type: ignore[attr-defined]
+                    raise
 
                 raise
             except Exception as e:
@@ -1215,9 +1375,9 @@ class InstructionTranslatorBase(
                     self.output.cleanup()
 
     def push(self, val: Optional[VariableTracker]):
-        assert val is None or isinstance(
-            val, VariableTracker
-        ), f"push expects VariableTracker, got {typestr(val)}"
+        assert val is None or isinstance(val, VariableTracker), (
+            f"push expects VariableTracker, got {typestr(val)}"
+        )
         self.stack.append(val)  # type: ignore[arg-type]
 
     def push_many(self, vals: list[VariableTracker]):
@@ -1480,6 +1640,9 @@ class InstructionTranslatorBase(
                 hints=[],
             )
 
+    # fb internal 3.12 opcode
+    EAGER_IMPORT_NAME = IMPORT_NAME
+
     def IMPORT_FROM(self, inst):
         self.DUP_TOP(inst)
         self._load_attr(inst)
@@ -1503,7 +1666,13 @@ class InstructionTranslatorBase(
         self.load_builtin_from_argval(inst.argval)
 
     def jump(self, inst):
+        assert self.instruction_pointer is not None
+        assert self.start_point is not None
+        get_metrics_context().increment(
+            "ir_count", self.instruction_pointer - self.start_point
+        )
         self.instruction_pointer = self.indexof[inst.target]
+        self.start_point = self.instruction_pointer
 
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
@@ -1543,34 +1712,6 @@ class InstructionTranslatorBase(
         self.popn(2)
         self.push(None)
 
-    def CALL_FINALLY(self, inst):
-        """
-        pushes the address of the next instruction onto the stack and increments
-        bytecode counter by delta
-        """
-        # Python 3.8 only
-        addr = self.indexof[self.next_instruction]
-        self.push(ConstantVariable.create(addr))
-        self.jump(inst)
-
-    def END_FINALLY(self, inst):
-        # Python 3.8 only
-        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
-        tos = self.pop()
-        if isinstance(tos, ConstantVariable):
-            self.instruction_pointer = tos.as_python_constant()
-        else:
-            pass
-
-    def POP_FINALLY(self, inst):
-        # Python 3.8 only
-        preserve_tos = inst.argval
-        if preserve_tos:
-            tos = self.pop()
-        _ = self.pop()
-        if preserve_tos:
-            self.push(tos)  # type: ignore[possibly-undefined]
-
     def FOR_ITER(self, inst):
         it = self.pop().realize()
         try:
@@ -1591,19 +1732,25 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(None))
             self.jump(inst)
 
-    def _raise_exception_variable(self, inst):
-        val = self.pop()
+    def _create_exception_type(self, val):
+        if isinstance(
+            val, (variables.BuiltinVariable, UserDefinedExceptionClassVariable)
+        ):
+            # Create the instance of the exception type
+            # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
+            val = val.call_function(self, [], {})  # type: ignore[arg-type]
+        return val
+
+    def _raise_exception_variable(self, val) -> NoReturn:
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
         #   2) raise execption instance - raise NotImplemetedError("foo")
 
         # 1) when user raises exception type
-        if isinstance(val, variables.BuiltinVariable):
-            # Create the instance of the exception type
-            # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L6547-L6549
-            val = val.call_function(self, [], {})  # type: ignore[arg-type]
+        val = self._create_exception_type(val)
 
         # Handle https://peps.python.org/pep-0479/
+        # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
         if (
             is_generator(self.f_code)
             and isinstance(val, variables.ExceptionVariable)
@@ -1612,13 +1759,12 @@ class InstructionTranslatorBase(
             val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
         # Save the exception in a global data structure
-        self.exn_vt_stack.append(val)
+        self.exn_vt_stack.set_current_exception(val)
 
         # 2) when user raises exception instance
-        if isinstance(val, variables.ExceptionVariable):
-            if observed_exception_type := exc.observed_exception_map.get(val.exc_type):
-                raise observed_exception_type(f"raised exception {val}")
-            raise exc.ObservedException(f"raised exception {val}")
+        if self._isinstance_exception(val):
+            observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined]
+            raise observed_exception_type(f"raised exception {val}")
         unimplemented_v2(
             gb_type="Failed to raise exception",
             context=str(exc),
@@ -1628,32 +1774,31 @@ class InstructionTranslatorBase(
 
     def RAISE_VARARGS(self, inst):
         if inst.arg == 0:
-            # duplicate the top of the stack and re-raise it
-            if sys.version_info < (3, 11):
-                unimplemented_v2(
-                    gb_type="Re-raise with no arguments",
-                    context="",
-                    explanation="Dynamo does not support re-raising the previous exception "
-                    "in Python < 3.11 (empty `raise`)",
-                    hints=[],
-                )
-            assert isinstance(self.stack[-1], ExceptionVariable)
-            self.stack.append(self.stack[-1])
-            self._raise_exception_variable(inst)
+            if not len(self.exn_vt_stack):
+                msg = ConstantVariable("No active exception to reraise")
+                exc.raise_observed_exception(RuntimeError, self, args=[msg])
+
+            # re-raise the previous exception. Here CPython refers to the exception
+            # on top of the exception stack
+            assert len(self.exn_vt_stack)
+            val = self.exn_vt_stack[-1]
+            assert self._isinstance_exception(val), val
+            self._raise_exception_variable(val)
         elif inst.arg == 1:
-            self._raise_exception_variable(inst)
+            # raise TOS
+            val = self.stack[-1]
+            self._raise_exception_variable(val)
         else:
-            # Support raise .. from None ... Dynamo does not track __cause__ and other attributes of exception. So we
-            # ignore `from None` part.
+            # raise .. from ...
             from_vt = self.pop()
-            if isinstance(from_vt, ConstantVariable) and from_vt.value is None:
-                self._raise_exception_variable(inst)
-            unimplemented_v2(
-                gb_type="Re-raise with 2 arguments",
-                context=str(from_vt),
-                explanation="Dynamo does not support `raise ... from [not-None]`",
-                hints=[],
-            )
+            val = self.pop()
+            try:
+                self._raise_exception_variable(val)
+            finally:
+                # Update __cause__/__supppress_context__ in the raised exception
+                curr_exc = self.exn_vt_stack.get_current_exception()
+                cause = self._create_exception_type(from_vt)
+                curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)
 
     def CLEANUP_THROW(self, inst):
         # https://github.com/python/cpython/pull/96010
@@ -1670,15 +1815,36 @@ class InstructionTranslatorBase(
             self.RERAISE(inst)
 
     def RERAISE(self, inst):
+        # https://docs.python.org/3/library/dis.html#opcode-RERAISE
+        #   Re-raises the exception currently on top of the stack. If oparg is
+        #   non-zero, pops an additional value from the stack which is used to
+        #   set f_lasti of the current frame.
+
         if sys.version_info >= (3, 11):
             # RERAISE is currently supported in a narrow case of `raise ... from None`
-            self._raise_exception_variable(inst)
-        unimplemented_v2(
-            gb_type="RERAISE in Python < 3.11",
-            context="",
-            explanation="RERAISE bytecode (https://docs.python.org/3.10/library/dis.html#opcode-RERAISE) "
-            "not supported in Python < 3.11. This bytecode is generated by try/with blocks.",
-            hints=[],
+            val = self.pop()
+            if inst.argval:
+                # RERAISE 1
+                _ = self.pop()
+                self._raise_exception_variable(val)
+            else:
+                # RERAISE 0
+                self.push(val)
+                self._raise_exception_variable(val)
+        else:
+            _exc = self.pop()
+            val = self.pop()
+            _tb = self.pop()
+            self._raise_exception_variable(val)
+
+    def _isinstance_exception(self, val):
+        return isinstance(
+            val,
+            (
+                variables.ExceptionVariable,
+                UserDefinedExceptionClassVariable,
+                UserDefinedExceptionObjectVariable,
+            ),
         )
 
     def WITH_EXCEPT_START(self, inst):
@@ -1693,20 +1859,25 @@ class InstructionTranslatorBase(
             assert len(self.stack) >= 4
             fn = self.stack[-4]
             val = self.stack[-1]
-            assert isinstance(val, variables.ExceptionVariable)
-            typ = BuiltinVariable(val.exc_type)
+            assert self._isinstance_exception(val)
+            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
             tb = ConstantVariable(None)
         else:
             assert len(self.stack) >= 7
             fn = self.stack[-7]
-            val = self.stack[-4]
-            assert isinstance(val, variables.ExceptionVariable)
-            typ = BuiltinVariable(val.exc_type)
+            val = self.stack[-2]
+            assert self._isinstance_exception(val)
+            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
             tb = ConstantVariable(None)
 
         self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
+        observed_exn_gb_explanation = (
+            "Dynamo found no exception handler at the top-level compiled function "
+            "when encountering an exception. Exception will propagate outside the compiled region."
+        )
+
         if sys.version_info >= (3, 11):
             exn_tab_entry = self.current_instruction.exn_tab_entry
             if exn_tab_entry:
@@ -1724,8 +1895,7 @@ class InstructionTranslatorBase(
                     )
 
                 # 3) push the exception to the stack
-                assert len(self.exn_vt_stack)
-                self.push(self.exn_vt_stack[-1])
+                self.push(self.exn_vt_stack.get_current_exception())
 
                 # 4) jump to the handler
                 self.jump(exn_tab_entry)
@@ -1734,14 +1904,19 @@ class InstructionTranslatorBase(
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    raise Unsupported("Observed exception")
+                    unimplemented_v2(
+                        gb_type="Observed exception",
+                        context=str(raised_exception),
+                        explanation=observed_exn_gb_explanation,
+                        hints=[
+                            *graph_break_hints.USER_ERROR,
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
                 raise raised_exception
         else:
             if len(self.block_stack):
                 # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
-
-                assert len(self.exn_vt_stack)
-                exception_var = self.exn_vt_stack[-1]
 
                 block_stack_entry = self.block_stack.pop()
 
@@ -1749,24 +1924,25 @@ class InstructionTranslatorBase(
                     # TODO(anijain2305) - This is not tested .. unable to create a testcase
                     # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
                     self.popn(3)
+                    self.exn_vt_stack.pop()
                     if len(self.block_stack) == 0:
                         # No handler found in this frame. Bubble the exception to the parent
                         # instruction translater.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            raise Unsupported("Observed exception")
+                            unimplemented_v2(
+                                gb_type="Observed exception (EXCEPT_HANDLER)",
+                                context=str(raised_exception),
+                                explanation=observed_exn_gb_explanation
+                                + " This graph break is unexpected.",
+                                hints=[*graph_break_hints.DYNAMO_BUG],
+                            )
+
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
-                if block_stack_entry.inst.opname != "SETUP_FINALLY":
-                    unimplemented_v2(
-                        gb_type="Exception raised with invalid exception handler",
-                        context="",
-                        explanation="Exception raised when top of the block stack "
-                        "is not exception handler (e.g. try .. with .. except). "
-                        f"Current TOS is {block_stack_entry.inst}",
-                        hints=[],
-                    )
+                exception_var = self.exn_vt_stack.get_current_exception()
+                self.exn_vt_stack.move_current_exception_to_stack()
 
                 # 1) pop values from the stack until it matches the stack depth
                 # for the handler
@@ -1808,20 +1984,49 @@ class InstructionTranslatorBase(
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    raise Unsupported("Observed exception")
+                    unimplemented_v2(
+                        gb_type="Observed exception",
+                        context=str(raised_exception),
+                        explanation=observed_exn_gb_explanation,
+                        hints=[
+                            *graph_break_hints.USER_ERROR,
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
                 raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
+        # https://docs.python.org/3/library/dis.html#opcode-PUSH_EXC_INFO
+        #   Pops a value from the stack. Pushes the current exception to the top
+        #   of the stack. Pushes the value originally popped back to the stack.
+        #
+        # The behavior of this opcode in CPython is a bit different than what it
+        # is described. It pops a value from the stack, pushes the top of the
+        # exception stack to the interpreter stack and moves the
+        # "current exception" to the exception stack.
+        #
+        # As an example, suppose the stack is in the following state:
+        #   + stack = [..., ConstantVariable(1), ConstantVariable(2)]
+        #   + current_exception = TypeError
+        #   + exception_stack = [ValueError]
+        #
+        # After PUSH_EXC_INFO is executed
+        #   + stack = [..., ConstantVariable(1), ValueError, ConstantVariable(2)]
+        #   + current_exception = None
+        #   + exception_stack = [ValueError, TypeError]
+
         val = self.pop()
-        assert len(self.exn_vt_stack)
-        self.push(self.exn_vt_stack[-1])
+        if len(self.exn_vt_stack) == 0:
+            prev_exc = ConstantVariable(None)
+        else:
+            prev_exc = self.exn_vt_stack[-1]
+        self.push(prev_exc)
         self.push(val)
+        self.exn_vt_stack.move_current_exception_to_stack()
 
     def POP_EXCEPT(self, inst):
         if sys.version_info >= (3, 11):
-            val = self.pop()
-            assert isinstance(val, variables.ExceptionVariable)
-
+            _ = self.pop()
             # This exception is handled and therefore we can clear the error indicator
             assert len(self.exn_vt_stack)
             self.exn_vt_stack.pop()
@@ -1857,11 +2062,20 @@ class InstructionTranslatorBase(
             # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L3650-L3665
             exc_instance = self.stack.pop()
 
-        # Users can check exception in 2 ways
-        # 1) except NotImplementedError --> BuilinVariable
-        # 2) except (NotImplemetedError, AttributeError) -> TupleVariable
+        # Users can check exception in 3 ways
+        # 1) except NotImplementedError --> BuiltinVariable
+        # 2) except CustomException --> UserDefinedExceptionClasVariable
+        # 3) except (NotImplemetedError, AttributeError) -> TupleVariable
 
-        if not isinstance(expected_exc_types, (BuiltinVariable, TupleVariable)):
+        if not isinstance(
+            expected_exc_types,
+            (
+                BuiltinVariable,
+                TupleVariable,
+                UserDefinedExceptionClassVariable,
+                UserDefinedExceptionObjectVariable,
+            ),
+        ):
             unimplemented_v2(
                 gb_type="Exception with bad expected type",
                 context=str(expected_exc_types),
@@ -1870,7 +2084,7 @@ class InstructionTranslatorBase(
             )
 
         if sys.version_info >= (3, 11):
-            if not isinstance(exc_instance, variables.ExceptionVariable):
+            if not self._isinstance_exception(exc_instance):
                 unimplemented_v2(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
@@ -1886,15 +2100,23 @@ class InstructionTranslatorBase(
             ]
 
         for expected_type in expected_types:
-            if not isinstance(expected_type, BuiltinVariable):
+            if not isinstance(
+                expected_type,
+                (
+                    BuiltinVariable,
+                    UserDefinedExceptionObjectVariable,
+                    UserDefinedExceptionClassVariable,
+                ),
+            ):
                 unimplemented_v2(
                     gb_type="Exception with non-type expectation",
                     context=str(expected_type),
                     explanation=f"`except ...` expects a non-type: {expected_type}.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
-            if isinstance(exc_instance, variables.ExceptionVariable) and issubclass(
-                exc_instance.exc_type, expected_type.fn
+            if self._isinstance_exception(exc_instance) and issubclass(
+                exc_instance.exc_type,  # type: ignore[attr-defined]
+                expected_type.fn,  # type: ignore[attr-defined]
             ):
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
@@ -2036,9 +2258,6 @@ class InstructionTranslatorBase(
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
 
-    def LOAD_BUILD_CLASS(self, inst):
-        self.load_builtin_from_argval("__build_class__")
-
     def LOAD_METHOD_SUPER(self, inst):
         self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
         arg = inst.argval[0]
@@ -2080,7 +2299,9 @@ class InstructionTranslatorBase(
     def _load_attr(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
+            self,  # type: ignore[arg-type]
+            [obj, ConstantVariable.create(inst.argval)],
+            {},
         )
         self.push(result)
 
@@ -2100,13 +2321,15 @@ class InstructionTranslatorBase(
         if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
             # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
-            assert (
-                not self.export
-            ), f"Mutating module attribute {inst.argval} during export."
+            assert not self.export, (
+                f"Mutating module attribute {inst.argval} during export."
+            )
 
         try:
             BuiltinVariable(setattr).call_function(
-                self, [obj, ConstantVariable.create(inst.argval), val], {}  # type: ignore[arg-type]
+                self,  # type: ignore[arg-type]
+                [obj, ConstantVariable.create(inst.argval), val],
+                {},
             )
             return
         except Unsupported as e:
@@ -2139,7 +2362,9 @@ class InstructionTranslatorBase(
     def DELETE_ATTR(self, inst):
         obj = self.pop()
         BuiltinVariable(delattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
+            self,  # type: ignore[arg-type]
+            [obj, ConstantVariable.create(inst.argval)],
+            {},
         )
 
     def create_call_resume_at(self, offset):
@@ -2515,9 +2740,15 @@ class InstructionTranslatorBase(
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
         val = self.stack[-1]
-        assert isinstance(val, ExceptionVariable)
-        if val.exc_type is StopIteration:
-            new_val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+        assert self._isinstance_exception(val)
+        if val.exc_type is StopIteration:  # type: ignore[attr-defined]
+            new_val = variables.BuiltinVariable(RuntimeError).call_function(
+                self,  # type: ignore[arg-type]
+                [ConstantVariable("generator raised StopIteration")],
+                {},
+            )
+            new_val.call_setattr(self, ConstantVariable("__context__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, ConstantVariable("__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):
@@ -2575,6 +2806,9 @@ class InstructionTranslatorBase(
 
     def LOAD_ASSERTION_ERROR(self, inst):
         self.load_builtin_from_argval("AssertionError")
+
+    def LOAD_BUILD_CLASS(self, inst):
+        self.load_builtin_from_argval("__build_class__")
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
@@ -2724,7 +2958,7 @@ class InstructionTranslatorBase(
             isinstance(ctx, GenericContextWrappingVariable)
             and not ctx.supports_graph_breaks()
         ):
-            self.generic_context_manager_depth += 1
+            self.active_generic_context_managers.append(ctx)
 
         # Need this redundant check for mypy
         assert isinstance(
@@ -2751,6 +2985,8 @@ class InstructionTranslatorBase(
         else:
             target = inst.target
 
+        self.push(exit)
+
         if target:
             if isinstance(self, InstructionTranslator):
                 self.block_stack.append(
@@ -2759,7 +2995,6 @@ class InstructionTranslatorBase(
             else:
                 self.block_stack.append(BlockStackEntry(inst, target, len(self.stack)))
 
-        self.push(exit)
         self.push(ctx.enter(self))
 
     def append_prefix_inst(self, inst):
@@ -2771,9 +3006,9 @@ class InstructionTranslatorBase(
             # In 3.12+, MAKE_CELL is not longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
             assert isinstance(self.symbolic_locals[inst.argval], NullVariable)
-            self.symbolic_locals[
-                inst.argval
-            ] = self.output.side_effects.track_cell_new()
+            self.symbolic_locals[inst.argval] = (
+                self.output.side_effects.track_cell_new()
+            )
         else:
             self.append_prefix_inst(inst)
 
@@ -2960,6 +3195,7 @@ class InstructionTranslatorBase(
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
+        exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
@@ -2975,22 +3211,23 @@ class InstructionTranslatorBase(
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.stack = []
         self.instruction_pointer = 0
+        self.start_point = None
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
-        self.generic_context_manager_depth = 0
+        self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
         self.lineno = -1
         self.kw_names = None
         self.accept_prefix_inst = True
         self.prefix_insts = []
-        self.exn_vt_stack = []
+        self.exn_vt_stack = exn_vt_stack
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
         self.indexof: dict[Instruction, int] = get_indexof(self.instructions)
-        self.f_locals: dict[
-            str, Any
-        ] = f_locals  # needed for recording accessed locals for replay
+        self.f_locals: dict[str, Any] = (
+            f_locals  # needed for recording accessed locals for replay
+        )
         self.f_globals: dict[str, Any] = f_globals
         self.f_builtins: dict[str, Any] = f_builtins
         self.code_options: dict[str, Any] = code_options
@@ -3067,6 +3304,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         frame_state,
         speculation_log: SpeculationLog,
+        exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
     ) -> None:
         _step_logger()(
@@ -3100,6 +3338,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
+            exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
         )
 
@@ -3111,17 +3350,27 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.one_graph: bool = one_graph
             self.export = export
             if self.export:
-                assert (
-                    self.one_graph
-                ), "Export without one graph - something has gone wrong."
+                assert self.one_graph, (
+                    "Export without one graph - something has gone wrong."
+                )
 
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
+
+            dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    local_dynamism = None
+                    if dynamism:
+                        local_dynamism = frozenset(dynamism.get(name, {}).items())
                     var = LazyVariableTracker.create(
-                        value, LocalSource(name, is_input=True)
+                        value,
+                        LocalSource(
+                            name,
+                            is_input=True,
+                            dynamism=local_dynamism,
+                        ),
                     )
                     self.symbolic_locals[name] = var
 
@@ -3247,7 +3496,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and self.generic_context_manager_depth == 0
+            and not self.active_generic_context_managers
         )
 
     def create_call_resume_at(self, inst):
@@ -3398,6 +3647,11 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def _return(self, inst):
         self.replace_tos_if_return_is_generator()
+        assert self.instruction_pointer is not None
+        assert self.start_point is not None
+        get_metrics_context().increment(
+            "ir_count", self.instruction_pointer - self.start_point
+        )
 
         if (
             not config.allow_empty_graphs
@@ -3468,6 +3722,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=[],
             )
 
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            msg = inspect.getattr_static(
+                func.get_function(), "_torchdynamo_disable_msg", None
+            )
+            unimplemented_v2(
+                gb_type="Skip inlining `torch.compiler.disable()`d function",
+                context=str(func.get_function()),
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped "
+                f"with `torch.compiler.disable` (reason: {msg})",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
+
         result = trace_rules.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
@@ -3487,11 +3757,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ]
             if "_dynamo" not in func.get_filename():
                 hints += [
-                    f"Remove the function `{fn_qualname}` or the file `{func.get_filename()}` "
-                    "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                    "attempting to trace into the function.",
+                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                    "to force tracing into the function. "
+                    "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
-                    # TODO suggest mark_force_inline when implemented
                 ]
             unimplemented_v2(
                 gb_type="Attempted to inline function marked as skipped",
@@ -3502,19 +3771,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=hints,
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
-            func.get_function(), "_torchdynamo_disable", False
-        ):
-            unimplemented_v2(
-                gb_type="Skip inlining `torch.compiler.disable()`d function",
-                context=str(func.get_function()),
-                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
-                hints=[
-                    "Remove the `torch.compiler.disable` call",
-                ],
-            )
-        else:
-            return result
+        return result
 
     @staticmethod
     def build_inline_tracer(
@@ -3637,9 +3894,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
-            # TODO(anijain2305) - This works but we should probably have a
-            # global/central data structure for the exception stack.
-            parent.exn_vt_stack.extend(self.exn_vt_stack)
             log.debug(msg)
             # bubble up the exception to the parent frame.
             raise
@@ -3714,6 +3968,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
+            exn_vt_stack=parent.exn_vt_stack,
             distributed_state=parent.distributed_state,
         )
         self.funcvar = funcvar
@@ -3756,10 +4011,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             module_name = self.f_globals["__name__"]
             module_source = self.import_source(module_name)
             if "torch_package" in module_name:
-                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
+                fglobals_value = (
+                    torch.package.package_importer._package_imported_modules[
+                        module_name
+                    ]
+                )  # type: ignore[assignment]
             else:
                 fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
+            # realize the VT because we are going to send this to side effects
+            fglobals_vt = fglobals_vt.realize()
             global_source = AttrSource(module_source, name)
         else:
             globals_name = self.output.install_global_by_id(
@@ -3768,6 +4029,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
+            # realize the VT because we are going to send this to side effects
+            fglobals_vt = fglobals_vt.realize()
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 

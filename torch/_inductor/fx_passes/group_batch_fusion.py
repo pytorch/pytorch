@@ -7,8 +7,8 @@ from collections.abc import Iterable, Iterator
 from typing import Any, Optional
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
-from torch._utils_internal import upload_graph
+from torch._dynamo.utils import counters
+from torch._logging import trace_structured
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
@@ -271,7 +271,9 @@ class PostGradBatchLinearFusion(BatchFusion):
                             args=(batch_biases[i],),
                             kwargs={"size": broadcast_shape},
                         )
-                        broadcast_bias.meta["val"] = aten.broadcast_to(batch_biases_meta[i]["val"], broadcast_shape)  # type: ignore[assignment]
+                        broadcast_bias.meta["val"] = aten.broadcast_to(
+                            batch_biases_meta[i]["val"], broadcast_shape
+                        )  # type: ignore[assignment]
                         new_bias_add = graph.call_function(  # type: ignore[operator]
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )
@@ -803,9 +805,9 @@ class BatchLayernormFusion(BatchFusion):
             group_biases = None  # type: ignore[assignment]
         if all(weight is None for weight in group_weights):
             group_weights = None  # type: ignore[assignment]
-        assert all(
-            eps == group_epss[0] for eps in group_epss
-        ), "all epsilon values must be equal"
+        assert all(eps == group_epss[0] for eps in group_epss), (
+            "all epsilon values must be equal"
+        )
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_input = graph.call_function(  # type: ignore[operator]
@@ -996,7 +998,11 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             # for relu op, we also use the inplace to construct the key
             # we batch the ops with same parent to enable followup split cat
             parent = node.args[0]
-            parent = parent.target if self.graph_search_options.get("fuse_nodes_with_same_parent", False) else ""  # type: ignore[union-attr]
+            parent = (
+                parent.target  # type: ignore[union-attr]
+                if self.graph_search_options.get("fuse_nodes_with_same_parent", False)
+                else ""
+            )
             group_key = (
                 "batch_aten_" + self.op.__name__.lower().split(".")[0],
                 str(input.meta["val"].shape),
@@ -1293,9 +1299,9 @@ def get_fusion_candidates(
     """
     q: collections.deque[tuple[int, torch.fx.Node]] = collections.deque()
 
-    candidate_dict: collections.defaultdict[
-        Any, list[torch.fx.Node]
-    ] = collections.defaultdict(list)
+    candidate_dict: collections.defaultdict[Any, list[torch.fx.Node]] = (
+        collections.defaultdict(list)
+    )
 
     if root_node.target in SEARCH_EXCLUSIONS:
         return candidate_dict
@@ -1349,7 +1355,27 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 )
                 log_to_scuba = True
     if log_to_scuba:
-        optimus_scuba_log[rule.__class__.__name__] = upload_graph(graph)
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        # Force graph to re-compile otherwise the output python code may be broken
+        gm = graph._owning_module
+        if isinstance(gm, _LazyGraphModule):
+            _LazyGraphModule.recompile()
+        else:
+            assert isinstance(gm, torch.fx.GraphModule)
+            gm.recompile()
+        graph_str = gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": f"optimus_{str(rule.__class__.__name__)}",
+                "encoding": "string",
+            },
+            payload_fn=lambda: graph_str,
+        )
 
 
 def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
