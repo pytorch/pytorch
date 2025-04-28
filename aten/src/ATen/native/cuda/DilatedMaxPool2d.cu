@@ -297,15 +297,16 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
       int pwend = p_end(iw, pad_w, pooled_width, stride_w);
       int index_shift = ih * width + iw;
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
+
 #if defined (USE_ROCM)
 #define _MAXh 2
 #define _MAXw 2
         if (phend-phstart<=_MAXh && pwend-pwstart<=_MAXw) {
           int msk[_MAXh][_MAXw];
           scalar_t tpd[_MAXh][_MAXw];
+          int cached_index = threadIdx.x;
 #pragma unroll
           for (int c = channel_offset; c < channels; c += blockDim.x*kernel_stride_C) {
-            int cached_index = threadIdx.x;
 #pragma unroll
             for(int oh = 0; oh < _MAXh; ++oh) {
 #pragma unroll
@@ -321,15 +322,18 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
                 }
               }
             }
+
+	    accscalar_t acm = 0;
 #pragma unroll
             for(int oh = 0; oh < _MAXh; ++oh) {
 #pragma unroll
               for(int ow = 0; ow < _MAXw; ++ow) {
                 if (msk[oh][ow] == index_shift) {
-                  out_cached[cached_index] += static_cast<accscalar_t>(tpd[oh][ow]);
+                  acm += static_cast<accscalar_t>(tpd[oh][ow]);
                 }
               }
             }
+            out_cached[cached_index] += acm;
             cached_index += blockDim.x;
           }
         }
