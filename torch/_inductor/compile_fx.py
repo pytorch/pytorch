@@ -1285,7 +1285,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    recursively_apply_fns = None
+                    compiled_fn_runner = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1344,8 +1344,8 @@ class _InProcessFxCompile(FxCompile):
                         else:
                             compiled_module = graph.compile_to_module()
                             compiled_fn = compiled_module.call
-                            recursively_apply_fns = getattr(
-                                compiled_module, "recursively_apply_fns", None
+                            compiled_fn_runner = getattr(
+                                compiled_module, "runner", None
                             )
 
                     num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
@@ -1421,7 +1421,7 @@ class _InProcessFxCompile(FxCompile):
                         inputs_to_check,
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
-                        recursively_apply_fns,
+                        compiled_fn_runner,
                     )
 
 

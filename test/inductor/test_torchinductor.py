@@ -14543,6 +14543,20 @@ if RUN_GPU:
                 )
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_foreach_op(self):
+            def fn(a0, a1):
+                c = torch._foreach_abs([a0, a1])
+                return torch.mul(c[0], a0)
+
+            compiled_fn = torch.compile(fn)
+
+            a0 = torch.randn(2, 3, device=self.device)
+            a1 = torch.randn(2, 3, device=self.device)
+            eager_out = fn(a0, a1)
+            compiled_out = compiled_fn(a0, a1)
+            self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_multiple_functions(self):
             def f(x, y):
                 x1 = x + 1
