@@ -9,7 +9,9 @@ from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
     try_import_cutlass,
 )
+from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
+from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -73,6 +75,12 @@ if try_import_cutlass():
         return name_to_buffer
 
 
+class MockSchedulerNode(BaseSchedulerNode):
+    def __init__(self, node, last_usage=None):
+        self.node = node
+        self.last_usage = last_usage or OrderedSet()
+
+
 class MockComputedBuffer(ComputedBuffer):
     def __init__(self, name, inner_fn, dtype, size, strides=None):
         self.name = name
@@ -90,17 +98,72 @@ class MockComputedBuffer(ComputedBuffer):
         return 1
 
 
-class MockGraphHandler:
+class MockGraphHandler(GraphLowering):
     def __init__(self, name_to_buffer):
         import torch._inductor.sizevars
 
         self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
         self.name_to_buffer = name_to_buffer
-        self.mutated_buffers = OrderedSet([])
+        self.mutated_buffers = OrderedSet()
 
 
 class TestCutlassEVT(TestCase):
-    def test_cutlass_py_codegen_disjoint_read_indexing(self):
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_accumulator_return(self):
+        from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
+        from torch._inductor.virtualized import V
+
+        size = (100, 300, 200)
+        buf0 = MockComputedBuffer("buf0", None, torch.float32, size)
+        buf1 = MockComputedBuffer("buf1", None, torch.float32, size)
+        buf2 = MockComputedBuffer("buf2", None, torch.float32, size)
+
+        # buf0 is acc
+        # buf1 is external
+        def inner_fn_buf3(index):
+            tmp0 = buf0.make_loader()(index)
+            tmp1 = buf1.make_loader()(index)
+            tmp2 = buf2.make_loader()(index)
+            return tmp0 * tmp1 + tmp2
+
+        def inner_fn_buf4(index):
+            tmp0 = buf0.make_loader()(index)
+            tmp3 = buf3.make_loader()(index)
+            return tmp0 + tmp3
+
+        buf3 = MockComputedBuffer("buf3", inner_fn_buf3, torch.float32, size)
+        buf4 = MockComputedBuffer("buf4", inner_fn_buf4, torch.float32, size)
+        with V.set_graph_handler(
+            MockGraphHandler(
+                {"buf0": buf0, "buf1": buf1, "buf2": buf2, "buf3": buf3, "buf4": buf4}
+            )
+        ):
+            reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
+                "buf0",
+                [
+                    MockSchedulerNode(buf3),
+                    MockSchedulerNode(buf4, last_usage=OrderedSet(["buf3"])),
+                ],
+            )
+        self.assertExpectedInline(reads, """['buf0', 'buf1', 'buf2']""")
+        self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
+        self.assertExpectedInline(
+            renames, """{'buf0': 'accum', 'buf3': 'tmp_1', 'buf4': 'tmp_2'}"""
+        )
+        self.assertExpectedInline(
+            code,
+            """\
+def fn(accum, buf1, buf2):
+    D = accum # cutlass evt requirement
+    tmp_0 = accum * buf1
+    tmp_1 = tmp_0 + buf2
+    tmp_2 = accum + tmp_1
+
+return D, tmp_1, tmp_2""",
+        )
+
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_py_codegen_disjoint_read_indexing(self):
         from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
         from torch._inductor.virtualized import V
 
@@ -133,7 +196,9 @@ class TestCutlassEVT(TestCase):
         ):
             result = None
             try:
-                CutlassEVTCodegen.ir_to_evt_python_code("buf0", [buf3, buf4])
+                CutlassEVTCodegen.ir_to_evt_python_code(
+                    "buf0", [MockSchedulerNode(buf3), MockSchedulerNode(buf4)]
+                )
             except NotImplementedError as e:
                 result = e
 
@@ -143,7 +208,7 @@ class TestCutlassEVT(TestCase):
             )
 
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
-    def test_cutlass_py_codegen(self):
+    def test_py_codegen(self):
         from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
         from torch._inductor.virtualized import V
 
@@ -173,7 +238,11 @@ class TestCutlassEVT(TestCase):
             )
         ):
             reads, writes, renames, code = CutlassEVTCodegen.ir_to_evt_python_code(
-                "buf0", [buf3, buf4]
+                "buf0",
+                [
+                    MockSchedulerNode(buf3),
+                    MockSchedulerNode(buf4, last_usage=OrderedSet(["buf0"])),
+                ],
             )
         self.assertExpectedInline(reads, """['buf0', 'buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf3', 'buf4']""")
@@ -186,7 +255,7 @@ class TestCutlassEVT(TestCase):
 def fn(accum, buf1, buf2):
     tmp_0 = accum * buf1
     tmp_1 = tmp_0 + buf2
-    D = tmp_1
+    D = tmp_1 # cutlass evt requirement
     tmp_2 = accum + D
 
 return D, tmp_2""",
