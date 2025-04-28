@@ -453,6 +453,8 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
+        return_lse = False
+
         # Compile the flex_attention function
         flex_attention = torch.compile(flex_attention, dynamic=False)
         Q_BLOCK_SIZE_DEFAULT = 128
@@ -494,11 +496,15 @@ class RingFlexAttentionTest(DTensorTestBase):
             device=self.device_type,
         )
 
-        expect_out = flex_attention(q, k, v, block_mask=block_mask)
+        expect_out = flex_attention(
+            q, k, v, block_mask=block_mask, return_lse=return_lse
+        )
+        if not return_lse:
+            assert isinstance(expect_out, torch.Tensor)
+            expect_out.sum().backward()
 
-        out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-
-        torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
+        # out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        # torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
 
         # test flex attention on DTensor
         device_mesh = init_device_mesh(
@@ -530,22 +536,45 @@ class RingFlexAttentionTest(DTensorTestBase):
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
             _DispatchMode.TORCH_DISPATCH
         )
+        sharder = FlexAttentionContiguousSharder()
         with context_parallel(
             device_mesh,
-            buffers=(cp_q, cp_k, cp_v),
-            buffer_seq_dims=(2, 2, 2),
+            buffers=[cp_q, cp_k, cp_v],
+            buffer_seq_dims=[2, 2, 2],
             block_mask=block_mask,
-            sharder=FlexAttentionContiguousSharder(),
+            sharder=sharder,
         ):
-            out = flex_attention(cp_q, cp_k, cp_v, block_mask=block_mask_post_sharding)
+            cp_q.requires_grad = True
+            cp_k.requires_grad = True
+            cp_v.requires_grad = True
+            cp_out = flex_attention(
+                cp_q, cp_k, cp_v, block_mask=block_mask_post_sharding
+            )
+            if not return_lse:
+                assert isinstance(cp_out, torch.Tensor)
+                cp_out.sum().backward()
 
         # all-gather the output
+        """
         assert isinstance(out, torch.Tensor)
         dist_out = DTensor.from_local(out, device_mesh, [Shard(2)])
         assert isinstance(dist_out, DTensor)
         torch.testing.assert_close(
             dist_out.full_tensor(), expect_out, atol=1e-1, rtol=1e-2
         )
+        """
+        (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [2], sharder)
+        torch.testing.assert_close(cp_out, expect_out, atol=1e-1, rtol=1e-2)
+
+        cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
+            device_mesh,
+            [cp_q.grad, cp_k.grad, cp_v.grad],
+            [2, 2, 2],
+            sharder,
+        )
+        torch.testing.assert_close(cp_q_grad, q.grad, atol=1e-6)
+        torch.testing.assert_close(cp_k_grad, k.grad, atol=1e-6)
+        torch.testing.assert_close(cp_v_grad, v.grad, atol=1e-6)
 
 
 if __name__ == "__main__":

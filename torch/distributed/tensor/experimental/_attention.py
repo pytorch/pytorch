@@ -17,7 +17,10 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
-from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._higher_order_ops.flex_attention import (
+    flex_attention as flex_attention_hop,
+    flex_attention_backward as flex_attention_backward_hop,
+)
 from torch._ops import TorchDispatchMode
 from torch._prims_common import DeviceLikeType
 from torch.distributed.device_mesh import DeviceMesh
@@ -1502,6 +1505,7 @@ def context_parallel(
     ):
         yield
 
+    return
     for buffer, original_buffer in zip(buffers, original_buffers):
         if original_buffer is not None:
             buffer.resize_(original_buffer.shape)
@@ -1513,6 +1517,7 @@ def context_parallel_unshard(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     seq_dims: list[int],
+    sharder: Optional[FlexAttentionSharder] = None,
 ) -> list[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
@@ -1526,12 +1531,23 @@ def context_parallel_unshard(
     Returns:
         List[torch.Tensor]: the unsharded buffers.
     """
-    sharder = (
-        _RoundRobinLoadBalancer
-        if _cp_options.enable_load_balance
-        else _SequentialSharder
-    )
-    return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+    if sharder is None:
+        sdpa_sharder = (
+            _RoundRobinLoadBalancer
+            if _cp_options.enable_load_balance
+            else _SequentialSharder
+        )
+        return [sdpa_sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+    else:
+        new_buffers = []
+        for buffer, seq_dim in zip(buffers, seq_dims):
+            buffer = buffer.contiguous()
+            cp_world_size = mesh.size()
+            all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
+            ft_c.all_gather_inplace(all_buffers, buffer, mesh)
+            new_buffers.append(sharder.unshard(all_buffers, seq_dim))
+
+        return new_buffers
 
 
 def set_rotate_method(rotate_method: str) -> None:
@@ -1713,3 +1729,46 @@ def cp_flex_attention_dispatch_mode(
     )
 
     return out, lse
+
+
+@flex_attention_backward_hop.py_impl(ContextParallelMode)
+def cp_flex_attention_backward_dispatch_mode(
+    mode: ContextParallelMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
+    fw_graph: Union[Callable, GraphModule],
+    joint_graph: GraphModule,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
+]:
+    (
+        grad_query,
+        grad_key,
+        grad_value,
+        grad_score_mod_captured,
+    ) = flex_attention_backward_hop(
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
