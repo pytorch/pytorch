@@ -1137,12 +1137,8 @@ class TestMaxAutotune(TestCase):
     )
     def test_max_autotune_decompose_k(self, sizes, dynamic):
         M, N, K = sizes
-        a = torch.randn(
-            M, K, dtype=torch.float16, device="cuda", requires_grad=True
-        )
-        b = torch.randn(
-            K, N, dtype=torch.float16, device="cuda", requires_grad=True
-        )
+        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
@@ -1164,7 +1160,9 @@ class TestMaxAutotune(TestCase):
 
         # Test adding reinterpret view before subgraph
         a = a.transpose(0, 1)
-        compiled_func = torch.compile(lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic)
+        compiled_func = torch.compile(
+            lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
+        )
         out, code = run_and_get_code(compiled_func, a, b)
         FileCheck().check("extern_kernels.bmm_dtype").check_regex(
             "triton_.*_fused_0.run"

@@ -1,3 +1,4 @@
+import itertools
 import logging
 from typing import Any, Callable
 
@@ -7,7 +8,6 @@ from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.virtualized import V
-import itertools
 
 
 log = logging.getLogger(__name__)
@@ -31,7 +31,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         super().__init__(name, input_nodes, layout, description)
         self.gm = gm
         self.example_inputs = example_inputs
-
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -80,7 +79,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     if isinstance(arg, torch.Tensor)
                 ],
                 *[
-                    str(arg.stride()) for arg in self.example_inputs if isinstance(arg, torch.Tensor)
+                    str(arg.stride())
+                    for arg in self.example_inputs
+                    if isinstance(arg, torch.Tensor)
                 ],
                 str(self.gm.graph),
             ]

@@ -6032,14 +6032,12 @@ class SubgraphBuffer(ExternKernel):
             def __init__(self, graph: GraphLowering):
                 self.graph = graph
                 self.name = graph.name
-        outer_inputs = [t.codegen_reference() for t in self.inputs]
 
-        for i, inp in enumerate(outer_inputs):
-            wrapper.writeline(f"{self.inputs[i].get_name()} = {inp}")
+        outer_inputs = [t.codegen_reference() for t in self.inputs]
 
         wrapper.codegen_subgraph(
             CodegenGraph(self.subgraph),
-            [*[buffer.get_name() for buffer in self.inputs]],
+            outer_inputs,
             [self.name],
         )
 
