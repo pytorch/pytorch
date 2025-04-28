@@ -281,8 +281,6 @@ dependencies as well as the nightly binaries into the repo directory.
 * [caffe2](caffe2) - The Caffe2 library.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2.
-  * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
@@ -669,7 +667,7 @@ details.
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
-used.
+used).
 
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
