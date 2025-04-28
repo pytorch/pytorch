@@ -42,7 +42,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
-    largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
     skipXPUIf,
@@ -67,18 +66,6 @@ Tensor = torch.Tensor
 
 T = TypeVar("T")
 M = TypeVar("M", bound=Callable)
-
-
-def large_tensor_test_class(
-    size: str, device: Optional[Union[torch.device, str]] = None
-) -> Callable[[type[T]], type[T]]:
-    def decorator(cls: type[T]) -> type[T]:
-        for name, method in list(cls.__dict__.items()):
-            if callable(method) and name.startswith("test_"):
-                setattr(cls, name, largeTensorTest(size, device)(method))
-        return cls
-
-    return decorator
 
 
 @contextmanager
@@ -417,7 +404,6 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-@large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -3398,8 +3384,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     def test_reduction_unrolled(self, device):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(S, 3).to(device)
-        length_scales = torch.logspace(0.001, 0.1, H).to(device)
+        means = torch.randn(S, 3, device=device)
+        length_scales = torch.logspace(0.001, 0.1, H, device=device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3409,7 +3395,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             inv_dist = torch.exp(-dist / scale)
             return inv_dist * score
 
-        self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device)
+        self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device=device)
 
     @supported_platform
     @skip_on_cpu
@@ -4532,7 +4518,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
 
-@large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4983,7 +4968,6 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
-@large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4991,7 +4975,7 @@ class TestLearnableBiases(InductorTestCase):
         self.atol = 3e-2
         self.rtol = 3e-2
 
-    def _init_tensors(self, params: Params, device: str = "cuda"):
+    def _init_tensors(self, params: Params, device: str):
         make_tensor = functools.partial(
             torch.randn,
             (params.batch_size, params.num_heads, params.seq_length, params.head_dim),
@@ -5601,12 +5585,9 @@ class TestLearnableBiases(InductorTestCase):
         opt_fn(sliding_window2, None, None, 1024, 1024, device=device)
 
     @supported_platform
-    def test_head_bias_req_grad(self):
-        device = self.device
+    def test_head_bias_req_grad(self, device):
         B, H, S, D = 1, 4, 256, 64
-        bias = torch.randn(
-            H, device=self.device, dtype=torch.float16, requires_grad=True
-        )
+        bias = torch.randn(H, device=device, dtype=torch.float16, requires_grad=True)
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -5637,8 +5618,7 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @supported_platform
-    def test_comparison_vs_sdpa_with_learnable_bias(self):
-        device = self.device
+    def test_comparison_vs_sdpa_with_learnable_bias(self, device):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
