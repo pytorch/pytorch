@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/qint8.h>
 #include <array>
 
@@ -24,8 +24,8 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at {
 namespace vec {
@@ -161,9 +161,8 @@ struct Vectorized<c10::qint8> {
             vec_madd(scale_vec1, vecf1_3, scale_zp_premul1)}};
   }
 
-  float_vec_return_type C10_ALWAYS_INLINE dequantize(
-      Vectorized<float> scale,
-      Vectorized<float> zero_point) const {
+  float_vec_return_type C10_ALWAYS_INLINE
+  dequantize(Vectorized<float> scale, Vectorized<float> zero_point) const {
     vint16 vecshi0 = vec_unpackh(_vec0);
     vint16 vecshi1 = vec_unpackl(_vec0);
 
@@ -290,7 +289,8 @@ struct Vectorized<c10::qint8> {
     return {vec0, vec1};
   }
 
-  Vectorized<c10::qint8> C10_ALWAYS_INLINE relu(Vectorized<c10::qint8> zero_point) const {
+  Vectorized<c10::qint8> C10_ALWAYS_INLINE
+  relu(Vectorized<c10::qint8> zero_point) const {
     return {vec_max(_vec0, zero_point._vec0), vec_max(_vec1, zero_point._vec1)};
   }
 
@@ -444,40 +444,53 @@ Vectorized<c10::qint8> inline minimum(
 }
 
 template <>
-Vectorized<c10::qint8> C10_ALWAYS_INLINE operator+(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
-  return Vectorized<c10::qint8>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator+(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
 }
 
 template <>
-Vectorized<c10::qint8> C10_ALWAYS_INLINE operator-(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
-  return Vectorized<c10::qint8>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator-(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
 }
 
 template <>
-Vectorized<c10::qint8> C10_ALWAYS_INLINE operator*(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
-  return Vectorized<c10::qint8>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator*(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
 }
 
 template <>
-Vectorized<c10::qint8> C10_ALWAYS_INLINE operator/(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
-  return Vectorized<c10::qint8>{a.vec0()/b.vec0(), a.vec1()/b.vec1()};
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator/(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{a.vec0() / b.vec0(), a.vec1() / b.vec1()};
 }
 
 template <>
-Vectorized<c10::qint8> C10_ALWAYS_INLINE operator&(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
-  return Vectorized<c10::qint8>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator&(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
 }
 
 template <>
-Vectorized<c10::qint8> C10_ALWAYS_INLINE operator|(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
-  return Vectorized<c10::qint8>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator|(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
 }
 
 template <>
-Vectorized<c10::qint8> C10_ALWAYS_INLINE operator^(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
-  return Vectorized<c10::qint8>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+Vectorized<c10::qint8> C10_ALWAYS_INLINE
+operator^(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+  return Vectorized<c10::qint8>{
+      vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at
