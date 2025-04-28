@@ -13170,12 +13170,14 @@
   dispatch:
     CPU: col2im_out_cpu
     CUDA: col2im_out_cuda
+    MPS: col2im_out_mps
 
 - func: col2im(Tensor self, SymInt[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
   dispatch:
     CPU: col2im_cpu
     CUDA: col2im_cuda
+    MPS: col2im_mps
   tags: core
 
 - func: column_stack(Tensor[] tensors) -> Tensor

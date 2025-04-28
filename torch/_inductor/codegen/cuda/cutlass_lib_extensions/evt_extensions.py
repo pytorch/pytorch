@@ -53,17 +53,10 @@ if try_import_cutlass():
         TileDescription,
     )
 
-    import torch
     from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
 
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
-
-    TORCH_TO_CUTLASS_DTYPE = {
-        torch.float32: DataType.f32,
-        torch.float16: DataType.f16,
-        torch.bfloat16: DataType.bf16,
-    }
 
     def create_example_tensors(
         read_names: list[str],
@@ -76,10 +69,11 @@ if try_import_cutlass():
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
-            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+
+            assert all(x.is_integer for x in shape), (
                 f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
             )
-            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+            assert all(x.is_integer for x in stride), (
                 f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
             )
             shape = tuple(int(x) for x in shape)
