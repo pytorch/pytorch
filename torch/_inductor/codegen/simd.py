@@ -2018,8 +2018,14 @@ class SIMDScheduling(BaseScheduling):
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
 
-        assert sympy_product(pw_ranges) == pointwise_numel
-        assert sympy_product(red_ranges) == reduction_numel
+        torch._check(
+            sympy_product(pw_ranges) == pointwise_numel,
+            lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}"
+        )
+        torch._check(
+            sympy_product(reduction_numel) == red_ranges,
+            lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}"
+        )
 
         # score of a pointwise or reduction split
         scored_sub_split: dict[Any, tuple[list[int], list[int]]] = {}

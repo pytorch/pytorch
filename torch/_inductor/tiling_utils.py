@@ -47,6 +47,9 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     Giving an expr with a single free symbol, try to find a tiling that would
     make the expression coalesced with respect to that symbol.
     """
+    if len(expr.free_symbols) == 0:
+        return None
+
     assert len(expr.free_symbols) == 1
     free_symbol = next(iter(expr.free_symbols))
 
