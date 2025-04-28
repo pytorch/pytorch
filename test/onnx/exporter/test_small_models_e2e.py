@@ -542,6 +542,63 @@ class DynamoExporterTest(common_utils.TestCase):
         # make sre the naming is working
         self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
 
+    def test_export_sym_max(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_max(*x.shape)
+
+        inputs = (torch.zeros((2, 3)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Max",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_min(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_min(*x.shape)
+
+        inputs = (torch.zeros((2, 3)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Min",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_not(self):
+        class SymNotModel(torch.nn.Module):
+            def forward(self, x):
+                comparison = x.shape[0] == x.shape[1]
+                return torch.sym_not(comparison)
+
+        inputs = (torch.zeros((2, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymNotModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        self.assertIn(
+            "Not",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_group_norm_opset_21(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.group_norm(x, 4)
+
+        x = torch.randn(1, 4, 4, 4, dtype=torch.float32)
+        onnx_program = self.export(Model(), (x,), opset_version=21)
+        # TODO(after ort support): As of ONNX Runtime 1.22, the operator is not implemented yet.
+        # call assert_onnx_program after ort support
+        self.assertIn(
+            "GroupNormalization",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
