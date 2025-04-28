@@ -462,12 +462,6 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
-if [[ "$image" == *centos9* ]]; then
- DOCKERFILE_NAME="Dockerfile.centos.stream"
-else
- DOCKERFILE_NAME="Dockerfile"
-fi
-
 no_cache_flag=""
 progress_flag=""
 # Do not use cache and progress=plain when in CI
@@ -521,7 +515,7 @@ docker build \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
-       -f $(dirname ${DOCKERFILE})/${DOCKERFILE_NAME} \
+       -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
        .
