@@ -48,10 +48,12 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     instantiate_parametrized_tests,
     MACOS_VERSION,
+    NAVI_ARCH,
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
     skipIfNotMiopenSuggestNHWC,
+    skipIfRocmArch,
     skipIfRocmVersionLessThan,
     subtest,
     TEST_SCIPY,
@@ -3885,6 +3887,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
+    @skipIfRocmArch(NAVI_ARCH) # not supported by MIOPEN on NAVI
     @dtypes(torch.float, torch.float16)
     @precisionOverride({torch.half: 0.002, torch.float: 1e-4})
     def test_cudnn_convolution_relu(self, device, dtype):
