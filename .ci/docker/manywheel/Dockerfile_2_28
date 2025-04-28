@@ -50,7 +50,7 @@ FROM base as magma
 ARG BASE_CUDA_VERSION=10.2
 # Install magma
 ADD ./common/install_magma_compile.sh install_magma_compile.sh
-COPY ../.ci/magma/* /magma/
+COPY ./magma/* /magma/
 RUN bash ./install_magma_compile.sh ${BASE_CUDA_VERSION} && rm install_magma_compile.sh
 
 FROM base as jni

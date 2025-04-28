@@ -10,7 +10,7 @@ function do_install() {
     magma_archive="magma-cuda${cuda_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
     cuda_dir="/usr/local/cuda-${cuda_version}"
 
-    pushd /magma
+    pushd magma
     make magma-cuda${cuda_version_nodot}
 
     tar -xvf "${magma_archive}"
