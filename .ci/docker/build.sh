@@ -501,7 +501,14 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
-DOCKER_PROGRESS="--progress=plain"
+no_cache_flag=""
+progress_flag=""
+# Do not use cache and progress=plain when in CI
+if [[ -n "${CI:-}" ]]; then
+  no_cache_flag="--no-cache"
+  progress_flag="--progress=plain"
+fi
+
 if [[ "${DOCKER_BUILDKIT}" == 0 ]]; then
   DOCKER_PROGRESS=""
 fi
