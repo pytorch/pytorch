@@ -24,6 +24,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import ParallelStyle
 from torch.nn.attention.flex_attention import (
+    _identity,
     _mask_mod_signature,
     BlockMask,
     create_block_mask,
@@ -124,9 +125,10 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert (
-            cls.ROUND_ROBIN_CYCLE == 2
-        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        assert cls.ROUND_ROBIN_CYCLE == 2, (
+            "The current implementation only works if ROUND_ROBIN_CYCLE is 2 "
+            f"but got {cls.ROUND_ROBIN_CYCLE}"
+        )
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -140,9 +142,10 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert (
-            cls.ROUND_ROBIN_CYCLE == 2
-        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        assert cls.ROUND_ROBIN_CYCLE == 2, (
+            "The current implementation only works if ROUND_ROBIN_CYCLE is 2 "
+            f"but got {cls.ROUND_ROBIN_CYCLE}"
+        )
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
 
@@ -1513,6 +1516,7 @@ def context_parallel_unshard(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     seq_dims: list[int],
+    sharder: Optional[FlexAttentionSharder] = None,
 ) -> list[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
@@ -1526,12 +1530,23 @@ def context_parallel_unshard(
     Returns:
         List[torch.Tensor]: the unsharded buffers.
     """
-    sharder = (
-        _RoundRobinLoadBalancer
-        if _cp_options.enable_load_balance
-        else _SequentialSharder
-    )
-    return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+    if sharder is None:
+        sdpa_sharder = (
+            _RoundRobinLoadBalancer
+            if _cp_options.enable_load_balance
+            else _SequentialSharder
+        )
+        return [sdpa_sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+    else:
+        new_buffers = []
+        for buffer, seq_dim in zip(buffers, seq_dims):
+            buffer = buffer.contiguous()
+            cp_world_size = mesh.size()
+            all_buffers = [torch.empty_like(buffer) for _ in range(cp_world_size)]
+            ft_c.all_gather_inplace(all_buffers, buffer, mesh)
+            new_buffers.append(sharder.unshard(all_buffers, seq_dim))
+
+        return new_buffers
 
 
 def set_rotate_method(rotate_method: str) -> None:
@@ -1685,6 +1700,11 @@ def cp_flex_attention_dispatch_mode(
     assert cp_block_mask is not None, (
         "flex_attention is called but cp_block_mask is not initialized. "
         "Please pass the `block_mask` argument to `context_parallel`."
+    )
+
+    assert score_mod == _identity, (
+        "Context-parallel flex_attention only support `_identity` score_mod "
+        f"but got {score_mod}"
     )
 
     sharding = Shard(2)
