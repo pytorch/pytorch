@@ -654,14 +654,9 @@ class CompiledFxGraph(OutputCode):
         self.current_callable = None
         self.recursively_apply_fns = None
 
-    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
-        from torch._dynamo.utils import counters, dynamo_timed
-        from torch._inductor.codecache import (
-            cpp_prefix_path,
-            get_path,
-            PyCodeCache,
-            write_atomic,
-        )
+    def write_to_disk(self) -> str:
+        from torch._dynamo.utils import counters
+        from torch._inductor.codecache import cpp_prefix_path, get_path, write_atomic
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -682,6 +677,13 @@ class CompiledFxGraph(OutputCode):
                     self.source_code = code
 
             write_atomic(artifact_path, code, make_dirs=True)
+        return artifact_path
+
+    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
+        from torch._dynamo.utils import dynamo_timed
+        from torch._inductor.codecache import PyCodeCache
+
+        artifact_path = self.write_to_disk()
 
         try:
             with dynamo_timed(

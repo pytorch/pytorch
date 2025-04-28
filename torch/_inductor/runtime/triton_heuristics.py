@@ -31,7 +31,6 @@ from typing import (
 
 import torch
 from torch._prims_common import compute_required_storage_length
-from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -479,7 +478,7 @@ class CachingAutotuner(KernelInterface):
                 try:
                     launchers.append(result.make_launcher())
 
-                except (OutOfResources, PTXASError) as e:
+                except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
                     exc = e
         if len(launchers) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
@@ -816,18 +815,15 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with (
-            dynamo_timed(
-                "CachingAutotuner.benchmark_all_configs",
-                log_pt2_compile_event=True,
-                metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-                dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-                compile_id=self.compile_id,
-                is_backward=self.is_backward,
-                log_waitcounter=True,
-                waitcounter_name_override="triton_autotuner",
-            ),
-            _WaitCounter("pytorch.wait_counter.dynamo_compile").guard(),
+        with dynamo_timed(
+            "CachingAutotuner.benchmark_all_configs",
+            log_pt2_compile_event=True,
+            metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
+            compile_id=self.compile_id,
+            is_backward=self.is_backward,
+            log_waitcounter=True,
+            waitcounter_name_override="triton_autotuner",
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -1278,7 +1274,10 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
-        self.kernel.load_kernel(self.compile_meta.get("device", 0))
+        device = self.compile_meta.get("device", 0)
+        if device is None:
+            device = 0
+        self.kernel.load_kernel(device)
         scope = {
             "runner": self.kernel.run,
         }
@@ -1473,7 +1472,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 "metadata",
                 *call_args,
             ]
-        else:  # args after CompiledKernel.launch_metadata: https://github.com/openai/triton/pull/3492
+        else:  # args after CompiledKernel.launch_metadata: https://github.com/triton-lang/triton/pull/3492
             # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
             # `bin.launch_metadata` is relatively expensive, and returns None unless a
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
