@@ -2407,10 +2407,10 @@ graph():
         with self.assertRaisesRegex(
             ValueError,
             r"Received user-specified dim hint Dim.DYNAMIC.*"
-            r"but tracing inferred a static shape of 0 for dimension "
+            r"but export 0/1 specialized due to hint of 0 for dimension "
             r"inputs\['x'\]\.shape\[0\](.*\n)*.*"
             r"Received user-specified dim hint Dim.DYNAMIC.*"
-            r"but tracing inferred a static shape of 1 for dimension "
+            r"but export 0/1 specialized due to hint of 1 for dimension "
             r"inputs\['x'\]\.shape\[1\].*",
         ):
             export(
@@ -13150,14 +13150,6 @@ def forward(self, x):
         inp2 = torch.randn(7, 4)
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
-
-    def test_dim_auto_01(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x * 2
-        
-        ep = export(Foo(), (torch.randn(1, 1),), dynamic_shapes={"x": [Dim.AUTO]*2})
-        print(ep)
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
