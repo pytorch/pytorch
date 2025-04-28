@@ -2003,9 +2003,15 @@ class TestSDPACpuOnly(NNTestCase):
         if type == "nested" \
                 or dropout > 0.0 \
                 or dtype not in [torch.float32, torch.float64, torch.bfloat16, torch.float16]:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH.value
+            self.assertEqual(torch._fused_sdp_choice(q, k, v, dropout_p=dropout), SDPBackend.MATH.value)
         else:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION.value
+            device_capability = None
+            if "cuda" in str(device):
+                device_capability = torch.cuda.get_device_capability()
+            if PLATFORM_SUPPORTS_CUDNN_ATTENTION and device_capability and (device_capability == (9, 0) or device_capability == (10, 0)):
+                self.assertEqual(torch._fused_sdp_choice(q, k, v, dropout_p=dropout), SDPBackend.CUDNN_ATTENTION.value)
+            else:
+                self.assertEqual(torch._fused_sdp_choice(q, k, v, dropout_p=dropout), SDPBackend.FLASH_ATTENTION.value)
 
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])

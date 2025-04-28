@@ -1288,7 +1288,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
   auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
-  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_qk);
+  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_v);
   auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
   std::unordered_map<int64_t, void*> variant_pack = {
@@ -1305,7 +1305,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
       {SEQ_LEN_KV, seqlen_kv.data_ptr()}};
   if (return_softmaxstats) {
     variant_pack[LSE] = softmaxstats.data_ptr();
-    variant_pack[RAG_LSE_OFF] = cum_seqlen_q.data_ptr();
+    variant_pack[RAG_LSE_OFF] = rag_stats_off.data_ptr();
   }
   if (dropout_probability != 0.0f) {
     variant_pack[SEED] = dropoutseed.data_ptr();
@@ -1492,7 +1492,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
   auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
-  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_qk);
+  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_v);
   auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
 
@@ -1534,9 +1534,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
       dropoutseed,
       dropoutoffset,
       handle);
-
-  TORCH_WARN(!q.is_nested(), !k.is_nested(), !v.is_nested(), !o.is_nested(), !dO_.is_nested(), !softmaxstats.is_nested(), !dQ.is_nested(), !dK.is_nested(), !dV.is_nested());
-  TORCH_WARN(q.defined(), k.defined(), v.defined(), o.defined(), dO_.defined(), softmaxstats.defined(), dQ.defined(), dK.defined(), dV.defined(), rag_q_off.defined(), rag_k_off.defined(), rag_v_off.defined(), rag_stats_off.defined(), seqlen_q.defined(), seqlen_kv.defined());
 
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs

@@ -6668,7 +6668,6 @@ torch.cuda.synchronize()
             q_nt_3, q_nt_3, q_nt_3
         )
         self.assertEqual(attn_out.shape, q_nt_3.shape)
-        print("PASS OUT ASSERT EQUAL")
 
         @parametrize("skip_backward", [True, False])
         def check_forward_backward(skip_backward=False):
@@ -6707,12 +6706,9 @@ torch.cuda.synchronize()
                 nt_grads = torch.autograd.grad(
                     attn_nt.values().sum(), (q_nt, k_nt, v_nt)
                 )
-                i =0
                 for nt_grad, d1_grad, d2_grad, grad_atol, grad_rtol in zip(
                     nt_grads, d1_grads, d2_grads, grad_atols, grad_rtols
                 ):
-                    i += 1
-                    print(i)
                     unbound_nt_grads = nt_grad.unbind()
                     self.assertEqual(
                         d1_grad,
@@ -6720,16 +6716,12 @@ torch.cuda.synchronize()
                         atol=grad_atol,
                         rtol=grad_rtol,
                     )
-                    print(d1_grad, unbound_nt_grads[0].unsqueeze(0))
-                    print("PASS D1 GRAD")
                     self.assertEqual(
                         d2_grad,
                         unbound_nt_grads[1].unsqueeze(0),
                         atol=grad_atol,
                         rtol=grad_rtol,
                     )
-                    print(d2_grad, unbound_nt_grads[1].unsqueeze(0))
-                    print("PASS D2 GRAD")
 
         # Default
         check_forward_backward()
@@ -6749,17 +6741,15 @@ torch.cuda.synchronize()
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
         check_cudnn = os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED", "0") == "1"
-        print(check_cudnn)
         if (
             "cuda" in str(device)
             and check_cudnn
             and (dtype == torch.float16 or dtype == torch.bfloat16)
         ):
-            with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA Nested Tensor"):
-                with torch.nn.attention.sdpa_kernel(
-                    torch.nn.attention.SDPBackend.CUDNN_ATTENTION
-                ):
-                    check_forward_backward()
+            with torch.nn.attention.sdpa_kernel(
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+            ):
+                check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
