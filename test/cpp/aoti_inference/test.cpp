@@ -14,6 +14,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
@@ -159,11 +160,18 @@ void test_aoti_package_loader_multi_gpu(
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
 
+  // For all available CUDA devices: Load PT2 package on this device, run inference, and validate results
+  auto input_tensors = data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
   for (int i = 0; i < torch::cuda::device_count(); i++) {
+    auto options = torch::TensorOptions().device(torch::kCUDA, i);
     torch::inductor::AOTIModelPackageLoader runner(pt2_package_path, "model", false, 1, i);
-    auto actual_output_tensors =
-        runner.run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
-    ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+    std::vector<torch::Tensor> input_tensors_on_device;
+    for (auto input_tensor: input_tensors) {
+      input_tensors_on_device.push_back(input_tensor.clone().to(options));
+    }
+    // Run loaded PT2 package on device
+    auto actual_output_tensors = runner.run(input_tensors_on_device);
+    ASSERT_TRUE(torch::allclose(ref_output_tensors[0].cpu(), actual_output_tensors[0].cpu()));
   }
 }
 
@@ -1016,8 +1024,8 @@ TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
   test_aoti_package_loader("cuda", false);
 }
 
-TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
-  test_aoti_package_loader_multi_gpu("cuda");
+TEST(AotInductorTest, BasicPackageLoaderTestMultiGpuCuda) {
+  test_aoti_package_loader_multi_gpu("cuda", false);
 }
 
 TEST(AotInductorTest, UpdateUserManagedConstantsCuda) {
