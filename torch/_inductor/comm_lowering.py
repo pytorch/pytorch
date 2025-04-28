@@ -193,6 +193,46 @@ def register_comm_lowerings():
 
     c10d = torch.ops._c10d_functional
 
+    @register_comm_lowering(c10d.shm_all_reduce)  # type: ignore[misc]
+    def _shm_all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
+        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+            return _one_shot_all_reduce(inp, reduce_op, group_name)
+
+        # Lower as c10d.shm_all_reduce_
+        inp = clone(inp)
+        if config.reorder_for_compute_comm_overlap:
+            # The horizontal fusion of this clone often severely delays the
+            # scheduling of the all_reduce_ node. Horizontally fusing this
+            # clone can almost never out-perform scheduling the all_reduce_
+            # earlier. Also in most cases, this clone is eliminated via
+            # in-place reuse. Therefore, we tell the scheduler to not fuse it.
+            inp.realize()
+            V.graph.no_fuse_buffer_names.add(inp.get_name())
+        inp = ir.ExternKernel.require_contiguous(inp)
+        ir._CollectiveKernel.create_inplace(
+            c10d.shm_all_reduce_.default, inp, reduce_op, group_name
+        )
+        return inp
+
+    @register_comm_lowering(c10d.shm_all_reduce_)  # type: ignore[misc]
+    def _shm_all_reduce_(
+        inp: ir.TensorBox, reduce_op: str, group_name: str
+    ) -> ir.TensorBox:
+        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+            ret = copy_(
+                inp,
+                _one_shot_all_reduce(inp, reduce_op, group_name),
+            )
+            mark_as_skip_wait(ret)
+            return inp
+
+        # Lower as c10d.shm_all_reduce_
+        inp = ir.ExternKernel.require_contiguous(inp)
+        ir._CollectiveKernel.create_inplace(
+            c10d.shm_all_reduce_.default, inp, reduce_op, group_name
+        )
+        return inp
+
     @register_comm_lowering(c10d.all_reduce)  # type: ignore[misc]
     def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):

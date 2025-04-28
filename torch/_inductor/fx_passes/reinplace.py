@@ -358,6 +358,9 @@ try:
         c10d_functional.all_reduce_coalesced.default: InplaceableOp(
             c10d_functional.all_reduce_coalesced_.default, 0
         ),
+        c10d_functional.shm_all_reduce.default: InplaceableOp(
+            c10d_functional.shm_all_reduce_.default, 0
+        ),
     }
     inplaceable_ops.update(inplaceable_collective_ops)
 except AttributeError:
