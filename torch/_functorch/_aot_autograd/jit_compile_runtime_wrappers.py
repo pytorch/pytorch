@@ -693,7 +693,9 @@ def run_joint_graph_passes_on_hops(
 
         # Insert the new_fw_hop_gm into the joint_gm
         with joint_gm.graph.inserting_after(fw_node):
-            new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, fw_node.args[1])
+            new_fw_mod_attr_name = add_new_hop_gm(
+                new_fw_hop_gm, f"___forward{identifier}"
+            )
             new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
 
         # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
