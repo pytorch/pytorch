@@ -179,7 +179,8 @@ class ItertoolsVariable(VariableTracker):
                         gb_type="Unsupported key type for itertools.groupby",
                         context=f"call_function {self} {args} {kwargs}",
                         explanation="Dynamo does not know how to trace "
-                        f"itertools.groupby with key type: {str(type(key))}",
+                        f"itertools.groupby with key type: {str(type(key))}. "
+                        "We only support grouping keys that are constants (int, float, str, etc.)",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
