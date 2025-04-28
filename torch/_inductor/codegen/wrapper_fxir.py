@@ -136,14 +136,6 @@ class FxConverter:
         self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
         self._unique_symbol_ids: Counter[str] = Counter()
 
-    def _get_unique_symbol(self, prefix: str) -> str:
-        """
-        Returns a symbol ID that is guaranteed to be unique, for the given prefix.
-        """
-        unique_id = self._unique_symbol_ids[prefix]
-        self._unique_symbol_ids[prefix] += 1
-        return f"{prefix}_{unique_id}"
-
     def _import_kernel(self, code: str, kernel_name: str) -> CachingAutotuner:
         """
         Imports a kernel from source, possibly autotuning block parameters.
@@ -251,15 +243,16 @@ class FxConverter:
                 # Use a WorkspaceArg for this.
                 buffer = self._get_buffer(node.data)
                 assert isinstance(buffer, (ir.Buffer, WorkspaceArg))
-                input_name = buffer.get_name()
-                unique_suffix = self._get_unique_symbol(input_name)
+                unique_name = self.gm.graph._graph_namespace.create_name(
+                    f"{buffer.get_name()}_view", None
+                )
                 device = buffer.get_device()
                 assert device
                 reused_as = WorkspaceArg(
                     count=buffer.get_size(),
                     zero_mode=WorkspaceZeroMode.UNINITIALIZED,
                     device=device,
-                    outer_name=f"{input_name}_view_{unique_suffix}",
+                    outer_name=unique_name,
                     dtype=buffer.get_dtype(),
                 )
 
