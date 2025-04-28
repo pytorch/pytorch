@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import platform
 import struct
-import sys
 from itertools import chain
 from typing import cast, TYPE_CHECKING
 
