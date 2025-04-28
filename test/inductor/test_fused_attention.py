@@ -29,6 +29,15 @@ def checkpoint_wrapper(fn):
 class TestSDPAPatternRewriterTemplate(TestCase):
     use_static_shapes = True
 
+    def setUp(self):
+        self.prev_tf32 = torch.backends.cuda.matmul.allow_tf32
+        torch.backends.cuda.matmul.allow_tf32 = True
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        torch.backends.cuda.matmul.allow_tf32 = self.prev_tf32
+
     def _clone_inputs(self, inputs):
         def clone(x):
             if not isinstance(x, torch.Tensor):

@@ -3,6 +3,7 @@ import functools
 import inspect
 import logging
 import math
+import warnings
 
 import torch
 
@@ -542,6 +543,20 @@ def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
     )
 
 
+@functools.lru_cache(None)
+def _warn_tf32_disabled() -> None:
+    if (
+        torch.cuda.is_available()
+        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.cuda.get_device_capability() >= (8, 0)
+    ):
+        warnings.warn(
+            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
+            "Skipping pattern matching to fused flash-attention. "
+            "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
+        )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -557,6 +572,7 @@ def _sfdp_params_check(match):
         and query.dtype == torch.float32
         and not torch.backends.cuda.matmul.allow_tf32
     ):
+        _warn_tf32_disabled()
         return False
 
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
