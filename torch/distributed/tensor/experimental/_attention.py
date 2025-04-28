@@ -26,6 +26,7 @@ from torch._prims_common import DeviceLikeType
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.fx.graph_module import GraphModule
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     BlockMask,
@@ -1751,6 +1752,9 @@ def cp_flex_attention_backward_dispatch_mode(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
+    print(
+        f"query={query.shape}, key={key.shape}, value={value.shape}, out={out.shape}, logsumexp={logsumexp.shape}, grad_out={grad_out.shape}, grad_logsumexp={grad_logsumexp.shape}"
+    )
     (
         grad_query,
         grad_key,
@@ -1772,3 +1776,4 @@ def cp_flex_attention_backward_dispatch_mode(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    return grad_query, grad_value, grad_key, grad_score_mod_captured
