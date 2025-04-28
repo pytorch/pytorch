@@ -1848,14 +1848,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 with restore_stdout_stderr():
                     choice.precompile()
                 elapsed_ns = time.time_ns() - start_ns
-                # Return tuple as triton async compile (_worker_compile_triton) 
+                # Return tuple as triton async compile (_worker_compile_triton)
                 # returns tuple[CachingAutotuner, int]
                 return None, elapsed_ns // 1000
 
             def on_complete(future):
                 _, precompile_elapsed_us = future.result()
                 elapsed_seconds = precompile_elapsed_us / 1e6
-                elapsed_times[future] = elapsed_seconds 
+                elapsed_times[future] = elapsed_seconds
                 log.debug(
                     "Precompilation complete for future: %s, elapsed time: %.02fs",
                     future,
