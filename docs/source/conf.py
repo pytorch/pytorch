@@ -204,6 +204,9 @@ html_context = {
     "community_links": community_links,
     "language_bindings_links": language_bindings_links,
     "version": version,
+    "date_info": {
+        "paths_to_skip": ["generated/", "index"],
+    },
 }
 
 napoleon_use_ivar = True
@@ -3730,6 +3733,7 @@ def setup(app):
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
+    app.config.add_last_updated = True
     return {"version": "0.1", "parallel_read_safe": True}
 
 
