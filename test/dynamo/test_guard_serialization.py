@@ -64,7 +64,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         assert self._frame_state is not None
 
         def guard_filter_fn(guards):
-            ret = [g.guard_type == guard_type for g in guards]
+            ret = [
+                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                for g in guards
+            ]
             self.assertTrue(any(ret))
             return ret
 
@@ -240,6 +243,19 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(
             ref, loaded, {"x": {"t": torch.randn(3), "d": torch.randn(3)}}, True
         )
+
+    def test_bool_match(self):
+        def fn(x, b):
+            if b:
+                return x + 1
+            else:
+                return x + 2
+
+        ref, loaded = self._test_serialization("BOOL_MATCH", fn, torch.randn(3), True)
+
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": True}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": False}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": None}, False)
 
 
 if __name__ == "__main__":
