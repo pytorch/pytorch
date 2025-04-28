@@ -1028,18 +1028,19 @@ def _try_get_metadata_from_dynamo(
     seen_sources = set()
 
     aot_autograd_arg_pos_to_source = []
+    static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
-    for name in param_keys:
+    for i, name in enumerate(param_keys):
         assert name in param_name_to_source, f"{name} not found."
         source = param_name_to_source[name]
         assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
+        static_input_indices.append(i)
 
     # Collect the dynamo graph inputs
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
-    static_input_indices = []
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
@@ -1054,7 +1055,11 @@ def _try_get_metadata_from_dynamo(
             static_inputs_log.debug(
                 "Adding static input pos %s for source %s", pos, source_name
             )
-            static_input_indices.append(pos)
+            # input[i] in dynamo is now:
+            # input[i + len(extra_params)] in AOT,
+            # where extra_params are the params/buffers that dynamo baked into
+            # the OutputGraph
+            static_input_indices.append(pos + len(param_keys))
         else:
             static_inputs_log.debug(
                 "Non-static input pos %s for source %s", pos, source_name
