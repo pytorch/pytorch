@@ -6625,7 +6625,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 x = eval(f"nn.ReplicationPad{dim}d(padding=1)")(x)
                 return x
 
-
             c_fn = torch.compile(fn)
             x = torch.randn([1] * (dim + 2))
             with self.assertRaisesRegex(
