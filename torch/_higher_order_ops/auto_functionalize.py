@@ -652,12 +652,12 @@ def do_auto_functionalize_v2(
     unwrapped_mutable_out = (
         [] if len(all_bases) == 0 else unwrapped_outs[-len(all_bases) :]
     )
-    assert len(unwrapped_actual_out) == len(schema.returns)
 
     if isinstance(op, HigherOrderOperator):
         assert (
             len(schema.returns) > 0
         ), f"hop is expected to return at least on output {schema}."
+        assert len(unwrapped_actual_out) == len(schema.returns)
     else:
         if len(schema.returns) == 0:
             assert unwrapped_actual_out[0] is None
