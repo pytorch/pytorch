@@ -295,7 +295,15 @@ num_guards_executed=0)
         x = torch.randn(4, 4)
         size = list(x.size())
         stride = list(x.stride())
-        guard_manager.add_tensor_match_guard(x, size, stride, "x", ["check_tensor(x)"])
+        guard_manager.add_tensor_match_guard(
+            x,
+            size,
+            stride,
+            "x",
+            ["check_tensor(x)"],
+            type(x),
+            torch._C._dispatch_keys(x),
+        )
         self.assertTrue(guard_manager.check(x))
         self.assertTrue(guard_manager.check_verbose(x).result)
         self.assertTrue(guard_manager.check(torch.randn(4, 4)))
