@@ -1058,10 +1058,10 @@ def _try_get_metadata_from_dynamo(
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
             "_dynamo_static_input_type", None
         ):
-            static_input_indices.append(actual_pos)
             static_inputs_log.debug(
                 "Adding static input pos %s for source %s", actual_pos, source_name
             )
+            static_input_indices.append(actual_pos)
         else:
             static_inputs_log.debug(
                 "Non-static input pos %s for source %s", actual_pos, source_name
