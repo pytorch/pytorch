@@ -696,7 +696,7 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
-                self.tx.output.guard_on_key_order.add(self.source.name())
+                self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
@@ -1337,7 +1337,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Guard on the key order
-            self.tx.output.guard_on_key_order.add(self.source.name())
+            self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
