@@ -11923,6 +11923,64 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_size_stride_assert(self):        
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32))
+
+        _, code = run_and_get_code(torch.compile(fn), a,)
+        FileCheck().check("assert_size_stride(buf2, (16, 32), (32, 1), 'torch.ops.test.foo.default')").run(code[0])
+        
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_alignment_assert(self):        
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32))
+
+        _, code = run_and_get_code(torch.compile(fn), a,)
+        FileCheck().check("assert_alignment(buf2, 16, 'torch.ops.test.foo.default')").run(code[0])
+
+    def test_assert_size_stride_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_size_stride(tensor, (16, 32), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_size_stride_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_size_stride(tensor, (32, 64), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_alignment(tensor, 16, "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_alignment(tensor, 0, "torch.ops.dummy.op_name")
+                    
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_custom_op_unbacked_symints(self):
