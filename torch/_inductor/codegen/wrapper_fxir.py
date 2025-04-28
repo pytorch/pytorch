@@ -21,7 +21,12 @@ from torch.fx import GraphModule
 
 from .. import ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
-from .common import FileBackedGraphModule, WorkspaceArg, WorkspaceZeroMode
+from .common import (
+    CodegenSymbol,
+    FileBackedGraphModule,
+    WorkspaceArg,
+    WorkspaceZeroMode,
+)
 from .wrapper import (
     AllocateLine,
     BufferLike,
@@ -52,9 +57,9 @@ aten = torch.ops.aten
 
 
 @dataclasses.dataclass
-class SymbolBuffer:
+class SymbolBuffer(CodegenSymbol):
     """
-    Wraps a sympy.Symbol to expose codegen functionality used for buffers.
+    Represents a sympy.Symbol graph input.
     """
 
     symbol: sympy.Symbol

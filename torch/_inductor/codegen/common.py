@@ -13,6 +13,7 @@ import os
 import re
 import tempfile
 import typing
+from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -140,8 +141,18 @@ class WorkspaceZeroMode(enum.Enum):
         return WorkspaceZeroMode.UNINITIALIZED
 
 
+class CodegenSymbol(ABC):
+    """
+    An IR object possibly corresponding to a variable in the wrapper code.
+    """
+
+    @abstractmethod
+    def get_name(self) -> str:
+        pass
+
+
 @ir_dataclass(frozen=True)
-class WorkspaceArg:
+class WorkspaceArg(CodegenSymbol):
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
