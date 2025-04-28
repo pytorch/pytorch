@@ -770,6 +770,21 @@ be called internally on deletion of the pool, hence returning all the memory to 
    del tensor, del pool
 
 
+Users can optionally specify a ``use_on_oom`` bool (which is False by default) during MemPool
+creation. If true, then the CUDACachingAllocator will be able to use memory in this pool as
+a last resort instead of OOMing.
+
+.. code:: python
+
+    pool = torch.cuda.MemPool(allocator, use_on_oom=True)
+    with torch.cuda.use_mem_pool(pool):
+        a = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+    del a
+
+    # at the memory limit, this will succeed by using pool's memory in order to avoid the oom
+    b = torch.randn(40 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+
+
 The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`
 APIs can be used for debugging purposes:
 

@@ -282,6 +282,8 @@ if torch.backends.mps.is_available():
         }
         # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
         MACOS_BEFORE_13_3_XFAILLIST = {
+            # float16 seems horribly wrong on MacOS13
+            "floor_divide": [torch.float16],
             # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
             "tan": [torch.float32],
             "cdist": [torch.float32],
@@ -312,6 +314,15 @@ if torch.backends.mps.is_available():
             "masked.cumsum": [torch.int64],
             "masked.cumprod": [torch.int64],
             "linalg.vander": [torch.int64],
+            # Fail with `Expected 1.0 but got nan.` for empty tensors
+            # Caused by sample input at index 23: SampleInput(
+            #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
+            #     args=(0),
+            #     kwargs={'mask': 'Tensor[size=(), device="mps:0", dtype=torch.bool]'},
+            #     broadcasts_input=False, name='')
+            "masked.softmin": [torch.float32, torch.float16],
+            "masked.softmax": [torch.float32, torch.float16],
+            "masked.log_softmax": [torch.float32, torch.float16],
         }
 
         MACOS_AFTER_13_1_XFAILLIST = {
@@ -455,6 +466,7 @@ if torch.backends.mps.is_available():
             "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
             "sparse.mm": None,
+            "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
             "special.airy_ai": None,
             "special.erfcx": None,
@@ -586,10 +598,6 @@ if torch.backends.mps.is_available():
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
-            # bfloat16 have weird issues with rounding
-            "divfloor_rounding": [torch.bfloat16],
-            "floor_divide": [torch.bfloat16],
-            "remainder": [torch.bfloat16],
             # atomic operations not supported
             "_unsafe_masked_index_put_accumulate": [
                 torch.bool,
@@ -654,7 +662,6 @@ if torch.backends.mps.is_available():
                 torch.int64,
                 torch.uint8,
                 torch.int8,
-                torch.bfloat16,
             ],
             # Failures due to random output that they generate using
             # Philox engine causing mismatch with CPU results
@@ -857,9 +864,6 @@ if torch.backends.mps.is_available():
 
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
-            # precision issues
-            "special.polygammaspecial_polygamma_n_0": [torch.float16],
-            "polygammapolygamma_n_0": [torch.float16],
             # Unimplemented ops
             "_segment_reduce": [torch.float16, torch.float32],
             "_chunk_cat": [torch.float16, torch.float32],
@@ -911,8 +915,6 @@ if torch.backends.mps.is_available():
             "equal": [torch.float16, torch.float32],
             # 'float' object is not iterable
             "item": [torch.float16, torch.float32],
-            # "mse_backward_cpu_out" not implemented for 'Half'
-            "nn.functional.mse_loss": [torch.float16],
             # "smooth_l1_backward_cpu_out" not implemented for 'Half'
             "nn.functional.smooth_l1_loss": [torch.float16],
             # cpu error: grad requires non-empty inputs
@@ -934,13 +936,18 @@ if torch.backends.mps.is_available():
             "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
+            # topk fails with duplicate indices
+            "topk": [torch.float16],
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
-            # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+            # Failures due to precision issues (may be fast-math). These has been fixed in MacOS 14
             "masked.softmin": [torch.float32, torch.float16],
             "masked.softmax": [torch.float32, torch.float16],
             "masked.log_softmax": [torch.float32, torch.float16],
+            "atanh": [torch.float16],
+            "__rmod__": [torch.float16],
+            "triangular_solve": [torch.float32],
             # Unsupported Border padding mode, forward pass success as fallback to cpu
             "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
