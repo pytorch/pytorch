@@ -279,6 +279,23 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         ):
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
 
+    def test_dispatch_key_set_match(self):
+        def fn(x, dks):
+            if dks.has("CPU"):
+                return torch.sin(x + 1)
+            else:
+                return torch.sin(x - 1)
+
+        x = torch.randn(3)
+        dks = torch._C._dispatch_keys(x)
+        ref, loaded = self._test_serialization("DISPATCH_KEY_SET_MATCH", fn, x, dks)
+
+        self._test_check_fn(ref, loaded, {"x": x, "dks": dks}, True)
+
+        x = torch.randn(3, device="meta")
+        dks = torch._C._dispatch_keys(x)
+        self._test_check_fn(ref, loaded, {"x": x, "dks": dks}, False)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
