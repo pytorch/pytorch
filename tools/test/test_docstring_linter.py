@@ -1,12 +1,16 @@
 # mypy: ignore-errors
 
+import io
 import json
 import sys
+import tempfile
 from pathlib import Path
+from unittest import mock
 
 from tools.linter.adapters.docstring_linter import (
     DocstringLinter,
     file_summary,
+    make_recursive,
     make_terse,
 )
 
@@ -32,6 +36,34 @@ class TestDocstringLinter(LinterTestCase):
     def test_python_code(self):
         self.lint_test(TEST_FILE, ARGS)
 
+    @mock.patch("sys.stdout", new_callable=io.StringIO)
+    def test_end_to_end(self, mock_stdout):
+        argv_base = *ARGS, str(TEST_FILE), str(TEST_FILE2)
+        report = "--report"
+        write = "--write-grandfather"
+
+        out = _next_stdout(mock_stdout)
+
+        def run(name, *argv):
+            DocstringLinter(argv_base + argv).lint_all()
+            self.assertExpected(TEST_FILE2, next(out), name)
+
+        with tempfile.TemporaryDirectory() as td:
+            grandfather_file = f"{td}/grandfather.json"
+            grandfather = f"--grandfather={grandfather_file}"
+
+            # Find some faiures
+            run("before.txt", grandfather)
+
+            # Rewrite grandfather file
+            run("before.json", grandfather, report, write)
+            actual = Path(grandfather_file).read_text()
+            self.assertExpected(TEST_FILE2, actual, "grandfather.json")
+
+            # Now there are no failures
+            run("after.txt", grandfather)
+            run("after.json", grandfather, report)
+
     def test_report(self):
         actual = _dumps(_data())
         self.assertExpected(TEST_FILE, actual, "report.json")
@@ -45,6 +77,23 @@ class TestDocstringLinter(LinterTestCase):
         terse = make_terse(_data(), index_by_line=True)
         actual = _dumps(terse)
         self.assertExpected(TEST_FILE, actual, "terse.line.json")
+
+    def test_recursive(self):
+        recursive = make_recursive(_data())
+        actual = _dumps(recursive)
+        self.assertExpected(TEST_FILE, actual, "recursive.json")
+
+    def test_terse_recursive(self):
+        recursive = make_recursive(_data())
+        terse = make_terse(recursive, index_by_line=False)
+        actual = _dumps(terse)
+        self.assertExpected(TEST_FILE, actual, "recursive.terse.json")
+
+    def test_terse_line_recursive(self):
+        recursive = make_recursive(_data())
+        terse = make_terse(recursive, index_by_line=True)
+        actual = _dumps(terse)
+        self.assertExpected(TEST_FILE, actual, "recursive.terse.line.json")
 
     def test_file_summary(self):
         actual = _dumps(file_summary(_data(), report_all=True))

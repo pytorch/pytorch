@@ -506,6 +506,8 @@ static void init_multicast_for_block(
     mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
     mc_prop.size = block->block_size;
 
+    // create a multicast object, which acts as a handle that allows multiple
+    // devices or processes to access the same memory allocation coherently.
     auto err = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
     if (err != CUDA_SUCCESS) {
       const char* err_str;
@@ -523,6 +525,7 @@ static void init_multicast_for_block(
     }
 
     int mc_fd;
+    // using the CUDA Driver API to export a multicast object into a POSIX file descriptor.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
         &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
     ipc_channel.broadcast_fds(rank, 0, pids, mc_fd);
@@ -533,6 +536,7 @@ static void init_multicast_for_block(
     if (mc_fd == -1) {
       return;
     }
+    // Convert back to a handle from the broadcasted POSIX file descriptor.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &mc_handle,
         (void*)(uintptr_t)mc_fd,
@@ -584,6 +588,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   c10::cuda::CUDAGuard guard(block->device_idx);
 
+  // Currently, IpcChannel is using a file based socket for inter-process communication
   IpcChannel ipc_channel;
   auto group_info = get_group_info(group_name_);
   auto store = group_info.store;
@@ -592,6 +597,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   auto driver_api = c10::cuda::DriverAPI::get();
   int block_fd;
+  // using the CUDA Driver API to export a GPU memory block as a
+  // POSIX file descriptor (FD), so it can be shared across processes via IPC.
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
       &block_fd,
       block->alloc_ref->handle,
@@ -625,6 +632,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       signal_pads[r] = (void*)((uintptr_t)ptr + block->signal_pad_offset);
       continue;
     }
+    // This api imports a GPU memory allocation that was previously exported as a file
+    // descriptor and it returns a memory handle.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &handles[r],
         (void*)(uintptr_t)imported_fds[r],
