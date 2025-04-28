@@ -12,6 +12,14 @@ using op = dnnl::graph::op;
 using partition = dnnl::graph::partition;
 
 namespace {
+
+inline data_type to_logical_tensor_data_type(c10::ScalarType scalar_type) {
+  return scalar_type == c10::ScalarType::Float      ? data_type::f32
+         : scalar_type == c10::ScalarType::Half     ? data_type::f16
+         : scalar_type == c10::ScalarType::BFloat16 ? data_type::bf16
+         : data_type::undef;
+}
+
 struct SDPALogicalParams {
   enum class TensorID {
     query,
@@ -39,11 +47,8 @@ struct SDPALogicalParams {
       const std::optional<at::Tensor>& attn_mask_,
       const at::Tensor& output_,
       bool is_causal) {
-    const data_type dtype = // to logical_tensor data type
-        query_.scalar_type() == c10::ScalarType::Float      ? data_type::f32
-        : query_.scalar_type() == c10::ScalarType::Half     ? data_type::f16
-        : query_.scalar_type() == c10::ScalarType::BFloat16 ? data_type::bf16
-                                                            : data_type::undef;
+    const data_type dtype =
+        to_logical_tensor_data_type(query_.scalar_type());
     TORCH_INTERNAL_ASSERT(
         (dtype != data_type::undef),
         "Only FP16/BF16/FP32 datatypes are currently supported");
@@ -98,10 +103,7 @@ struct SDPALogicalParams {
     }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
-          attn_mask_->scalar_type() == c10::ScalarType::Float      ? data_type::f32
-          : attn_mask_->scalar_type() == c10::ScalarType::Half     ? data_type::f16
-          : attn_mask_->scalar_type() == c10::ScalarType::BFloat16 ? data_type::bf16
-                                                                      : data_type::undef;
+          to_logical_tensor_data_type(attn_mask_->scalar_type());
       TORCH_INTERNAL_ASSERT(
         (mask_dtype != data_type::undef),
         "Only FP16/BF16/FP32 datatypes are currently supported for attn_mask");
