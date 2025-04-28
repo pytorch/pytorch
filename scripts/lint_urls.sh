@@ -27,8 +27,8 @@ while IFS=: read -r filepath url; do
         https://check-host.net/check-http \
         | jq -r .request_id) || request_id=""
       if [ -n "$request_id" ]; then
-        sleep 3
-        for _ in {1..10}; do
+        sleep 5
+        for _ in {1..5}; do
           new_code=$(curl -sS -H 'Accept: application/json' \
             "https://check-host.net/check-result/$request_id" \
             | jq -r -e '.[][0][3]') || new_code=000
@@ -37,7 +37,7 @@ while IFS=: read -r filepath url; do
             code=$new_code
             break
           fi
-          sleep 3
+          sleep 5
         done
       fi
     fi
@@ -74,9 +74,7 @@ done < <(
 
 for pid in "${pids[@]}"; do
   if ! wait "$pid" 2>/dev/null; then
-    if [ $? -eq 1 ]; then
-      status=1
-    fi
+    status=1
   fi
 done
 
