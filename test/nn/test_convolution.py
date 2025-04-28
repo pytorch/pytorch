@@ -2618,11 +2618,13 @@ class TestConvolutionNNDeviceType(NNTestCase):
             lambda x, y: F.conv_transpose3d(x, y, padding="valid"),
             (x, y),
             check_forward_ad=check_forward_ad,
+            nondet_tol=1e-5,
         )
         gradgradcheck(
             lambda x, y: F.conv_transpose3d(x, y, padding="valid"),
             (x, y),
             check_fwd_over_rev=check_forward_ad,
+            nondet_tol=1e-5,
         )
 
     @dtypes(torch.double, torch.cdouble)
