@@ -1737,6 +1737,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_operation_names():
                 self.name_to_node[name] = other_node
 
+            self.outputs_by_name: dict[str, SchedulerBuffer] = {
+                k: v for snode in self.snodes for k, v in snode.outputs_by_name.items()
+            }
+
         self.use_custom_partition_algo = use_custom_partition_algo
         device = snodes[0].get_device()
         assert device
