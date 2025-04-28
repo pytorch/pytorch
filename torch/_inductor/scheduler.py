@@ -3916,6 +3916,9 @@ class Scheduler:
 
     def free_buffers(self) -> None:
         """Free any buffers that are no longer needed"""
+        from .codegen.wrapper import SubgraphPythonWrapperCodegen
+        from .graph import SubgraphLowering
+
         for name in sorted(
             self.buffer_names_to_free
             - V.graph.removed_buffers
@@ -3925,7 +3928,13 @@ class Scheduler:
                 buf = self.name_to_buf[name]
                 if buf.can_free():
                     V.graph.wrapper_code.codegen_free(buf.node)
-            elif name in V.graph.graph_inputs:
+            elif (
+                not (
+                    isinstance(V.graph, SubgraphLowering)
+                    and isinstance(V.graph.wrapper_code, SubgraphPythonWrapperCodegen)
+                )
+                and name in V.graph.graph_inputs
+            ):
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
