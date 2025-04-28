@@ -12,6 +12,9 @@ inline namespace CPU_CAPABILITY {
 using ComplexDbl = c10::complex<double>;
 
 template <>
+struct is_vec_specialized_for<ComplexDbl> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<ComplexDbl> {
   union {
     struct {

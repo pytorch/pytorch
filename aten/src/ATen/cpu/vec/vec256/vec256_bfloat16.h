@@ -13,6 +13,9 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_AVX2)
 
 template <>
+struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<BFloat16> : public Vectorized16<BFloat16> {
  public:
   using Vectorized16::Vectorized16;
