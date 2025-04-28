@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <clocale>
 #include <cstdlib>
 #include <cstring>
@@ -210,7 +211,7 @@ struct TORCH_API SharedParserData {
       return true;
     }
 
-    if (isalpha(*pos) || *pos == '_') {
+    if (std::isalpha(*pos) || *pos == '_') {
       matchIdentOrKeyword(pos, kind, end);
       return true;
     }
@@ -453,7 +454,7 @@ struct TORCH_API SharedParserData {
     ++pos;
     size_t i;
     auto valid_ident_char = [](const char ch) {
-      return isalpha(ch) || ch == '_' || isdigit(ch);
+      return std::isalpha(ch) || ch == '_' || std::isdigit(ch);
     };
     for (i = 1; pos.has_next(); ++pos, ++i) {
       auto ch = *pos;
@@ -634,7 +635,7 @@ struct TORCH_API SharedParserData {
     // http://en.cppreference.com/w/cpp/string/byte/strtof
     // but we want only the number part, otherwise 1+3 will turn into two
     // adjacent numbers in the lexer
-    if (first == '-' || first == '+' || isalpha(first))
+    if (first == '-' || first == '+' || std::isalpha(first))
       return false;
     const char* startptr = str.data() + start;
     char* endptr = nullptr;

@@ -1158,7 +1158,7 @@ class triton:
     # of registers being benchmarked.
     #
     # NOTE: triton will always report >0 register spills for kernels using sin/cos.
-    # (check this issue https://github.com/openai/triton/issues/1756 )
+    # (check this issue https://github.com/triton-lang/triton/issues/1756 )
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
