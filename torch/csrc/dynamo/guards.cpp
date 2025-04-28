@@ -844,21 +844,38 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   PyObject* item = nullptr;
   PyObject* size = nullptr;
   PyObject* stride = nullptr;
-  if (!PyArg_ParseTuple(args, "OOO", &item, &size, &stride)) {
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "OOO|s", &item, &size, &stride, &op_name)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    std::stringstream msg;
+    msg << "expected Tensor()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
-    PyErr_SetString(PyExc_TypeError, "expected tuple()");
+    std::stringstream msg;
+    msg << "expected tuple()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
-    PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
+    std::stringstream msg;
+    msg << "wrong number of dimensions" << ndim;
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
 
@@ -887,6 +904,9 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   }
 
   if (num_errors) {
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
     msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
     msg << "\nUse torch.library.opcheck to test your custom op.";
     msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
@@ -896,7 +916,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 
   Py_RETURN_TRUE;
 }
-
+ 
 static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   /*
    * Asserts that a given tensor meets certain alignment.
@@ -904,15 +924,27 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
    */
   PyObject* item = nullptr;
   unsigned long alignment = 0;
-  if (!PyArg_ParseTuple(args, "Ok", &item, &alignment)) {
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "Ok|s", &item, &alignment, &op_name)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    std::stringstream msg;
+    msg << "expected Tensor()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   if (alignment == 0) {
-    PyErr_SetString(PyExc_AssertionError, "alignment can not be 0");
+    std::stringstream msg;
+    msg << "alignment cannot be 0";
+    if (op_name) {
+      msg << " in op: " << op_name;
+    }
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
 
@@ -922,7 +954,10 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   size_t itemsize = tensor.itemsize();
   if (storage_offset * itemsize % alignment != 0) {
     std::stringstream msg;
-    msg << "Expect the tensor to be " << alignment
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
+    msg << "\nExpect the tensor to be " << alignment
         << " bytes aligned. Fail due to storage_offset=" << storage_offset
         << " itemsize=" << itemsize;
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
