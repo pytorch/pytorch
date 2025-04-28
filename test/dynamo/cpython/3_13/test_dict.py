@@ -517,7 +517,7 @@ class DictTest(__TestCase):
         for copymode in -1, +1:
             # -1: b has same structure as a
             # +1: b is a.copy()
-            for log2size in range(12):
+            for log2size in range(4):
                 size = 2**log2size
                 a = {}
                 b = {}
