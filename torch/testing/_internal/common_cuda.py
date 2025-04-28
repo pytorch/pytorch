@@ -48,6 +48,9 @@ def evaluate_gfx_arch_within(arch_list):
     # Hence the matching should be done reversely
     return any(arch in effective_arch for arch in arch_list)
 
+def CDNA3OrLater():
+    return evaluate_gfx_arch_within(["gfx940", "gfx941", "gfx942", "gfx950"])
+
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
 
@@ -260,7 +263,7 @@ def _get_torch_cuda_version():
     return tuple(int(x) for x in cuda_version.split("."))
 
 def _get_torch_rocm_version():
-    if not TEST_WITH_ROCM:
+    if not TEST_WITH_ROCM or torch.version.hip is None:
         return (0, 0)
     rocm_version = str(torch.version.hip)
     rocm_version = rocm_version.split("-")[0]    # ignore git sha
@@ -320,6 +323,9 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
+
+def xfailIfSM100OrLater(func):
+    return func if not SM100OrLater else unittest.expectedFailure(func)
 
 
 # Importing this module should NOT eagerly initialize CUDA

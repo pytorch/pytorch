@@ -342,9 +342,9 @@ class ModularIndexing(sympy.Function):
                         and isinstance(term.args[0], sympy.Integer)
                         and term.args[0] < 0
                     ):
-                        # workaround for https://github.com/openai/triton/issues/619,
+                        # workaround for https://github.com/triton-lang/triton/issues/619,
                         # if there are negative terms, // produces wrong result
-                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # TODO if https://github.com/triton-lang/triton/issues/619 is fixed
                         # this optimization would become valid
                         all_positive = False
                         break
@@ -534,6 +534,10 @@ class CeilToInt(sympy.Function):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
+
+    def _ccode(self, printer):
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"ceil({number})"
 
 
 class FloorToInt(sympy.Function):
@@ -1126,6 +1130,11 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(float(base) / float(divisor))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
+
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        return f"((int){base}/(int){divisor})"
 
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
