@@ -27,7 +27,7 @@ add_library(backend_with_compiler SHARED
         )
 if(USE_KINETO)
   set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
-  "-DUSE_KINETO -DTMP_IMPL_MEMORY_PROFILING_ON_DEMAND")
+  "-DUSE_KINETO")
 endif()
 target_link_libraries(backend_with_compiler torch)
 
@@ -115,6 +115,8 @@ target_compile_definitions(test_jit PRIVATE USE_GTEST)
 
 if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
+else()
+  target_link_libraries(test_jit PRIVATE onnx_library)
 endif()
 
 if(USE_MKLDNN)
