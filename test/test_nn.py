@@ -11752,7 +11752,7 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
-    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
     @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", "cuda")
@@ -11785,7 +11785,7 @@ class TestNNDeviceType(NNTestCase):
             with torch.no_grad():
                 self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
-    # Ref: https://github.com/pytorch/pytorch/issue/108345
+    # Ref: https://github.com/pytorch/pytorch/issues/108345
     @onlyCUDA
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("20GB", "cuda")
@@ -12152,7 +12152,7 @@ if __name__ == '__main__':
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("120GB", "cpu")
     @largeTensorTest("70GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
