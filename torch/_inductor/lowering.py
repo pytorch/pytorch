@@ -6985,7 +6985,9 @@ def associative_scan(
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
     x_loaders = tuple(x.make_loader() for x in xs)
-    kwargs["inner_fns"] = tuple(lambda idx, _: x_loader(idx) for x_loader in x_loaders)
+    kwargs["inner_fns"] = tuple(
+        lambda idx, _, x_loader=x_loader: x_loader(idx) for x_loader in x_loaders
+    )
     result = ir.Scan.create(
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,

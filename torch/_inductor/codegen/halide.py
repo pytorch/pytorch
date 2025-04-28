@@ -1325,8 +1325,8 @@ class HalideKernel(SIMDKernel):
             read_right = [result_var.subs_str(scan_renames_cur)]
         else:
 
-            def maybe_tuple(x):
-                return f"hl.Tuple([{', '.join(x)}])"
+            def maybe_tuple(t):
+                return f"hl.Tuple([{', '.join(str(x) for x in t)}])"
 
             read_left = [
                 result_var.subs_str(scan_renames_pri) + f"[{i}]"
