@@ -1,10 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import importlib
 import pickle
 import sys
 import types
-import importlib
 
 import torch
 import torch._dynamo.testing
