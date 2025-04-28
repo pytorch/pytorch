@@ -5,8 +5,7 @@ import logging
 import re
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Union
-
+from typing import Any, Optional, Union
 
 import torch
 
@@ -31,6 +30,8 @@ from .cutlass_presets import gen_cutlass_presets
 from .cutlass_python_evt import CutlassEVTCodegen
 from .cutlass_utils import torch_dtype_to_cutlass_type
 
+
+GemmOperation = Any
 
 log = logging.getLogger(__name__)
 
@@ -491,8 +492,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     @abstractmethod
     def _define_gemm_instance(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-        evt_name: Optional[str],
+        op: GemmOperation,
+        evt_name: Optional[str] = None,
     ) -> tuple[str, str]:
         raise NotImplementedError
 
@@ -1067,19 +1068,20 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 W.get_layout().dtype,
             )
         else:
+            evt_name = None
             epilogue_inputs = []
             epilogue_outputs = []
-            evt_name = None
             evt_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
             evt_code = ""
 
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs,  # type: ignore[arg-type]
             outputs=[Y],
-            epilogue_inputs=[],
-            epilogue_outputs=epilogue_inputs + epilogue_outputs,
+            epilogue_inputs=epilogue_inputs,
+            epilogue_outputs=epilogue_outputs,
             names_str=names_str,
             input_reorder=input_reorder,
+            dtype_to_cpp_type=cutlass_utils.DTYPE_TO_CUTLASS_TYPE,
         )
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
 
@@ -1128,7 +1130,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         Returns a C++ statement that calls the GEMM operation with the correct arguments.
         """
-        _, __, arg_types = kernel.args.cpp_argdefs()
+        _, __, arg_types = kernel.args.cpp_argdefs(cutlass_utils.DTYPE_TO_CUTLASS_TYPE)
         arg_names = [name.strip() for name in names_str.strip().split(",")]
         arg_names = self._update_arg_names_for_test_call_statement(
             arg_names, input_nodes
@@ -1141,7 +1143,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     def _render_evt(
         self,
-        op: "cutlass_gemm_op.GemmOperation",
+        op: GemmOperation,
         evt_py_code: str,
         read_names: list[str],
         write_names: list[str],
@@ -1153,6 +1155,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
+    """
+    CUTLASS 3x GEMM Template, which is used to generate CUTLASS GEMM kernels
+    including those which allow flexible fusions with epilogues.
+    """
+
     def __init__(
         self,
         input_nodes: list[Buffer],
@@ -1285,7 +1292,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
     def _render_evt(
         self,
-        op: "cutlass_gemm_op.GemmOperation",
+        op: GemmOperation,
         evt_py_code: str,
         read_names: list[str],
         write_names: list[str],
@@ -1302,13 +1309,16 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         evt_name, evt_args, evt_code = trace(
             evt_py_code,
             create_example_tensors(
-                read_names, write_names, buffer_renames, name_to_buffer
+                read_names,
+                write_names,
+                buffer_renames,
+                name_to_buffer,  # type: ignore[arg-type]
             ),
             acc_dtype,
             output_dtype,
-            op.tile_description,
-            op.epilogue_schedule,
-            name_to_buffer,
+            op.tile_description,  # type: ignore[attr-defined]
+            op.epilogue_schedule,  # type: ignore[attr-defined]
+            name_to_buffer,  # type: ignore[arg-type]
         )
 
         return (
@@ -1360,7 +1370,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
     def _define_gemm_instance(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: GemmOperation,
         evt_name: Optional[str] = None,
     ) -> tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
@@ -1647,7 +1657,8 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
     def _define_gemm_instance(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: GemmOperation,
+        evt_name: Optional[str] = None,
     ) -> tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
 
