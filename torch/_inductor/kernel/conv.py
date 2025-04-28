@@ -539,18 +539,18 @@ def convolution(
     # apply channels last.
     if V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
-        x = ir.ExternKernel.require_channels_last(x)  # type: ignore[assignment]
+        x = ir.ExternKernel.require_channels_last(x)
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
-        weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
+        weight = ir.ExternKernel.require_channels_last(weight)
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
     ordered_kwargs_for_cpp_kernel = [
         "stride",
@@ -620,7 +620,7 @@ def convolution(
                     PADDING_W=padding[1],
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/openai/triton/issues/1254
+                    #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
                     ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                     num_stages=cfg.num_stages,
@@ -643,7 +643,7 @@ def convolution(
                     PADDING_W=padding[2],
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/openai/triton/issues/1254
+                    #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
                     ALLOW_TF32=torch.backends.cudnn.allow_tf32,
                     num_stages=cfg.num_stages,
