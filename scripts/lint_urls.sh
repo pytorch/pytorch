@@ -73,12 +73,13 @@ done < <(
 )
 
 for pid in "${pids[@]}"; do
-  wait "$pid" 2>/dev/null
-  case $? in
-    0) ;;
-    1) status=1 ;;
-    *) exit $? ;;
-  esac
+  wait "$pid" 2>/dev/null || {
+    case $? in
+      1) status=1 ;;
+      127) ;;  # ignore "not a child" noise
+      *) exit $? ;;
+    esac
+  }
 done
 
 exit $status
