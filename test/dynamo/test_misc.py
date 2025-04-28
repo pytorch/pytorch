@@ -12120,6 +12120,17 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
 
+    def test___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __repr__(self):
+                    return f"<{self.__class__.__name__}>"
+
+            return t.sin()
+
+        fn(torch.randn(2))
+
     def test_dunder_weakref(self):
         class Foo:
             pass
