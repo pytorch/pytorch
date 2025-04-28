@@ -514,7 +514,11 @@ class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+#else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
+#endif
   }
 };
 static ReduceAdd reduce_add;
@@ -1615,7 +1619,6 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
   }
 }
 
-
 namespace {
 
 // When using a 0-dim scalar tensor, we need the legacy (THC) semantics of
@@ -1725,7 +1728,6 @@ void index_select_out_cuda_impl(
       auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<const index_t, unsigned int>(index));
       indicesInfo.collapseDims();
 
-      // bool indexIsMajor = indexShouldBeMajor(outInfo, outSelectDim);
       // A reasonable choice for when to have each thread iterate over
       // indices to choose
       if (numIndices <= 16) {
