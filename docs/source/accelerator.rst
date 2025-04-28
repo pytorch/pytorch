@@ -10,6 +10,7 @@ torch.accelerator
     device_count
     is_available
     current_accelerator
+    set_default_device
     set_device_index
     set_device_idx
     current_device_index
@@ -18,3 +19,4 @@ torch.accelerator
     current_stream
     synchronize
     device_index
+    device_module
