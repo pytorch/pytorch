@@ -82,6 +82,13 @@ struct hermite_polynomial_h_functor {
   }
 };
 
+struct hermite_polynomial_he_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::hermite_polynomial_he_forward(a, b));
+  }
+};
+
 struct nextafter_functor {
 #if __METAL_VERSION__ < 310
   template <typename U>
@@ -173,6 +180,8 @@ REGISTER_BINARY_OP(chebyshev_polynomial_w, float, float);
 REGISTER_BINARY_OP(chebyshev_polynomial_w, half, half);
 REGISTER_BINARY_OP(hermite_polynomial_h, float, float);
 REGISTER_BINARY_OP(hermite_polynomial_h, half, half);
+REGISTER_BINARY_OP(hermite_polynomial_he, float, float);
+REGISTER_BINARY_OP(hermite_polynomial_he, half, half);
 
 #if __METAL_VERSION__ >= 310
 REGISTER_BINARY_OP(copysign, bfloat, bfloat);
@@ -186,6 +195,7 @@ REGISTER_BINARY_OP(chebyshev_polynomial_u, bfloat, bfloat);
 REGISTER_BINARY_OP(chebyshev_polynomial_v, bfloat, bfloat);
 REGISTER_BINARY_OP(chebyshev_polynomial_w, bfloat, bfloat);
 REGISTER_BINARY_OP(hermite_polynomial_h, bfloat, bfloat);
+REGISTER_BINARY_OP(hermite_polynomial_he, bfloat, bfloat);
 #endif
 
 // Complex binary functions
