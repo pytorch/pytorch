@@ -52,7 +52,7 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
-        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # (https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_almost_equal.html)
         # We use decimal = 0 to ignore off-by-1 differences between reference
         # and test. Off-by-1 differences arise due to the order of round and
         # zero_point addition operation, i.e., if addition followed by round is
