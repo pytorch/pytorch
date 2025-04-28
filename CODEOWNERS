@@ -21,6 +21,7 @@
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/tags.yaml @ezyang
+/.github/merge_rules.yaml @albanD @malfet
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
