@@ -28,6 +28,7 @@ from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shar
 from torch.distributed.tensor.parallel.style import ParallelStyle
 from torch.fx.graph_module import GraphModule
 from torch.nn.attention.flex_attention import (
+    _identity,
     _mask_mod_signature,
     BlockMask,
     create_block_mask,
@@ -128,9 +129,10 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert (
-            cls.ROUND_ROBIN_CYCLE == 2
-        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        assert cls.ROUND_ROBIN_CYCLE == 2, (
+            "The current implementation only works if ROUND_ROBIN_CYCLE is 2 "
+            f"but got {cls.ROUND_ROBIN_CYCLE}"
+        )
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -144,9 +146,10 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert (
-            cls.ROUND_ROBIN_CYCLE == 2
-        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        assert cls.ROUND_ROBIN_CYCLE == 2, (
+            "The current implementation only works if ROUND_ROBIN_CYCLE is 2 "
+            f"but got {cls.ROUND_ROBIN_CYCLE}"
+        )
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
 
@@ -1704,6 +1707,11 @@ def cp_flex_attention_dispatch_mode(
         "Please pass the `block_mask` argument to `context_parallel`."
     )
 
+    assert score_mod == _identity, (
+        "Context-parallel flex_attention only support `_identity` score_mod "
+        f"but got {score_mod}"
+    )
+
     sharding = Shard(2)
     k_dist = DTensor.from_local(key, mode._device_mesh, [sharding])
     v_dist = DTensor.from_local(value, mode._device_mesh, [sharding])
@@ -1803,4 +1811,4 @@ def cp_flex_attention_backward_dispatch_mode(
         grad_value, reduceOp="sum", scatter_dim=2, group=mode._device_mesh
     )
 
-    return grad_query, grad_value, grad_key, grad_score_mod_captured
+    return grad_query, grad_key, grad_value, grad_score_mod_captured

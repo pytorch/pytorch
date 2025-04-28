@@ -7,7 +7,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Shard
+from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
     _AttentionContextParallel,
@@ -18,7 +18,6 @@ from torch.distributed.tensor.experimental._attention import (
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
-    ContextParallelMode,
     FlexAttentionContiguousSharder,
     set_rotate_method,
 )
@@ -168,7 +167,7 @@ class RingAttentionTest(DTensorTestBase):
         # now. So we can just use context_parallel() to shard q, k, v.
         # In reality, context_paralle() should be used to shard the input.
         with context_parallel(
-            device_mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(2, 2, 2)
+            device_mesh, buffers=[cp_q, cp_k, cp_v], buffer_seq_dims=[2, 2, 2]
         ):
             cp_q.requires_grad = True
             cp_k.requires_grad = True
@@ -454,8 +453,6 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-        return_lse = False
-
         # Compile the flex_attention function
         flex_attention = torch.compile(flex_attention, dynamic=False)
         Q_BLOCK_SIZE_DEFAULT = 128
@@ -497,12 +494,10 @@ class RingFlexAttentionTest(DTensorTestBase):
             device=self.device_type,
         )
 
-        expect_out = flex_attention(
-            q, k, v, block_mask=block_mask, return_lse=return_lse
+        expect_out, expect_lse = flex_attention(
+            q, k, v, block_mask=block_mask, return_lse=True
         )
-        if not return_lse:
-            assert isinstance(expect_out, torch.Tensor)
-            expect_out.sum().backward()
+        expect_out.sum().backward()
 
         # test flex attention on DTensor
         device_mesh = init_device_mesh(
@@ -511,59 +506,72 @@ class RingFlexAttentionTest(DTensorTestBase):
             mesh_dim_names=("cp",),
         )
 
-        # shard the QKV tensors
-        sharding = Shard(2)
-        q_local = distribute_tensor(q, device_mesh, [sharding]).to_local()
-        k_local = distribute_tensor(k, device_mesh, [sharding]).to_local()
-        v_local = distribute_tensor(v, device_mesh, [sharding]).to_local()
+        q_local_size = list(q.shape)
+        q_local_size[2] //= self.world_size
+        k_local_size = list(k.shape)
+        k_local_size[2] //= self.world_size
 
         # this is the block_mask created within the training step
+        # NOTE: flex_attention checks block_mask shape and input shape before
+        # calling into flex_attention_hop.
         block_mask_post_sharding = create_block_mask(
             causal_mask,
             B=bs,
             H=nheads,
-            Q_LEN=q_local.size(2),
-            KV_LEN=k_local.size(2),
+            Q_LEN=q_local_size[2],
+            KV_LEN=k_local_size[2],
             device=self.device_type,
         )
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
-        # NOTE: flex_attention checks block_mask shape and input shape before
-        # calling into flex_attention_hop.
+
+        # set CP context dispatch mode to use TorchDispatchMode for flex_attention
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
             _DispatchMode.TORCH_DISPATCH
         )
+
+        # prepare input buffer
+        cp_q = q.detach().clone()
+        cp_k = k.detach().clone()
+        cp_v = v.detach().clone()
+
+        # create sharder
         sharder = FlexAttentionContiguousSharder()
-        with context_parallel(
-            device_mesh,
-            buffers=[cp_q, cp_k, cp_v],
-            buffer_seq_dims=[2, 2, 2],
-            block_mask=block_mask,
-            sharder=sharder,
-        ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
-            cp_out = flex_attention(
-                cp_q, cp_k, cp_v, block_mask=block_mask_post_sharding
-            )
-            if not return_lse:
-                assert isinstance(cp_out, torch.Tensor)
+
+        with CommDebugMode() as comm_mode:
+            with context_parallel(
+                device_mesh,
+                buffers=[cp_q, cp_k, cp_v],
+                buffer_seq_dims=[2, 2, 2],
+                block_mask=block_mask,
+                sharder=sharder,
+            ):
+                cp_q.requires_grad = True
+                cp_k.requires_grad = True
+                cp_v.requires_grad = True
+                cp_out, cp_lse = flex_attention(
+                    cp_q,
+                    cp_k,
+                    cp_v,
+                    block_mask=block_mask_post_sharding,
+                    return_lse=True,
+                )
                 cp_out.sum().backward()
 
-        # all-gather the output
-        """
-        assert isinstance(out, torch.Tensor)
-        dist_out = DTensor.from_local(out, device_mesh, [Shard(2)])
-        assert isinstance(dist_out, DTensor)
-        torch.testing.assert_close(
-            dist_out.full_tensor(), expect_out, atol=1e-1, rtol=1e-2
+        self.assertDictEqual(
+            comm_mode.get_comm_counts(),
+            {
+                c10d_functional.all_gather_into_tensor: 2 * 2,  # forward + backward
+                c10d_functional.reduce_scatter_tensor: 2,  # backward
+            },  # currently we have k and v all-gather separate
         )
-        """
-        (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [2], sharder)
-        torch.testing.assert_close(cp_out, expect_out, atol=1e-1, rtol=1e-2)
 
+        # unshard the output
+        cp_out, cp_lse = context_parallel_unshard(
+            device_mesh, [cp_out, cp_lse], [2, 2], sharder
+        )
+        torch.testing.assert_close(cp_out, expect_out, atol=1e-1, rtol=1e-2)
+        torch.testing.assert_close(cp_lse, expect_lse, atol=1e-1, rtol=1e-2)
+
+        # unshard the gradient
         cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
             device_mesh,
             [cp_q.grad, cp_k.grad, cp_v.grad],
