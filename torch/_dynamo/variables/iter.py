@@ -107,8 +107,14 @@ class ItertoolsVariable(VariableTracker):
                     gb_type="Unsupported arguments for itertools.accumulate",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Dynamo does not know how to trace "
-                    f"itertools.accumulate with args: {args}",
-                    hints=[*graph_break_hints.USER_ERROR],
+                    f"itertools.accumulate with args: {args} and kwargs: {kwargs}. "
+                    "itertools.accumulate expects an iterable, an optional "
+                    "binary function for accumulation, and an optional initial "
+                    "value to set the starting state.",
+                    hints=[
+                        "Make sure the arguments to itertools.accumulate are correct.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
             items = []
