@@ -558,7 +558,7 @@ class MetalKernel(SIMDKernel):
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
         result = self._reduction_nocache(dtype, src_dtype, reduction_type, value)
-        self.cse.reduction_cache[cache_key] = result
+        self.cse.reduction_cache[cache_key] = result  # type: ignore[assignment]
         return result
 
     def _reduction_nocache(
