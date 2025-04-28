@@ -85,8 +85,14 @@ if(HIP_FOUND)
 
   find_package_and_print_version(hip REQUIRED CONFIG)
   # Find ROCM version for checks. UNIX filename is rocm_version.h, Windows is hip_version.h
-  find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h hip_version.h
-      HINTS ${ROCM_INCLUDE_DIR}/rocm-core ${hip_INCLUDE_DIR}/hip /usr/include)
+  if(UNIX)
+    find_package_and_print_version(rocm-core REQUIRED CONFIG)
+    find_file(ROCM_VERSION_HEADER_PATH NAMES rocm_version.h
+      HINTS ${rocm_core_INCLUDE_DIR}/rocm-core /usr/include)
+  else() # Win32
+    find_file(ROCM_VERSION_HEADER_PATH NAMES hip_version.h
+      HINTS ${hip_INCLUDE_DIR}/hip /usr/include)
+  endif()
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
   if(EXISTS ${ROCM_VERSION_HEADER_PATH})
