@@ -16,7 +16,14 @@ import collections
 from pathlib import Path
 import errno
 import logging
-logging.basicConfig(format='%(message)s', level=logging.INFO)
+
+# Configure logging with a consistent format
+logger = logging.getLogger(__name__)
+if not logger.handlers:  # Only add handler if none exists
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)  # Default to INFO level
 
 import torch
 import torch._appdirs
@@ -487,7 +494,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             raise ValueError("setuptools>=49.4.0 is required")
         if cuda_ver.major != torch_cuda_version.major:
             raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
-        warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
+        logger.warning(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
 
     if not (sys.platform.startswith('linux') and
             os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') not in ['ON', '1', 'YES', 'TRUE', 'Y'] and
@@ -497,7 +504,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     cuda_compiler_bounds: VersionMap = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
     if cuda_str_version not in cuda_compiler_bounds:
-        warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
+        logger.warning(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
     else:
         min_compiler_version, max_excl_compiler_version = cuda_compiler_bounds[cuda_str_version]
         # Special case for 11.4.0, which has lower compiler bounds than 11.4.1
@@ -2087,7 +2094,7 @@ def _jit_compile(name,
     )
     if version > 0:
         if version != old_version and verbose:
-            print(f'The input conditions for extension module {name} have changed. ' +
+            logger.info(f'The input conditions for extension module {name} have changed. ' +
                   f'Bumping to version {version} and re-building as {name}_v{version}...')
         name = f'{name}_v{version}'
 
@@ -2130,7 +2137,7 @@ def _jit_compile(name,
                         with_sycl=with_sycl,
                         is_standalone=is_standalone)
             elif verbose:
-                print('No modifications detected for re-loaded extension '
+                logger.debug('No modifications detected for re-loaded extension '
                       f'module {name}, skipping build step...')
         finally:
             baton.release()
@@ -2138,7 +2145,7 @@ def _jit_compile(name,
         baton.wait()
 
     if verbose:
-        print(f'Loading extension module {name}...')
+        logger.info(f'Loading extension module {name}...')
 
     if is_standalone:
         return _get_exec_path(name, build_directory)
@@ -2179,12 +2186,12 @@ def _write_ninja_file_and_compile_objects(
         with_sycl = any(map(_is_sycl_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...')
+        logger.debug(f'Emitting ninja build file {build_file_path}...')
 
     # Create build_directory if it does not exist
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating directory {build_directory}...')
+            logger.debug(f'Creating directory {build_directory}...')
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2205,7 +2212,7 @@ def _write_ninja_file_and_compile_objects(
         with_cuda=with_cuda,
         with_sycl=with_sycl)
     if verbose:
-        print('Compiling objects...')
+        logger.info('Compiling objects...')
     _run_ninja_build(
         build_directory,
         verbose,
@@ -2243,12 +2250,12 @@ def _write_ninja_file_and_build_library(
         is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        print(f'Emitting ninja build file {build_file_path}...')
+        logger.debug(f'Emitting ninja build file {build_file_path}...')
 
     # Create build_directory if it does not exist
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating directory {build_directory}...')
+            logger.debug(f'Creating directory {build_directory}...')
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2268,7 +2275,7 @@ def _write_ninja_file_and_build_library(
         is_standalone=is_standalone)
 
     if verbose:
-        print(f'Building extension module {name}...')
+        logger.info(f'Building extension module {name}...')
     _run_ninja_build(
         build_directory,
         verbose,
@@ -2327,7 +2334,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
 
     if with_cuda:
         if verbose:
-            print('Detected CUDA files, patching ldflags')
+            logger.info('Detected CUDA files, patching ldflags')
         if IS_WINDOWS:
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
@@ -2413,7 +2420,7 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
             arch_list = []
     elif not _arch_list:
         # Instead of a warning, use logging.info for regular information
-        warnings.warn("TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
+        logger.warning("TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
                     "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to 'native' "
                     "to only use the current GPU's architecture, or to specific architectures.")
         arch_list = []
@@ -2504,12 +2511,12 @@ def _get_build_directory(name: str, verbose: bool) -> str:
             root_extensions_directory, build_folder)
 
     if verbose:
-        print(f'Using {root_extensions_directory} as PyTorch extensions root...')
+        logger.info(f'Using {root_extensions_directory} as PyTorch extensions root...')
 
     build_directory = os.path.join(root_extensions_directory, name)
     if not os.path.exists(build_directory):
         if verbose:
-            print(f'Creating extension directory {build_directory}...')
+            logger.debug(f'Creating extension directory {build_directory}...')
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2520,10 +2527,10 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     max_jobs = os.environ.get('MAX_JOBS')
     if max_jobs is not None and max_jobs.isdigit():
         if verbose:
-            print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
+            logger.debug(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
         return int(max_jobs)
     if verbose:
-        print('Allowing ninja to set a default number of workers... '
+        logger.info('Allowing ninja to set a default number of workers... '
               '(overridable by setting the environment variable MAX_JOBS=N)')
     return None
 
