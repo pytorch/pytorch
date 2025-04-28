@@ -34,6 +34,7 @@ jobs:
         run: |
           set -euxo pipefail
           cat /etc/os-release
+          python3 --version
 
       - name: Install python
         uses: actions/setup-python@v4
@@ -68,7 +69,6 @@ jobs:
           repository: osalpekar/llm-target-determinator
           ref: v0.0.2
           path: llm-target-determinator
-
 
       - name: Install requirements
         shell: bash
