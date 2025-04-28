@@ -27,6 +27,7 @@ from .utils import (
     is_fallback_op,
     is_wait,
 )
+from .virtualized import V
 
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNode]:
+def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
     """
@@ -45,7 +46,7 @@ def sink_waits(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNode
     )
 
 
-def raise_comms(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNode]:
+def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules comms as early as possible.
     """
@@ -56,7 +57,6 @@ def raise_comms(snodes: list[BaseSchedulerNode], *args) -> list[BaseSchedulerNod
 
 def reorder_compute_for_overlap(
     snodes: list[BaseSchedulerNode],
-    *args,
 ) -> list[BaseSchedulerNode]:
     """
     This achieves the following overall scheduling procedure:
@@ -76,8 +76,6 @@ def reorder_compute_for_overlap(
 
 def reorder_comms_preserving_peak_memory(
     snodes: list[BaseSchedulerNode],
-    graph_inputs: OrderedSet[str],
-    graph_outputs: OrderedSet[str],
 ) -> list[BaseSchedulerNode]:
     """
     Reorders communication ops relative to computation ops to improve communication-compute overlapping and hide comm
@@ -114,7 +112,8 @@ def reorder_comms_preserving_peak_memory(
     PER_COLLECTIVE_PREFETCH_LIMIT = len(snodes)
     if config.reorder_prefetch_limit is not None:
         PER_COLLECTIVE_PREFETCH_LIMIT = config.reorder_prefetch_limit
-
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
         snodes, graph_inputs
     )
@@ -487,10 +486,10 @@ def visualize_overlap(order):
 
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
-    graph_inputs: OrderedSet[str],
-    graph_outputs: OrderedSet[str],
 ) -> list[BaseSchedulerNode]:
     order = snodes
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
@@ -504,7 +503,7 @@ def reorder_compute_and_comm_for_overlap(
             )
             visualize_overlap(order)
         t0 = time.time()
-        order = p(order, graph_inputs, graph_outputs)  # type: ignore[operator]
+        order = p(order)  # type: ignore[operator]
         t = time.time() - t0
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
