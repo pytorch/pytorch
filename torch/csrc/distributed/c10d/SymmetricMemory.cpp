@@ -213,16 +213,20 @@ namespace {
 
 at::Tensor one_shot_all_reduce_meta(
     const at::Tensor& input,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string reduce_op,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string group_name) {
   return at::empty_like(input);
 }
 
 at::Tensor one_shot_all_reduce_copy_meta(
     const at::Tensor& symm_buffer,
     const at::Tensor& local_input,
-    const std::string& reduce_op,
-    const std::string& group_name) {
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string reduce_op,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string group_name) {
   return at::empty_like(local_input);
 }
 
