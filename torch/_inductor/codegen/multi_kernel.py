@@ -4,6 +4,7 @@ import logging
 import os
 import pathlib
 
+import torch
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
@@ -234,6 +235,13 @@ class MultiKernel:
                 if isinstance(precompile_arg, TensorArg):
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
+                    arg_dtype = precompile_arg.dtype
+                    if (
+                        arg_dtype == torch.float8_e4m3fn
+                        or arg_dtype == torch.float8_e4m3fnuz
+                    ):
+                        # FP8 E4M3 cannot represent inf
+                        continue
                     line = f"assert not {arg}.isinf().any().item()"
                     wrapper.writeline(line)
 

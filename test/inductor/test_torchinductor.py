@@ -14793,7 +14793,7 @@ if RUN_GPU:
 
     class NanCheckerTest(TestCase):
         @config.patch("nan_asserts", True)
-        def test_nan_checker_pass(self):
+        def test_nan_checker_pass_fp32(self):
             def f(x):
                 return torch.softmax(x, dim=-1)
 
@@ -14804,11 +14804,38 @@ if RUN_GPU:
 
             code = code[0]
             if config.cpp_wrapper:
-                self.assertIn("aoti_torch_check_inf_and_nan", code)
+                self.assertRegex(
+                    code,
+                    r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch_check_inf_and_nan\(.*,.*,False\)\);",
+                )
             else:
                 self.assertIn("# make sure graph inputs are not nan/inf", code)
                 self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
-                self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
+                self.assertRegex(code, r"assert not arg.*\.isinf\(\)\.any\(\).item\(\)")
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_pass_fp8_e4m3fn(self):
+            def f(x):
+                return x.half() + 1
+
+            x = torch.randn(2, 1024, device=GPU_TYPE).to(torch.float8_e4m3fn)
+            ref = f(x)
+            actual, code = run_and_get_code(torch.compile(f), x)
+            self.assertTrue(torch.allclose(ref, actual))
+
+            code = code[0]
+            # Check inf check is skipped as fp8_e4m3 cannot represent infinity
+            if config.cpp_wrapper:
+                self.assertRegex(
+                    code,
+                    r"AOTI_TORCH_ERROR_CODE_CHECK\(aoti_torch_check_inf_and_nan\(.*,.*,True\)\);",
+                )
+            else:
+                self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
+                self.assertNotRegex(
+                    code, r"assert not arg.*\.isinf\(\)\.any\(\).item\(\)"
+                )
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
