@@ -19,11 +19,7 @@ static constexpr const char* kTypeTorchbindCustomClass =
 static constexpr const char* kTypeNamedTuple = "NamedTuple";
 
 bool isSpecialChar(char a) {
-  for (const char* c = valid_single_char_tokens; *c; c++) {
-    if (a == *c)
-      return true;
-  }
-  return false;
+  return std::strchr(valid_single_char_tokens, a);
 }
 } // namespace
 
