@@ -1337,12 +1337,88 @@ def floor_divide(
 
     assert isinstance(a, Tensor) and isinstance(b, Tensor)
     dtype = a.dtype
+
+@_make_elementwise_binary_reference(
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_two_python_scalars=True,
+    should_register_decomposition=False,
+)
+def ceiling_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    # Wrap scalars because some references only accept tensor arguments.
+    if isinstance(a, Number) and isinstance(b, Number):
+        a = scalar_tensor(a)
+        b = scalar_tensor(b)
+    elif isinstance(b, Number) and isinstance(a, Tensor):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(a, Number) and isinstance(b, Tensor):
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        if a.device == torch.device("cpu"):
+            msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
+            raise RuntimeError(msg)
+        else:
+            b = prims.device_put(b, device=a.device)
+
+    assert isinstance(a, Tensor) and isinstance(b, Tensor)
+    dtype = a.dtype
     if utils.is_float_dtype(dtype):
-        return _floor_divide_float(a, b)
+        return _ceiling_divide_float(a, b)
     elif utils.is_integer_dtype(dtype):
-        return _floor_divide_integer(a, b)
+        return _ceiling_divide_integer(a, b)
     else:
-        torch._check(False, lambda: f"{dtype} not supported for floor_divide")
+        torch._check(False, lambda: f"{dtype} not supported for ceiling_divide")
+
+
+def _ceiling_divide_integer(a: Tensor, b: Tensor) -> Tensor:
+    a, b = _maybe_broadcast(a, b)
+    
+    # Ceiling division for integers can be implemented as: (a + b - 1) // b
+    # But we need to handle signs carefully
+    same_sign = torch.eq(torch.signbit(a), torch.signbit(b))
+    has_remainder = torch.ne(torch.fmod(a, b), 0)
+    
+    # Only add offset when there's a remainder and signs match
+    offset = same_sign.logical_and(has_remainder)
+    div = prims.div(a, b)
+    return div + _maybe_convert_to_dtype(offset, a.dtype)
+
+
+def _ceiling_divide_float(a: Tensor, b: Tensor) -> Tensor:
+    mod = fmod(a, b)
+    div = true_divide(sub(a, mod), b)
+
+    # If there's a remainder and signs match, we need to round up
+    same_signed_inputs = torch.eq(torch.signbit(a), torch.signbit(b))
+    non_zero_remainder = ne(mod, 0)
+    mask = bitwise_and(non_zero_remainder, same_signed_inputs)
+    div = where(mask, add(div, 1), div)
+
+    # Map quotient to nearest integer value
+    ceil_div = ceil(div)
+
+    basic_div = true_divide(a, b)
+    zero_tensor = scalar_tensor(0, dtype=basic_div.dtype, device=basic_div.device)
+
+    # If quotient is zero, copy signbit from true_divide quotient
+    ceil_div = where(ne(div, 0), ceil_div, copysign(zero_tensor, basic_div))
+
+    # If denominator is zero, then follow true_divide behavior
+    return where(ne(b, 0), ceil_div, basic_div)
+
+
+# Alias for ceiling_divide
+@_make_elementwise_binary_reference(
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_two_python_scalars=True,
+    should_register_decomposition=False,
+    aten_op=None,  # CompositeImplicitAutograd
+)
+def divup(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    return ceiling_divide(a, b)
 
 
 def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:

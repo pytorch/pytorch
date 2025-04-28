@@ -61,6 +61,7 @@ DECLARE_DISPATCH(structured_binary_fn, mul_stub)
 DECLARE_DISPATCH(structured_binary_fn, div_true_stub)
 DECLARE_DISPATCH(structured_binary_fn, div_floor_stub)
 DECLARE_DISPATCH(structured_binary_fn, div_trunc_stub)
+DECLARE_DISPATCH(structured_binary_fn, div_ceil_stub)
 DECLARE_DISPATCH(structured_binary_fn, atan2_stub)
 DECLARE_DISPATCH(structured_binary_fn, remainder_stub)
 DECLARE_DISPATCH(structured_binary_fn, bitwise_and_stub)
@@ -115,5 +116,22 @@ DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_t_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_u_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_v_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_w_stub)
+
+// ceiling_divide and divup function declarations
+Tensor& ceiling_divide_out_impl(const Tensor& self, const Tensor& other, Tensor& result);
+Tensor ceiling_divide_impl(const Tensor& self, const Tensor& other);
+Tensor& ceiling_divide_impl_(Tensor& self, const Tensor& other);
+
+Tensor& ceiling_divide_out(const Tensor& self, const Tensor& other, Tensor& result);
+Tensor ceiling_divide(const Tensor& self, const Tensor& other);
+Tensor& ceiling_divide_(Tensor& self, const Tensor& other);
+Tensor ceiling_divide(const Tensor& self, const Scalar& other);
+Tensor& ceiling_divide_(Tensor& self, const Scalar& other);
+
+Tensor& divup_out(const Tensor& self, const Tensor& other, Tensor& result);
+Tensor divup(const Tensor& self, const Tensor& other);
+Tensor& divup_(Tensor& self, const Tensor& other);
+Tensor divup(const Tensor& self, const Scalar& other);
+Tensor& divup_(Tensor& self, const Scalar& other);
 
 } // namespace at::native

@@ -1139,6 +1139,14 @@ class Tensor(torch._C.TensorBase):
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
+        
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __divup__(self, other):
+        return torch.ceiling_divide(self, other)
+        
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rdivup__(self, other):
+        return torch.ceiling_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):

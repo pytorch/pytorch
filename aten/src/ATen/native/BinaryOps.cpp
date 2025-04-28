@@ -380,6 +380,7 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(div_true_stub);
 DEFINE_DISPATCH(div_floor_stub);
 DEFINE_DISPATCH(div_trunc_stub);
+DEFINE_DISPATCH(div_ceil_stub);
 DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
@@ -986,6 +987,53 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
   return native::floor_divide_out(self, other, self);
 }
 
+// Ceiling division implementation
+Tensor& ceiling_divide_out_impl(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_ceil_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
+  return result;
+}
+
+Tensor ceiling_divide_impl(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_ceil_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& ceiling_divide_impl_(Tensor& self, const Tensor& other) {
+  return ceiling_divide_out_impl(self, other, self);
+}
+
+// Public API
+Tensor& ceiling_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return ceiling_divide_out_impl(self, other, result);
+}
+
+Tensor ceiling_divide(const Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl(self, other);
+}
+
+Tensor& ceiling_divide_(Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl_(self, other);
+}
+
+// Alias for ceiling_divide
+Tensor& divup_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return ceiling_divide_out_impl(self, other, result);
+}
+
+Tensor divup(const Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl(self, other);
+}
+
+Tensor& divup_(Tensor& self, const Tensor& other) {
+  return ceiling_divide_impl_(self, other);
+}
+
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 Tensor mul(const Tensor& self, const Scalar& other) {
@@ -1513,6 +1561,26 @@ Tensor floor_divide(const Tensor& self, const Scalar& other) {
 
 Tensor& floor_divide_(Tensor& self, const Scalar& other) {
   return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
+}
+
+Tensor ceiling_divide(const Tensor& self, const Scalar& other) {
+  auto other_tensor = wrapped_scalar_tensor(other);
+  return ceiling_divide_impl(self, other_tensor);
+}
+
+Tensor& ceiling_divide_(Tensor& self, const Scalar& other) {
+  auto other_tensor = wrapped_scalar_tensor(other);
+  return ceiling_divide_out_impl(self, self, other_tensor);
+}
+
+Tensor divup(const Tensor& self, const Scalar& other) {
+  auto other_tensor = wrapped_scalar_tensor(other);
+  return ceiling_divide_impl(self, other_tensor);
+}
+
+Tensor& divup_(Tensor& self, const Scalar& other) {
+  auto other_tensor = wrapped_scalar_tensor(other);
+  return ceiling_divide_out_impl(self, self, other_tensor);
 }
 
 Tensor& fmod_out(const Tensor& self, const Scalar& other, Tensor & result) {
