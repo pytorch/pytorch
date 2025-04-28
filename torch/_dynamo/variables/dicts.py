@@ -55,6 +55,21 @@ if TYPE_CHECKING:
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
+def raise_args_mismatch(tx, name):
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[
+            ConstantVariable(
+                f"wrong number of arguments for {name}() call"
+                # f"{name}() takes {len(tx.input.args)} positional arguments"
+                # f"{name}() takes {len(tx.input.args)} positional arguments
+                # but {len(tx.input.args) + len(tx.input.kwargs)} were given"
+            )
+        ],
+    )
+
+
 def was_instancecheck_override(obj):
     return type(obj).__dict__.get("__instancecheck__", False)
 
@@ -407,6 +422,11 @@ class ConstDictVariable(VariableTracker):
 
         arg_hashable = args and is_hashable(args[0])
 
+        def raise_unhashable(arg):
+            raise_observed_exception(
+                TypeError, tx, args=[ConstantVariable(f"unhashable type: {type(arg)}")]
+            )
+
         if name == "__init__":
             temp_dict_vt = variables.BuiltinVariable(dict).call_dict(
                 tx, *args, **kwargs
@@ -450,7 +470,10 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
-        elif name == "__setitem__" and arg_hashable and self.is_mutable():
+        elif name == "__setitem__" and self.is_mutable():
+            if not arg_hashable:
+                raise_unhashable(args[0])
+
             self.install_dict_keys_match_guard()
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
@@ -747,7 +770,8 @@ class SetVariable(ConstDictVariable):
         # We foward the calls to the dictionary model
         if name == "add":
             assert not kwargs
-            assert len(args) == 1
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
             name = "__setitem__"
             args = (args[0], SetVariable._default_value())
         elif name == "pop":
