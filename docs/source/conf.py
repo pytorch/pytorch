@@ -3799,7 +3799,7 @@ latex_elements = {
        \setcounter{secnumdepth}{3}
        % Fix table column widths
        \renewenvironment{tabulary}{\begin{longtable}{p{0.3\linewidth}p{0.7\linewidth}}}{\end{longtable}}
-       
+
        % Ensure tables don't overflow
        \AtBeginEnvironment{tabular}{\sloppy}
     """,
