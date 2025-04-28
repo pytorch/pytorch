@@ -1036,6 +1036,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
+    @requires_cuda
     def test_foreach_map_input_mutation(self):
         def fn(xs, ys):
             outs = foreach_map_add_inplace(xs, ys)
