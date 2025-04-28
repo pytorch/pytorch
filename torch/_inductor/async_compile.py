@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import json
 import atexit
 import functools
+import json
 import logging
 import multiprocessing
 import os
@@ -19,11 +19,8 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import (
     counters,
     dynamo_timed,
-    get_chromium_event_logger,
     get_metrics_context,
     set_feature_use,
-    CompileEventLogger,
-    CompileEventLogLevel,
 )
 from torch._inductor import config
 from torch._inductor.codecache import (
@@ -64,6 +61,8 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 log = logging.getLogger(__name__)
 
+_triton_kernel_metrics: Optional[dict[str, dict[str, Any]]] = None
+
 
 def pre_fork_setup():
     """
@@ -91,18 +90,39 @@ def caching_device_properties():
 
 
 def _compile_start() -> None:
-    global _t0
+    global _t0, _triton_kernel_metrics
     if _t0 is None:
         _t0 = time()
+    if _triton_kernel_metrics is None:
+        _triton_kernel_metrics = {}
 
 
 def _compile_end() -> None:
-    global _cumulative_compile_time, _t0
+    global _cumulative_compile_time, _t0, _triton_kernel_metrics
     if _t0 is not None:
         t1 = time()
         _cumulative_compile_time += t1 - _t0
         _t0 = None
         # print("CUMULATIVE COMPILE TIME", _cumulative_compile_time)
+    if _triton_kernel_metrics:
+        # Log triton kernel info
+        sorted_info = dict(sorted(_triton_kernel_metrics.items()))
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "triton_kernel_info",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(sorted_info),
+        )
+        _triton_kernel_metrics = None
+
+
+def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
+    global _triton_kernel_metrics
+    # Must be called between _compile_start and _compile_end
+    assert _triton_kernel_metrics is not None
+    _triton_kernel_metrics[kernel_name] = info
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -350,14 +370,7 @@ class AsyncCompile:
                 )
                 info = kernel.autotune_cache_info or {}
                 info["compile_time_us"] = elapsed_us
-                chromium_log = get_chromium_event_logger()
-                event_data = chromium_log.get_event_data().get("PyCodeCache.load_by_key_path", {})
-                kernel_info = event_data.get("triton_kernel_info", {})
-                kernel_info[kernel_name] = info
-                chromium_log.add_event_data(
-                    "PyCodeCache.load_by_key_path",
-                    triton_kernel_info=kernel_info
-                )
+                _add_triton_kernel_info(kernel_name, info)
                 get_metrics_context().add_top_n(
                     "triton_kernel_compile_times_us", kernel_name, elapsed_us
                 )
@@ -387,14 +400,7 @@ class AsyncCompile:
                 )
                 info = kernel.autotune_cache_info or {}
                 info["compile_time_us"] = elapsed_us
-                chromium_log = get_chromium_event_logger()
-                event_data = chromium_log.get_event_data().get("PyCodeCache.load_by_key_path", {})
-                kernel_info = event_data.get("triton_kernel_info", {})
-                kernel_info[kernel_name] = info
-                chromium_log.add_event_data(
-                    "PyCodeCache.load_by_key_path",
-                    triton_kernel_info=kernel_info
-                )
+                _add_triton_kernel_info(kernel_name, info)
                 return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
@@ -470,23 +476,6 @@ class AsyncCompile:
             ):
                 self._wait_futures(scope)
 
-        # Log triton kernel info
-        chromium_log = get_chromium_event_logger()
-        event_data = chromium_log.get_event_data()
-        if "PyCodeCache.load_by_key_path" in event_data:
-            data = event_data["PyCodeCache.load_by_key_path"]
-            if "triton_kernel_info" in data:
-                info = data["triton_kernel_info"]
-                # Sort by kernel name
-                sorted_info = dict(sorted(info.items()))
-                torch._logging.trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": f"triton_kernel_info",
-                        "encoding": "json",
-                    },
-                    payload_fn=lambda: json.dumps(sorted_info),
-                )
         _compile_end()
 
     def _wait_futures(self, scope: dict[str, Any]) -> None:

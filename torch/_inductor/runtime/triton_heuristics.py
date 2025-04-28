@@ -1701,7 +1701,9 @@ def cached_autotune(
         if autotune_cache:
             if best_config := autotune_cache.read_best(inductor_meta, configs):
                 configs = [best_config]
-                autotune_cache_info["best_config"] = triton_config_to_hashable(best_config)
+                autotune_cache_info["best_config"] = triton_config_to_hashable(
+                    best_config
+                )
                 autotune_cache_info["autotune_cache_state"] = "hit"
             else:
                 autotune_cache_info["autotune_cache_state"] = "miss"
