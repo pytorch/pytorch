@@ -7640,16 +7640,16 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a * 10
 
         a = torch.rand(1, 1)
-        b = torch.rand(2, 2)
+        b = torch.rand(1, 1)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
         torch._dynamo.decorators.mark_unbacked(b, 0)
         torch._dynamo.decorators.mark_unbacked(b, 1)
-        # TODO(laithsakka): update inductor runtime asserts to properly raise
         func(a, b)
         func(torch.rand(4, 5), torch.rand(4, 5))
-        func(torch.rand(1, 1), torch.rand(2, 1))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(1, 1), torch.rand(2, 1))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
