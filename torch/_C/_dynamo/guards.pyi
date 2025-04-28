@@ -176,14 +176,13 @@ def assert_size_stride(
     item: torch.Tensor,
     size: torch.types._size,
     stride: torch.types._size,
-    op_name: str
-    
+    op_name: str,
 ): ...
 
 def assert_alignment(
     item: torch.Tensor,
     alignment: int,
-    op_name: str
+    op_name: str,
 ): ...
 
 def check_obj_id(obj: object, expected: int) -> bool: ...
