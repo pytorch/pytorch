@@ -53,17 +53,10 @@ if try_import_cutlass():
         TileDescription,
     )
 
-    import torch
     from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
 
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
-
-    TORCH_TO_CUTLASS_DTYPE = {
-        torch.float32: DataType.f32,
-        torch.float16: DataType.f16,
-        torch.bfloat16: DataType.bf16,
-    }
 
     def create_example_tensors(
         read_names: list[str],
