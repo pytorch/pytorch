@@ -279,8 +279,6 @@ class UniformValueConstantFolder(ConstantFolder):
 
         # TODO: cat, more indexing
 
-        print("deduce_value:", node.target, node.args, node.kwargs)        
-
         # single-elem attrs
         if node.op == "get_attr" or (
             node.op == "call_function"
@@ -292,7 +290,7 @@ class UniformValueConstantFolder(ConstantFolder):
 
         # handle device_put op
         if node.target == prims.device_put.default:
-            return super(ConstantFolder, self)._run_node_on_cpu(node)
+            return super(ConstantFolder, self).run_node(node)
 
         # constructors ops
         if (
