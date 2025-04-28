@@ -380,7 +380,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     if (filename_len == 0) {
       throw std::runtime_error("Failed to read filename");
     }
-    std::string filename_str(filename_len + 1, '\0');
+    std::string filename_str(filename_len, '\0');
     if (!mz_zip_reader_get_filename(
             &zip_archive, i, filename_str.data(), filename_len)) {
       throw std::runtime_error("Failed to read filename");
@@ -434,13 +434,12 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       size_t extension_idx = output_path_str.find_last_of('.');
       if (extension_idx != std::string::npos) {
         std::string filename_extension = output_path_str.substr(extension_idx);
-        if (filename_extension == ".cpp") {
+        // use strcmp to correctly compare strings with extra null terminator
+        if (std::strcmp(filename_extension.c_str(), ".cpp") == 0) {
           cpp_filename = output_path_str;
-        }
-        if (filename_extension == ".o") {
+        } else if (std::strcmp(filename_extension.c_str(), ".o") == 0) {
           consts_filename = output_path_str;
-        }
-        if (filename_extension == ".so") {
+        } else if (std::strcmp(filename_extension.c_str(), ".so") == 0) {
           so_filename = output_path_str;
         }
       }
