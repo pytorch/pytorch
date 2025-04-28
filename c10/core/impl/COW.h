@@ -3,7 +3,6 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
