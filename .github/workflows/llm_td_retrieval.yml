@@ -26,16 +26,15 @@ jobs:
     continue-on-error: true
     needs: get-label-type
     steps:
+      - name: Setup Linux
+        uses: ./pytorch/.github/actions/setup-linux
+
       - name: Test
         shell: bash
         run: |
           set -euxo pipefail
-          echo "Running on $RUNNER_OS"
-          echo "Running on $RUNNER_ARCH"
-          echo "Running on $RUNNER_NAME"
-          echo "Running on $RUNNER_LABELS"
-          echo "Running on $RUNNER_WORKSPACE"
           cat /etc/os-release
+
       - name: Install python
         uses: actions/setup-python@v4
         with:
@@ -55,9 +54,6 @@ jobs:
           repository: pytorch/pytorch
           fetch-depth: 0
           path: pytorch
-
-      - name: Setup Linux
-        uses: ./pytorch/.github/actions/setup-linux
 
       - name: Clone CodeLlama
         uses: actions/checkout@v4
