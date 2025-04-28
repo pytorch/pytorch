@@ -63,6 +63,14 @@ def index(iterator, item, start=0, end=None):
     raise ValueError(f"{item} is not in {type(iterator)}")
 
 
+def count(iterator, value):
+    return sum(it is value or it == value for it in iterator)
+
+
+def contains(iterator, value):
+    return any(value is it or it == value for it in iterator)
+
+
 def repeat(item, count):
     for _ in range(count):
         yield item
