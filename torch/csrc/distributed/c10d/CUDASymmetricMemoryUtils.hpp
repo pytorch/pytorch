@@ -54,6 +54,7 @@ std::vector<T> store_all_gather(
   static size_t store_comm_seq_id = 0;
 
   std::vector<std::string> peer_keys;
+  peer_keys.reserve(world_size);
   for (int r = 0; r < world_size; ++r) {
     std::ostringstream oss;
     oss << store_comm_prefix << "/" << store_comm_seq_id << "/" << r;
