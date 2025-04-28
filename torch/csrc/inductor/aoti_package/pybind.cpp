@@ -57,7 +57,8 @@ void initAOTIPackageBindings(PyObject* module) {
            const std::string&,
            const std::string&,
            const bool,
-           const size_t>())
+           const size_t,
+           const c10::DeviceIndex>())
       .def("get_metadata", &AOTIModelPackageLoaderPybind::get_metadata)
       .def(
           "run",

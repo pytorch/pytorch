@@ -2125,22 +2125,24 @@ class AOTInductorTestsTemplate:
             def forward(self, x, y):
                 return x + torch.nn.functional.linear(y, self.weight)
 
-        weight = torch.randn(10, 10)
-        inputs = (torch.randn(10, 10), torch.randn(10, 10))
-        model = Model(weight)
-        result_cpu = model(*inputs)
+        weight = torch.randn(10, 10, device=self.device)
+        inputs = (torch.randn(10, 10, device=self.device), torch.randn(10, 10, device=self.device))
+        model = Model(weight).to(device=self.device)
+        result_ref = model(*inputs)
 
         package_path = AOTIRunnerUtil.compile(model, inputs)
 
         # Load AOT package on gpu:N
         device_interface = get_interface_for_device(GPU_TYPE)
         for i in range(device_interface.device_count()):
+            device = torch.device(GPU_TYPE, i)
             with device_interface.device(i), torch.no_grad():
-                model_gpu = torch.inductor.aoti_load_package(
+                model_package = torch._inductor.aoti_load_package(
                     package_path, device_index=i
                 )
-                result_gpu = model_gpu(*inputs)
-            self.assertTrue(same(result_cpu, result_gpu.cpu()))
+                inputs_on_device = [input.to(device=device) for input in inputs]
+                result_package = model_package(*inputs_on_device)
+            self.assertTrue(same(result_ref.cpu(), result_package.cpu()))
 
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
