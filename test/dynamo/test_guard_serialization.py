@@ -208,7 +208,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return m(x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Please define the class at global scope"
+            TypeError, "Please define the class at global scope"
         ):
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
 
