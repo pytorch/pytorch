@@ -29,7 +29,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   NVSHMEMSymmetricMemory(
       std::shared_ptr<NVSHMEMAllocation> allocation,
       const std::string& group_name)
-      : allocation_(allocation),
+      : allocation_(std::move(allocation)),
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name) {
