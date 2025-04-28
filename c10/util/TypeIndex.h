@@ -33,39 +33,70 @@ namespace detail {
 
 template <typename T>
 inline constexpr c10::c10_string_view fully_qualified_type_name_impl() {
+#if defined(__CUDA_ARCH__)
+#define MY_CUDA_ARCH 1
+#else
+#define MY_CUDA_ARCH 0
+#endif
 #if defined(_MSC_VER) && !defined(__clang__)
   constexpr c10::string_view fun_sig = __FUNCSIG__;
-#if defined(__NVCC__)
-  constexpr c10::string_view prefix =
-      "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr c10::string_view suffix = ">()";
-#else
-  constexpr c10::string_view prefix =
-      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr c10::string_view suffix = ">(void)";
-#endif
+  #if defined(__NVCC__)
+    constexpr c10::string_view prefix =
+        "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<";
+    constexpr c10::string_view prefix2 = "";
+    constexpr c10::string_view suffix = ">()";
+  #else
+    constexpr c10::string_view prefix =
+        "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<";
+    constexpr c10::string_view prefix2 = "";
+    constexpr c10::string_view suffix = ">(void)";
+  #endif
 #elif defined(__clang__)
   constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
   constexpr c10::string_view prefix =
       "c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ";
+  constexpr c10::string_view prefix2 =
+      "c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ";
   constexpr c10::string_view suffix = "]";
 #elif defined(__GNUC__)
   constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
   constexpr c10::string_view prefix =
       "constexpr c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ";
+  constexpr c10::string_view prefix2 = "";
   constexpr c10::string_view suffix =
       "; c10::c10_string_view = c10::basic_string_view<char>]";
 #endif
-#if !defined(__CUDA_ARCH__)
-  static_assert(c10::starts_with(
-      static_cast<std::string_view>(fun_sig),
-      static_cast<std::string_view>(prefix)));
-  static_assert(c10::ends_with(
-      static_cast<std::string_view>(fun_sig),
-      static_cast<std::string_view>(suffix)));
-#endif
-  return fun_sig.substr(
+  if constexpr (MY_CUDA_ARCH) {
+    return fun_sig.substr(
       prefix.size(), fun_sig.size() - prefix.size() - suffix.size());
+  } else {
+    constexpr bool prefix1_good = c10::starts_with(
+      static_cast<std::string_view>(fun_sig),
+      static_cast<std::string_view>(prefix));
+    constexpr bool prefix2_good = !prefix2.empty() && c10::starts_with(
+      static_cast<std::string_view>(fun_sig),
+      static_cast<std::string_view>(prefix2));
+    constexpr bool suffix_good = c10::ends_with(
+      static_cast<std::string_view>(fun_sig),
+      static_cast<std::string_view>(suffix));
+
+    static_assert(suffix_good);
+
+    if constexpr (prefix1_good) {
+      return fun_sig.substr(
+          prefix.size(), fun_sig.size() - prefix.size() - suffix.size());
+    } else if constexpr (prefix2_good) {
+      return fun_sig.substr(
+        prefix2.size(), fun_sig.size() - prefix2.size() - suffix.size());
+    } else {
+      static_assert(prefix1_good || prefix2_good);
+      // Debug signature using, eg:
+      // static_assert(fun_sig[0]==prefix2[0]);
+      // static_assert(fun_sig[1]==prefix2[1]);
+      // static_assert(fun_sig[2]==prefix2[2]);
+    }
+  }
+#undef MY_CUDA_ARCH
 }
 
 #if !defined(__CUDA_ARCH__)
