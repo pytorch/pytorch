@@ -94,7 +94,7 @@ class CUDACPPScheduling(BaseScheduling):
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
-        kernel, render = ctb.make_kernel_render(ctb)  # type: ignore[misc]
+        kernel, render = ctb.make_kernel_render(ctb)
         with kernel:
             template_node.mark_run()
             src_code = render()

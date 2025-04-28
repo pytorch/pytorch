@@ -47,6 +47,7 @@ from typing_extensions import Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -125,10 +126,7 @@ else:
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence
-    from concurrent.futures import Future
-
-    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .compile_fx import _CompileFxKwargs
     from .graph import GraphLowering
     from .ir import ChoiceCaller
     from .output_code import CompiledFxGraphConstants, OutputCode
@@ -928,14 +926,14 @@ class GuardedCache(Generic[T]):
     """
 
     @classmethod
-    def _get_tmp_dir_for_key(cls: type[GuardedCache[T]], _key: str) -> str:
+    def _get_tmp_dir_for_key(cls: type["GuardedCache[T]"], _key: str) -> str:
         raise NotImplementedError("Implement _get_tmp_dir_for_key on parent class")
 
     @classmethod
     def iterate_over_candidates(
-        cls: type[GuardedCache[T]],
+        cls: type["GuardedCache[T]"],
         local: bool,
-        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        remote_cache: Optional["RemoteCache[JsonDataTy]"],
         key: str,
     ) -> Generator[tuple[T, bytes], None, None]:
         if local:
@@ -967,10 +965,10 @@ class GuardedCache(Generic[T]):
 
     @classmethod
     def find_guarded_entry(
-        cls: type[GuardedCache[T]],
+        cls: type["GuardedCache[T]"],
         key: str,
         local: bool,
-        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        remote_cache: Optional["RemoteCache[JsonDataTy]"],
         evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
         hints: list[int],
     ) -> tuple[Optional[T], Optional[bytes], str]:
@@ -1022,7 +1020,7 @@ class GuardedCache(Generic[T]):
 
     @classmethod
     def _filter_backed_symints(
-        cls: type[GuardedCache[T]], inputs: Sequence[InputType]
+        cls: type["GuardedCache[T]"], inputs: Sequence["InputType"]
     ) -> list[torch.SymInt]:
         """
         Get the backed SymInt objects from the input list. Note that we can never
@@ -1031,7 +1029,7 @@ class GuardedCache(Generic[T]):
         return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
 
     @classmethod
-    def _get_shape_env(cls: type[GuardedCache[T]]) -> Optional[ShapeEnv]:
+    def _get_shape_env(cls: type["GuardedCache[T]"]) -> Optional[ShapeEnv]:
         """
         Helper to get the shape env from the tracing context.
         """
@@ -1079,7 +1077,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         return os.path.join(cache_dir(), "fxgraph")
 
     @classmethod
-    def _get_tmp_dir_for_key(cls: type[FxGraphCache], key: str) -> str:
+    def _get_tmp_dir_for_key(cls: type["FxGraphCache"], key: str) -> str:
         """
         Return the disk location for a given cache key.
         """
@@ -1090,8 +1088,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         key: str,
         example_inputs: Sequence["InputType"],
         local: bool,
-        remote_cache: Optional[RemoteCache[JsonDataTy]],
-        constants: CompiledFxGraphConstants,
+        remote_cache: Optional["RemoteCache[JsonDataTy]"],
+        constants: "CompiledFxGraphConstants",
         evaluate_guards: Optional[
             Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
         ] = None,
@@ -1391,12 +1389,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: Optional["RemoteCache[JsonDataTy]"],
         is_backward: bool,
-        constants: CompiledFxGraphConstants,
+        constants: "CompiledFxGraphConstants",
         evaluate_guards: Optional[
             Callable[[str, Union[list[int], list[torch.SymInt]]], bool]
         ] = None,
-    ) -> tuple[Optional[CompiledFxGraph], dict[str, Any]]:
-        constants: "CompiledFxGraphConstants",
     ) -> tuple[Optional["CompiledFxGraph"], dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -1862,7 +1858,14 @@ class AotCodeCompiler:
                 wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
-                wrapper_builder.build()
+                try:
+                    wrapper_builder.build()
+                except (exc.CppCompileError, SkipFrame) as e:
+                    if " is too big to optimize" in str(e):
+                        raise RuntimeError(
+                            "Please use torch._inductor.config.aot_inductor.compile_wrapper_opt_level = 'O0' flag."
+                        ) from e
+                    raise e
                 kernel_builder.build()
 
             if not use_mmap_weights:

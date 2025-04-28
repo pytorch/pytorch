@@ -390,7 +390,7 @@ def ceildiv(
 def _type_of(key: Optional[torch.dtype]) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
-    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # https://github.com/triton-lang/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
     if key is None:
         return "*i8"
@@ -936,7 +936,7 @@ def get_first_incompatible_cudagraph_node(
         if (
             not torch._inductor.config.graph_partition
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
             # graph_partition helps by spliting on this cudagraph_unsafe
@@ -1981,7 +1981,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
-        # Triton API change in https://github.com/openai/triton/pull/2293
+        # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
         sm_clock = max_clock_rate()
@@ -2128,7 +2128,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
+        and is_multi_outputs_template(input_buf.inputs[0])
     )
 
 
@@ -2925,7 +2925,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
 
     if (
         isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
     ):
         return True
 
