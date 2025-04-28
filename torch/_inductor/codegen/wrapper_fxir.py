@@ -11,16 +11,12 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     tracing_triton_hopifier_singleton,
     triton_kernel_wrapper_mutation,
 )
-from torch._library.triton import wrap_triton
-from torch.fx import GraphModule
-
-
-aten = torch.ops.aten
-
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
 from torch._inductor.virtualized import V
+from torch._library.triton import wrap_triton
+from torch.fx import GraphModule
 
 from .. import ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
@@ -49,6 +45,9 @@ from .wrapper import (
     ReinterpretLine,
     ReuseLine,
 )
+
+
+aten = torch.ops.aten
 
 
 @dataclasses.dataclass
