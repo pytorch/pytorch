@@ -1710,7 +1710,12 @@ def cached_autotune(
                 autotune_cache_info["num_configs"] = len(configs)
                 if inductor_meta.get("coordinate_descent_tuning"):
                     autotune_cache_info["coordesc_tuning"] = True
-
+                    if len(configs) == 1:
+                        # This is the config that coordinate descent tuning started at, which
+                        # is not the same as the final config chosen (i.e. only_config, best_config)
+                        autotune_cache_info["coordesc_tuning_start_config"] = (
+                            triton_config_to_hashable(configs[0])
+                        )
     else:
         if len(configs) == 1:
             autotune_cache_info["autotune_cache_state"] = "only 1 config"
