@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
 from weakref import ReferenceType
 
 import torch
@@ -524,8 +524,8 @@ def get_key_index_source(source, index):
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj):
-    raise RuntimeError(
+def raise_local_type_error(obj: Any) -> NoReturn:
+    raise TypeError(
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
@@ -1571,16 +1571,6 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
-
-    def DATA_PTR_MATCH(self, guard: Guard):
-        # C++ guard has the type check internally
-        obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
-        self._set_guard_export_info(guard, [code])
-
-        self.get_guard_manager(guard).add_data_ptr_guard(
-            obj, get_verbose_code_parts(code, guard)
-        )
 
     def DUAL_LEVEL(self, guard: Guard):
         # Invalidate dual level if current dual level is different than the one
