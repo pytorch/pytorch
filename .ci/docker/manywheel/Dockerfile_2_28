@@ -50,7 +50,8 @@ FROM base as magma
 ARG BASE_CUDA_VERSION=10.2
 # Install magma
 WORKDIR .ci/magma
-RUN make magma-cuda${BASE_CUDA_VERSION}
+ENV cuda_version_nodot=${BASE_CUDA_VERSION/./}
+RUN make magma-cuda${cuda_version_nodot}
 # ADD ./common/install_magma.sh install_magma.sh
 # RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
 
