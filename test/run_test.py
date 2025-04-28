@@ -351,11 +351,12 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
             "WORLD_SIZE": f"{num_gpus}",
         }
-    if dist.is_gloo_available() and num_gpus > 0:
+    if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
-            "WORLD_SIZE": f"{num_gpus}",
+            "WORLD_SIZE": f"{num_gpus if num_gpus > 0 else 3}",
         }
+    del num_gpus
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
