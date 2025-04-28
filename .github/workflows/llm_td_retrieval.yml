@@ -51,7 +51,6 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          python --version
           python3 -m pip install -r llm-target-determinator/requirements.txt
           cd "${GITHUB_WORKSPACE}/codellama"
           python3 -m pip install -e .
