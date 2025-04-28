@@ -48,8 +48,8 @@ def device_module() -> Optional[ModuleType]:
 
     Example:
         >>> acc_mod = torch.accelerator.device_module()
-        >>> acc_mod.device_count() if acc_mod else -1
-        1
+        >>> acc_mod.device_count() if acc_mod else 0
+        0
     """
 
     acc = current_accelerator()
