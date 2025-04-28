@@ -441,37 +441,30 @@ class BlockPtrOptions:
         # Substitute maximum block sizes in shape expressions.
         # This works in multiple_of checks because block sizes are powers of 2.
         block_to_max: dict[sympy.Expr, Any] = {
-            block_size: get_max_block(prefix_str[symt])
-            for symt, block_size in TritonSymbols.block_sizes.items()
+            TritonSymbols.block_sizes[t.symt]: get_max_block(prefix_str[t.symt])
+            for t in range_trees
         }
 
-        boundary_check = []
-        overflow_grid_check = None
-        for idx in range(len(self.shape)):
-            # See Note: Constant mask optimisation
-            # if ynumel / YBLOCK > max_ygrid, then the z dimension is used to handle
-            # the remaining programs that cannot fit into the y dimension. This means
-            # its possible that some redundant programs are launched, so even if
-            # ynumel divides YBLOCK, boundary checking is required in the relevant dimensions
-            if (
-                TritonSymbols.block_sizes[SymT.YBLOCK]
-                in self.block_shape[idx].free_symbols
-            ):
-                if overflow_grid_check is None:
-                    y_tree: IterationRangesRoot = next(
-                        t for t in range_trees if t.prefix == "y"
-                    )
-                    overflow_grid_check = (
-                        not y_tree.has_zdim
-                        and not V.graph.sizevars.statically_known_leq(
-                            y_tree.numel, get_max_y_grid()
-                        )
-                    )
-
+        # Also see Note: Constant mask optimisation
+        # if ynumel / YBLOCK > max_ygrid, then the z dimension is used to handle
+        # the remaining programs that cannot fit into the y dimension. This means
+        # its possible that more than the required number of programs are launched,
+        # possibly leading to out-of-bounds accesses. So even if ynumel divides YBLOCK,
+        # boundary checking is required in the dimensions that are based on YBLOCK
+        # e.g. for [YBLOCK // 16, YBLOCK, XBLOCK] dimensions 0 and 1 need boundary
+        # checks when max_ygrid is exceeded.
+        needs_overflow_grid = any(map(V.kernel.needs_yz_grid_overflow, range_trees))
+        self._boundary_check = [
+            idx
+            for idx in range(len(self.shape))
             if (
                 not sizevars.statically_known_equals(self.strides[idx], sympy.S.Zero)
                 and (
-                    overflow_grid_check
+                    (
+                        needs_overflow_grid
+                        and TritonSymbols.block_sizes[SymT.YBLOCK]
+                        in self.block_shape[idx].free_symbols
+                    )
                     or (
                         not sizevars.statically_known_multiple_of(
                             self.shape[idx], self.block_shape[idx]
@@ -486,10 +479,8 @@ class BlockPtrOptions:
                     V.kernel.no_x_dim
                     and self.block_shape[idx] == TritonSymbols.block_sizes[SymT.XBLOCK]
                 )
-            ):
-                boundary_check.append(idx)
-
-        self._boundary_check = boundary_check
+            )
+        ]
 
     def boundary_check(self) -> list[int]:
         assert self._boundary_check is not None
