@@ -34,7 +34,7 @@ def should_unwrap_unspec_arg(name: str):
 def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
-        # Related PR: https://github.com/openai/triton/pull/2279/
+        # Related PR: https://github.com/triton-lang/triton/pull/2279/
         if arg.dtype == torch.float8_e4m3fn:
             tye = "*fp8e4nv"
         elif arg.dtype == torch.float8_e5m2:
@@ -122,9 +122,14 @@ def signature_to_meta(
 
 def is_unaligned_buffer(arg: TensorArg):
     buf_name = arg.buffer
+    if buf_name in V.graph.unaligned_buffers:
+        return True
+
     if buf_name in V.graph.graph_inputs:
         # See Note: [Input Alignment handling in Inductor]
-        return buf_name not in V.graph.aligned_inputs
+        # For graph inputs that is not recorded in V.graph.unaligned_buffers,
+        # we know for sure the tensor is aligned.
+        return False
 
     if buf_name in V.graph.constants:
         # all constants are assumed to be aligned
@@ -179,7 +184,7 @@ def config_of(
     def is_aligned(x: KernelArgType, alignment: int, include_tensor: bool) -> bool:
         """
         Roughly follow triton code here:
-        https://github.com/openai/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222
+        https://github.com/triton-lang/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222
         """
         if isinstance(x, TensorArg):
             if include_tensor:

@@ -44,7 +44,7 @@ if triton is not None:
             return (backend, arch)
 
     # In the latest triton, math functions were shuffled around into different modules:
-    # https://github.com/openai/triton/pull/3172
+    # https://github.com/triton-lang/triton/pull/3172
     try:
         from triton.language.extra import libdevice
 

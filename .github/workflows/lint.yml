@@ -281,6 +281,34 @@ jobs:
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
 
+  lint-urls:
+    name: Lint URLs
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        ./scripts/lint_urls.sh
+
+  lint-xrefs:
+    name: Lint Xrefs
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
+    with:
+      timeout: 60
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        ./scripts/lint_xrefs.sh
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

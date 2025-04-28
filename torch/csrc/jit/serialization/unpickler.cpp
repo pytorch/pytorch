@@ -5,6 +5,7 @@
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/csrc/utils/byte_order.h>
@@ -267,18 +268,6 @@ void Unpickler::setInput(size_t memo_id) {
   } else {
     memo_table_[memo_id] = stack_.back();
   }
-}
-
-// emplace_back on bool vectors does not exist on some systems
-// avoid it by calling push_back for bool
-template <typename T>
-inline void append(std::vector<T>& a, T&& e) {
-  a.emplace_back(std::forward<T>(e));
-}
-template <>
-// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-inline void append<bool>(std::vector<bool>& a, bool&& e) {
-  a.push_back(e);
 }
 
 static std::vector<int64_t> tupleToIntList(const IValue& v) {
@@ -1188,7 +1177,7 @@ void Unpickler::readList(IValue list_ivalue) {
   readListElements(std::move(list_ivalue), start);
 }
 
-inline bool is_valid_python_id_char(char c) {
+static inline bool is_valid_python_id_char(char c) {
   return c == '_' || c == '.' || (c >= '0' && c <= '9') ||
       (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }

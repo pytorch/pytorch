@@ -858,7 +858,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   return result;
 }
 namespace tracer = torch::profiler::impl::python_tracer;
-std::unique_ptr<tracer::PythonMemoryTracerBase> memory_tracer;
+static std::unique_ptr<tracer::PythonMemoryTracerBase> memory_tracer;
 void startMemoryProfile() {
   if (memory_tracer == nullptr) {
     memory_tracer = tracer::PythonMemoryTracerBase::make();
