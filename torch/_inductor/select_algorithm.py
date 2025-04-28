@@ -947,27 +947,23 @@ class TritonTemplateKernel(TritonKernel):
         return "<STORE_OUTPUT>"
 
     def render(self, template, kwargs):
-        def make_template_env():
-            """
-            Generate the namespace visible in the template.
-            """
-            return {
-                fn.__name__: fn
-                for fn in [
-                    self.def_kernel,
-                    self.size,
-                    self.stride,
-                    self.store_output,
-                    self.load_input,
-                    self.make_load,
-                    self.modification,
-                    self.gen_argdefs,
-                    self.gen_defines,
-                ]
-            }
+        make_template_env = {
+            fn.__name__: fn
+            for fn in [
+                self.def_kernel,
+                self.size,
+                self.stride,
+                self.store_output,
+                self.load_input,
+                self.make_load,
+                self.modification,
+                self.gen_argdefs,
+                self.gen_defines,
+            ]
+        }
 
         return PartialRender(
-            template.render(**make_template_env(), **kwargs),
+            template.render(**make_template_env, **kwargs),
             self.render_hooks,
         )
 
