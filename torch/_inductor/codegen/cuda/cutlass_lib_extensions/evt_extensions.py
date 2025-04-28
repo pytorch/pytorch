@@ -53,17 +53,10 @@ if try_import_cutlass():
         TileDescription,
     )
 
-    import torch
     from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
 
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
-
-    TORCH_TO_CUTLASS_DTYPE = {
-        torch.float32: DataType.f32,
-        torch.float16: DataType.f16,
-        torch.bfloat16: DataType.bf16,
-    }
 
     def create_example_tensors(
         read_names: list[str],
@@ -76,10 +69,11 @@ if try_import_cutlass():
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
-            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+
+            assert all(x.is_integer for x in shape), (
                 f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
             )
-            assert all(isinstance(x, int) for x in buffer.get_layout().stride), (
+            assert all(x.is_integer for x in stride), (
                 f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
             )
             shape = tuple(int(x) for x in shape)
@@ -175,42 +169,43 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
             )
 
         buffer = IndentedBuffer()
-        buffer.tabwidth = 2 # Ew, but matches the rest of the codegen
+        with buffer.set_tabwidth(2):
 
-        def render_argument_type(name: str, t: CutlassArgType) -> None:
-            if issubclass(t, ctypes.c_byte):
-                buffer.writeline(f"{{}}, /* {name} */")
-            else:
-                fields = [
-                    (fname, _get_arg_from_node(ty, name_to_buffer[name]))
-                    for fname, ty in t._fields_
-                ]
-                field_strs = [f"/* {fname} */ {str(field)}" for fname, field in fields]
-                buffer.writeline(f"{{{', '.join(field_strs)}}}, /* {name} */")
+            def render_argument_type(name: str, t: CutlassArgType) -> None:
+                if issubclass(t, ctypes.c_byte):
+                    buffer.writeline(f"{{}}, /* {name} */")
+                else:
+                    fields = [
+                        (fname, _get_arg_from_node(ty, name_to_buffer[name]))
+                        for fname, ty in t._fields_
+                    ]
+                    field_strs = [
+                        f"/* {fname} */ {str(field)}" for fname, field in fields
+                    ]
+                    buffer.writeline(f"{{{', '.join(field_strs)}}}, /* {name} */")
 
-        def render_thread_type(name: str, t: CutlassArgType) -> None:
-            if is_nested_visitor_type(t):
-                buffer.writeline(f"{{ /* {name} */")
-                with buffer.indent():
-                    for name, inner_t in t._fields_:
-                        render_thread_type(name, inner_t)
-                buffer.writeline("},")
-            else:
-                render_argument_type(name, t)
+            def render_thread_type(name: str, t: CutlassArgType) -> None:
+                if is_nested_visitor_type(t):
+                    buffer.writeline(f"{{ /* {name} */")
+                    with buffer.indent():
+                        for name, inner_t in t._fields_:
+                            render_thread_type(name, inner_t)
+                    buffer.writeline("},")
+                else:
+                    render_argument_type(name, t)
 
-        # unroll the recursion once to address special case formatting
-        # namely, no ending comma and no indentation for the outermost thread type
-        buffer.writeline("{ /* thread */")
-        with buffer.indent(3):
-            if is_nested_visitor_type(epilogue_thread_type):
-                with buffer.indent():
-                    for name, inner_t in epilogue_thread_type._fields_:
-                        render_thread_type(name, inner_t)
-            else:
-                render_argument_type("thread", epilogue_thread_type)
-            buffer.writeline("}")
+            # unroll the recursion once to address special case formatting
+            # namely, no ending comma and no indentation for the outermost thread type
+            buffer.writeline("{ /* thread */")
+            with buffer.indent(3):
+                if is_nested_visitor_type(epilogue_thread_type):
+                    with buffer.indent():
+                        for name, inner_t in epilogue_thread_type._fields_:
+                            render_thread_type(name, inner_t)
+                else:
+                    render_argument_type("thread", epilogue_thread_type)
+                buffer.writeline("}")
 
-        buffer.tabwidth = 4
         return buffer.getvalue()
 
     def _get_arg_from_node(arg_ty: type, node: Buffer) -> str:
