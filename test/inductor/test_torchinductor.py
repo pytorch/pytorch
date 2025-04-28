@@ -42,6 +42,7 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._dynamo.utils import ifdynstaticdefault
+from torch._C._dynamo.guards import assert_size_stride, assert_alignment
 from torch._guards import CompileContext, CompileId
 from torch._inductor import lowering
 from torch._inductor.aoti_eager import (
