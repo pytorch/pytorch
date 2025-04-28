@@ -34,7 +34,7 @@ import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import detect_fake_mode, identity
+from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
@@ -45,7 +45,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info, not_progapate_real_tensors
+from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -55,6 +55,7 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
+    statically_known_true,
     SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -86,6 +87,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
     ir_dataclass,
@@ -2593,6 +2595,24 @@ def is_stride_order_storage_and_layout(
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
+
+
+def is_unaligned(node: IRNode) -> bool:
+    if isinstance(node, (TensorBox, StorageBox)):
+        return is_unaligned(node.data)
+
+    if isinstance(node, ReinterpretView):
+        layout = node.layout
+        has_unaligned_layout = not statically_known_true(
+            layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
+        )
+        return is_unaligned(node.data) or has_unaligned_layout
+
+    if isinstance(node, Buffer):
+        return node.get_name() in V.graph.unaligned_buffers
+
+    # assume to be aligned otherwise
+    return False
 
 
 @ir_dataclass
@@ -5228,10 +5248,7 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
-
-        fake_mode = detect_fake_mode(example_args, ignore_context=True)
-        with not_progapate_real_tensors(fake_mode):
-            example_output = kernel(*new_args, **new_kwargs)
+        example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
@@ -6993,9 +7010,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.
-        has_unaligned_input = any(
-            arg.get_name() in V.graph.unaligned_buffers for arg in tensor_args
-        )
+        has_unaligned_input = any(is_unaligned(arg) for arg in tensor_args)
 
         device = cls.find_device(tensor_args, example_output)
 
