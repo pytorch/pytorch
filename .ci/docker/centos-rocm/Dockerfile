@@ -1,4 +1,3 @@
-
 ARG CENTOS_VERSION
 
 FROM quay.io/centos/centos:stream${CENTOS_VERSION}
@@ -11,7 +10,6 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 # Install required packages to build Caffe2
 
 # Install common dependencies (so that this step can be cached separately)
-ARG EC2
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
@@ -42,6 +40,7 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
+ARG CONDA_CMAKE
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
@@ -62,10 +61,7 @@ COPY ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh
 RUN rm install_rocm_magma.sh
-
-ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
