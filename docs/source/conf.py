@@ -3786,8 +3786,8 @@ htmlhelp_basename = "PyTorchdoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
-latex_engine = 'xelatex'
-latex_show_urls = 'footnote'
+latex_engine = "lualatex"
+latex_show_urls = "footnote"
 
 latex_elements = {
     "papersize": "letterpaper",
@@ -3797,35 +3797,14 @@ latex_elements = {
        \usepackage{tocloft}
        \setcounter{tocdepth}{3}
        \setcounter{secnumdepth}{3}
-       \usepackage{etoolbox}
-       % Increase LaTeX memory limits
-       \usepackage{etex}
-       \reserveinserts{28}
-       \usepackage{luatex85}
-       % Fix for SVG images
-       \usepackage{graphicx}
-       \usepackage{svg}
-       \usepackage{ifxetex}
-       \ifxetex
-         \usepackage{letltxmacro}
-         \LetLtxMacro\SavedIncludeGraphics\includegraphics
-         \def\includegraphics#1#{% #1 catches optional stuff (star/opt. arg.)
-           \IncludeGraphicsAux{#1}%
-         }%
-         \newcommand*{\IncludeGraphicsAux}[2]{%
-           \ifpdf
-             \SavedIncludeGraphics#1{#2}%
-           \else
-             \SavedIncludeGraphics#1{#2}%
-           \fi
-         }%
-       \fi
+       % Fix table column widths
+       \renewenvironment{tabulary}{\begin{longtable}{p{0.3\linewidth}p{0.7\linewidth}}}{\end{longtable}}
+       
+       % Ensure tables don't overflow
+       \AtBeginEnvironment{tabular}{\sloppy}
     """,
     "fncychap": r"\usepackage[Bjornstrup]{fncychap}",
-    "maxlistdepth": "2",
-    "sphinxsetup": "verbatimwithframe=false",
     "extraclassoptions": "oneside",
-    "babel": "\\usepackage{babel}",
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
@@ -3834,9 +3813,15 @@ latex_elements = {
 
 
 latex_documents = [
-    ('pytorch-api', 'pytorch_api.tex', 'PyTorch API Reference', 'Torch Contributors', 'manual'),
-    ('notes', 'pytorch_notes.tex', 'PyTorch Notes', 'Torch Contributors', 'manual'),
+    (
+        master_doc,
+        "pytorch.tex",
+        "PyTorch Documentation",
+        "Torch Contributors",
+        "manual",
+    ),
 ]
+latex_use_xindy = False
 
 
 # -- Options for manual page output ---------------------------------------

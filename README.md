@@ -490,7 +490,9 @@ To create the PDF:
    make LATEXOPTS="-interaction=nonstopmode"
    ```
 
-   This will produce a `pytorch.pdf` with the desired content.
+   This will produce a `pytorch.pdf` with the desired content. Run this
+   command one more time so that it generates the correct table
+   of contents and index.
 
 > [!NOTE]
 > To view the Table of Contents, switch to the **Table of Contents**
