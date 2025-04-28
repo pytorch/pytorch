@@ -63,14 +63,12 @@ def index(iterator, item, start=0, end=None):
     raise ValueError(f"{item} is not in {type(iterator)}")
 
 
-def count(iterator, item):
-    # TODO(guilherme): is this correct? NaN != NaN by def. Equality only holds
-    # if they are the same object
-    # import math
-    # if math.isnan(item):
-    #     return sum(math.isnan(e) for e in iterator)
+def count(iterator, value):
+    return sum(it is value or it == value for it in iterator)
 
-    return sum(e == item for e in iterator)
+
+def contains(iterator, value):
+    return any(value is it or it == value for it in iterator)
 
 
 def repeat(item, count):
