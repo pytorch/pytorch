@@ -73,9 +73,12 @@ done < <(
 )
 
 for pid in "${pids[@]}"; do
-  if ! wait "$pid" 2>/dev/null; then
-    [ "$?" -eq 1 ] && status=1
-  fi
+  wait "$pid" 2>/dev/null
+  case $? in
+    0) ;;
+    1) status=1 ;;
+    *) exit $? ;;
+  esac
 done
 
 exit $status
