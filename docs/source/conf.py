@@ -3708,7 +3708,6 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines (List[str]): the lines of the docstring, see above
 
     References:
-        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
         https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
     """
     import re
