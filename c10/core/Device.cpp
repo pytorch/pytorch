@@ -82,7 +82,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   for (size_t i = 0;
        pstate != DeviceStringParsingState::ERROR && i < device_string.size();
        ++i) {
-    const char ch = device_string.at(i);
+    const unsigned char ch = static_cast<unsigned char>(*it);
     switch (pstate) {
       case DeviceStringParsingState::START:
         if (ch != ':') {
