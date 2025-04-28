@@ -205,7 +205,11 @@ def _extract_fused_node_meta(
                 (n._body.reduce_vars, n._body.sizes[1]),
             )  # type: ignore[return-value]
 
-        assert sympy_product(n._body.sizes[0]) == pointwise_numel * red_numel  # type: ignore[operator]
+        torch._check(
+            get_hint(sympy_product(n._body.sizes[0])) == get_hint(pointwise_numel * red_numel),
+            lambda: f"Unexpected sizes: {n._body.sizes[0], pointwise_numel, red_numel}"
+        )
+
         i = len(n._body.sizes[0]) - 1
         prod = 1
         while i >= 0:

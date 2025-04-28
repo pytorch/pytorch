@@ -2019,12 +2019,13 @@ class SIMDScheduling(BaseScheduling):
         red_ranges = [ranges[v] for v in all_red_vars]
 
         torch._check(
-            sympy_product(pw_ranges) == pointwise_numel,
-            lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}"
+            V.graph.sizevars.size_hint(sympy_product(pw_ranges) - pointwise_numel) == 0,
+            lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
         )
         torch._check(
-            sympy_product(red_ranges) == reduction_numel,
-            lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}"
+            V.graph.sizevars.size_hint(sympy_product(red_ranges) - reduction_numel)
+            == 0,
+            lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
         )
 
         # score of a pointwise or reduction split
