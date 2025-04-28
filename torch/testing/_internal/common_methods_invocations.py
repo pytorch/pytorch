@@ -15355,6 +15355,10 @@ op_db: list[OpInfo] = [
                    'TestCommon', 'test_noncontiguous_samples',
                ),
                DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=2e-5, rtol=3e-6)}),
+                   'TestCommon', 'test_variant_consistency_eager',
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=5e-5, rtol=5e-6)}),
                    'TestMathBits', 'test_conj_view',
                ),
