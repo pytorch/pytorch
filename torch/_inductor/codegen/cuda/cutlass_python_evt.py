@@ -1,4 +1,5 @@
-from collections.abc import Generator, Sequence
+import itertools
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from os import linesep
 from typing import Any, Optional
@@ -7,8 +8,9 @@ import sympy
 
 import torch
 import torch._inductor.virtualized as virtualized
-from torch._inductor.ir import ComputedBuffer, IRNode, Pointwise
+from torch._inductor.ir import ComputedBuffer, Pointwise
 from torch._inductor.ops_handler import DefaultHandler
+from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import IndentedBuffer, OrderedSet
 from torch._inductor.virtualized import OpsValue
 
@@ -50,13 +52,17 @@ class CutlassEVTCodegen:
     @staticmethod
     def ir_to_evt_python_code(
         cuda_template_node_name: str,
-        epilogue_nodes: list[IRNode],
+        epilogue_nodes: list[BaseSchedulerNode],
     ) -> tuple[list[str], list[str], dict[str, Any], str]:
-        codegen = CutlassEVTCodegen(cuda_template_node_name)
+        last_usages = OrderedSet(
+            itertools.chain(*[node.last_usage for node in epilogue_nodes])
+        )
+        codegen = CutlassEVTCodegen(cuda_template_node_name, last_usages)
         handler = _AssignmentFormatter(codegen)
 
         with virtualized.V.set_ops_handler(handler):
-            for node in epilogue_nodes:
+            for s_node in epilogue_nodes:
+                node = s_node.node
                 assert isinstance(node, ComputedBuffer)
                 with codegen.set_cur_node(node):
                     index_vars = CutlassEVTCodegen._get_index_vars(node)
@@ -69,27 +75,29 @@ class CutlassEVTCodegen:
             codegen.get_value(),
         )
 
-    def __init__(self, accumulator_node_name: str):
+    def __init__(self, accumulator_node_name: str, last_usages: OrderedSet[str]):
         """
 
         Initializes a CutlassEVTEpilogueArgumentFormatter object. Do not instantiate directly.
         Use the CutlassEVTCodegen.ir_to_evt_python_code static method.
 
         Args:
-            accumulator_node_name (str): The name of the accumulator node which should contain
+            accumulator_node_name: The name of the accumulator node which should contain
                                           the Matmul result before fusion according to the IR graph.
+            epilogue_nodes: The list of scheduler nodes to be fused into the epilogue
         """
         self.accumulator_node_name: str = accumulator_node_name  #
         self.output: IndentedBuffer = IndentedBuffer(1)  # The output buffer for codegen
-        self.var_counter: int = (
-            0  # used to generate variable names, incremented for each new variable
-        )
+        self.var_counter: Iterator[int] = itertools.count()
         self.store_name_to_value: dict[str, OpsValue] = (
             dict()
         )  # Aliases for subexpression functors
         self.reads: OrderedSet[str] = OrderedSet()
-        self.last_result: Optional[str] = None
-        self._cur_node: Optional[ComputedBuffer] = None
+        self.last_usages: OrderedSet[str] = OrderedSet()
+        self.cur_node: Optional[ComputedBuffer] = None
+
+        if accumulator_node_name not in last_usages:
+            self.store(accumulator_node_name, value=OpsValue(_ACCUMULATOR_ALIAS))
 
     def get_value(self) -> str:
         return linesep.join(
@@ -102,12 +110,12 @@ class CutlassEVTCodegen:
 
     @contextmanager
     def set_cur_node(self, node: ComputedBuffer) -> Generator[None, Any, Any]:
-        prev_node = self._cur_node
+        prev_node = self.cur_node
         try:
-            self._cur_node = node
+            self.cur_node = node
             yield
         finally:
-            self._cur_node = prev_node
+            self.cur_node = prev_node
 
     def get_renames(self) -> dict[str, str]:
         renames = {k: v.value for k, v in self.store_name_to_value.items()}
@@ -134,14 +142,15 @@ class CutlassEVTCodegen:
     def store(
         self, name: Any, index: Any = None, value: Any = None, mode: Any = None
     ) -> None:
-        value_to_write = value
-        if not self.store_name_to_value:
-            # EVT requires an output to be named D lol
-            # so rename the first store to D
-            self.output.writeline(f"D = {value}")
-            value_to_write = OpsValue("D")
+        if name not in self.last_usages:
+            value_to_write = value
+            if not self.store_name_to_value:
+                # EVT requires an output to be named D lol
+                # so rename the first store to D
+                self.output.writeline(f"D = {value} # cutlass evt requirement")
+                value_to_write = OpsValue("D")
 
-        self.store_name_to_value[name] = value_to_write
+            self.store_name_to_value[name] = value_to_write
         return None
 
     def to_dtype(
@@ -178,8 +187,8 @@ class CutlassEVTCodegen:
         raise NotImplementedError
 
     def _get_cur_node(self) -> ComputedBuffer:
-        assert self._cur_node
-        return self._cur_node
+        assert self.cur_node
+        return self.cur_node
 
     @staticmethod
     def _get_index_vars(node: ComputedBuffer) -> Sequence[sympy.Expr]:
@@ -212,12 +221,14 @@ class CutlassEVTCodegen:
         return f"def fn({arguments}):"
 
     def _render_return_statement(self) -> str:
-        return f"return {', '.join(op_v.value for op_v in self.store_name_to_value.values())}"
+        return_vars = OrderedSet(
+            op_v.value for op_v in self.store_name_to_value.values()
+        )
+        assert "D" in return_vars
+        return f"return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:
-        var = f"tmp_{self.var_counter}"
-        self.var_counter += 1
-        return var
+        return f"tmp_{next(self.var_counter)}"
 
     def _infix_bin_op(self, op: str, a: str, b: str) -> str:
         return f"{a} {op} {b}"
