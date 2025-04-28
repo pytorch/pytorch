@@ -1553,16 +1553,6 @@ class GuardBuilder(GuardBuilderBase):
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
-    def DATA_PTR_MATCH(self, guard: Guard):
-        # C++ guard has the type check internally
-        obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
-        self._set_guard_export_info(guard, [code])
-
-        self.get_guard_manager(guard).add_data_ptr_guard(
-            obj, get_verbose_code_parts(code, guard)
-        )
-
     def DUAL_LEVEL(self, guard: Guard):
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
