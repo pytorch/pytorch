@@ -7331,6 +7331,7 @@ def _constant_pad_nd_meta(input, pad, value=0):
         memory_format=suggest_memory_format(input),
     )
 
+
 @register_meta(aten.embedding)
 @out_wrapper()
 def embedding(
