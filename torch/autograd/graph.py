@@ -791,7 +791,7 @@ def _register_logging_hooks_on_whole_graph(
 
     def fmt(t: Optional[torch.Tensor]) -> str:
         # Avoid circular import
-        from torch.testing._internal.common_utils import dtype_abbrs
+        from torch.utils._dtype_abbrs import dtype_abbrs
 
         if t is None:
             return "None"
