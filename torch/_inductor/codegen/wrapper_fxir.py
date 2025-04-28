@@ -8,6 +8,7 @@ import sympy
 
 import torch
 from torch._higher_order_ops.triton_kernel_wrap import (
+    TraceableTritonKernelWrapper,
     tracing_triton_hopifier_singleton,
     triton_kernel_wrapper_mutation,
 )
@@ -65,14 +66,14 @@ class SymbolBuffer:
 CodegenBuffer = Union[BufferLike, SymbolBuffer]
 
 
+@dataclasses.dataclass
 class TritonKernel:
     """
     Stores metadata about Triton kernels for use in FX.
     """
 
-    def __init__(self, tuner: CachingAutotuner):
-        self.tuner = tuner
-        self.wrapped = wrap_triton(tuner.fn)
+    tuner: CachingAutotuner
+    wrapped: TraceableTritonKernelWrapper
 
 
 class WrapperFxCodegen(PythonWrapperCodegen):
@@ -600,5 +601,6 @@ class FxConverter:
         )
 
         # Import the module and store the JIT kernel.
-        kernel = self._import_kernel(kernel_code, line.kernel_name)
-        self.kernels[line.kernel_name] = TritonKernel(kernel)
+        tuner = self._import_kernel(kernel_code, line.kernel_name)
+        wrapped = wrap_triton(tuner.fn)
+        self.kernels[line.kernel_name] = TritonKernel(tuner, wrapped)
