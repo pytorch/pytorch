@@ -2023,7 +2023,7 @@ class SIMDScheduling(BaseScheduling):
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}"
         )
         torch._check(
-            sympy_product(reduction_numel) == red_ranges,
+            sympy_product(red_ranges) == reduction_numel,
             lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}"
         )
 
