@@ -1221,7 +1221,7 @@ Tensor _convolution_transpose_mode_symint(
   TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
 }
 
-at::Tensor complex_convolution_transpose_mode(
+static at::Tensor complex_convolution_transpose_mode(
     const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias_opt,
     c10::SymIntArrayRef stride, std::string_view padding, SymIntArrayRef output_padding,
     const c10::SymInt& groups, c10::SymIntArrayRef dilation) {
