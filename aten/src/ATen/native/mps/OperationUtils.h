@@ -167,6 +167,10 @@ struct MPSCachedKernel {
     _object = nullptr;
   }
 
+  // Delete copy constructor and assignment
+  MPSCachedKernel(const MPSCachedKernel&) = delete;
+  void operator=(const MPSCachedKernel&) = delete;
+
   template <typename T>
   inline T* kernel() const {
     return (T*)_object;
@@ -264,7 +268,7 @@ struct MPSKernelCache {
     dispatch_sync_with_rethrow(serialQueue_, ^() {
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
         cachedKernel = entry.cachedKernel_;
       } else {
         cachedKernel = createCacheBlock();
@@ -286,7 +290,7 @@ struct MPSKernelCache {
     dispatch_sync_with_rethrow(serialQueue_, ^() {
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
         cachedKernel = entry.cachedKernel_;
       }
     });
@@ -300,7 +304,7 @@ struct MPSKernelCache {
 
  private:
   MPSKernelCache() {
-    serialQueue_ = dispatch_queue_create("cache queue", DISPATCH_QUEUE_SERIAL);
+    serialQueue_ = dispatch_queue_create("kernel cache queue", DISPATCH_QUEUE_SERIAL);
   }
 
   static MPSKernelCache* _instance_cache;
