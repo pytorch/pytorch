@@ -1175,7 +1175,16 @@ class InstructionTranslatorBase(
             inner_fn = fn.fn
         if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-        self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+        try:
+            self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+        except (exc.ObservedException, exc.TorchDynamoException):
+            raise
+        except Exception as e:
+            exc.raise_observed_exception(
+                type(e),
+                self,
+                args=list(map(ConstantVariable.create, e.args)),
+            )
 
     def inline_generator_function(self, fn, args, kwargs):
         """
