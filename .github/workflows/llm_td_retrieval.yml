@@ -86,6 +86,7 @@ jobs:
         run: |
           set -euxo pipefail
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator
+          export PATH="$HOME/.local/bin:$PATH"
           torchrun \
             --standalone \
             --nnodes=1 \
