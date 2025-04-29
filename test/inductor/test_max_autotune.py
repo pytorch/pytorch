@@ -1129,7 +1129,7 @@ class TestMaxAutotune(TestCase):
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
     @parametrize("dynamic", (True, False))
-    @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000)))
+    @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
@@ -1137,8 +1137,37 @@ class TestMaxAutotune(TestCase):
     )
     def test_max_autotune_decompose_k(self, sizes, dynamic):
         M, N, K = sizes
+        if K == 177147 and dynamic:
+            # decompose_k won't get selected in this case, return
+            return
+
         a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
         b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+
+        import torch._inductor.utils as inductor_utils
+
+        if dynamic:
+            possible_splits = inductor_utils.default_k_splits
+        else:
+            possible_splits = range(
+                inductor_utils.min_k_split, inductor_utils.max_k_split + 1
+            )
+
+        divisors = {split for split in possible_splits if K % split == 0}
+
+        def check_divisors(code):
+            for kernel in code:
+                if "decompose_k" in kernel:
+                    divisor_found = False
+                    for divisor in divisors:
+                        if f"{divisor}_split" in kernel:
+                            divisor_found = True
+                            break
+
+                    self.assertTrue(
+                        divisor_found,
+                        f"Could not find a split in {divisors} in {kernel}",
+                    )
 
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
@@ -1147,6 +1176,7 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("extern_kernels.bmm_dtype").check_regex(
             "triton_.*_fused_0.run"
         ).check("decompose_k").run(code[0])
+        check_divisors(code)
 
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
@@ -1157,6 +1187,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(
             compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
         )
+        check_divisors(code)
 
         # Test adding reinterpret view before subgraph
         a = a.transpose(0, 1)
@@ -1170,6 +1201,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(
             compiled_func(a, b), (a.transpose(0, 1) @ b).relu(), atol=1e-2, rtol=1e-2
         )
+        check_divisors(code)
 
 
 @instantiate_parametrized_tests
