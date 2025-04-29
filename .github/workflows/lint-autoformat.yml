@@ -14,11 +14,6 @@ jobs:
     runs-on: lf.linux.2xlarge
     if: ${{ github.repository_owner == 'pytorch' && github.event.pull_request.user.login != 'ezyang' && github.event.pull_request.user.login != 'malfet' && !startsWith(github.head_ref, 'export-') }}
     steps:
-      - name: Checkout pytorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: true
-          fetch-depth: 0
 
       - name: Install python
         shell: bash
@@ -27,6 +22,13 @@ jobs:
           sudo dnf install -y python3.10 python3.10-venv
           python3.10 -m venv /tmp/venv
           source /tmp/venv/bin/activate
+
+      - name: Checkout pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+          fetch-depth: 0
+
 
       - name: Run lintrunner (nonretryable)
         continue-on-error: true
