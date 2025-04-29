@@ -388,7 +388,17 @@ def export(
             fallback=fallback,
         )
     else:
+        import warnings
+
         from torch.onnx.utils import export
+
+        warnings.warn(
+            "The legacy ONNX export logic is deprecated and will be removed in a future release. "
+            "Please use the new export logic by setting `dynamo=True` in the `torch.onnx.export` API "
+            "for better performance and support for modern features.",
+            category=DeprecationWarning,
+            stacklevel=3,
+        )
 
         if dynamic_shapes:
             raise ValueError(
