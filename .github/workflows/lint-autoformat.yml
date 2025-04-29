@@ -19,16 +19,12 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
-      - name: Install python
-        shell: bash
-        run: |
-          sudo dnf install -y python3.12
       - name: Run lintrunner (nonretryable)
         continue-on-error: true
         # we can't run all files here because only changes around where the diff are shown in the PR UI
         run: |
           set -ex
-          python3.12 -m venv /tmp/venv
+          python3 -m venv /tmp/venv
           source /tmp/venv/bin/activate
           export ADDITIONAL_LINTRUNNER_ARGS="format"
           bash .github/scripts/lintrunner.sh
