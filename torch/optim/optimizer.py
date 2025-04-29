@@ -858,6 +858,10 @@ class Optimizer:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
 
+        .. warning::
+            Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
+            as calling it beforehand will overwrite the loaded learning rates.
+
         .. note::
             The names of the parameters (if they exist under the "param_names" key of each param group
             in :meth:`state_dict`) will not affect the loading process.
@@ -869,10 +873,6 @@ class Optimizer:
             the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
             the optimizer ``param_names`` will remain unchanged.
 
-        .. warning::
-            Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
-            as calling it beforehand will overwrite the loaded learning rates.
-
         Example:
             >>> # xdoctest: +SKIP
             >>> model = torch.nn.Linear(10, 10)
@@ -881,7 +881,7 @@ class Optimizer:
             >>> scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=80, eta_min=3e-5)
             >>> lr = torch.optim.lr_scheduler.SequentialLR(optim, schedulers=[scheduler1, scheduler2], milestones=[20])
             >>> lr.load_state_dict(torch.load('./save_seq.pt'))
-            >>> // now load the optimizer checkpoint after loading the LRScheduler
+            >>> # now load the optimizer checkpoint after loading the LRScheduler
             >>> optim.load_state_dict(torch.load('./save_optim.pt'))
 
         """
