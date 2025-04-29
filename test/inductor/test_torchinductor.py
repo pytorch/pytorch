@@ -8343,38 +8343,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.empty(0)
         self.common(fn, [a, b])
 
-    def test_slice_scatter_types_promotion(self):
+    @parametrize("dtype", (torch.int8, torch.float16, torch.int64, torch.bool))
+    def test_slice_scatter_types_promotion(self, dtype):
         def fn(a, b):
-            return torch.slice_scatter(a, b, 0, start=6)
-
-        compiled = torch.compile(fn)
+            return torch.slice_scatter(a, b, dim=0, start=6)
 
         a = torch.randn([8, 8])
         b = torch.randn([2, 8])
 
-        for dtype in (torch.int8, torch.float16, torch.int64, torch.bool):
-            out_eager = fn(a.to(dtype), b)
-            out_inductor = compiled(a.to(dtype), b)
-            self.assertEqual(
-                out_inductor.dtype,
-                out_eager.dtype,
-                f"Expected dtype {out_eager.dtype}, but got {out_inductor.dtype}",
-            )
-            self.assertTrue(
-                torch.allclose(out_inductor, out_eager),
-                f"Allclose failed for dtype {a.dtype}",
-            )
-            out_eager = fn(a, b.to(dtype))
-            out_inductor = compiled(a, b.to(dtype))
-            self.assertEqual(
-                out_inductor.dtype,
-                out_eager.dtype,
-                f"Expected dtype {out_eager.dtype}, but got {out_inductor.dtype}",
-            )
-            self.assertTrue(
-                torch.allclose(out_inductor, out_eager),
-                f"Allclose failed for dtype {a.dtype}",
-            )
+        self.common(fn, [a.to(dtype), b])
+        self.common(fn, [a, b.to(dtype)])
 
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
