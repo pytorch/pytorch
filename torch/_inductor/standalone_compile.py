@@ -81,7 +81,7 @@ class CompiledArtifact:
 
                 from .codecache import torch_key
 
-                writer = BytesWriter(0)
+                writer = BytesWriter()
                 writer.write_bytes(torch_key())
                 writer.write_str(key)
                 writer.write_bytes(artifact_bytes)
