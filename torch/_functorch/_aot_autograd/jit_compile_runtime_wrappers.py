@@ -970,7 +970,7 @@ def maybe_inline_graph_saved_tensors_hooks(
         pack_g_inputs = pack_g.find_nodes(op="placeholder")
         assert len(pack_g_inputs) == 1
         env = {pack_g_inputs[0]: saved}
-        fw_pack_out_n = None
+        fw_pack_out_args = None
         with fw_g.inserting_before(fw_out_n):
             for node in pack_g.nodes:
                 if node.op == "placeholder":
@@ -980,21 +980,19 @@ def maybe_inline_graph_saved_tensors_hooks(
                 # Output node is temporarily copied to have remapped arguments.
                 # Removed in the end.
                 if node.op == "output":
-                    fw_pack_out_n = new_n
+                    fw_pack_out_args = new_n.args[0]
+                    fw_g.erase_node(new_n)
 
         env.clear()
-        assert fw_pack_out_n
-        for out_idx, n in enumerate(pytree.tree_leaves(fw_pack_out_n.args[0])):
+        assert fw_pack_out_args
+        for out_idx, n in enumerate(pytree.tree_leaves(fw_pack_out_args)):
             if not isinstance(n, torch.fx.Node):
                 continue
-            if not n.meta:
-                n.meta = {}
             n.meta["__debug_hooks_origin"] = f"{saved.name}_{out_idx}"
             if isinstance(n.meta["val"], torch.Tensor):
                 fw_outs_packed_tensors.append(n)
             elif is_sym_node(n):
                 fw_outs_packed_syms.append(n)
-        fw_g.erase_node(fw_pack_out_n)
 
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
@@ -1106,6 +1104,8 @@ def maybe_inline_graph_saved_tensors_hooks(
 
     fw_g.lint()
     bw_g.lint()
+    fw_module.recompile()
+    bw_module.recompile()
 
     if aot_config.enable_log:
         trace_structured(

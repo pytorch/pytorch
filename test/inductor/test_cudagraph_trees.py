@@ -901,6 +901,21 @@ if HAS_CUDA:
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl(expected_clones=0)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("triton.cudagraph_trees", False)
+        def test_graph_partition_gc(self):
+            def _test_dummy():
+                def foo(x):
+                    return x + 1
+
+                foo = torch.compile(foo)
+                for _ in range(3):
+                    foo(torch.randn(2, 3, device="cuda"))
+
+            _test_dummy()
+            gc.collect()
+            self.assertIsNone(self.get_manager())
+
         def test_sparsity(self):
             def foo(view_6, buf31):
                 return aten._sparse_coo_tensor_with_dims_and_tensors(

@@ -61,6 +61,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -7060,6 +7061,55 @@ metadata incorrectly.
             inline=True,
             expected_compile_count=3,
         )
+
+    @torch._functorch.config.patch(donated_buffer=True)
+    def test_saved_tensors_hooks_donated_buffers(self):
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack_fp8,
+            unpack_fp8,
+            "pack_hash",
+            "unpack_hash",
+        )
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        def fn(x):
+            x0 = x
+            x = SAF.apply(x)
+            return x0, torch.nn.functional.relu(x)
+
+        inp = torch.rand([3, 3], requires_grad=True)
+        # 1. No donated buffers without hooks, as relu saves input which is also user output.
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            out = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)(
+                inp
+            )
+            out[1].sum().backward()
+            expected_msg = "bw_donated_idxs=[]"
+
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
+
+        inp = torch.rand([3, 3], requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            with self.assertLogs(logger_name, level="INFO") as captured:
+                out = torch.compile(
+                    fn, backend="aot_eager", fullgraph=True, dynamic=False
+                )(inp)
+                out[1].sum().backward()
+
+                expected_msg = "bw_donated_idxs=[0, 1]"
+
+        FileCheck().check(expected_msg).run("\n".join(captured.output))
 
 
 # entries in here don't work and need to be fixed.

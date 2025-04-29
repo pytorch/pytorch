@@ -308,7 +308,7 @@ def _create_runtime_wrapper(
         )
 
     def runtime_wrapper(args: list[Any]):
-        with _disable_saved_tensors_hooks() if _should_disable_saved_tensors_hooks() else contextlib.nullcontext():
+        with _disable_saved_tensors_hooks() if trace_joint and _should_disable_saved_tensors_hooks() else contextlib.nullcontext():
             # stash a ref to each input tensor we plan to use after the compiled function
             orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
