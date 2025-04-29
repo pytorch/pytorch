@@ -14,10 +14,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-if TEST_WITH_TORCHDYNAMO:
-    __TestCase = CPythonTestCase
-else:
-    __TestCase = unittest.TestCase
+__TestCase = CPythonTestCase
+# if TEST_WITH_TORCHDYNAMO:
+#     __TestCase = CPythonTestCase
+# else:
+#     __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -332,7 +333,4 @@ class ListTest(list_tests.CommonTest):
 
 
 if __name__ == "__main__":
-    if TEST_WITH_TORCHDYNAMO:
-        run_tests()
-    else:
-        unittest.main()
+    run_tests()
