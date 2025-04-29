@@ -171,19 +171,20 @@ class CPythonTestCase(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Skip test if python versions doesn't match
-        try:
-            test_py_ver = tuple(
-                map(int, inspect.getfile(cls).split(os.sep)[-2].split("_"))
+        m = re.match(r"\b\d+_\d+\b", inspect.getfile(cls))
+        if m:
+            test_py_ver = tuple(map(int, m.group().split("_")))
+        else:
+            raise unittest.TestCase.failureException(
+                f"Test file {inspect.getfile(cls)} does not contain a valid Python version"
             )
-            py_ver = sys.version_info[:2]
-            if py_ver != test_py_ver:
-                expected = ".".join(map(str, test_py_ver))
-                got = ".".join(map(str, py_ver))
-                raise unittest.SkipTest(
-                    f"Test requires Python {expected} but got Python {got}"
-                )
-        except Exception:
-            pass
+        py_ver = sys.version_info[:2]
+        if py_ver != test_py_ver:
+            expected = ".".join(map(str, test_py_ver))
+            got = ".".join(map(str, py_ver))
+            raise unittest.SkipTest(
+                f"Test requires Python {expected} but got Python {got}"
+            )
 
         super().setUpClass()
         cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
