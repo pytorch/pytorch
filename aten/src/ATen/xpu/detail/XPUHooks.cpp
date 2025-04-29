@@ -76,7 +76,12 @@ Allocator* XPUHooks::getPinnedMemoryAllocator() const {
 }
 
 bool XPUHooks::isPinnedPtr(const void* data) const {
-  return at::getHostAllocator(at::kXPU)->is_pinned(data);
+  if (!at::xpu::is_available()) {
+    return false;
+  }
+
+  return sycl::usm::alloc::host ==
+      sycl::get_pointer_type(data, c10::xpu::get_device_context());
 }
 
 bool XPUHooks::isAvailable() const {
