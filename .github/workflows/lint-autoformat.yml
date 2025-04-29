@@ -18,17 +18,6 @@ jobs:
         shell: bash
         run: |
           sudo dnf install -y python3.12
-          python3.12 -m venv /tmp/venv
-          source /tmp/venv/bin/activate
-
-      - name: Stuff
-        run: |
-          set -ex
-          python --version || true
-          python3 --version || true
-          source /tmp/venv/bin/activate
-          python --version || true
-          python3 --version || true
 
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -41,8 +30,8 @@ jobs:
         # we can't run all files here because only changes around where the diff are shown in the PR UI
         run: |
           set -ex
-          python --version || exit 0
-          python3 --version || exit 0
+          python3.12 -m venv /tmp/venv
+          source /tmp/venv/bin/activate
           export ADDITIONAL_LINTRUNNER_ARGS="format"
           bash .github/scripts/lintrunner.sh
       - name: Check for changes
