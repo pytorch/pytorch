@@ -547,20 +547,11 @@ class GPUDeviceBenchmarkMixin:
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
         else:
-            if torch.cuda.is_available():
-                device_idx = torch.cuda.current_device()
-            elif torch.xpu.is_available():
-                device_idx = torch.xpu.current_device()
+            device_idx = device_interface.current_device()
 
-        
-        if torch.cuda.is_available():
-            with torch.cuda.device(device_idx):
-                out = benchmarker.benchmark_gpu(fn)
-                torch.cuda.synchronize() # shake out any CUDA errors
-        elif torch.xpu.is_available():
-            with torch.xpu.device(device_idx):
-                out = benchmarker.benchmark_gpu(fn)
-                torch.xpu.synchronize() # shake out any XPU errors
+        with device_interface.device(device_idx):  # type: ignore[attr-defined]
+            out = benchmarker.benchmark_gpu(fn)
+            device_interface.synchronize()  # shake out any GPU errors
 
         return out
 
