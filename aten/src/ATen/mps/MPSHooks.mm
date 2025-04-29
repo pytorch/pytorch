@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
