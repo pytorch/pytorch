@@ -61,7 +61,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     set_default_dtype,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfTorchInductor,
     slowTest,
@@ -1421,7 +1420,6 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
-    @skipIfRocm
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)

@@ -121,6 +121,7 @@ from torch._inductor.compile_fx import (
     complex_memory_overlap,
 )
 from torch._inductor.utils import has_torchvision_roi_align
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     clone_preserve_strides_offset,
@@ -129,7 +130,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
-    IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
@@ -1369,11 +1369,7 @@ class CommonTemplate:
             b = torch.add(args[0], args[0])
             return (a, b)
 
-        # Complex are not supported on MacOS-13
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("No complex on MacOS13")
-
-        x = torch.randn(41, dtype=torch.complex64, device=self.device)
+        x = torch.randn(41, dtype=torch.complex64)
         y = x.clone()
         # should not inplace write to the input
         fn(x)
@@ -1854,6 +1850,7 @@ class CommonTemplate:
             ),
         )
 
+    @xfail_if_mps
     def test__unsafe_masked_index_put_accumulate(self):
         def fn(a, mask, idx, values):
             return aten._unsafe_masked_index_put_accumulate(a, mask, idx, values)
@@ -3842,7 +3839,8 @@ class CommonTemplate:
             torch.compile(fn)(t)
 
     @unittest.skipIf(
-        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+        IS_SM89,
+        "Triton not supported as Inductor GEMM backend on SM89, see https://github.com/pytorch/pytorch/issues/150390",
     )
     @config.patch(
         {
@@ -5774,6 +5772,7 @@ class CommonTemplate:
             a = torch.rand((1, 1000000), device=self.device)
             self.common(f, (a,))
 
+    @xfail_if_mps  # 100% results are wrong
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -6538,14 +6537,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([64]),),
         )
 
+    @xfail_if_mps  # float64 is not MPS type
     def test_expm1(self):
         def fn(x):
             return torch.expm1(x), torch.expm1(x) * 2
 
         for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
-            if not self.is_dtype_supported(dtype):
-                continue
-
             self.common(
                 fn,
                 (torch.randn([64]).to(dtype=dtype),),
@@ -6611,14 +6608,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 ):
                     c_op(x, kernel_size=2, stride=2)
 
+    @xfail_if_mps  # float64 is not MPS type
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
 
         for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
-            if not self.is_dtype_supported(dtype):
-                continue
-
             self.common(
                 fn,
                 (torch.randn([64]).to(dtype=dtype),),
@@ -7940,6 +7935,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
+    @xfail_if_mps  # 100% entries are wrong
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)
@@ -8012,6 +8008,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @xfail_if_mps_unimplemented  # RuntimeError: Expected scalar_type == ScalarType::Float
     def test_index_put_fallback1(self):
         def fn(a, b, c, d):
             a = a.clone()
@@ -8038,6 +8035,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @xfail_if_mps_unimplemented  # RuntimeError: Expected scalar_type == ScalarType::Float
     def test_index_put_fallback2(self):
         def fn(a, b, c, d, e):
             a = a.clone()
@@ -8383,6 +8381,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    @xfail_if_mps
     def test_scatter2(self):
         if self.device == "cuda":
             raise unittest.SkipTest("unstable on sm86")
@@ -8405,6 +8404,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps
     def test_scatter3(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b, reduce="add")
@@ -8449,6 +8449,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     check_lowp=check_lowp,
                 )
 
+    @xfail_if_mps
     def test_scatter5(self):
         def fn(a, dim, index, b, reduce):
             a = a.clone()
@@ -8518,6 +8519,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps  # All elements are wrong
     def test_scatter_add2(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -8537,6 +8539,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps
     def test_scatter_add3(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -8561,6 +8564,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     check_lowp=check_lowp,
                 )
 
+    @xfail_if_mps
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum")
@@ -8580,6 +8584,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=check_lowp,
         )
 
+    @xfail_if_mps  # 50% of elements are wrong
     def test_scatter_reduce2(self):
         def fn(a, dim, index, b, reduce):
             return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
@@ -8601,6 +8606,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=check_lowp,
             )
 
+    @xfail_if_mps
     def test_scatter_reduce3(self):
         def fn(a, dim, index, b, reduce):
             a = a.clone()
@@ -10597,6 +10603,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @skip_if_halide  # log2 not yet implemented
     @skip_if_triton_cpu  # log2 implemented only in Dec 2024
+    @xfail_if_mps  # Missing op in printer
     @expectedFailureXPU  # Remmove this after the known issue of Intel Triton #3871 resolved.
     def test_pow_by_natural_log2_dynamic_shapes(self):
         @torch.compile(dynamic=True)
@@ -12114,16 +12121,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(called)
 
     @skip_if_gpu_halide  # cuda error
+    @xfail_if_mps  # float64 is not MPS type
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):
             out = tensor.index_add(0, index, source, alpha=2.0) / 2
             return out
 
         device = "cpu"
-        dtype = torch.double if self.device != "mps" else torch.float32
-        tensor = torch.rand((1,), dtype=dtype, device=device)
+        tensor = torch.rand((1,), dtype=torch.double, device=device)
         index = torch.tensor([0], dtype=torch.long, device=device)
-        source = torch.rand((1,), dtype=dtype, device=device)
+        source = torch.rand((1,), dtype=torch.double, device=device)
         self.common(
             fn,
             (
@@ -12515,6 +12522,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "erfcx",
                 "gammainc",
                 "gammaincc",
+                "hermite_polynomial_he",
                 "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",
@@ -13159,69 +13167,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
                 assert len(inps) == 0
 
-    def test_remove_noop_view_default(self):
-        def f(x):
-            batch_size = x.shape[0]
-            x = x.transpose(1, 2)  # (batch_size, 2, 3)
-            x = x.reshape(batch_size, 2, 3)  # noop
-            return x
-
-        f = torch.compile(f)
-
-        x = torch.randn((2, 3, 2), device=self.device)
-        expected_graph1 = f"""\
-def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
-        permute: "f32[2, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
-        return (permute,)"""  # noqa: B950
-
-        post_grad_graph = get_post_grad_graph(f, (x,))
-
-        self.assertExpectedInline(
-            post_grad_graph,
-            expected_graph1,
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
-
-        # dynamic shape
-        x = torch.randn((4, 3, 2), device=self.device)
-        expected_graph2 = f"""\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.device)}"):
-        permute: "f32[s77, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
-        return (permute,)"""  # noqa: B950
-        post_grad_graph = get_post_grad_graph(f, (x,))
-        self.assertExpectedInline(
-            post_grad_graph,
-            expected_graph2,
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
-
-    def test_remove_noop_view_dtype(self):
-        def f(x):
-            x = x.transpose(1, 2)  # (batch_size, 2, 3)
-            x = x.view(torch.uint8)  # noop
-            return x
-
-        f = torch.compile(f)
-
-        x = torch.ones((2, 3, 2), device=self.device, dtype=torch.uint8)
-        torch._dynamo.mark_dynamic(x, 0)
-        torch._dynamo.mark_dynamic(x, 1)
-        torch._dynamo.mark_dynamic(x, 2)
-
-        post_grad_graph = get_post_grad_graph(f, (x,))
-        expected_graph = f"""\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "u8[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
-        permute: "u8[s77, s53, s27][s27*s53, 1, s53]{str(x.device)}" = torch.ops.aten.permute.default(arg3_1, [0, 2, 1]);  arg3_1 = None
-        return (permute,)"""  # noqa: B950
-        self.assertExpectedInline(
-            post_grad_graph,
-            expected_graph,
-            ignore_comments=True,
-            ignore_empty_lines=True,
-        )
-
     @xfail_if_mps
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
@@ -13230,6 +13175,99 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (0, x))
         self.common(fn, (1, x))
         self.common(fn, (2, x))
+
+    def test_unaligned_input(self):
+        def fn(x):
+            return torch.nn.functional.relu(x)
+
+        x = torch.randn(1024 + 16, device=self.device)[1:-15]
+        # TODO (malfet): Investigate failures on MacOS-14
+        with (
+            contextlib.nullcontext()
+            if self.device != "mps" or MACOS_VERSION >= 15.0
+            else self.assertRaises(AssertionError)
+        ):
+            self.common(fn, (x,), check_lowp=False)
+
+    def test_unaligned_input_2d(self):
+        def fn(x):
+            return torch.nn.functional.relu(x)
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)[:, 1:-15]
+        self.common(fn, (x,), check_lowp=False)
+
+    def test_alignment_without_custom_op(self):
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = (3 * a)[1:-15]
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_align_for_custom_op(self):
+        def slice1d(x):
+            return (3 * x)[1:-15]
+
+        def slice1d_meta(x):
+            return torch.empty_like(x)[1:-15]
+
+        define_custom_op_for_test("slice1d", slice1d, slice1d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice1d(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_no_align_for_custom_op_2d(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 1:-15]
+
+        define_custom_op_for_test("slice2d", slice2d, slice2d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice2d(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)
+        self.common(fn, (x,), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True, alignment_asserts=True)
+    @skip_if_cpp_wrapper(
+        "Inductor does not generate alignment assertion for cpp_wrapper right now"
+    )
+    def test_incorrect_meta_for_custom_op_2d(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 0:-16]
+
+        define_custom_op_for_test("slice2d_incorrect_meta", slice2d, slice2d_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.slice2d_incorrect_meta(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(1024, 1024 + 16, device=self.device)
+
+        expected_error = "Expect the tensor to be 16 bytes aligned. Fail due to storage_offset=1 itemsize=4"
+        with self.assertRaisesRegex(AssertionError, expected_error):
+            self.common(fn, (x,), check_lowp=False)
 
 
 @dataclasses.dataclass

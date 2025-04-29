@@ -36,4 +36,8 @@ class TORCH_API TimeoutError : public DistNetworkError {
   using DistNetworkError::DistNetworkError;
 };
 
+class TORCH_API QueueEmptyError : public DistStoreError {
+  using DistStoreError::DistStoreError;
+};
+
 } // namespace c10d

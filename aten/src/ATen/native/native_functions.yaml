@@ -1073,16 +1073,6 @@
     XPU: baddbmm_out_xpu
     SparseCsrCUDA: baddbmm_out_sparse_csr_cuda
 
-- func: baddbmm.dtype(Tensor self, Tensor batch1, Tensor batch2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    CUDA: _baddbmm_dtype_cuda
-
-- func: baddbmm.dtype_out(Tensor self, Tensor batch1, Tensor batch2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CUDA: _baddbmm_out_dtype_cuda
-
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: bartlett_window
@@ -1221,7 +1211,8 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: bitwise_not_out
+    CPU, CUDA: bitwise_not_out
+    MPS: bitwise_not_out_mps
   tags: pointwise
 
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -1383,16 +1374,6 @@
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
-
-- func: bmm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
-  variants: function
-  dispatch:
-    CUDA: _bmm_dtype_cuda
-
-- func: bmm.dtype_out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CUDA: _bmm_out_dtype_cuda
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
@@ -3321,10 +3302,6 @@
   dispatch:
     CompositeImplicitAutograd: rms_norm_symint
 
-- func: _fused_rms_norm(Tensor input, int normalized_shape_ndim, Tensor weight, float eps) -> Tensor
-  dispatch:
-    MPS: _fused_rms_norm_mps
-
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method
   dispatch:
@@ -4167,14 +4144,6 @@
     XPU: mm_out_xpu
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm_out
-
-- func: mm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
-  dispatch:
-    CUDA: _mm_dtype_cuda
-
-- func: mm.dtype_out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CUDA: _mm_dtype_out_cuda
 
 - func: _int_mm(Tensor self, Tensor mat2) -> Tensor
   dispatch:
@@ -7074,14 +7043,6 @@
     SparseCUDA: addmm_sparse_dense_cuda
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: addmm_sparse_compressed_dense
   tags: core
-
-- func: addmm.dtype(Tensor self, Tensor mat1, Tensor mat2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  dispatch:
-    CUDA: _addmm_dtype_cuda
-
-- func: addmm.dtype_out(Tensor self, Tensor mat1, Tensor mat2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CUDA: _addmm_dtype_out_cuda
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: addmm.out
@@ -15363,7 +15324,7 @@
 - func: special_hermite_polynomial_he.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA, MPS: special_hermite_polynomial_he_out
+    CPU, CUDA: special_hermite_polynomial_he_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

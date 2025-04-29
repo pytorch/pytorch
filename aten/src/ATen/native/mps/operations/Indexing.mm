@@ -108,12 +108,15 @@ static std::string getIndexFunctionName(ScalarType scalar_type,
       : (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_"
                                                : (serial ? "index_put_serial_" : "index_put_");
 
-  indexFunction.append(getBitSizeString(scalar_type));
+  indexFunction += getBitSizeString(scalar_type);
   if (accumulate) {
-    indexFunction.append(1, '_');
-    indexFunction.append(scalarToMetalTypeString(scalar_type));
+    TORCH_CHECK(scalar_type == ScalarType::Float || scalar_type == ScalarType::Int,
+                "Unsupported data type for accumulate case: ",
+                getMPSTypeString(scalar_type));
+    string dtypeString = (scalar_type == ScalarType::Float) ? "_float" : "_int";
+    indexFunction += dtypeString;
   }
-  indexFunction.append(use_64bit_indexing ? "_idx64" : "_idx32");
+  indexFunction += use_64bit_indexing ? "_idx64" : "_idx32";
   return indexFunction;
 }
 
@@ -203,7 +206,8 @@ static void validateInputData(const TensorIteratorBase& iter,
 
   if (accumulate) {
     // No atomic support for the rest of dtypes
-    TORCH_CHECK(supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool);
+    TORCH_CHECK(scalar_type == ScalarType::Float || inputTensor.scalar_type() == ScalarType::Int ||
+                scalar_type == ScalarType::Bool);
   } else {
     TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type) ||
                     scalar_type == ScalarType::ComplexFloat || scalar_type == ScalarType::ComplexHalf,
