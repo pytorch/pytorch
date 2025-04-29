@@ -314,8 +314,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 20),
                 torch.ones(10, 20),
             ),
-            """{x0: OrderedSet([]), y0: OrderedSet([]), sin_: OrderedSet([0]), add_: \
-OrderedSet([0]), sum_1: OrderedSet([]), sum_2: OrderedSet([]), add: OrderedSet([])}""",
+            """{sin_: OrderedSet([0]), add_: OrderedSet([0])}""",
         )
 
     def test_mutation_tracking_allow_in_graph(self):
@@ -336,7 +335,7 @@ OrderedSet([0]), sum_1: OrderedSet([]), sum_2: OrderedSet([]), add: OrderedSet([
                 torch.rand(20, 10),
                 torch.rand(20, 10),
             ),
-            """{z: OrderedSet([]), o0: OrderedSet([0]), sin_: OrderedSet([0]), add_1: OrderedSet([])}""",
+            """{o0: OrderedSet([0]), sin_: OrderedSet([0])}""",
         )
 
 

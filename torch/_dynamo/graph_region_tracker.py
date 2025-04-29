@@ -262,7 +262,8 @@ class GraphRegionTracker:
             ):
                 mutated_arg_positions.add(i)
 
-        self.node_to_mutated_arg_positions[node] = mutated_arg_positions
+        if mutated_arg_positions:
+            self.node_to_mutated_arg_positions[node] = mutated_arg_positions
 
     def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
