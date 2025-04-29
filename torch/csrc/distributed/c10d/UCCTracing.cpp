@@ -43,6 +43,7 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
       fullpath / fmt::format("rank{}.json", rank);
   if (!std::filesystem::create_directory(fullpath)) {
     LOG(INFO) << getLogPrefix() << "[INFO] failed to mkdir " << fullpath;
+    return;
   }
   std::ofstream _outfile;
   _outfile.open(trace_filename, std::ofstream::out | std::ofstream::trunc);
