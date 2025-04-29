@@ -41,7 +41,7 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
     auto pass_name = line.substr(0, index_at);
     pass_name = std::filesystem::path(pass_name).replace_extension().string();
     auto opt_limit = parseOptLimit(line.substr(index_at + 1));
-    passes_to_opt_limits.insert({pass_name, opt_limit});
+    passes_to_opt_limits.insert({std::move(pass_name), opt_limit});
   }
 
   return passes_to_opt_limits;
