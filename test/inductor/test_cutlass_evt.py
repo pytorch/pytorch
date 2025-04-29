@@ -13,6 +13,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -108,6 +109,7 @@ class MockGraphHandler(GraphLowering):
 
 
 class TestCutlassEVT(TestCase):
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_accumulator_return(self):
         from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
@@ -162,6 +164,7 @@ def fn(accum, buf1, buf2):
 return D, tmp_1, tmp_2""",
         )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
         from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
@@ -207,6 +210,7 @@ return D, tmp_1, tmp_2""",
                 """Unsupported indexing for buf0 with index 200*i0 + 60000*i1 + i2 and strides [200, 60000, 1]""",
             )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
         from torch._inductor.codegen.cuda.cutlass_python_evt import CutlassEVTCodegen
@@ -261,6 +265,7 @@ def fn(accum, buf1, buf2):
 return D, tmp_2""",
         )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
@@ -292,6 +297,7 @@ return D, tmp_2""",
             result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
         )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
         epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS)
@@ -322,6 +328,7 @@ return D, tmp_2""",
 """,
         )
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
         _, _, code = trace(
