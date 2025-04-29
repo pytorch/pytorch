@@ -1522,9 +1522,12 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
-decompose_k_threshold = 16
+decompose_k_threshold = 32
+
+# To limit compile time
 k_splits_limit = 5
-min_k_split, max_k_split = 16, 512
+
+# Hand-tuned
 default_k_splits = [16, 32, 64, 128, 256]
 
 
@@ -1536,23 +1539,39 @@ def use_decompose_k_choice(m: int, n: int, k: int) -> bool:
     ) and V.graph.sizevars.evaluate_expr(sympy.Ge(k, decompose_k_threshold * n))
 
 
-def get_k_splits(k: Union[int, sympy.Expr]) -> list[int]:
+@functools.lru_cache(None)
+def get_k_splits(m: int, n: int, k: Union[int, sympy.Expr]) -> list[int]:
     # If k is a sympy expression, we can't do any splitting
     if isinstance(k, sympy.Expr) and not k.is_number:
         return default_k_splits
 
+    max_k_split = min(k // m, k // n)
+    min_k_split = 2
     # Get all divisors of k, k has to be divisible by kPart
     divisors = sympy.divisors(k)
 
-    k_splits = [
+    divisors = [
         divisor
         for divisor in divisors
         if divisor <= max_k_split and divisor >= min_k_split
     ]
-    if len(k_splits) > k_splits_limit:
-        k_splits = k_splits[:: len(k_splits) // k_splits_limit]
 
-    return k_splits
+    pow_of_2_divisors, mul_of_32_divisors, rest_of_splits = [], [], []
+
+    for d in divisors:
+        kPart = k // d
+        # power of 2 divisors are best performing, conform to hardware
+        if (kPart & kPart - 1) == 0:
+            pow_of_2_divisors.append(d)
+        # Else check if creates a multiple of 32
+        elif kPart % 32 == 0:
+            mul_of_32_divisors.append(d)
+        # otherwise, take the smallest values
+        else:
+            rest_of_splits.append(d)
+
+    best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+    return best_splits[:k_splits_limit]
 
 
 @functools.lru_cache(None)

@@ -1128,6 +1128,8 @@ class TestMaxAutotune(TestCase):
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @parametrize("dynamic", (True, False))
     @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
     @config.patch(
