@@ -227,6 +227,23 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         ):
             self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
 
+    def test_dict_contains(self):
+        def fn(x):
+            if x.__contains__("t"):
+                return x["t"] + 1
+            else:
+                return torch.ones(3)
+
+        ref, loaded = self._test_serialization(
+            "DICT_CONTAINS", fn, {"t": torch.randn(3)}
+        )
+
+        self._test_check_fn(ref, loaded, {"x": {"t": torch.randn(3)}}, True)
+        self._test_check_fn(ref, loaded, {"x": {}}, False)
+        self._test_check_fn(
+            ref, loaded, {"x": {"t": torch.randn(3), "d": torch.randn(3)}}, True
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
