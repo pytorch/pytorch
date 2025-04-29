@@ -283,7 +283,43 @@ class WrapperBackend:
 Scope = dict[str, object]
 
 
-class OutputGraph:
+@dataclass
+class OutputGraphGuardsState:
+    """
+    A base class containing fields that are considered "persistent" when we
+    want to save all the important state for reconstrucing guards in a different
+    process. Normally we don't need to add states here, but we may have to when
+    the information is needed to serialize the guards, so the fields here are
+    supposed to be serializable as a requirement.
+    """
+
+    local_scope: Scope
+    global_scope: Scope
+    # This records the initial torch function mode stack for guarding
+    torch_function_mode_stack: list[torch.overrides.TorchFunctionMode]
+    guard_on_key_order: set[str]
+    # Map from graph input's `Source` to sizes / strides metadata
+    input_source_to_sizes_strides: dict[Source, dict[str, Any]]
+    export: bool = False
+    export_constraints: bool = False
+
+    _guards: Optional[torch._guards.GuardsSet] = None
+    _aotautograd_guards: Optional[list[torch._guards.GuardEnvExpr]] = None
+
+    @property
+    def shape_env(self):
+        raise AssertionError(f"shape_env shouldn't be accessed from {type(self)}")
+
+    @property
+    def guards(self):
+        return self._guards
+
+    @property
+    def aotautograd_guards(self):
+        return self._aotautograd_guards
+
+
+class OutputGraph(OutputGraphGuardsState):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -309,6 +345,13 @@ class OutputGraph:
         f_code,
         torch_function_mode_stack,
     ):
+        super().__init__(
+            local_scope,
+            global_scope,
+            torch_function_mode_stack,
+            guard_on_key_order=set(),
+            input_source_to_sizes_strides={},
+        )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -316,8 +359,6 @@ class OutputGraph:
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        # Map from graph input's `Source` to sizes / strides metadata
-        self.input_source_to_sizes_strides: dict[Source, dict[str, Any]] = {}
         self.cleanup_hooks: list[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
@@ -400,8 +441,6 @@ class OutputGraph:
 
         # Not checkpointed
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
-        self.global_scope: Scope = global_scope
-        self.local_scope = local_scope
         self.root_tx = root_tx
 
         # Given a source, what are the user stacks of all locations that
@@ -423,8 +462,6 @@ class OutputGraph:
 
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
-        # This records the initial torch function mode stack for guarding
-        self.torch_function_mode_stack = torch_function_mode_stack
 
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
@@ -472,21 +509,6 @@ class OutputGraph:
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
-
-        self.guard_on_key_order: set[str] = set()
-
-        self.compiler_trace_stack = contextlib.ExitStack()
-
-    def mark_bytecode_tracing_start(self):
-        self.compiler_trace_stack.enter_context(
-            dynamo_timed(
-                "bytecode_tracing",
-                log_pt2_compile_event=True,
-            )
-        )
-
-    def mark_bytecode_tracing_stop(self):
-        self.compiler_trace_stack.close()
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
@@ -557,6 +579,19 @@ class OutputGraph:
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
 
+    def dump_guards_state(self):
+        return OutputGraphGuardsState(
+            local_scope=self.local_scope,
+            global_scope=self.global_scope,
+            torch_function_mode_stack=self.torch_function_mode_stack,
+            guard_on_key_order=self.guard_on_key_order,
+            input_source_to_sizes_strides=self.input_source_to_sizes_strides,
+            export=self.export,
+            export_constraints=self.export_constraints,
+            _guards=self.guards,
+            _aotautograd_guards=self.aotautograd_guards,
+        )
+
     def synthetic_graph_input(self, fn, args):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
@@ -576,6 +611,8 @@ class OutputGraph:
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
         result = VariableTracker.build(self.root_tx, example_value, source)
+        # Realize the VT because we will delete the guards on it in the next line.
+        result = result.realize()
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
         )
@@ -680,6 +717,10 @@ class OutputGraph:
     @property
     def nn_modules(self) -> dict[str, Any]:
         return self.tracing_context.module_context.nn_modules
+
+    @property
+    def aotautograd_guards(self):
+        return self.tracing_context.guards_context.aotautograd_guards
 
     def save_global_state(self, out=None):
         """
@@ -1017,8 +1058,6 @@ class OutputGraph:
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
-        # bytecode tracing has finished. Pop the context manager for dynamo_timed
-        self.mark_bytecode_tracing_stop()
         assert reason is not None
 
         from .decorators import disable

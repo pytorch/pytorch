@@ -212,7 +212,7 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_input_indices
+    return context.fw_metadata.static_input_indices
 
 
 def record_original_output_strides(gm: GraphModule) -> None:
@@ -454,7 +454,9 @@ def _recursive_pre_grad_passes(
         return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
-def _recursive_joint_graph_passes(gm: GraphModule) -> None:
+def _recursive_joint_graph_passes(
+    gm: GraphModule, skip_invoke_subgraph: bool = False
+) -> None:
     with dynamo_timed(
         "_recursive_joint_graph_passes",
         log_pt2_compile_event=True,
@@ -466,9 +468,9 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
         # AOTAutograd has access to partition_fn, which internally calls the
         # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
         # skip_invoke_subgraph.
-        for subgraph_name in _get_subgraph_names(gm, skip_invoke_subgraph=True):
+        for subgraph_name in _get_subgraph_names(gm, skip_invoke_subgraph):
             subgraph = getattr(gm, subgraph_name)
-            _recursive_joint_graph_passes(subgraph)
+            _recursive_joint_graph_passes(subgraph, skip_invoke_subgraph)
         joint_graph_passes(gm)
 
 
@@ -1285,7 +1287,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    recursively_apply_fns = None
+                    compiled_fn_runner = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1333,14 +1335,19 @@ class _InProcessFxCompile(FxCompile):
                                     additional_files=[
                                         *dict.fromkeys(
                                             graph.wrapper_code.additional_files
+                                            + (
+                                                const_graph.wrapper_code.additional_files
+                                                if const_graph
+                                                else []
+                                            )
                                         )
                                     ],
                                 )
                         else:
                             compiled_module = graph.compile_to_module()
                             compiled_fn = compiled_module.call
-                            recursively_apply_fns = getattr(
-                                compiled_module, "recursively_apply_fns", None
+                            compiled_fn_runner = getattr(
+                                compiled_module, "runner", None
                             )
 
                     num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
@@ -1416,7 +1423,7 @@ class _InProcessFxCompile(FxCompile):
                         inputs_to_check,
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
-                        recursively_apply_fns,
+                        compiled_fn_runner,
                     )
 
 
@@ -1868,6 +1875,7 @@ def compile_fx(
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
+    ignore_shape_env: bool = False,
 ) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2147,7 +2155,10 @@ def compile_fx(
         ) -> tuple[GraphModule, GraphModule]:
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
-                _recursive_joint_graph_passes(gm)
+                # We can skip the invoke_subgraph because the
+                # entire_partition_fn is called recursively for invoke_subgraph
+                # in partitioning.
+                _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
 
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
@@ -2279,6 +2290,7 @@ def compile_fx(
                     keep_inference_input_mutations=True,
                     cudagraphs=cudagraphs,
                     boxed_forward_device_index=forward_device,
+                    ignore_shape_env=ignore_shape_env,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.

@@ -1,16 +1,24 @@
+import functools
 from collections import defaultdict
 
 import torch
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 
 
-PRESETS: dict[int, dict[str, list[str]]] = {}
+@functools.lru_cache(None)
+def gen_cutlass_presets() -> dict[int, dict[str, list[str]]]:
+    """
+    Generate cutlass presets for the given CUDA arch.
+    """
+    presets: dict[int, dict[str, list[str]]] = {}
 
-PRESETS[0] = defaultdict(list)
-if torch._C._has_cuda:
+    if not torch._C._has_cuda:
+        return presets
+
+    presets[0] = defaultdict(list)
     arch = get_cuda_arch()
     if arch == "90":
-        preset = PRESETS[0]
+        preset = presets[0]
         preset["0"] = [
             r"cutlass3x_sm90_tensorop_s64x128x16gemm_.*_128x128x64_2x1x1_0_.*_align.*_stream_k_warpspecialized_cooperative_epi_tma",
             r"cutlass3x_sm90_tensorop_s64x256x16gemm_.*_128x256x64_1x2x1_0_.*_align.*_warpspecialized_cooperative_epi_tma",
@@ -227,3 +235,5 @@ if torch._C._has_cuda:
             r"cutlass3x_sm90_tensorop_s64x16x16gemm_.*_64x16x256_1x1x1_0_.*_align.*_warpspecialized_epi_nosmem",
             r"cutlass3x_sm90_tensorop_s64x192x16gemm_.*_256x192x64_1x2x1_0_.*_align.*_warpspecialized_cooperative_epi_tma",
         ]
+
+    return presets
