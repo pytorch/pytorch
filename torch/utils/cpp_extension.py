@@ -122,7 +122,7 @@ def _find_cuda_home() -> Optional[str]:
             if not os.path.exists(cuda_home):
                 cuda_home = None
     if cuda_home and not torch.cuda.is_available():
-        warnings.warn(f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'")
+        logger.warning("No CUDA runtime is found, using CUDA_HOME='%s'", cuda_home)
     return cuda_home
 
 def _find_rocm_home() -> Optional[str]:
@@ -144,7 +144,7 @@ def _find_rocm_home() -> Optional[str]:
             if os.path.exists(fallback_path):
                 rocm_home = fallback_path
     if rocm_home and torch.version.hip is None:
-        warnings.warn(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'")
+        logger.warning("No ROCm runtime is found, using ROCM_HOME='%s'", rocm_home)
     return rocm_home
 
 def _find_sycl_home() -> Optional[str]:
@@ -166,7 +166,7 @@ def _find_sycl_home() -> Optional[str]:
                     sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
                     break
         except importlib.metadata.PackageNotFoundError:
-            warnings.warn("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.")
+            logger.warning("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.")
     return sycl_home
 
 def _join_rocm_home(*paths) -> str:
@@ -432,7 +432,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
-        warnings.warn(WRONG_COMPILER_WARNING.format(
+        logger.warning(WRONG_COMPILER_WARNING.format(
             user_compiler=compiler,
             pytorch_compiler=_accepted_compilers_for_platform()[0],
             platform=sys.platform))
@@ -453,7 +453,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
             version = ['0', '0', '0'] if match is None else list(match.groups())
     except Exception:
         _, error, _ = sys.exc_info()
-        warnings.warn(f'Error checking compiler version for {compiler}: {error}')
+        logger.warning('Error checking compiler version for %s: %s', compiler, error)
         return (False, TorchVersion('0.0.0'))
 
     # convert alpha-numeric string to numeric string
@@ -464,7 +464,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
         return (True, TorchVersion('.'.join(numeric_version)))
 
     compiler = f'{compiler} {".".join(numeric_version)}'
-    warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
+    logger.warning(ABI_INCOMPATIBILITY_WARNING.format(compiler))
 
     return (False, TorchVersion('.'.join(numeric_version)))
 
@@ -600,9 +600,9 @@ class BuildExtension(build_ext):
         if self.use_ninja:
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
-                   '{}. Falling back to using the slow distutils backend.')
+                   '%s. Falling back to using the slow distutils backend.')
             if not is_ninja_available():
-                warnings.warn(msg.format('we could not find ninja.'))
+                logger.warning(msg % 'we could not find ninja.')
                 self.use_ninja = False
 
     def finalize_options(self) -> None:
@@ -1116,7 +1116,7 @@ class BuildExtension(build_ext):
                         # replace fist instance of "CUDA" with "HIP" in flag
                         modified_flag = flag.replace("CUDA", "HIP", 1)
                     modified_flags.append(modified_flag)
-                    logging.info(f'Modified flag: {flag} -> {modified_flag}')
+                    logging.info('Modified flag: %s -> %s', flag, modified_flag)
                 else:
                     modified_flags.append(flag)
             extension.extra_compile_args['nvcc'] = modified_flags
