@@ -19,10 +19,14 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: "3.10"
+
+      - name: Install python
+        shell: bash
+        run: |
+          sudo dnf install -y python3.10 python3.10-venv
+          python3.10 -m venv /tmp/venv
+          source /tmp/venv/bin/activate
+
       - name: Run lintrunner (nonretryable)
         continue-on-error: true
         # we can't run all files here because only changes around where the diff are shown in the PR UI
