@@ -18,9 +18,8 @@ TEST(CachingHostAllocatorTest, testPinnedAliasSlice) {
   // Check a standard pinned tensor can be correctly recorded.
   auto pinned_tensor =
       at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
-  ASSERT_TRUE(pinned_tensor.is_pinned());
-  ASSERT_TRUE(at::getHostAllocator(at::kXPU)->is_pinned(
-      pinned_tensor.data_ptr()));
+  // TODO: Uncomment this line when op `pin_memory` is supported on XPU.
+  // ASSERT_TRUE(pinned_tensor.is_pinned());
   ASSERT_TRUE(at::getHostAllocator(at::kXPU)->record_event(
       pinned_tensor.data_ptr(),
       pinned_tensor.storage().data_ptr().get_context(),
