@@ -888,8 +888,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 if method is torch.nn.Module.__init__:
                     method = unpatched_nn_module_init
-                if source:
-                    install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
                 return UserMethodVariable(method, self, source=source).call_function(
                     tx, args, kwargs
                 )
@@ -989,6 +987,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj_var = VariableTracker.build(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif callable(self.value):
+            if self.source:
+                source = AttrSource(self.cls_source, "__call__")
+                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
