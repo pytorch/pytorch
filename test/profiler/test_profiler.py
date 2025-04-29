@@ -2997,6 +2997,28 @@ aten::mm""",
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
+    def test_profiler_debug_autotuner(self):
+        """
+        This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
+        """
+        in1 = torch.randn((400, 600), device="cuda", dtype=torch.float16)
+        in2 = torch.randn((600, 800), device="cuda", dtype=torch.float16)
+        def mm():
+            return torch.mm(in1, in2)
+        
+        pb_mm = torch.compile(mm, options={"benchmark_kernel": True, "max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN", "profile_bandwidth": True})
+        comp_mm = torch.compile(mm, options={"benchmark_kernel": True, "max_autotune": True, "max_autotune_gemm_backends": "TRITON"})
+
+        with profile() as prof:
+            pb_mm()
+        for ev in prof.events():
+            if "triton" in ev.name:
+                breakpoint()
+        
+
+        
+        
+
 
 
 if __name__ == "__main__":
