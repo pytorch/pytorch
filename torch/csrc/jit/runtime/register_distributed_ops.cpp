@@ -102,7 +102,7 @@ void prepare_and_call_rpc_op(
     std::vector<std::string> names;
     for (const auto& entry : kwargsDict) {
       const IValue& keyIValue = entry.key();
-      const string& keyStr = keyIValue.toStringRef();
+      const std::string& keyStr = keyIValue.toStringRef();
       names.emplace_back(keyStr);
     }
     throw std::runtime_error(functionSchema.findErrorInKwargs(names));
