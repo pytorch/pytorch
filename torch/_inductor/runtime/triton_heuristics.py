@@ -70,10 +70,10 @@ from .triton_compat import (
     cc_warp_size,
     CompiledKernel,
     Config,
-    config as tr_config,
     GPUTarget,
     HAS_WARP_SPEC,
     KernelInterface,
+    knobs,
     OutOfResources,
     PTXASError,
     triton,
@@ -1424,12 +1424,12 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
-        if tr_config is None:
+        if knobs is None:
             launch_enter = binary.__class__.launch_enter_hook
             launch_exit = binary.__class__.launch_exit_hook
         else:
-            launch_enter = tr_config.runtime.launch_enter_hook
-            launch_exit = tr_config.runtime.launch_exit_hook
+            launch_enter = knobs.runtime.launch_enter_hook
+            launch_exit = knobs.runtime.launch_exit_hook
 
         scope = {
             "grid_meta": cfg.kwargs,

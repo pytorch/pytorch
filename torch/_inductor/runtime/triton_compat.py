@@ -71,9 +71,9 @@ if triton is not None:
     HAS_WARP_SPEC = hasattr(tl, "async_task")
 
     try:
-        from triton import config
+        from triton import knobs
     except ImportError:
-        config = None
+        knobs = None
 else:
 
     def _raise_error(*args: Any, **kwargs: Any) -> Any:
@@ -93,7 +93,7 @@ else:
     _log2 = _raise_error
     libdevice = None
     math = None
-    config = None
+    knobs = None
 
     class triton:  # type: ignore[no-redef]
         @staticmethod
@@ -144,5 +144,5 @@ __all__ = [
     "math",
     "triton",
     "cc_warp_size",
-    "config",
+    "knobs",
 ]
