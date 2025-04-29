@@ -743,16 +743,17 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, frozenset) and all(
-            (
-                # For DBR quantization, we could get a frozenset of torch funcs.
-                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
-                or
-                # Another commonly used frozenset of types.
-                x in torch.utils._pytree.BUILTIN_TYPES
-            )
-            for x in value
-        ):
+        elif istype(value, frozenset):
+            # elif istype(value, frozenset) and all(
+            #     (
+            #         # For DBR quantization, we could get a frozenset of torch funcs.
+            #         (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+            #         or
+            #         # Another commonly used frozenset of types.
+            #         x in torch.utils._pytree.BUILTIN_TYPES
+            #     )
+            #     for x in value
+            # ):
             # For the limited cases of frozenset here, we know the items won't
             # change across runs, so we can safely create sourceless VTs for
             # them and only guard on the frozenset id.
