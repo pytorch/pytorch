@@ -146,7 +146,7 @@ def _embedding_dense_backward(
     num_weights: int,
     padding_idx: int,
     scale_grad_by_freq: bool,
-):
+) -> torch.Tensor:
     if grad_output.is_xpu:
         return NotImplemented
     # decomp_func = decompositions.pop(op.overloads()[0], None)
