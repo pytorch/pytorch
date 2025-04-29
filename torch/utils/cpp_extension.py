@@ -11,7 +11,6 @@ import setuptools
 import subprocess
 import sys
 import sysconfig
-import warnings
 import collections
 from pathlib import Path
 import errno
@@ -198,40 +197,40 @@ def _join_sycl_home(*paths) -> str:
 
 
 
-ABI_INCOMPATIBILITY_WARNING = (\
-    "\n\n                               !! WARNING !!\n\n"
-    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-    "Your compiler (%s) may be ABI-incompatible with PyTorch!\n"
-    "Please use a compiler that is ABI-compatible with GCC 5.0 and above.\n"
-    "See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.\n\n"
-    "See https://gist.github.com/goldsborough/d466f43e8ffc948ff92de7486c5216d6\n"
-    "for instructions on how to install GCC 5 or higher.\n"
-    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n"
-    "                              !! WARNING !!\n"
+ABI_INCOMPATIBILITY_WARNING = (
+    "                               !! WARNING !!"
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    "Your compiler (%s) may be ABI-incompatible with PyTorch!"
+    "Please use a compiler that is ABI-compatible with GCC 5.0 and above."
+    "See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html."
+    "See https://gist.github.com/goldsborough/d466f43e8ffc948ff92de7486c5216d6"
+    "for instructions on how to install GCC 5 or higher."
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    "                              !! WARNING !!"
 )
-WRONG_COMPILER_WARNING = (\
-    "\n\n                               !! WARNING !!\n\n"
-    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-    "Your compiler (%s) is not compatible with the compiler Pytorch was\n"
-    "built with for this platform, which is %s on %s. Please\n"
-    "use %s to to compile your extension. Alternatively, you may\n"
-    "compile PyTorch from source using %s, and then you can also use\n"
-    "%s to compile your extension.\n\n"
-    "See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help\n"
-    "with compiling PyTorch from source.\n"
-    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n"
-    "                              !! WARNING !!\n"
+WRONG_COMPILER_WARNING = (
+    "                               !! WARNING !!"
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    "Your compiler (%s) is not compatible with the compiler Pytorch was"
+    "built with for this platform, which is %s on %s. Please"
+    "use %s to to compile your extension. Alternatively, you may"
+    "compile PyTorch from source using %s, and then you can also use"
+    "%s to compile your extension."
+    "See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help"
+    "with compiling PyTorch from source."
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    "                              !! WARNING !!"
 )
-CUDA_MISMATCH_MESSAGE = (\
-    "\nThe detected CUDA version (%s) mismatches the version that was used to compile\n"
-    "PyTorch (%s). Please make sure to use the same CUDA versions.\n"
+CUDA_MISMATCH_MESSAGE = (
+    "The detected CUDA version (%s) mismatches the version that was used to compile"
+    "PyTorch (%s). Please make sure to use the same CUDA versions."
 )
 CUDA_MISMATCH_WARN = (
     "The detected CUDA version (%s) has a minor version mismatch with the version that was used to compile PyTorch (%s). Most likely this shouldn't be a problem."
 )
-CUDA_NOT_FOUND_MESSAGE = (\
-    "\nCUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH\n"
-    "environment variable or add NVCC to your system PATH. The extension compilation will fail.\n"
+CUDA_NOT_FOUND_MESSAGE = (
+    "CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH"
+    "environment variable or add NVCC to your system PATH. The extension compilation will fail."
 )
 ROCM_HOME = _find_rocm_home()
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
@@ -491,7 +490,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             raise ValueError("setuptools>=49.4.0 is required")
         if cuda_ver.major != torch_cuda_version.major:
             raise RuntimeError(CUDA_MISMATCH_MESSAGE % (cuda_str_version, torch.version.cuda))
-        logger.warning(CUDA_MISMATCH_WARN % (cuda_str_version, torch.version.cuda))
+        logger.warning(CUDA_MISMATCH_WARN, cuda_str_version, torch.version.cuda)
 
     if not (sys.platform.startswith('linux') and
             os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') not in ['ON', '1', 'YES', 'TRUE', 'Y'] and
@@ -501,7 +500,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     cuda_compiler_bounds: VersionMap = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
     if cuda_str_version not in cuda_compiler_bounds:
-        logger.warning(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
+        logger.warning('There are no %s version bounds defined for CUDA version %s', compiler_name, cuda_str_version)
     else:
         min_compiler_version, max_excl_compiler_version = cuda_compiler_bounds[cuda_str_version]
         # Special case for 11.4.0, which has lower compiler bounds than 11.4.1
@@ -599,7 +598,7 @@ class BuildExtension(build_ext):
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '%s. Falling back to using the slow distutils backend.')
             if not is_ninja_available():
-                logger.warning(msg % 'we could not find ninja.')
+                logger.warning(msg, 'we could not find ninja.')
                 self.use_ninja = False
 
     def finalize_options(self) -> None:
@@ -1113,7 +1112,7 @@ class BuildExtension(build_ext):
                         # replace fist instance of "CUDA" with "HIP" in flag
                         modified_flag = flag.replace("CUDA", "HIP", 1)
                     modified_flags.append(modified_flag)
-                    logging.info('Modified flag: %s -> %s', flag, modified_flag)
+                    logger.info('Modified flag: %s -> %s', flag, modified_flag)
                 else:
                     modified_flags.append(flag)
             extension.extra_compile_args['nvcc'] = modified_flags
@@ -2091,8 +2090,8 @@ def _jit_compile(name,
     )
     if version > 0:
         if version != old_version and verbose:
-            logger.info(f'The input conditions for extension module {name} have changed. ' +
-                  f'Bumping to version {version} and re-building as {name}_v{version}...')
+            logger.info('The input conditions for extension module %s have changed.', name)
+            logger.info('Bumping to version %s and re-building as %s_v%s...', version, name, version)
         name = f'{name}_v{version}'
 
     baton = FileBaton(os.path.join(build_directory, 'lock'))
@@ -2134,15 +2133,14 @@ def _jit_compile(name,
                         with_sycl=with_sycl,
                         is_standalone=is_standalone)
             elif verbose:
-                logger.debug('No modifications detected for re-loaded extension '
-                      f'module {name}, skipping build step...')
+                logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
         finally:
             baton.release()
     else:
         baton.wait()
 
     if verbose:
-        logger.info(f'Loading extension module {name}...')
+        logger.info(f'Loading extension module %s...', name)
 
     if is_standalone:
         return _get_exec_path(name, build_directory)
@@ -2183,12 +2181,12 @@ def _write_ninja_file_and_compile_objects(
         with_sycl = any(map(_is_sycl_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        logger.debug(f'Emitting ninja build file {build_file_path}...')
+        logger.debug('Emitting ninja build file %s...', build_file_path)
 
     # Create build_directory if it does not exist
     if not os.path.exists(build_directory):
         if verbose:
-            logger.debug(f'Creating directory {build_directory}...')
+            logger.debug('Creating directory %s...', build_directory)
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2247,12 +2245,12 @@ def _write_ninja_file_and_build_library(
         is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
-        logger.debug(f'Emitting ninja build file {build_file_path}...')
+        logger.debug('Emitting ninja build file %s...', build_file_path)
 
     # Create build_directory if it does not exist
     if not os.path.exists(build_directory):
         if verbose:
-            logger.debug(f'Creating directory {build_directory}...')
+            logger.debug('Creating directory %s...', build_directory)
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2272,7 +2270,7 @@ def _write_ninja_file_and_build_library(
         is_standalone=is_standalone)
 
     if verbose:
-        logger.info(f'Building extension module {name}...')
+        logger.info('Building extension module %s...', name)
     _run_ninja_build(
         build_directory,
         verbose,
@@ -2416,7 +2414,6 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
             # If CUDA is not available, fall back to default behavior
             arch_list = []
     elif not _arch_list:
-        # Instead of a warning, use logging.info for regular information
         logger.warning("TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
                     "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to 'native' "
                     "to only use the current GPU's architecture, or to specific architectures.")
@@ -2488,11 +2485,11 @@ def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
 def _get_build_directory(name: str, verbose: bool) -> str:
     """
     Get the build directory for an extension.
-    
+
     Args:
         name: The name of the extension
         verbose: Whether to print verbose information
-        
+
     Returns:
         The path to the build directory
     """
@@ -2508,12 +2505,12 @@ def _get_build_directory(name: str, verbose: bool) -> str:
             root_extensions_directory, build_folder)
 
     if verbose:
-        logger.info(f'Using {root_extensions_directory} as PyTorch extensions root...')
+        logger.info('Using %s as PyTorch extensions root...', root_extensions_directory)
 
     build_directory = os.path.join(root_extensions_directory, name)
     if not os.path.exists(build_directory):
         if verbose:
-            logger.debug(f'Creating extension directory {build_directory}...')
+            logger.debug('Creating extension directory %s...', build_directory)
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
@@ -2524,7 +2521,7 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     max_jobs = os.environ.get('MAX_JOBS')
     if max_jobs is not None and max_jobs.isdigit():
         if verbose:
-            logger.debug(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...')
+            logger.debug('Using envvar MAX_JOBS (%s) as the number of workers...', max_jobs)
         return int(max_jobs)
     if verbose:
         logger.info('Allowing ninja to set a default number of workers... '
