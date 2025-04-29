@@ -295,7 +295,10 @@ def gen_alias_from_base(
 
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
-    storage_offset = target_meta_tensor.storage_offset()
+    # We use the aliased base tensor's storage offset because the target_meta_tensor's offset
+    # storage can be incorrect since we often times clone_preserve_strides to fix alignment. See
+    # copy_misaligned_inputs in _inductor/utils.py
+    storage_offset = aliased_base_tensor.storage_offset()
     if aliased_base_tensor.is_complex() and not target_meta_tensor.is_complex():
         aliased_out = torch.view_as_real(aliased_base_tensor).as_strided(
             size, stride, storage_offset
