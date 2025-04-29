@@ -9,23 +9,21 @@ FOR %%v IN (%DESIRED_PYTHON%) DO (
     set PYTHON_VERSION_STR=%%v
     set PYTHON_VERSION_STR=!PYTHON_VERSION_STR:.=!
     conda remove -n py!PYTHON_VERSION_STR! --all -y || rmdir %CONDA_HOME%\envs\py!PYTHON_VERSION_STR! /s
-    if "%%v" == "3.9" call conda create -n py!PYTHON_VERSION_STR! -y numpy=2.0.1  python=%%v
-    if "%%v" == "3.10" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1  python=%%v
-    if "%%v" == "3.11" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1  python=%%v
-    if "%%v" == "3.12" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1  python=%%v
-    if "%%v" == "3.13" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2  python=%%v
-    if "%%v" == "3.13t" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2  python-freethreading python=3.13
+    if "%%v" == "3.9" call conda create -n py!PYTHON_VERSION_STR! -y numpy=2.0.1 cmake python=%%v
+    if "%%v" == "3.10" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1 cmake python=%%v
+    if "%%v" == "3.11" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1 cmake python=%%v
+    if "%%v" == "3.12" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1 cmake python=%%v
+    if "%%v" == "3.13" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2 cmake python=%%v
+    if "%%v" == "3.13t" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2 cmake python-freethreading python=3.13
 
     call conda run -n py!PYTHON_VERSION_STR! pip install pyyaml
     call conda run -n py!PYTHON_VERSION_STR! pip install mkl mkl-include mkl-static
-    call conda run -n py!PYTHON_VERSION_STR! pip install boto3 ninja typing_extensions cmake setuptools==72.1.0
+    call conda run -n py!PYTHON_VERSION_STR! pip install boto3 ninja typing_extensions setuptools==72.1.0
 )
 endlocal
 
 :: Install libuv
-conda install -y -q -c conda-forge libuv=1.39
+curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o libuv-1.40.0-h8ffe710_0.tar.bz2
+7z x -aoa libuv-1.40.0-h8ffe710_0.tar.bz2
+tar -xvf libuv-1.40.0-h8ffe710_0.tar -C %CONDA_HOME%
 set libuv_ROOT=%CONDA_HOME%\Library
-echo libuv_ROOT=%libuv_ROOT%
-:: curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o libuv-1.40.0-h8ffe710_0.tar.bz2
-:: tar -xvf libuv-1.40.0-h8ffe710_0.tar.bz2 -C %CONDA_HOME%
-:: set libuv_ROOT=%CONDA_HOME%\Library
