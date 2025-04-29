@@ -8337,21 +8337,21 @@ class GraphModule(torch.nn.Module):
         return (sub,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_, s94, s17_cond_true, getitem_2_cond_false, l_z__cond_false):
             l_x__1 = l_x_
             s94_1 = s94
 
-            add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = s17_true_branch = None
+            add: "f32[s17, s94]" = l_x__1 + s17_cond_true;  l_x__1 = s17_cond_true = None
             getitem: "f32[s17 - 2, s94]" = add[slice(2, None, None)];  add = None
             clone: "f32[s17 - 2, s94]" = getitem.clone();  getitem = None
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_, s94, s17_cond_true, getitem_2_cond_false, l_z__cond_false):
             l_x__1 = l_x_
             s94_1 = s94
 
-            mul: "f32[s17, s94]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
+            mul: "f32[s17, s94]" = getitem_2_cond_false * l_z__cond_false;  getitem_2_cond_false = l_z__cond_false = None
             add: "f32[s17, s94]" = l_x__1 + mul;  l_x__1 = mul = None
             getitem: "f32[2, s94]" = add[slice(None, 2, None)];  add = None
             clone: "f32[2, s94]" = getitem.clone();  getitem = None

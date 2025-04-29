@@ -346,7 +346,7 @@ def _collect_fake_inputs(inputs):
     from torch._subclasses.fake_tensor import FakeTensor
 
     # Get the example values of the inputs.
-    inputs_fake = []
+    inputs_fake: list[Union[FakeTensor, torch.Tensor, int]] = []
     for inp in inputs:
         if isinstance(inp, (torch.fx.proxy.Proxy, torch.fx.node.Node)):
             inp = inp.node if isinstance(inp, torch.fx.proxy.Proxy) else inp
