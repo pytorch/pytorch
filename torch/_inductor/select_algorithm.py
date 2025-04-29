@@ -1805,21 +1805,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 benchmark=None,
             )
 
-            if timings:
+            if timings and len(timings) == len(choices):
                 # compilation in precompile stage is much cheaper than that in
                 # autotuning stage
-                if len(timings) == len(choices):
-                    log.debug("Timings found in cache, returning no_op")
-                    return no_op
-                else:
-                    # TODO: remove this branch in April 2025
-                    # added warning for debugging purpose
-                    log.info(
-                        "Found only %d/%d timings for %s, not skipping precompilation",
-                        len(timings),
-                        len(choices),
-                        name,
-                    )
+                log.debug(
+                    "Found all %d timings in cache, returning no_op", len(timings)
+                )
+                return no_op
 
             if config.search_autotune_cache and not (
                 config.max_autotune or config.max_autotune_gemm
