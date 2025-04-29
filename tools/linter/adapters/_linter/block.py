@@ -95,7 +95,7 @@ class Block:
         Each decorator both the @ symbol and any arguments to the decorator
         but no extra whitespace.
         """
-        return list(_get_decorators(self.tokens, self.begin))
+        return _get_decorators(self.tokens, self.begin)
 
     @cached_property
     def is_override(self) -> bool:
@@ -164,4 +164,6 @@ def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
                     return  # A statement means no more decorators
             end = begin
 
-    return list(decorators())[::-1]
+    out = list(decorators())
+    out.reverse()
+    return out
