@@ -390,7 +390,7 @@ def ceildiv(
 def _type_of(key: Optional[torch.dtype]) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
-    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # https://github.com/triton-lang/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
     if key is None:
         return "*i8"
@@ -796,16 +796,45 @@ def sympy_str(expr: sympy.Expr) -> str:
     somewhat worse, as it doesn't do as much simplification.  So don't
     use this for final codegen.
     """
-    if isinstance(expr, sympy.Symbol):
-        return expr.name
-    if isinstance(expr, sympy.Add):
-        return " + ".join(map(sympy_str, expr.args))
-    if isinstance(expr, sympy.Mul):
-        return " * ".join(map(sympy_str, expr.args))
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
-        return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
-    return str(expr)
+    def is_neg_lead(expr: sympy.Expr) -> bool:
+        return (
+            isinstance(expr, sympy.Mul) and len(expr.args) == 2 and expr.args[0] == -1
+        )
+
+    def sympy_str_add(expr: sympy.Expr) -> str:
+        if isinstance(expr, sympy.Add):
+            # Special case 'a - b'. Note that 'a - b - c' will still appear as
+            # 'a + -1 * b + -1 * c'.
+            if len(expr.args) == 2 and is_neg_lead(expr.args[1]):
+                return f"{sympy_str_mul(expr.args[0])} - {sympy_str_mul(expr.args[1].args[1])}"
+            else:
+                return " + ".join(map(sympy_str_mul, expr.args))
+        else:
+            return sympy_str_mul(expr)
+
+    def sympy_str_mul(expr: sympy.Expr) -> str:
+        if isinstance(expr, sympy.Mul):
+            if is_neg_lead(expr):
+                # Special case '-a'. Note that 'a * -b' will still appear as
+                # '-1 * a * b'.
+                return f"-{sympy_str_atom(expr.args[1])}"
+            else:
+                return " * ".join(map(sympy_str_atom, expr.args))
+        else:
+            return sympy_str_atom(expr)
+
+    def sympy_str_atom(expr: sympy.Expr) -> str:
+        if isinstance(expr, sympy.Symbol):
+            return expr.name
+        elif isinstance(expr, (sympy.Add, sympy.Mul)):
+            return f"({sympy_str_add(expr)})"
+        elif isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
+            return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
+        else:
+            return str(expr)
+
+    return sympy_str_add(expr)
 
 
 def get_bounds_index_expr(index: sympy.Expr) -> ValueRanges[Any]:
@@ -1981,7 +2010,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
-        # Triton API change in https://github.com/openai/triton/pull/2293
+        # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
         sm_clock = max_clock_rate()
