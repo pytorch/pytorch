@@ -61,7 +61,7 @@ class C10_API SymBool {
   // that value.  Note that C++ comparison operations default to returning
   // bool, so it's not so common to have to call this
   bool guard_bool(const char* file, int64_t line) const;
-  bool expect_true(const char* file, int64_t line) const;
+  bool expect_true(const char* file, int64_t line, const char* error_message) const;
   bool guard_size_oblivious(const char* file, int64_t line) const;
   bool statically_known_true(const char* file, int64_t line) const;
   bool guard_or_false(const char* file, int64_t line) const;
@@ -91,14 +91,14 @@ class C10_API SymBool {
 };
 
 C10_API std::ostream& operator<<(std::ostream& os, const SymBool& s);
-
+// TODO pass error message to expect_true when possible.
 #define TORCH_SYM_CHECK(cond, ...) \
-  TORCH_CHECK((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
+  TORCH_CHECK((cond).expect_true(__FILE__, __LINE__, ""), __VA_ARGS__)
 #define TORCH_SYM_INTERNAL_ASSERT(cond, ...) \
-  TORCH_INTERNAL_ASSERT((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
+  TORCH_INTERNAL_ASSERT((cond).expect_true(__FILE__, __LINE__, ""), __VA_ARGS__)
 #define TORCH_MAYBE_SYM_CHECK(cond, ...)                                 \
   if constexpr (std::is_same_v<std::decay_t<decltype(cond)>, SymBool>) { \
-    TORCH_CHECK((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)     \
+    TORCH_CHECK((cond).expect_true(__FILE__, __LINE__, ""), __VA_ARGS__)     \
   } else {                                                               \
     TORCH_CHECK((cond), __VA_ARGS__)                                     \
   }
