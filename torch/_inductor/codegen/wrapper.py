@@ -926,7 +926,8 @@ class PythonWrapperCodegen(CodeGen):
             return SubgraphPythonWrapperCodegen(
                 subgraph_name, parent_wrapper, partition_signatures
             )
-        return PythonWrapperCodegen()
+        from .wrapper_fxir import WrapperFxCodegen #XXX testing
+        return WrapperFxCodegen() #XXX testing
 
     def set_launcher_fn_name(self) -> None:
         self.launcher_fn_name = "call"
