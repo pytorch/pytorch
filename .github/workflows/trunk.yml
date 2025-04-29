@@ -176,7 +176,7 @@ jobs:
       build-environment: win-arm64-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-arm64-cpu-build
-      runner: "windows-11-arm64"
+      runner: "windows-11-arm64-preview"
     secrets: inherit
 
   win-arm64-vs2022-cpu-py3-test:
@@ -188,7 +188,7 @@ jobs:
     with:
       build-environment: win-arm64-vs2022-cpu-py3
       cuda-version: cpu
-      runner: "windows-11-arm64"
+      runner: "windows-11-arm64-preview"
     secrets: inherit
 
   linux-focal-rocm-py3_10-build:

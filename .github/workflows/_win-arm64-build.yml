@@ -41,7 +41,7 @@ on:
       runner:
         required: false
         type: string
-        default: windows-11-arm64
+        default: windows-11-arm64-preview
         description: |
           Label of the runner this job should run on.
 
@@ -67,7 +67,7 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: "windows-11-arm64"
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
@@ -87,27 +87,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: pytorch
+          submodules: recursive
 
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "%PYTORCH_ROOT%"
-
-      - name: Git checkout PyTorch - recursive
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-          submodules: recursive
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"        
 
       - name: Parse ref
         id: parse-ref

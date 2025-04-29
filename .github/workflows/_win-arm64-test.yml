@@ -28,7 +28,7 @@ on:
       runner:
         required: false
         type: string
-        default: windows-11-arm64
+        default: windows-11-arm64-preview
         description: |
           Label of the runner this job should run on.
           
@@ -51,21 +51,6 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: pytorch
-
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-
-      - name: Remove Pytorch folder
-        shell: cmd
-        run: |
-          rmdir /s /q "%PYTORCH_ROOT%"
-
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
