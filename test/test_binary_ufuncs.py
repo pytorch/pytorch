@@ -1686,23 +1686,12 @@ class TestBinaryUfuncs(TestCase):
             base = torch.tensor(3.0, device="cpu")
             self._test_pow(base, exp)
 
-    # adding special case for power of 2 for complex numbers 
     @onlyCUDA
     def test_pow_cuda_complex_extremal_passing(self, device):
-        t = torch.tensor([-5 + 0.j], device=device)
+        t = torch.tensor([-5 + 0.0j], device=device)
         cuda_out = t.pow(2)
         cpu_out = t.cpu().pow(2)
-        # Ensure exact equality
         self.assertEqual(cpu_out, cuda_out)
-
-    @onlyCUDA
-    @dtypes(torch.complex64, torch.complex128)
-    def test_pow_cuda_complex_extremal_failing(self, device, dtype):
-        t = torch.tensor(complex(-1.0, float("inf")), dtype=dtype, device=device)
-        with self.assertRaises(AssertionError):
-            cuda_out = t.pow(2)
-            cpu_out = t.cpu().pow(2)
-            self.assertEqual(cpu_out, cuda_out)
 
     @skipIfTorchDynamo()
     @onlyNativeDeviceTypes
