@@ -118,7 +118,7 @@ static void binaryOpTensor(const Tensor& self,
   }
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other, output_});
+    std::string key = op_name + getTensorsStringKey({self, other, output_});
     auto cachedGraph = LookUpOrCreateCachedGraph<BinaryOpCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->primaryTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(inputDataType), getMPSShape(self));
@@ -200,7 +200,7 @@ static void div_mode_template(const Tensor& self,
                               const Tensor& other,
                               std::optional<std::string_view> rounding_mode,
                               const Tensor& output,
-                              const string op_name) {
+                              const std::string& op_name) {
   if (rounding_mode.has_value() && *rounding_mode == "trunc") {
     TORCH_CHECK(self.scalar_type() != ScalarType::Half, "MPS: does not support trunc_divide op with float16 input");
   }
