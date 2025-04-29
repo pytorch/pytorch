@@ -871,7 +871,7 @@ class Optimizer:
 
         .. warning::
             Make sure this method is called after initializing :class:`torch.optim.lr_scheduler.LRScheduler`,
-            as calling it beforehand will overwrite the loaded opelearning rates.
+            as calling it beforehand will overwrite the loaded learning rates.
 
         Example:
             >>> # xdoctest: +SKIP
