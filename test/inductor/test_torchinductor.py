@@ -2969,7 +2969,7 @@ class CommonTemplate:
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
 
         # without manual_seed, there is some chance this test fails due to:
-        # https://github.com/openai/triton/issues/530
+        # https://github.com/triton-lang/triton/issues/530
         torch.manual_seed(0)
 
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
@@ -5875,7 +5875,6 @@ class CommonTemplate:
             ),
         )
 
-    @xfail_if_mps  # Expected `value` to be on same device as `a`
     def test_masked_fill_promotion(self):
         def fn(mask, value):
             return aten.masked_fill(value, mask, torch.tensor(3.5))
@@ -6616,6 +6615,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     RuntimeError, r".*(not implemented|aoti_torch_).*"
                 ):
                     c_op(x, kernel_size=2, stride=2)
+
+    def test_replication_pad_errors_with_bool(self):
+        for dim in (1, 2, 3):
+
+            def fn(x):
+                x = torch.signbit(x)
+                x = eval(f"nn.ReplicationPad{dim}d(padding=1)")(x)
+                return x
+
+            c_fn = torch.compile(fn)
+            x = torch.randn([1] * (dim + 2))
+            with self.assertRaisesRegex(
+                RuntimeError, r".*(not implemented|aoti_torch_).*"
+            ):
+                c_fn(x)
 
     def test_log1p(self):
         def fn(x):
@@ -7957,7 +7971,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.randint(0, 100, size=[600], dtype=torch.int64),
                 torch.randn([600, 256, 7, 7]),
             ],
-            # workaround for https://github.com/openai/triton/issues/558
+            # workaround for https://github.com/triton-lang/triton/issues/558
             check_lowp=False,
         )
 
@@ -14542,6 +14556,20 @@ if RUN_GPU:
                 ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
                     code[0]
                 )
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_foreach_op(self):
+            def fn(a0, a1):
+                c = torch._foreach_abs([a0, a1])
+                return torch.mul(c[0], a0)
+
+            compiled_fn = torch.compile(fn)
+
+            a0 = torch.randn(2, 3, device=self.device)
+            a1 = torch.randn(2, 3, device=self.device)
+            eager_out = fn(a0, a1)
+            compiled_out = compiled_fn(a0, a1)
+            self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_multiple_functions(self):

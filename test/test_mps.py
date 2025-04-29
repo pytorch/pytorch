@@ -5605,6 +5605,52 @@ class TestMPS(TestCaseMPS):
         x = x_cpu.detach().clone().to('mps')
         self.assertEqual(helper(x_cpu), helper(x))
 
+    def test_col2im(self):
+        def helper(shapes, output_size, kernel_size, padding, stride, contiguous, dtype=torch.float32, test_bool=False):
+            atol = 1e-5 if dtype == torch.float else 1e-2
+            rtol = 1e-3 if dtype == torch.float else 1e-2
+            x_cpu = torch.rand(*shapes, dtype=dtype)
+            if test_bool:
+                x_cpu = x_cpu > 0.5
+            x_mps = x_cpu.clone().to('mps')
+            if not contiguous:
+                x_cpu = x_cpu.mT
+                x_mps = x_mps.mT
+            out_cpu = torch.nn.functional.fold(
+                x_cpu,
+                output_size=output_size,
+                kernel_size=kernel_size,
+                padding=padding,
+                stride=stride
+            )
+            out_mps = torch.nn.functional.fold(
+                x_mps,
+                output_size=output_size,
+                kernel_size=kernel_size,
+                padding=padding,
+                stride=stride
+            )
+            self.assertEqual(out_cpu, out_mps, atol=atol, rtol=rtol)
+
+        helper((4, 27, 1600), (40, 40), 3, 1, 1, True)
+        helper((1, 27, 1600), (40, 40), 3, 1, 1, True)
+        helper((27, 1600), (40, 40), 3, 1, 1, True)
+        helper((27, 320), (80, 4), 3, 1, 1, True)
+        helper((27, 320), (4, 80), 3, 1, 1, True)
+        helper((320, 27), (4, 80), 3, 1, 1, False)
+        helper((4, 75, 1600), (40, 40), 5, 2, 1, True)
+        helper((4, 75, 441), (41, 41), 5, 2, 2, True)
+        helper((4, 12, 100), (20, 20), 2, 0, 2, True)
+        helper((4, 48, 225), (30, 30), 4, 1, 2, True)
+        helper((100, 75), (20, 20), 5, 2, 2, False)
+        helper((4, 15, 1600), (40, 40), (3, 5), (1, 2), (1, 1), True)
+        helper((4, 45, 187), (35, 33), (3, 5), (0, 1), (2, 3), True)
+        helper((1600, 15), (40, 40), (3, 5), (1, 2), (1, 1), False)
+        if MACOS_VERSION >= 14.0:
+            helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.bfloat16)
+        helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
+        helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
+
     def test_select(self):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
@@ -11979,6 +12025,8 @@ class TestConsistency(TestCaseMPS):
             ):
                 atol = 1e-5
                 rtol = 1.5e-3
+            if op.name == "nn.functional.unfold" and dtype == torch.float16:
+                atol, rtol = 1e-3, 1e-3
             # Order of ops in unsafe_masked_index backward is not guaranteed
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
