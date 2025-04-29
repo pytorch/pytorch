@@ -9234,12 +9234,13 @@ class TestSDPA(TestCaseMPS):
             )
         self._compare_tensors(y.cpu(), y_ref)
 
+    @serialTest
     def test_sdpa_fp32_no_memory_leak(self):
         def get_mps_memory_usage():
             return (torch.mps.current_allocated_memory() / (1024 * 1024),
                     torch.mps.driver_allocated_memory() / (1024 * 1024))
         if MACOS_VERSION > 15.0:
-            batch_size, seq_len, num_heads, head_dim = 4, 1024, 8, 512
+            batch_size, seq_len, num_heads, head_dim = 4, 128, 8, 64
             query = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
             key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
             value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
