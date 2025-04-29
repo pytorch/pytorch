@@ -2089,11 +2089,12 @@ if HAS_CUDA:
                 is_backward=False,
                 is_inference=False,
                 device_index=0,
+                stack_traces=["dummy stack trace1", "dummy stack trace2"]
             )
 
             ref_out = torch.ones((2, 3), device="cuda:0", dtype=torch.float32)
 
-            for i in range(3):
+            for _ in range(3):
                 torch.compiler.cudagraph_mark_step_begin()
                 main_stream_buffer, side_stream_buffer = graphed_multi_stream_func(
                     [2, 3]

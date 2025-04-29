@@ -2186,7 +2186,6 @@ class CUDAGraphTreeManager:
         self, new_inputs: list[InputType], function_id: FunctionID
     ) -> OutputType:
         assert not isinstance(self.current_node, CUDAWarmupNode)
-        breakpoint()
         graph_id = self.new_graph_id()
         log.debug(
             "Recording function %d of graph recording id %d",
