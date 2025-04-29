@@ -827,6 +827,10 @@ class MetalKernel(SIMDKernel):
     def call_kernel(self, name: str, node: Any = None) -> None:
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
+        # Make sure sizevarss has been computed
+        for v in self.args.sizevars.keys():
+            wrapper.ensure_size_computed(v)
+
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
