@@ -2894,7 +2894,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # Call the subgraph launcher function
         self.writeline(
-            f"({outer_output_names}) = {subgraph.graph.name}(({outer_input_names}))"
+            f"({outer_output_names}) = {subgraph.graph.name}([{outer_input_names}])"
         )
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
@@ -3149,12 +3149,3 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
-
-    def write_args(self, input_names: list[str]):
-        lhs = ", ".join(input_names)
-        if len(input_names) == 1:
-            lhs += ","
-        self.prefix.writeline(f"{lhs} = args")
-        # Dont use clear on args
-        if config.graph_partition:
-            self.prefix.writeline("args.clear()")
