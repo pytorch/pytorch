@@ -555,8 +555,12 @@ class FxConverter:
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):
             kwargs["out"] = self.buffer_to_node[out_ir_node.codegen_reference()]
-        elif not isinstance(kernel.layout, ir.NoneLayout):
+        elif isinstance(kernel.layout, (ir.Layout, ir.MultiOutputLayout)):
             result_buffer = kernel.get_name()
+        elif isinstance(kernel.layout, ir.NoneLayout):
+            pass
+        else:
+            raise NotImplementedError(f"Unrecognized output layout: {kernel.layout}")
 
         # Look up the kernel function from its name.
         kernel_name = kernel.get_kernel_name()
