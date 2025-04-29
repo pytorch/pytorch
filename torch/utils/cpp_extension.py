@@ -198,47 +198,41 @@ def _join_sycl_home(*paths) -> str:
 
 
 
-ABI_INCOMPATIBILITY_WARNING = '''
-
-                               !! WARNING !!
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-Your compiler ({}) may be ABI-incompatible with PyTorch!
-Please use a compiler that is ABI-compatible with GCC 5.0 and above.
-See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.
-
-See https://gist.github.com/goldsborough/d466f43e8ffc948ff92de7486c5216d6
-for instructions on how to install GCC 5 or higher.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-                              !! WARNING !!
-'''
-WRONG_COMPILER_WARNING = '''
-
-                               !! WARNING !!
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-Your compiler ({user_compiler}) is not compatible with the compiler Pytorch was
-built with for this platform, which is {pytorch_compiler} on {platform}. Please
-use {pytorch_compiler} to to compile your extension. Alternatively, you may
-compile PyTorch from source using {user_compiler}, and then you can also use
-{user_compiler} to compile your extension.
-
-See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
-with compiling PyTorch from source.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-                              !! WARNING !!
-'''
-CUDA_MISMATCH_MESSAGE = '''
-The detected CUDA version ({0}) mismatches the version that was used to compile
-PyTorch ({1}). Please make sure to use the same CUDA versions.
-'''
-CUDA_MISMATCH_WARN = "The detected CUDA version ({0}) has a minor version mismatch with the version that was used to compile PyTorch ({1}). Most likely this shouldn't be a problem."
-CUDA_NOT_FOUND_MESSAGE = '''
-CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
-environment variable or add NVCC to your system PATH. The extension compilation will fail.
-'''
+ABI_INCOMPATIBILITY_WARNING = (\
+    "\n\n                               !! WARNING !!\n\n"
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+    "Your compiler (%s) may be ABI-incompatible with PyTorch!\n"
+    "Please use a compiler that is ABI-compatible with GCC 5.0 and above.\n"
+    "See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.\n\n"
+    "See https://gist.github.com/goldsborough/d466f43e8ffc948ff92de7486c5216d6\n"
+    "for instructions on how to install GCC 5 or higher.\n"
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n"
+    "                              !! WARNING !!\n"
+)
+WRONG_COMPILER_WARNING = (\
+    "\n\n                               !! WARNING !!\n\n"
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+    "Your compiler (%s) is not compatible with the compiler Pytorch was\n"
+    "built with for this platform, which is %s on %s. Please\n"
+    "use %s to to compile your extension. Alternatively, you may\n"
+    "compile PyTorch from source using %s, and then you can also use\n"
+    "%s to compile your extension.\n\n"
+    "See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help\n"
+    "with compiling PyTorch from source.\n"
+    "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n"
+    "                              !! WARNING !!\n"
+)
+CUDA_MISMATCH_MESSAGE = (\
+    "\nThe detected CUDA version (%s) mismatches the version that was used to compile\n"
+    "PyTorch (%s). Please make sure to use the same CUDA versions.\n"
+)
+CUDA_MISMATCH_WARN = (
+    "The detected CUDA version (%s) has a minor version mismatch with the version that was used to compile PyTorch (%s). Most likely this shouldn't be a problem."
+)
+CUDA_NOT_FOUND_MESSAGE = (\
+    "\nCUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH\n"
+    "environment variable or add NVCC to your system PATH. The extension compilation will fail.\n"
+)
 ROCM_HOME = _find_rocm_home()
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
@@ -438,10 +432,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
-        logger.warning(WRONG_COMPILER_WARNING.format(
-            user_compiler=compiler,
-            pytorch_compiler=_accepted_compilers_for_platform()[0],
-            platform=sys.platform))
+        logger.warning(WRONG_COMPILER_WARNING % (compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0]))
         return (False, TorchVersion('0.0.0'))
 
     if IS_MACOS:
@@ -470,7 +461,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
         return (True, TorchVersion('.'.join(numeric_version)))
 
     compiler = f'{compiler} {".".join(numeric_version)}'
-    logger.warning(ABI_INCOMPATIBILITY_WARNING.format(compiler))
+    logger.warning(ABI_INCOMPATIBILITY_WARNING % compiler)
 
     return (False, TorchVersion('.'.join(numeric_version)))
 
@@ -499,8 +490,8 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
         if getattr(cuda_ver, "major", None) is None:
             raise ValueError("setuptools>=49.4.0 is required")
         if cuda_ver.major != torch_cuda_version.major:
-            raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
-        logger.warning(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
+            raise RuntimeError(CUDA_MISMATCH_MESSAGE % (cuda_str_version, torch.version.cuda))
+        logger.warning(CUDA_MISMATCH_WARN % (cuda_str_version, torch.version.cuda))
 
     if not (sys.platform.startswith('linux') and
             os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') not in ['ON', '1', 'YES', 'TRUE', 'Y'] and
