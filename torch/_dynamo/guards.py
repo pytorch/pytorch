@@ -2518,6 +2518,10 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_python_module(cls, alias: str):
         return importlib.import_module(alias)
 
+    @classmethod
+    def _unpickle_dispatch_key_set(cls, raw_repr: int):
+        return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
+
     def reducer_override(self, obj):
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             return type(self)._unpickle_tensor, (
@@ -2535,6 +2539,9 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif inspect.ismodule(obj):
             return type(self)._unpickle_python_module, (obj.__name__,)
+
+        elif isinstance(obj, torch._C.DispatchKeySet):
+            return type(self)._unpickle_dispatch_key_set, (obj.raw_repr(),)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise RuntimeError(
