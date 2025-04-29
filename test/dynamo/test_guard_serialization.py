@@ -270,6 +270,15 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": False}, False)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": True}, False)
 
+    def test_id_match(self):
+        def fn(x):
+            return x + id(x)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "ID_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("ID_MATCH", fn, torch.randn(3))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

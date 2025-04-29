@@ -1517,6 +1517,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def ID_MATCH(self, guard: Guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("ID_MATCH guard cannot be serialized.")
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
