@@ -916,7 +916,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 
   Py_RETURN_TRUE;
 }
- 
+
 static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   /*
    * Asserts that a given tensor meets certain alignment.
