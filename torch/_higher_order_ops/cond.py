@@ -19,8 +19,8 @@ from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_reenter_make_fx,
-    FunctionalizeCtxWrapper,
     _set_compilation_env,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -660,7 +660,7 @@ def _merge_tensors(
 
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)

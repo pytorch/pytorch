@@ -11,9 +11,9 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
-    FunctionalizeCtxWrapper,
     check_meta_consistency,
     first_slice_copy,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -857,7 +857,7 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)

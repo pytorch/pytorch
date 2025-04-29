@@ -3,11 +3,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import (
-    FunctionalizeCtxWrapper,
-    reenter_make_fx,
-    UnsupportedAliasMutationException,
-)
+from torch._higher_order_ops.utils import FunctionalizeCtxWrapper, reenter_make_fx
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -242,7 +238,7 @@ def map_fake_tensor_mode(mode, f, xs, args):
 
 @map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)

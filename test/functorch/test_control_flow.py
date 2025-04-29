@@ -159,7 +159,7 @@ def get_scan_combine_fn(name, associative=True, parameters=None):
     def RNN(x: torch.Tensor, y: torch.Tensor):
         c_new = y @ parameters[0] + parameters[1]
         h_new = torch.tanh(c_new + x @ parameters[2] + parameters[3])
-        return h_new, h_new
+        return h_new, h_new.clone()
 
     def fct_c1_no_grad(x: torch.Tensor, y: torch.Tensor):
         h_new = torch.tanh(x[0] + x[1] + y)
@@ -2395,8 +2395,11 @@ def forward(self, pred_1, x_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "Combine_fn might be aliasing the input or the output.*",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
         ):
             scan_fct(wrong_carry_shape, init, x, dim=dim)
 
@@ -3324,8 +3327,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         with self.assertRaisesRegex(
             # Should be
-            RuntimeError,
-            "Combine_fn might be modifying the input!",
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
         ):
             scan(fct_input_mutation, init, x, dim=0)
 
@@ -3343,8 +3348,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         with self.assertRaisesRegex(
             # Should be
-            RuntimeError,
-            "Combine_fn might be aliasing the input.*",
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
@@ -3362,8 +3369,10 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         with self.assertRaisesRegex(
             # Should be
-            RuntimeError,
-            "Combine_fn might be aliasing the input.*",
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
@@ -3382,9 +3391,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
 
         with self.assertRaisesRegex(
-            # Should be:
-            RuntimeError,
-            "Combine_fn might be aliasing the input.*",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
         ):
             scan(fct_carry_carry_alias, init, inp, dim=0)
 
@@ -3403,9 +3414,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
 
         with self.assertRaisesRegex(
-            # Should be:
-            RuntimeError,
-            "Combine_fn might be aliasing the input.*",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
@@ -4741,8 +4754,10 @@ class AssociativeScanTests(TestCase):
 
         with self.assertRaisesRegex(
             # Should be
-            RuntimeError,
-            "Combine_fn might be modifying the input!",
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "associative_scan must be captured completely with torch.compile.*",
         ):
             associative_scan(fct_input_mutation, x, 0)
 
@@ -4759,8 +4774,10 @@ class AssociativeScanTests(TestCase):
 
         with self.assertRaisesRegex(
             # Should be
-            RuntimeError,
-            "Combine_fn might be aliasing the input.*",
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "associative_scan must be captured completely with torch.compile.*",
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
@@ -4778,9 +4795,11 @@ class AssociativeScanTests(TestCase):
         inp = (x, y)
 
         with self.assertRaisesRegex(
-            # Should be:
-            RuntimeError,
-            "Combine_fn might be aliasing the input.*",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "associative_scan must be captured completely with torch.compile.*",
         ):
             associative_scan(fct_output_output_alias, inp, 0)
 
@@ -5617,8 +5636,9 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_true might be modifying the input!",
+            # torch._dynamo.exc.InternalTorchDynamoError,
+            RuntimeError,
+            "cond_true might be aliasing the input or the output!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5658,8 +5678,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_false might be modifying the input!",
+            RuntimeError,
+            "cond_false might be aliasing the input or the output!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5692,8 +5712,11 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_false might be aliasing the input or the output!",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5720,8 +5743,8 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_true might be modifying the input!",
+            RuntimeError,
+            "cond_true might be aliasing the input or the output!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5753,8 +5776,11 @@ def forward(self, x_1):
             f(example_input_func)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be modifying the input!",
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -5772,8 +5798,11 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_true might be modifying the input!",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -5794,8 +5823,11 @@ def forward(self, x_1):
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be aliasing the input or the output!",
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 f(example_input_func)
         finally:
@@ -5825,8 +5857,11 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_true might be aliasing the input or the output!",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -5961,8 +5996,11 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_false might be aliasing the input or the output!",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -6134,8 +6172,11 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "cond_false might be aliasing the input or the output!",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile.*",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -6421,7 +6462,7 @@ def forward(self, arg0_1):
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.map might be modifying the input!",
+            "torch.map might be aliasing the input or the output!",
         ):
             functional_f(*example_inputs)
 
@@ -6439,7 +6480,7 @@ def forward(self, arg0_1):
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.map might be modifying the input!",
+            "torch.map might be aliasing the input or the output!",
         ):
             functional_f(*example_inputs)
 
@@ -7369,8 +7410,8 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "Combine_fn might be modifying the input!",
+            RuntimeError,
+            "Combine_fn might be aliasing the input or the output!",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7383,8 +7424,8 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
 
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "Combine_fn might be modifying the input",
+            RuntimeError,
+            "Combine_fn might be aliasing the input or the output!",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7399,8 +7440,11 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "Combine_fn might be aliasing the input or the output!",
+            # Should be
+            # torch._dynamo.exc.Unsupported,
+            # "Encountered aliasing during higher order op tracing for HOP.*"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with torch.compile.*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7910,8 +7954,11 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be aliasing the input or the output!",
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 torch.compile(fn)(f, x)
 
@@ -7927,8 +7974,11 @@ class GraphModule(torch.nn.Module):
         # as a result of auto lifting.
         for view_f in ALIAS_FN[1:]:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be aliasing the input or the output!",
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 torch.compile(fn)(view_f, x)
 
@@ -7945,14 +7995,20 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be modifying the input!",
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 torch.compile(fn)(f, x)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be modifying the input!",
+                # Should be
+                # torch._dynamo.exc.Unsupported,
+                # "Encountered aliasing during higher order op tracing for HOP.*"
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile.*",
             ):
                 with torch.inference_mode(inference_mode):
                     torch.compile(fn)(f, x)

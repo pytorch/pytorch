@@ -136,7 +136,7 @@ def call_delegate_fake_tensor_mode(mode, lowered_module, *args):
 @executorch_call_delegate.py_functionalize_impl
 # pyre-ignore
 def call_delegate_functionalize(ctx, lowered_module, *args):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_args = tuple(ctx.unwrap_tensors(arg) for arg in args)
     with ctx.redispatch_to_next():

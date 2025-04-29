@@ -482,7 +482,7 @@ def _(subgraph, identifier, operands):
 
 @invoke_subgraph.py_functionalize_impl
 def _(ctx, subgraph, identifier, operands):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_operands = ctx.unwrap_tensors(operands)
     with ctx.redispatch_to_next():

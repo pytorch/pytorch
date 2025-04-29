@@ -88,7 +88,7 @@ def hints_wrapper_fake_tensor_mode(mode, body_func, args, kwargs, hints):
 
 @hints_wrapper.py_functionalize_impl
 def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_args = ctx.unwrap_tensors(args)
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)

@@ -342,6 +342,65 @@ def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     )
 
 
+def _collect_fake_inputs(inputs):
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    # Get the example values of the inputs.
+    inputs_fake = []
+    for inp in inputs:
+        if isinstance(inp, (torch.fx.proxy.Proxy, torch.fx.node.Node)):
+            inp = inp.node if isinstance(inp, torch.fx.proxy.Proxy) else inp
+            if hasattr(inp, "meta"):
+                val = inp.meta["example_value"]
+                if isinstance(val, torch.Tensor):
+                    if torch._C._functorch.is_batchedtensor(
+                        val
+                    ) or torch._C._functorch.is_functionaltensor(val):
+                        # This case is for batched or functional tensors
+                        # Unwrap the tensors
+                        while torch._C._functorch.is_batchedtensor(
+                            val
+                        ) or torch._C._functorch.is_functionaltensor(val):
+                            val = torch._C._functorch.get_unwrapped(val)
+                        assert isinstance(val, FakeTensor)
+                        inputs_fake.append(val)
+                    else:
+                        # This is the standard case of a TensorVariable
+                        assert isinstance(val, FakeTensor)
+                        inputs_fake.append(val)
+                else:
+                    # This case is for SymInts and other non-Tensor elements
+                    assert not isinstance(val, torch.Tensor)
+                    inputs_fake.append(val)
+        else:
+            # This case is for ints
+            assert isinstance(inp, int)
+            inputs_fake.append(inp)
+
+    return inputs_fake
+
+
+def _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch):
+    aliases, inp_mutation = has_potential_input_alias_or_mutation(
+        graph_module, inputs_fake, pre_dispatch=pre_dispatch
+    )
+    if aliases:
+        raise RuntimeError(
+            f"{name} might be aliasing the input or the output!"
+        )  # noqa: F541
+    if inp_mutation:
+        raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
+
+
+def check_mutation_and_alias(tx, graph_module, inputs, name, pre_dispatch=False):
+    with tx.fake_mode:
+        # Collect the fake inputs from the input proxies
+        inputs_fake = _collect_fake_inputs(inputs)
+
+        # Check for mutations and alias and raise Exceptions when needed
+        _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch)
+
+
 def unique_graph_id(proxy_mode, prefix):
     """Returns a unique name and id for a graph to be added to a proxy_mode tracer"""
     # There are probably better ways - I know that create_arg has some self incrementing name

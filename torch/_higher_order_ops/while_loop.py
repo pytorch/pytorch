@@ -6,10 +6,10 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    FunctionalizeCtxWrapper,
     _set_compilation_env,
     autograd_not_implemented,
     check_meta_consistency,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     validate_subgraph_args_types,
 )
@@ -393,7 +393,7 @@ def while_loop_fake_tensor_mode(
 
 @while_loop_op.py_functionalize_impl
 def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)

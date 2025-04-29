@@ -9,11 +9,11 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    FunctionalizeCtxWrapper,
     _set_compilation_env,
     autograd_not_implemented,
     check_meta_consistency,
     first_slice_copy,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -421,7 +421,7 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
 
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+    from torch._higher_order_ops.utils import _check_mutation_and_alias
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
