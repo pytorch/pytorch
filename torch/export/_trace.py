@@ -1353,17 +1353,16 @@ def _strict_export(
     _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
     """
 
-    with _compiling_state_context():
-        gm_torch_level = _export_to_torch_ir(
-            mod,
-            args,
-            kwargs,
-            dynamic_shapes,
-            preserve_module_call_signature=preserve_module_call_signature,
-            restore_fqn=False,  # don't need to restore because we will do it later
-            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-            _log_export_usage=False,
-        )
+    gm_torch_level = _export_to_torch_ir(
+        mod,
+        args,
+        kwargs,
+        dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        restore_fqn=False,  # don't need to restore because we will do it later
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        _log_export_usage=False,
+    )
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
     (
