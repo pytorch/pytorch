@@ -26,6 +26,11 @@ class _FrameState:
     f_builtins: dict
 
 
+class GlobalModule(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
     def _tracefunc(self, frame, event, arg):
         if event != "call":
@@ -183,6 +188,27 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         delattr(m, "a")
         self._test_check_fn(ref, loaded, {"m": m}, False)
+
+    def test_type_match(self):
+        class LocalModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+        m = LocalModule()
+
+        def fn(m, x):
+            return m(x)
+
+        with self.assertRaisesRegex(
+            TypeError, "Please define the class at global scope"
+        ):
+            self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
+
+        m = GlobalModule()
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"m": m}, True)
+        self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
+        self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
 
 
 if __name__ == "__main__":
