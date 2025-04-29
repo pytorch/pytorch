@@ -485,21 +485,6 @@ def lazy_init():
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
-    if torch.distributed.is_available():
-
-        def check():
-            # This is a wait node, and `other_node`` is some collective node.
-            # Eager semantics allow waits to be issued in a different order than
-            # the collectives. Reordering this wait node might reorder collectives
-            # which cause hangs. Once we have SPMD mode, we can safely reorder them.
-            # However, increasing the locality between a collective and its wait node
-            # is generally worse for performance.
-            return node.target != torch.ops._c10d_functional.wait_tensor.default
-    else:
-
-        def check():
-            return True
-
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -507,7 +492,6 @@ def reorder_for_locality(graph: torch.fx.Graph):
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
-            and check()
         ):
             # move node's producers right before it
             node.prepend(other_node)
@@ -898,14 +882,9 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp(aten.view.default)
-def view_default_noop(arg, size):
-    return statically_known_true(sym_eq(arg.shape, tuple(size)))
-
-
-@register_noop_decomp(aten.view.dtype)
-def view_dtype_noop(arg, dtype):
-    return arg.dtype == dtype
+@register_noop_decomp(aten.view)
+def view_noop(arg, size):
+    return arg.shape == size
 
 
 # Note, we also always have a check for identical metadata, which is why these

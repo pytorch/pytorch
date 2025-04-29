@@ -109,18 +109,11 @@ class BlockPointerTestBase(InductorTestCase):
         view = torch.as_strided(full, view_size, full.stride())
         return view
 
-    def _assert_pointwise_ndims(self, code, num_dims: int) -> None:
-        pointwise_blocks = ["XBLOCK", "YBLOCK", "ZBLOCK"]
-        return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
-
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
         reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
-        return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
-
-    def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
-        for expected_block in blocks[:num_dims]:
+        for expected_block in reduction_blocks[:num_dims]:
             self.assertIn(expected_block, code)
-        for unexpected_block in blocks[num_dims:]:
+        for unexpected_block in reduction_blocks[num_dims:]:
             self.assertNotIn(unexpected_block, code)
 
     def _get_lines_containing_substr(self, code: str, substr: str) -> str:
@@ -936,7 +929,7 @@ class CommonTemplate:
         )
 
         # Check for 3D tiling
-        self._assert_pointwise_ndims(code, 3)
+        self.assertIn("ZBLOCK", code)
 
     @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     @parametrize("num_tile_candidates", (1, 2))
@@ -1043,63 +1036,6 @@ class CommonTemplate:
     yindex = yoffset + tl.arange(0, YBLOCK)[None, :, None]
     xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",  # noqa: B950
         )
-
-    def test_expand_clone_broadcast(self):
-        """
-        Test expand followed by clone. This uses an explicit Triton broadcast.
-        """
-        base_size = (1, 32)
-        expanded_size = (32, 32)
-
-        def foo(x):
-            return x.expand(*expanded_size).clone()
-
-        inps = [torch.randn(base_size, device=self.device)]
-        result, (triton_code,) = run_and_compare(
-            self,
-            foo,
-            *inps,
-            expected_num_triton_kernels=1,
-            expected_num_block_pointers=2,
-            config_patches={
-                "triton.max_tiles": 3,
-                "triton.prefer_nd_tiling": True,
-            },
-        )
-
-        # We should only need one broadcast.
-        num_broadcasts = triton_code.count("tl.broadcast_to")
-        self.assertEqual(num_broadcasts, 1)
-
-    def test_mul_broadcast_multi_output(self):
-        def foo(x, y, z):
-            a = x * y
-            b = 128.0
-            c = a * b
-            d = a * z
-            e = x * z
-            return a, c, d, e
-
-        inps = [
-            torch.randn((8, 11, 128), device=self.device),
-            torch.randn((128,), device=self.device),
-            torch.randn((8, 11, 128), device=self.device),
-        ]
-        result, (triton_code,) = run_and_compare(
-            self,
-            foo,
-            *inps,
-            expected_num_triton_kernels=1,
-            expected_num_block_pointers=7,
-            config_patches={
-                "triton.max_tiles": 3,
-                "triton.prefer_nd_tiling": True,
-            },
-        )
-
-        # Check that the tiling is 2D, even though we allow up to 3D.
-        # Singleton splits should be discarded.
-        self._assert_pointwise_ndims(triton_code, 2)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

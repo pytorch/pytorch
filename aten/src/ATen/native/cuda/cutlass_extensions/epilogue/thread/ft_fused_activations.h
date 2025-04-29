@@ -42,7 +42,6 @@
 #include <cutlass/half.h>
 #include <cutlass/numeric_conversion.h>
 #include <cutlass/numeric_types.h>
-#include <cutlass/version.h>
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -70,7 +69,6 @@ __forceinline__ __device__ float tanh_opt(float x)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-#if CUTLASS_VERSION <= 380
 template<>
 struct GELU_taylor<float> {
     static const bool kIsHeavy = true;
@@ -94,7 +92,6 @@ struct GELU_taylor<float> {
         return this->operator()(scalar);
     }
 };
-#endif
 
 }  // namespace thread
 }  // namespace epilogue

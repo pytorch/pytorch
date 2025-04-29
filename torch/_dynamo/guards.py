@@ -65,7 +65,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import CompileEventLogger, get_metrics_context
+from torch._dynamo.utils import CompileEventLogger
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -2143,12 +2143,6 @@ class GuardBuilder(GuardBuilderBase):
 
             value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
-
-            if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
-                metrics_context = get_metrics_context()
-                metrics_context.increment("param_numel", value.numel())
-                metrics_context.increment("param_bytes", value.nbytes)
-                metrics_context.increment("param_count", 1)
 
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]

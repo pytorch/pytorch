@@ -39,7 +39,6 @@ class IpcChannel {
  public:
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
     TORCH_CHECK(
-        // Local-only, Uses file paths instead of IP addresses
         (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
         "Failed to create socket: ",
         c10::utils::str_error(errno));
@@ -58,9 +57,6 @@ class IpcChannel {
     unlink(socket_name_.c_str());
   }
 
-  // Because file descriptors are process-local kernel objects,
-  // and we can’t pass them via normal socket payloads (like write() or send()).
-  // Unix domain sockets provide a mechanism to pass actual FDs via sendmsg()/recvmsg().
   void send_fd(int dst_pid, int fd) {
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     auto socket_name = get_socket_name(dst_pid);
@@ -77,8 +73,6 @@ class IpcChannel {
       .msg_controllen = sizeof(cbuf)
     };
 
-    // This points to the first control message header
-    // With SCM_RIGHTS we let the kernel know that we are passing file descriptors.
     auto cmsg = CMSG_FIRSTHDR(&msg);
     cmsg->cmsg_len = CMSG_LEN(sizeof(int));
     cmsg->cmsg_level = SOL_SOCKET;
@@ -235,8 +229,6 @@ void store_barrier(
   store_all_gather(store, rank, world_size, 0);
 }
 
-// This function returns a pointer of virtual address space that is
-// mapped to the same physical memory as the given handler.
 void map_block(
     void** ptr,
     c10d::symmetric_memory::HandleType handle,
@@ -245,13 +237,10 @@ void map_block(
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   auto dev_ptr = reinterpret_cast<CUdeviceptr*>(ptr);
-  // Allocate virtual address space.
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMemAddressReserve_(dev_ptr, size, 0ULL, 0, 0ULL));
-  // Map the physical memory to the virtual address.
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemMap_(*dev_ptr, size, 0, handle, 0ULL));
 
-  // Set access permissions.
   CUmemAccessDesc desc;
   desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -748,8 +737,6 @@ static void init_multicast_for_block(
     mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
     mc_prop.size = block->block_size;
 
-    // create a multicast object, which acts as a handle that allows multiple
-    // devices or processes to access the same memory allocation coherently.
     auto err = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
     if (err != CUDA_SUCCESS) {
       const char* err_str;
@@ -767,7 +754,6 @@ static void init_multicast_for_block(
     }
 
     int mc_fd;
-    // using the CUDA Driver API to export a multicast object into a POSIX file descriptor.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
         &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
     ipc_channel.broadcast_fds(rank, 0, pids, mc_fd);
@@ -778,7 +764,6 @@ static void init_multicast_for_block(
     if (mc_fd == -1) {
       return;
     }
-    // Convert back to a handle from the broadcasted POSIX file descriptor.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &mc_handle,
         (void*)(uintptr_t)mc_fd,
@@ -830,7 +815,6 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   c10::cuda::CUDAGuard guard(block->device_idx);
 
-  // Currently, IpcChannel is using a file based socket for inter-process communication
   IpcChannel ipc_channel;
   auto group_info = get_group_info(group_name_);
   auto store = group_info.store;
@@ -839,8 +823,6 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   auto driver_api = c10::cuda::DriverAPI::get();
   int block_fd;
-  // using the CUDA Driver API to export a GPU memory block as a
-  // POSIX file descriptor (FD), so it can be shared across processes via IPC.
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
       &block_fd,
       block->alloc_ref->handle,
@@ -874,8 +856,6 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       signal_pads[r] = (void*)((uintptr_t)ptr + block->signal_pad_offset);
       continue;
     }
-    // This api imports a GPU memory allocation that was previously exported as a file
-    // descriptor and it returns a memory handle.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &handles[r],
         (void*)(uintptr_t)imported_fds[r],

@@ -192,16 +192,12 @@ void HashStore::queuePush(
   cv_.notify_one();
 }
 
-std::vector<uint8_t> HashStore::queuePop(const std::string& key, bool block) {
+std::vector<uint8_t> HashStore::queuePop(const std::string& key) {
   std::unique_lock<std::mutex> lock(m_);
 
-  if (block) {
-    waitLocked(lock, {key}, timeout_);
-  }
+  waitLocked(lock, {key}, timeout_);
 
   auto& queue = queues_[key];
-  TORCH_CHECK_WITH(DistQueueEmptyError, queue.size() > 0, "queue is empty");
-
   auto val = queue.front();
   queue.pop_front();
   return val;

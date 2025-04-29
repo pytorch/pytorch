@@ -62,8 +62,6 @@ def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
 
 
 class MetalExprPrinter(ExprPrinter_):
-    """Converts sympy expression to Metal code snippet"""
-
     def _print_FloorDiv(self, expr: sympy.Expr) -> str:
         x, div = expr.args
         x = self.doprint(x)
@@ -118,26 +116,6 @@ class MetalExprPrinter(ExprPrinter_):
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**23
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
-
-    def _print_PowByNatural(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 2
-        x, y = map(self.doprint, expr.args)
-        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
-
-    def _print_ToFloat(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
-        x = self.doprint(expr.args[0])
-        return f"static_cast<float>({x})"
-
-    def _print_FloorToInt(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
-        x = self.doprint(expr.args[0])
-        return f"static_cast<int>(metal::floor({x}))"
-
-    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
-        assert len(expr.args) == 1
-        x = self.doprint(expr.args[0])
-        return f"metal::log2({x})"
 
 
 class MetalOverrides(OpOverrides):
@@ -477,10 +455,6 @@ class MetalOverrides(OpOverrides):
     def hermite_polynomial_h(x: CSEVariable, n: CSEVariable) -> str:
         return f"c10::metal::hermite_polynomial_h_forward({x}, {n})"
 
-    @staticmethod
-    def hermite_polynomial_he(x: CSEVariable, n: CSEVariable) -> str:
-        return f"c10::metal::hermite_polynomial_he_forward({x}, {n})"
-
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
@@ -529,15 +503,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.output(name)
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
-        cast_val = f"static_cast<{dtype_str}>({value})"
-        if mode is None:
-            line = f"{var}[{self.index_to_str(index)}] = {cast_val};"
-        elif mode == "atomic_add":
-            atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
-            cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
-            line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
-        else:
-            raise RuntimeError(f"Unimplemented store mode {mode}")
+        line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
         if self.inside_reduction:
             self.compute.writeline(DeferredLine(name, line))
         else:
@@ -793,7 +759,6 @@ class MetalKernel(SIMDKernel):
         with code.indent():
             code.splice(
                 """
-            #include <c10/metal/atomic.h>
             #include <c10/metal/random.h>
             #include <c10/metal/special_math.h>
             #include <c10/metal/utils.h>

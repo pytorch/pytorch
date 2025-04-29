@@ -572,12 +572,6 @@ class SymNode:
             _advise_is_size(SymInt(self))
         return r
 
-    def statically_known_true(self, file, line):
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-        assert self.is_bool()
-        return statically_known_true(SymBool(self))
-
     def guard_size_oblivious(self, file, line):
         """
         Like guard_bool, but if we encounter unbacked symbols, if those symbols
@@ -1225,6 +1219,11 @@ sizes_strides_methods = {
     "is_non_overlapping_and_dense_indicator": _sympy_is_non_overlapping_and_dense_indicator,
 }
 
+alternate_impl_if_hinted_methods = {
+    "sym_min": builtins.min,
+    "sym_max": builtins.max,
+}
+
 
 def to_node(self, num):
     if isinstance(num, SymTypes):
@@ -1342,6 +1341,10 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
+
+        alternate_impl = alternate_impl_if_hinted_methods.get(method)
+        if alternate_impl and out_hint is not None:
+            return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
 
         if get_proxy_mode():
             return to_node(
