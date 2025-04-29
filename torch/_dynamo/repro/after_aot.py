@@ -782,8 +782,7 @@ def repro_analyze(options, mod, load_args):
                     r,
                     inductor,
                     float64,
-                    atol=torch._dynamo.config.repro_tolerance,
-                    rtol=torch._dynamo.config.repro_tolerance,
+                    tol=torch._dynamo.config.repro_tolerance,
                     equal_nan=True,
                     log_error=log_error,
                 ):
