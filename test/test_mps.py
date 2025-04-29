@@ -12095,48 +12095,63 @@ class TestCOWInputs(TestCase):
         for sample in samples:
             args_raw = [sample.input] + list(sample.args)
             kwargs_raw = sample.kwargs
+
+            # Eagerly cloned inputs used to keep track of the original values of
+            # inputs
             args_copy = []
-            args = []
             kwargs_copy = {}
-            kwargs = {}
+
+            # The lazy cloned inputs to be passed to the op.
+            args_lazy_cloned = []
+            kwargs_lazy_cloned = {}
+
+            # In order to keep the original args/kwargs_raw COW in cases where
+            # the op materializes the input, we need to start with three sets of
+            # COW inputs.
+            args_lazy_cloned_2 = []
+            kwargs_lazy_cloned_2 = {}
+
+            leaf_tensors = composite_compliance.gather_leaf_tensors(args_raw, kwargs_raw)
 
             # Convert strided tensor inputs to COW tensors and make copies of
             # all inputs
             for idx, arg in enumerate(args_raw):
                 if is_strided_tensor(arg):
                     args_copy.append(arg.detach().clone())
-                    args.append(torch._lazy_clone(arg))
+                    args_lazy_cloned.append(torch._lazy_clone(arg))
+                    args_lazy_cloned_2.append(torch._lazy_clone(arg))
                 else:
                     if torch.is_tensor(arg):
                         args_copy.append(arg.detach().clone())
                     else:
                         args_copy.append(copy.deepcopy(arg))
-                    args.append(arg)
+                    args_lazy_cloned.append(arg)
+                    args_lazy_cloned_2.append(arg)
 
             for kw, arg in kwargs_raw.items():
                 if is_strided_tensor(arg):
                     kwargs_copy[kw] = arg.detach().clone()
-                    kwargs[kw] = torch._lazy_clone(arg)
+                    kwargs_lazy_cloned[kw] = torch._lazy_clone(arg)
+                    kwargs_lazy_cloned_2[kw] = torch._lazy_clone(arg)
                 else:
                     if torch.is_tensor(arg):
                         kwargs_copy[kw] = arg.detach().clone()
                     else:
                         kwargs_copy[kw] = copy.deepcopy(arg)
-                    kwargs[kw] = arg
-
-            leaf_tensors = composite_compliance.gather_leaf_tensors(args, kwargs)
+                    kwargs_lazy_cloned[kw] = arg
+                    kwargs_lazy_cloned_2[kw] = arg
 
             # Call forward op
             try:
-                results_raw = op.get_op()(*args, **kwargs)
+                results_raw = op.get_op()(*args_lazy_cloned, **kwargs_lazy_cloned)
             except NotImplementedError:
                 raise unittest.SkipTest("Op not implemented") from None
 
             # Check that COW inputs remain COW after the forward op is executed
-            for idx, arg in enumerate(args):
+            for idx, arg in enumerate(args_lazy_cloned):
                 check_cow_input(args_copy[idx], args_raw[idx], idx)
 
-            for kw, arg in kwargs.items():
+            for kw, arg in kwargs_lazy_cloned.items():
                 check_cow_input(kwargs_copy[kw], kwargs_raw[kw], kw)
 
             # Call backward op if it is supported. This part of the test is
@@ -12183,7 +12198,7 @@ class TestCOWInputs(TestCase):
                     )
 
                     # Check that COW inputs remain COW after the backward op is executed
-                    for idx, arg in enumerate(args):
+                    for idx, arg in enumerate(args_lazy_cloned):
                         check_cow_input(
                             args_copy[idx],
                             args_raw[idx],
