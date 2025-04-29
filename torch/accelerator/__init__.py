@@ -2,10 +2,11 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Literal, Optional
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
+from torch.types import ExplicitDevice
 
 from ._utils import _device_t, _get_device_index
 
@@ -120,7 +121,7 @@ current_device_idx = deprecated(
 )(current_device_index)
 
 
-def set_device_index(device: _device_t, /) -> None:
+def set_device_index(device: ExplicitDevice) -> None:
     r"""Set the current device index to a given device.
 
     Args:
@@ -129,7 +130,7 @@ def set_device_index(device: _device_t, /) -> None:
 
     .. note:: This function is a no-op if this device index is negative.
     """
-    device_index = _get_device_index(device)
+    device_index = _get_device_index(device, optional=False)
     torch._C._accelerator_setDeviceIndex(device_index)
 
 
@@ -139,7 +140,7 @@ set_device_idx = deprecated(
 )(set_device_index)
 
 
-def current_stream(device: _device_t = None, /) -> torch.Stream:
+def current_stream(device: _device_t = None) -> torch.Stream:
     r"""Return the currently selected stream for a given device.
 
     Args:
@@ -150,7 +151,7 @@ def current_stream(device: _device_t = None, /) -> torch.Stream:
     Returns:
         torch.Stream: the currently selected stream for a given device.
     """
-    device_index = _get_device_index(device, True)
+    device_index = _get_device_index(device, optional=True)
     return torch._C._accelerator_getStream(device_index)
 
 
@@ -165,7 +166,7 @@ def set_stream(stream: torch.Stream) -> None:
     torch._C._accelerator_setStream(stream)
 
 
-def synchronize(device: _device_t = None, /) -> None:
+def synchronize(device: _device_t = None) -> None:
     r"""Wait for all kernels in all streams on the given device to complete.
 
     Args:
@@ -188,7 +189,7 @@ def synchronize(device: _device_t = None, /) -> None:
         >>> torch.accelerator.synchronize()
         >>> elapsed_time_ms = start_event.elapsed_time(end_event)
     """
-    device_index = _get_device_index(device, True)
+    device_index = _get_device_index(device, optional=True)
     torch._C._accelerator_synchronizeDevice(device_index)
 
 
@@ -216,7 +217,7 @@ class device_index:
         ...     pass
     """
 
-    def __init__(self, device: Optional[int], /) -> None:
+    def __init__(self, device: Optional[int]) -> None:
         self.idx = device
         self.prev_idx = -1
 
@@ -224,7 +225,6 @@ class device_index:
         if self.idx is not None:
             self.prev_idx = torch._C._accelerator_exchangeDevice(self.idx)
 
-    def __exit__(self, *args: object) -> Literal[False]:
+    def __exit__(self, *exec_info: Any) -> None:
         if self.idx is not None:
             torch._C._accelerator_maybeExchangeDevice(self.prev_idx)
-        return False
