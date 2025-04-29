@@ -30,7 +30,7 @@ from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
-    torch.float16: "half",
+    torch.float16: "at::Half",
     torch.int64: "int64_t",
     torch.int32: "int32_t",
     torch.int16: "int16_t",
@@ -40,14 +40,14 @@ DTYPE_TO_CPP = {
     torch.uint16: "uint16_t",
     torch.uint8: "uint8_t",
     torch.bool: "bool",
-    torch.bfloat16: "bfloat16",
-    torch.complex32: "c10::complex<half>",
-    torch.complex64: "c10::complex<float>",
-    torch.complex128: "c10::complex<double>",
-    torch.float8_e4m3fn: "float8_e4m3fn",
-    torch.float8_e5m2: "float8_e5m2",
-    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
-    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
+    torch.bfloat16: "at::BFloat16",
+    torch.complex32: "at::complex<at::Half>",
+    torch.complex64: "at::complex<float>",
+    torch.complex128: "at::complex<double>",
+    torch.float8_e4m3fn: "at::Float8_e4m3fn",
+    torch.float8_e5m2: "at::Float8_e5m2",
+    torch.float8_e4m3fnuz: "at::Float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "at::Float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {

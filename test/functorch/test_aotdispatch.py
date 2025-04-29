@@ -73,6 +73,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    TEST_MKL,
     TestCase,
     xfail_inherited_tests,
     xfailIfTorchDynamo,
@@ -3964,6 +3965,20 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    def test_duplicated_arguments_on_tensor_overlap(self):
+        # Test whether we correctly handle duplicated arguments when changing the
+        # parameters, so that we take the base tensor as argument.
+        #
+        # - t0 and t1 must have storage overlap: triggers the target execution flow.
+        # - s0 and s1 must be equal: triggers the error in the target execution flow.
+
+        @torch.compile(dynamic=True)
+        def foo(t0, t1, s0, s1):
+            return t0.add_(s0), t1.add_(s1)
+
+        tensor = torch.rand(10)
+        foo(tensor, tensor[1:-1], 2, 2)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -6655,6 +6670,24 @@ aot_autograd_failures = {
     # conv2d sometimes nondeterministic in this config?
     decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
+
+if not TEST_MKL:
+    aot_autograd_failures.update(
+        {
+            decorate(
+                "matmul",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "__rmatmul__",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+        }
+    )
 
 symbolic_aot_autograd_failures = {
     xfail("combinations", ""),  # aten.masked_select.default
