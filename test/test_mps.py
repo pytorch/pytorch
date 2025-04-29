@@ -9239,18 +9239,18 @@ class TestSDPA(TestCaseMPS):
         def get_mps_memory_usage():
             return (torch.mps.current_allocated_memory() / (1024 * 1024),
                     torch.mps.driver_allocated_memory() / (1024 * 1024))
-        if MACOS_VERSION > 15.0:
-            batch_size, seq_len, num_heads, head_dim = 4, 128, 8, 64
-            query = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
-            key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
-            value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
-            memory_footprints = []
-            for i in range(100):
-                output = F.scaled_dot_product_attention(query, key, value)
-                current_mem, driver_mem = get_mps_memory_usage()
-                memory_footprints.append((current_mem, driver_mem))
-            # 5 MB different maximum allowed value(could be decreased even more)
-            torch.testing.assert_close(memory_footprints[-1], memory_footprints[0], atol=5, rtol=1)
+
+        batch_size, seq_len, num_heads, head_dim = 4, 128, 8, 64
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
+        memory_footprints = []
+        for i in range(100):
+            output = F.scaled_dot_product_attention(query, key, value)
+            current_mem, driver_mem = get_mps_memory_usage()
+            memory_footprints.append((current_mem, driver_mem))
+        # 5 MB different maximum allowed value(could be decreased even more)
+        torch.testing.assert_close(memory_footprints[-1], memory_footprints[0], atol=5, rtol=1)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
