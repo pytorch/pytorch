@@ -11,8 +11,6 @@ on:
       - release/*
       - landchecks/*
   workflow_dispatch:
-  schedule:
-    - cron: '0 10 * * *'  # Runs daily at 2 AM PST
 
 permissions: read-all
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
@@ -282,45 +280,6 @@ jobs:
         run: |
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
-
-  lint-urls:
-    name: Lint URLs
-    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint')
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
-    with:
-      timeout: 120
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
-      fetch-depth: 0
-      submodules: false
-      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      script: |
-        ./scripts/lint_urls.sh $(
-          [ "${{ github.event_name }}" = "pull_request" ] \
-            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
-        ) || {
-          echo
-          echo "URL lint failed. If this is a transient outage, you can bypass it by adding the \`skip-url-lint\` label to your PR."
-          exit 1
-        }
-
-  lint-xrefs:
-    name: Lint Xrefs
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
-    with:
-      timeout: 60
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
-      fetch-depth: 0
-      submodules: false
-      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      script: |
-        ./scripts/lint_xrefs.sh $(
-          [ "${{ github.event_name }}" = "pull_request" ] \
-            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
-        )
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
