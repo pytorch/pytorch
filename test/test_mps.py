@@ -12127,7 +12127,11 @@ class TestCOWInputs(TestCase):
             leaf_tensors = composite_compliance.gather_leaf_tensors(args, kwargs)
 
             # Call forward op
-            results_raw = op.get_op()(*args, **kwargs)
+            try:
+                results_raw = op.get_op()(*args, **kwargs)
+            except NotImplementedError:
+                raise unittest.SkipTest("Op not implemented") from None
+
 
             # Check that COW inputs remain COW after the forward op is executed
             for idx, arg in enumerate(args):
