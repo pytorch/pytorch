@@ -485,7 +485,9 @@ class BaseSchedulerNode:
                     continue
 
                 if (
-                    buf_to_be_inplaced.scheduler.get_fused_node(user_node)
+                    user_node.get_first_name()
+                    not in buf_to_be_inplaced.scheduler.name_to_fused_node
+                    or buf_to_be_inplaced.scheduler.get_fused_node(user_node)
                     is not fused_node
                 ):
                     continue
@@ -1734,6 +1736,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             self.name_to_node = foreach_node.name_to_node
             for name in other_node.get_operation_names():
                 self.name_to_node[name] = other_node
+
+            self.outputs_by_name: dict[str, SchedulerBuffer] = {
+                k: v for snode in self.snodes for k, v in snode.outputs_by_name.items()
+            }
 
         self.use_custom_partition_algo = use_custom_partition_algo
         device = snodes[0].get_device()
@@ -4558,7 +4564,7 @@ class Scheduler:
                     )
                     return False
             except CompilationError as e:
-                # workaround triton issue: https://github.com/openai/triton/issues/2151
+                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
                 if "Loop-carried variable" in str(e):
                     fusion_log.debug(
                         "ComboKernel benchmark: return True because of loop-carried variable"
@@ -4572,7 +4578,7 @@ class Scheduler:
         try:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
-            # workaround triton issue: https://github.com/openai/triton/issues/2151
+            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
             if "Loop-carried variable" in str(e):
                 fusion_log.debug(
                     "ComboKernel benchmark: return True because of loop-carried variable"
