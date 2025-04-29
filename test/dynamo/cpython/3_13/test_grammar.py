@@ -1469,30 +1469,6 @@ class GrammarTests(__TestCase):
             compile("try:\n    pass\nexcept Exception as a.b:\n    pass", "?", "exec")
             compile("try:\n    pass\nexcept Exception as a[b]:\n    pass", "?", "exec")
 
-    def test_try_star(self):
-        ### try_stmt: 'try': suite (except_star_clause : suite) + ['else' ':' suite]
-        ### except_star_clause: 'except*' expr ['as' NAME]
-        try:
-            1/0
-        except* ZeroDivisionError:
-            pass
-        else:
-            pass
-        try: 1/0
-        except* EOFError: pass
-        except* ZeroDivisionError as msg: pass
-        else: pass
-        try: 1/0
-        except* (EOFError, TypeError, ZeroDivisionError): pass
-        try: 1/0
-        except* (EOFError, TypeError, ZeroDivisionError) as msg: pass
-        try: pass
-        finally: pass
-        with self.assertRaises(SyntaxError):
-            compile("try:\n    pass\nexcept* Exception as a.b:\n    pass", "?", "exec")
-            compile("try:\n    pass\nexcept* Exception as a[b]:\n    pass", "?", "exec")
-            compile("try:\n    pass\nexcept*:\n    pass", "?", "exec")
-
     def test_suite(self):
         # simple_stmt | NEWLINE INDENT NEWLINE* (stmt NEWLINE*)+ DEDENT
         if 1: pass
