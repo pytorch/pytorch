@@ -67,6 +67,8 @@ struct TORCH_API AcceleratorHooksInterface {
     return -1;
   }
 
+  C10_DEPRECATED_MESSAGE(
+    "isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(...)->is_pinned(...) instead.")
   virtual bool isPinnedPtr(const void* data) const {
     return false;
   }

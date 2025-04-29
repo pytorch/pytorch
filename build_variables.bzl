@@ -1052,6 +1052,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/LegacyVmapMode.cpp",
     "aten/src/ATen/LegacyVmapTransforms.cpp",
     "aten/src/ATen/core/BackendSelectFallbackKernel.cpp",
+    "aten/src/ATen/core/CachingHostAllocator.cpp",
     "aten/src/ATen/core/DeprecatedTypeProperties.cpp",
     "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
     "aten/src/ATen/core/Dict.cpp",

@@ -7,6 +7,7 @@
 #include <ATen/ROCmFABackend.h>
 #include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -105,7 +106,7 @@ class TORCH_API Context {
       // If the device is not initialized, no pointer can be pinned for it
       return false;
     }
-    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
+    return at::getHostAllocator(opt_device_type.value())->is_pinned(data);
   }
 
   Allocator* getPinnedMemoryAllocator(

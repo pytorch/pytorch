@@ -96,6 +96,8 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
+  C10_DEPRECATED_MESSAGE(
+    "getMTIAHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kMTIA)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override {
     return false;
   }

@@ -49,6 +49,8 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
+  C10_DEPRECATED_MESSAGE(
+    "getPrivateUse1Hooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kPrivateUse1)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override {
     return false;
   }

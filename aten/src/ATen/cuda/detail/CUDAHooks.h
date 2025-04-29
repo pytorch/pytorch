@@ -20,6 +20,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
   void init() const override;
   Device getDeviceFromPtr(void* data) const override;
+  C10_DEPRECATED_MESSAGE(
+    "getCUDAHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kCUDA)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override;
   const Generator& getDefaultGenerator(
       DeviceIndex device_index = -1) const override;

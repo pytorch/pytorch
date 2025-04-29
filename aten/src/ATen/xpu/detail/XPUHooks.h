@@ -24,6 +24,8 @@ struct XPUHooks : public at::XPUHooksInterface {
     return true;
   }
   bool isAvailable() const override;
+  C10_DEPRECATED_MESSAGE(
+      "getXPUHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kXPU)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override;
   bool hasPrimaryContext(DeviceIndex device_index) const override;
   DeviceIndex deviceCount() const override;

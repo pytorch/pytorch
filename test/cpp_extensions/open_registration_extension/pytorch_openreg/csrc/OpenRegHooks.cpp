@@ -1,10 +1,10 @@
 #include "OpenReg.h"
 
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 
-#include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -14,8 +14,8 @@ namespace {
 // Python factory function where real implementations can be found
 PyObject* py_factory;
 
-struct HostAllocator final : at::Allocator {
-  HostAllocator() = default;
+struct OpenRegHostAllocator final : at::HostAllocator {
+  OpenRegHostAllocator() = default;
 
   at::DataPtr allocate(size_t nbytes) override {
     py::gil_scoped_acquire acquire;
@@ -39,9 +39,44 @@ struct HostAllocator final : at::Allocator {
         reinterpret_cast<openreg_ptr_t>(src),
         count);
   }
+
+  bool is_pinned(const void* data) const override {
+    py::gil_scoped_acquire acquire;
+    return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
+        .cast<bool>();
+  }
+
+  bool record_event(void* ptr, void* ctx, c10::Stream stream) override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "record_event is not implemented for OpenRegHostAllocator.");
+  }
+
+  void empty_cache() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "empty_cache is not implemented for OpenRegHostAllocator.");
+  }
+
+  at::HostStats get_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "get_stats is not implemented for OpenRegHostAllocator.");
+  }
+
+  void reset_accumulated_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "reset_accumulated_stats is not implemented for OpenRegHostAllocator.");
+  }
+
+  void reset_peak_stats() override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "reset_peak_stats is not implemented for OpenRegHostAllocator.");
+  }
 };
 
-static HostAllocator global_host_alloc;
+static OpenRegHostAllocator global_host_alloc;
+
+REGISTER_HOST_ALLOCATOR(at::kPrivateUse1, &global_host_alloc);
 
 static c10::DeviceIndex device_count() {
   py::gil_scoped_acquire acquire;
@@ -79,13 +114,11 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   }
 
   at::Allocator* getPinnedMemoryAllocator() const override {
-    return &global_host_alloc;
+    return at::getHostAllocator(at::kPrivateUse1);
   }
 
   bool isPinnedPtr(const void* data) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
-        .cast<bool>();
+    return at::getHostAllocator(at::kPrivateUse1)->is_pinned(data);
   }
 
   const at::Generator& getDefaultGenerator(

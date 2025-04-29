@@ -36,6 +36,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   size_t getDriverAllocatedMemory() const override;
   size_t getRecommendedMaxMemory() const override;
   void setMemoryFraction(double ratio) const override;
+  C10_DEPRECATED_MESSAGE(
+      "getMPSHooks().isPinnedPtr(...) is deprecated. Please use at::getHostAllocator(at::kMPS)->is_pinned(...) instead.")
   bool isPinnedPtr(const void* data) const override;
   Allocator* getPinnedMemoryAllocator() const override;
 
