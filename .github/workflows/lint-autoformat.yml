@@ -21,6 +21,15 @@ jobs:
           python3.12 -m venv /tmp/venv
           source /tmp/venv/bin/activate
 
+      - name: Stuff
+        run: |
+          set -ex
+          python --version || exit 0
+          python3 --version || exit 0
+          source /tmp/venv/bin/activate
+          python --version || exit 0
+          python3 --version || exit 0
+
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
