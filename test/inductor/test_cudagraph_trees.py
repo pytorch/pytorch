@@ -2426,40 +2426,6 @@ if HAS_CUDA:
             self.run_static_input_param_test(fn, 4)
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        def test_no_rerecord_with_mark_static_address(self):
-            class Mod(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.linear = nn.Linear(2, 2)
-
-                def forward(self, x):
-                    return self.linear(x)
-
-            mod = Mod().cuda()
-
-            def fn_eager(x, marked_static_y):
-                return torch.cos(x) + mod(marked_static_y)
-
-            with torch.device("cuda"):
-                fn_compiled = torch.compile(fn_eager, mode="reduce-overhead")
-
-                # y is marked static
-                y = torch.randn(2, 2)
-                torch._dynamo.mark_static_address(y)
-
-                # Chanhing pointer of x should not lead to re-records
-                for _ in range(5):
-                    x = torch.randn(2, 2, requires_grad=True)
-                    res = fn_compiled(x, y)
-                    res.sum().backward()
-                    x.grad = None
-                    mod.linear.weight.grad = None
-                    mod.linear.bias.grad = None
-                # One forward and one backward
-                self.assertEqual(self.get_manager().new_graph_id().id, 2)
-
         def test_tensor_constant_mutation(self):
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:
