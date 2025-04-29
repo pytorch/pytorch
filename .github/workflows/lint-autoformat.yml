@@ -17,7 +17,7 @@ jobs:
       - name: Install python
         shell: bash
         run: |
-          sudo dnf install -y python3.12 python3.12-venv
+          sudo dnf install -y python3.12
           python3.12 -m venv /tmp/venv
           source /tmp/venv/bin/activate
 
