@@ -2140,7 +2140,7 @@ def _jit_compile(name,
         baton.wait()
 
     if verbose:
-        logger.info(f'Loading extension module %s...', name)
+        logger.info('Loading extension module %s...', name)
 
     if is_standalone:
         return _get_exec_path(name, build_directory)
@@ -2414,9 +2414,11 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
             # If CUDA is not available, fall back to default behavior
             arch_list = []
     elif not _arch_list:
-        logger.warning("TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
-                    "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to 'native' "
-                    "to only use the current GPU's architecture, or to specific architectures.")
+        logger.warning(
+            "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
+            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to 'native' "
+            "to only use the current GPU's architecture, or to specific architectures."
+        )
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
@@ -2524,8 +2526,10 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
             logger.debug('Using envvar MAX_JOBS (%s) as the number of workers...', max_jobs)
         return int(max_jobs)
     if verbose:
-        logger.info('Allowing ninja to set a default number of workers... '
-              '(overridable by setting the environment variable MAX_JOBS=N)')
+        logger.info(
+            'Allowing ninja to set a default number of workers... '
+            '(overridable by setting the environment variable MAX_JOBS=N)'
+        )
     return None
 
 
