@@ -49,6 +49,30 @@ class CutlassEVTCodegen:
         * Extend this with more _op_<whatever> nodes to add support for new pointwise operations.
     """
 
+    def __init__(self, accumulator_node_name: str, last_usages: OrderedSet[str]):
+        """
+
+        Initializes a CutlassEVTEpilogueArgumentFormatter object. Do not instantiate directly.
+        Use the CutlassEVTCodegen.ir_to_evt_python_code static method.
+
+        Args:
+            accumulator_node_name: The name of the accumulator node which should contain
+                                          the Matmul result before fusion according to the IR graph.
+            epilogue_nodes: The list of scheduler nodes to be fused into the epilogue
+        """
+        self.accumulator_node_name: str = accumulator_node_name  #
+        self.output: IndentedBuffer = IndentedBuffer(1)  # The output buffer for codegen
+        self.var_counter: Iterator[int] = itertools.count()
+        self.store_name_to_value: dict[str, OpsValue] = (
+            dict()
+        )  # Aliases for subexpression functors
+        self.reads: OrderedSet[str] = OrderedSet()
+        self.last_usages: OrderedSet[str] = OrderedSet()
+        self.cur_node: Optional[ComputedBuffer] = None
+
+        if accumulator_node_name not in last_usages:
+            self.store(accumulator_node_name, value=OpsValue(_ACCUMULATOR_ALIAS))
+
     @staticmethod
     def ir_to_evt_python_code(
         cuda_template_node_name: str,
@@ -74,30 +98,6 @@ class CutlassEVTCodegen:
             codegen.get_renames(),
             codegen.get_value(),
         )
-
-    def __init__(self, accumulator_node_name: str, last_usages: OrderedSet[str]):
-        """
-
-        Initializes a CutlassEVTEpilogueArgumentFormatter object. Do not instantiate directly.
-        Use the CutlassEVTCodegen.ir_to_evt_python_code static method.
-
-        Args:
-            accumulator_node_name: The name of the accumulator node which should contain
-                                          the Matmul result before fusion according to the IR graph.
-            epilogue_nodes: The list of scheduler nodes to be fused into the epilogue
-        """
-        self.accumulator_node_name: str = accumulator_node_name  #
-        self.output: IndentedBuffer = IndentedBuffer(1)  # The output buffer for codegen
-        self.var_counter: Iterator[int] = itertools.count()
-        self.store_name_to_value: dict[str, OpsValue] = (
-            dict()
-        )  # Aliases for subexpression functors
-        self.reads: OrderedSet[str] = OrderedSet()
-        self.last_usages: OrderedSet[str] = OrderedSet()
-        self.cur_node: Optional[ComputedBuffer] = None
-
-        if accumulator_node_name not in last_usages:
-            self.store(accumulator_node_name, value=OpsValue(_ACCUMULATOR_ALIAS))
 
     def get_value(self) -> str:
         return linesep.join(
@@ -143,6 +143,9 @@ class CutlassEVTCodegen:
         self, name: Any, index: Any = None, value: Any = None, mode: Any = None
     ) -> None:
         if name not in self.last_usages:
+            if index:
+                self._check_indexing(name, index)
+
             value_to_write = value
             if not self.store_name_to_value:
                 # EVT requires an output to be named D lol
