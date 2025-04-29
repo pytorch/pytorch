@@ -66,7 +66,7 @@ class TestSubprocess(TestCase):
         # some tests are expected to fail then we should probably add a list of
         # expected failures here.
         self.assertEqual(
-            FxCompile._compile_stats[type(_InProcessFxCompile)].codegen_and_compile, 0
+            FxCompile._compile_stats.codegen_and_compile, 0
         )
         self._stack.close()
         TestCase.tearDown(self)

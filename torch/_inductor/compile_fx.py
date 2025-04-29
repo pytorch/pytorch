@@ -867,13 +867,16 @@ def _compile_fx_inner(
             if triton_bundler_meta is not None:
                 cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = mb_compiled_graph._time_taken_ns
-            FxGraphCache._save_graph(
-                cache_key,
-                mb_compiled_graph,
-                example_inputs,
-                local,
-                remote_cache,
-            )
+            # If the compiled graph is not a CompiledFxGraph (e.g, _AsyncOutputCode),
+            # don't write it.
+            if isinstance(mb_compiled_graph, CompiledFxGraph):
+                FxGraphCache._save_graph(
+                    cache_key,
+                    mb_compiled_graph,
+                    example_inputs,
+                    local,
+                    remote_cache,
+                )
 
         # CACHE HIT: not much to really do, just make sure the cache key
         # is recorded on the graph
@@ -999,6 +1002,9 @@ class _FxCompileStat:
     def __repr__(self) -> str:
         return f"codegen_and_compile: {self.codegen_and_compile}"
 
+    def reset(self):
+        self.codegen_and_compile = 0
+
 
 class FxCompile(ABC):
     """
@@ -1007,7 +1013,7 @@ class FxCompile(ABC):
     """
 
     # Some stats for logging/debugging
-    _compile_stats: dict[type[FxCompile], _FxCompileStat] = defaultdict(_FxCompileStat)
+    _compile_stats = _FxCompileStat()
 
     # TODO: We should probably eventually add some kind of async version of this
     # so we can kick off a compile and then go do other things - but we'll need
@@ -1023,8 +1029,7 @@ class FxCompile(ABC):
 
     @classmethod
     def _reset_stats(cls) -> None:
-        cls._compile_stats.clear()
-
+        FxCompile._compile_stats.reset()
 
 class _InProcessFxCompile(FxCompile):
     @override
@@ -1406,7 +1411,7 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
-                    self._compile_stats[type(self)].codegen_and_compile += 1
+                    _InProcessFxCompile._compile_stats.codegen_and_compile += 1
 
                     return CompiledFxGraph(
                         compiled_fn,

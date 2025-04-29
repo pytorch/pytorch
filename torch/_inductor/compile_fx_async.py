@@ -8,8 +8,9 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._inductor.output_code import CompiledFxGraphConstants, OutputCode
 
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
-from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap as complex_memory_overlap, MockFXGraphCacheOutput  # noqa: F401
 
+from functorch.compile import make_boxed_func
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -116,6 +117,10 @@ class _AsyncOutputCode(OutputCode):
             assert self._output_code is not None
             self._output_code.post_compile(example_inputs, constants, graph_kwargs)
 
+    @override
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        if self._output_code is not None:
+            self._output_code.set_triton_bundle(triton_bundle)
 
 # Given an FxCompile for an out-of-process compile _AsyncFxCompile will run
 # eager until the compiled artifact is ready then it will automatically switch
@@ -152,10 +157,6 @@ class _AsyncFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        eager_output_code = _InProcessFxCompile().codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-
         # This is similar to _SerializedFxCompile.codegen_and_compile() but
         # handles the async routing.
 
@@ -164,7 +165,9 @@ class _AsyncFxCompile(FxCompile):
         )
         if not serialized:
             # We can't serialize - just return the eager OutputCode
-            return eager_output_code
+            return _InProcessFxCompile().codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
 
         inputs, constants = serialized
 
@@ -178,4 +181,4 @@ class _AsyncFxCompile(FxCompile):
             self._compile._postprocess(output)
             return output.graph
 
-        return _AsyncOutputCode(eager_output_code, f, callback)
+        return _AsyncOutputCode(MockFXGraphCacheOutput(make_boxed_func(gm)), f, callback)

@@ -420,7 +420,7 @@ class _SerializedFxCompile(FxCompile):
         output = self._send_to_child(inputs).deserialize(constants)
 
         self._postprocess(output)
-        self._compile_stats[type(self)].codegen_and_compile += 1
+        _SerializedFxCompile._compile_stats.codegen_and_compile += 1
 
         # TODO: Do we need to figure out what changed in TracingContext in the
         # child and plumb that back up to the parent?
