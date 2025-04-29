@@ -1,9 +1,9 @@
-import dataclasses
 import datetime
 import tempfile
 from collections import defaultdict
+from dataclasses import dataclass
 from types import ModuleType
-from typing import Any, Optional, Protocol
+from typing import Any, Optional, Protocol, Union
 
 import torch
 from torch.autograd import DeviceType
@@ -158,7 +158,7 @@ def benchmark_all_kernels(
         )
 
 
-@dataclasses.dataclass
+@dataclass
 class ProfileEvent:
     category: str
     key: str
@@ -170,11 +170,15 @@ class ProfileEvent:
 
 def parse_profile_event_list(
     benchmark_name: str,
-    event_list: torch.autograd.profiler_util.EventList,
+    event_list: Union[torch.autograd.profiler_util.EventList, dict[str, Any]],
     wall_time_ms: float,
     nruns: int,
     device_name: str,
 ) -> None:
+    """
+    Parse and generate a report for an event_list.
+    """
+
     def get_self_device_time(
         ev: torch.autograd.profiler_util.EventList,
     ) -> float:
@@ -294,6 +298,10 @@ def parse_profile_event_list(
     report()
 
 
+PROFILE_DIR = tempfile.gettempdir()
+PROFILE_PATH = f"{PROFILE_DIR}/compiled_module_profile.json"
+
+
 def perf_profile(
     wall_time_ms: float,
     times: int,
@@ -304,14 +312,14 @@ def perf_profile(
     with torch.profiler.profile(record_shapes=True) as p:
         benchmark_compiled_module_fn(times=times, repeat=repeat)
 
-    path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+    path = PROFILE_PATH
     p.export_chrome_trace(path)
     print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
     print(f"Chrome trace for the profile is written to {path}")
     event_list = p.key_averages(group_by_input_shape=True)
     print(event_list.table(sort_by="self_device_time_total", row_limit=10))
     parse_profile_event_list(
-        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
+        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device or ""
     )
 
 

@@ -30,6 +30,7 @@ from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_s
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
+from torch.utils.flop_counter import countable
 
 from ..utils._sympy.functions import CeilDiv
 from . import config, ir
@@ -65,6 +66,7 @@ from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
+    count_flops_fx,
     FakeIndentedBuffer,
     get_dtype_size,
     is_gpu,
@@ -428,6 +430,16 @@ class TritonTemplateKernel(TritonKernel):
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
 
+    def estimate_flops(self) -> int:
+        flops = 0
+        for node in self.input_nodes:
+            for fx_node in node._current_origins:
+                if countable(fx_node):
+                    f = count_flops_fx(fx_node)
+                    if f is not None:
+                        flops += f
+        return flops
+
     def jit_lines(self):
         if self.use_jit:
             return "@triton.jit"
@@ -463,6 +475,10 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            breakpoint()
+            flops = self.estimate_flops()
+            inductor_meta["kernel_flop"] = flops
 
         template_args = f"""
             num_stages={self.num_stages},

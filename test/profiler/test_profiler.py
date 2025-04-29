@@ -2997,6 +2997,7 @@ aten::mm""",
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
+        
     def test_profiler_debug_autotuner(self):
         """
         This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
@@ -3015,13 +3016,24 @@ aten::mm""",
             comp_mm()
         def names(prof):
             return {ev.name for ev in prof.events() if "mm" in ev.name or "triton" in ev.name}
+        # for ev in prof1.events():
+        #     if ev.name == "triton_tem_fused_mm_0":
+        #         breakpoint()
+        # for ev in prof2.events():
+        #     if ev.name == "triton_tem_fused_mm_0":
+        #         breakpoint()
+        
+        trace1 = "/tmp/trace1_pb.json"
+        trace2 = "/tmp/trace2_nopb.json"
+        print(trace1, trace2)
+        prof1.export_chrome_trace(trace1)
+        prof2.export_chrome_trace(trace2)
+        breakpoint()
         
         n1 = names(prof1)
         n2 = names(prof2)
         self.assertEqual(n1, n2)
-
-        
-        
+        breakpoint()        
 
 
 

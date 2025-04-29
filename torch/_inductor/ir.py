@@ -5146,15 +5146,9 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(  # type: ignore[no-untyped-def]
+    def _get_output(  # type: ignore[no-untyped-def]
         cls, kernel, *args, **kwargs
-    ) -> tuple[
-        Any,
-        list[Any],
-        list[Any],
-        Callable[[Any, Any], Any],
-        Optional[dict[sympy.Symbol, pytree.KeyPath]],
-    ]:
+    ) -> tuple[Any, list[Any], list[Any], Callable[[Any, Any], Any]]:
         binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
@@ -5226,11 +5220,32 @@ class ExternKernel(InputsKernel):
                 )
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
-
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
+        return (
+            example_output,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+        )
+
+    @classmethod
+    def process_kernel(  # type: ignore[no-untyped-def]
+        cls, kernel, *args, **kwargs
+    ) -> tuple[
+        Any,
+        list[Any],
+        list[Any],
+        Callable[[Any, Any], Any],
+        Optional[dict[sympy.Symbol, pytree.KeyPath]],
+    ]:
+        example_output, tensor_args, non_tensor_args, unflatten_args = cls._get_output(
+            cls, kernel, *args, **kwargs
+        )
+
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
+
         if shape_env := V.fake_mode.shape_env:
             node_meta_val = V.current_node.meta.get("val")
             ctx = nullcontext()

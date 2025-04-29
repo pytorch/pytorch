@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.nn.functional as F
 import torch.utils.flop_counter
+from torch.utils.flop_counter import countable
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -853,6 +854,34 @@ class TestFlopCounter(TestCase):
             )
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
+
+    def test_countable(self):
+        def create_fx_node(aten):
+            return torch.fx.Node(
+                graph=torch.fx.Graph(),
+                name="",
+                op="call_function",
+                target=aten,
+                args=(),
+                kwargs={},
+            )
+
+        trues = [
+            torch.ops.aten.addmm,
+            torch.ops.aten.bmm,
+            torch.ops.aten.mm,
+            torch.ops.aten.convolution,
+            torch.ops.aten._convolution,
+            torch.ops.aten.cudnn_convolution,
+        ]
+        falses = [
+            torch.ops.aten.add,
+            torch.ops.aten.mul,
+        ]
+        for t in trues:
+            self.assertTrue(countable(create_fx_node(t)), f"Expected true {t}")
+        for f in falses:
+            self.assertFalse(countable(create_fx_node(f)), f"Expected false {f}")
 
 if __name__ == "__main__":
     run_tests()

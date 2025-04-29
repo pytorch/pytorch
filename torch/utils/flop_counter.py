@@ -127,7 +127,6 @@ def conv_flop_count(
     Returns:
         int: the number of flops
     """
-
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
     c_out, c_in, *filter_size = w_shape
@@ -146,8 +145,8 @@ def conv_flop_count(
     flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
     return flop
 
-@register_flop_formula([aten.convolution, aten._convolution])
-def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
+@register_flop_formula([aten.convolution, aten._convolution, aten.cudnn_convolution])
+def conv_flop(x_shape, w_shape, bias, stride, padding, dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """Count flops for convolution."""
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
@@ -561,6 +560,7 @@ flop_registry = {
     aten._scaled_mm: _scaled_mm_flop,
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
+    aten.cudnn_convolution: conv_flop,
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
     aten._scaled_dot_product_flash_attention: sdpa_flop,
@@ -790,3 +790,15 @@ class _FlopCounterMode(TorchDispatchMode):
         # no further decomposition; execute & count flops
         out = func(*args, **kwargs)
         return self.counter._count_flops(func._overloadpacket, out, args, kwargs)
+
+def countable(node: torch.fx.Node) -> bool:
+    if not isinstance(node, torch.fx.Node):
+        breakpoint()
+    assert(isinstance(node, torch.fx.Node))
+    if not hasattr(node, "target"):
+        return False
+    target = node.target.overloadpacket
+
+    return target in flop_registry
+    
+    

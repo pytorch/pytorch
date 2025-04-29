@@ -688,6 +688,7 @@ class CachingAutotuner(KernelInterface):
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
             if autograd_profiler._is_profiler_enabled:
+                breakpoint()
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
                     self.inductor_meta.get("kernel_name", "triton kernel"),
@@ -708,8 +709,7 @@ class CachingAutotuner(KernelInterface):
                 )
             self.restore_args_from_cpu(cpu_copies)
 
-        # NOTE: only use profiler when not already in a profiler instance, because
-        # composing profiler instances isn't supported.
+        # only use profiler when not already in a profiler instance
         if with_profiler and not autograd_profiler._is_profiler_enabled:
             from torch._inductor.utils import do_bench_using_profiling
 
