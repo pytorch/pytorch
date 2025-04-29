@@ -147,7 +147,7 @@ double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event
 }
 
 bool MPSHooks::isPinnedPtr(const void* data) const {
-  return at::getHostAllocator(at::kMPS)->is_pinned(data);
+  return at::mps::isMPSPinnedPtr(data);
 }
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
