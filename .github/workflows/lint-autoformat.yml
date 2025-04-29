@@ -23,6 +23,7 @@ jobs:
       - name: Install python
         shell: bash
         run: |
+          dnf list available 'python3*'
           sudo dnf install -y python3.10 python3.10-venv
           python3.10 -m venv /tmp/venv
           source /tmp/venv/bin/activate
