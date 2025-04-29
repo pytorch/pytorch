@@ -670,8 +670,8 @@ class GuardBuilder(GuardBuilderBase):
         # to access the same object - self._module["param"] is same as
         # self.param.
         self.key_order_guarded_dict_ids = set()
-        for source_name in self.check_fn_manager.output_graph.guard_on_key_order:
-            self.key_order_guarded_dict_ids.add(id(self.get(source_name)))
+        for source in self.check_fn_manager.output_graph.guard_on_key_order:
+            self.key_order_guarded_dict_ids.add(id(self.get(source.name())))
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -2709,6 +2709,10 @@ class CheckFunctionManager:
             used_global_vars = set()
             for guard in sorted_guards:
                 if name := get_global_source_name(guard.originating_source):
+                    assert isinstance(name, str)
+                    used_global_vars.add(name)
+            for source in self.output_graph.guard_on_key_order:
+                if name := get_global_source_name(source):
                     assert isinstance(name, str)
                     used_global_vars.add(name)
 
