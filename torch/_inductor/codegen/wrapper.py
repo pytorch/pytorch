@@ -3156,3 +3156,5 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             lhs += ","
         self.prefix.writeline(f"{lhs} = args")
         # Dont use clear on args
+        if config.graph_partition:
+            self.prefix.writeline("args.clear()")
