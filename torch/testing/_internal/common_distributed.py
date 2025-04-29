@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     TEST_HPU,
+    TEST_CUDA,
     TEST_XPU,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
@@ -116,15 +117,15 @@ def skip_if_no_gpu(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
+        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
-        if torch.cuda.device_count() < world_size:
+        if TEST_CUDA and torch.cuda.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-        if TEST_HPU and torch.hpu.device_count < world_size:
+        if TEST_HPU and torch.hpu.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-        if TEST_XPU and torch.xpu.device_count < world_size:
-            sys.exit(TEST_SKIPS[f"multi-xpu-{world_size}"].exit_code)
+        if TEST_XPU and torch.xpu.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
 
@@ -193,7 +194,13 @@ def import_transformers_or_skip():
 
 
 def at_least_x_gpu(x):
-    return torch.cuda.is_available() and torch.cuda.device_count() >= x
+    if TEST_CUDA and torch.cuda.device_count() >= x:
+        return True
+    if TEST_HPU and torch.hpu.device_count() >= x:
+        return True
+    if TEST_XPU and torch.xpu.device_count() >= x:
+        return True
+    return False
 
 
 def skip_if_lt_x_gpu(x):
@@ -936,9 +943,14 @@ class DistributedTestBase(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
+        os.environ["WORLD_SIZE"] = str(self.world_size)
         self._spawn_processes()
 
     def tearDown(self):
+        try:
+            torch.distributed.destroy_process_group()
+        except AssertionError:
+            pass
         try:
             os.remove(self.file_name)
         except OSError:
@@ -954,12 +966,14 @@ class DistributedTestBase(MultiProcessTestCase):
         else :
             return "gloo"
 
-    def create_pg(self, device):
+    def create_pg(self, device, world_size=None):
+        if world_size is None:
+            world_size = self.world_size
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
         torch.distributed.init_process_group(
             backend=self.backend(device),
-            world_size=self.world_size,
+            world_size=world_size,
             rank=self.rank,
             store=store
         )
@@ -1353,11 +1367,12 @@ class SaveForwardInputsModel(nn.Module):
         return self.c2(self.c1(x))
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
+def _dynamo_dist_per_rank_init(rank, world_size, backend="nccl", init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     if not fake_pg:
-        torch.accelerator.set_device_index(rank)
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(self.rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:
@@ -1370,7 +1385,7 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
                 store=store,
             )
         else:
-            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+            c10d.init_process_group(backend=backend, rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1414,7 +1429,7 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
 
-class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
+class DynamoDistributedMultiProcTestCase(DistributedTestBase):
     """
     Use this for tests that actually run on multiple GPUs.
 
@@ -1424,17 +1439,6 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
     Prefer MultiThreadedTestCase for most tests. Perhaps use this one
     sparingly for integration tests.
     """
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
     @property
     def world_size(self) -> int:
         return torch.cuda.device_count()
