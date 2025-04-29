@@ -687,14 +687,30 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
-            launcher(
-                *args_with_constexprs,
-                **cloned_kwargs,
-                stream=stream,
-            )
+            if autograd_profiler._is_profiler_enabled:
+                profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
+                with torch._C._profiler._RecordFunctionFast(
+                    self.inductor_meta.get("kernel_name", "triton kernel"),
+                    args,
+                    profiler_kwargs,
+                ):
+                    launcher(
+                        *args,
+                        **kwargs,
+                        stream=stream,
+                    )
+
+            else:
+                launcher(
+                    *args_with_constexprs,
+                    **cloned_kwargs,
+                    stream=stream,
+                )
             self.restore_args_from_cpu(cpu_copies)
 
-        if with_profiler:
+        # NOTE: only use profiler when not already in a profiler instance, because
+        # composing profiler instances isn't supported.
+        if with_profiler and not autograd_profiler._is_profiler_enabled:
             from torch._inductor.utils import do_bench_using_profiling
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
@@ -1743,7 +1759,7 @@ def cached_autotune(
                 regex_filter=inductor_meta["profile_bandwidth_regex"],
                 with_profiler=inductor_meta[
                     "profile_bandwidth_with_do_bench_using_profiling"
-                ] or autograd_profiler._is_profiler_enabled,
+                ],
                 configs=configs,
                 save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,

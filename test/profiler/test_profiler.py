@@ -3006,15 +3006,19 @@ aten::mm""",
         def mm():
             return torch.mm(in1, in2)
         
-        pb_mm = torch.compile(mm, options={"benchmark_kernel": True, "max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN", "profile_bandwidth": True})
+        pb_mm = torch.compile(mm, options={"benchmark_kernel": True, "max_autotune": True, "max_autotune_gemm_backends": "TRITON", "profile_bandwidth": True})
         comp_mm = torch.compile(mm, options={"benchmark_kernel": True, "max_autotune": True, "max_autotune_gemm_backends": "TRITON"})
 
-        with profile() as prof:
+        with profile() as prof1:
             pb_mm()
-        for ev in prof.events():
-            if "triton" in ev.name:
-                breakpoint()
+        with profile() as prof2:
+            comp_mm()
+        def names(prof):
+            return {ev.name for ev in prof.events() if "mm" in ev.name or "triton" in ev.name}
         
+        n1 = names(prof1)
+        n2 = names(prof2)
+        self.assertEqual(n1, n2)
 
         
         
