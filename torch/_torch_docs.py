@@ -767,7 +767,7 @@ This function checks if :attr:`input` and :attr:`other` satisfy the condition:
 """
     + r"""
 elementwise, for all elements of :attr:`input` and :attr:`other`. The behaviour of this function is analogous to
-`numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_
+`numpy.allclose <https://numpy.org/doc/stable/reference/generated/numpy.allclose.html>`_
 
 Args:
     input (Tensor): first tensor to compare
@@ -13826,7 +13826,7 @@ Returns the indices of the buckets to which each value in the :attr:`input` belo
 boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
 as :attr:`input`. If :attr:`right` is False (default), then the left boundary is open. Note that
 this behavior is opposite the behavior of
-`numpy.digitize <https://docs.scipy.org/doc/numpy/reference/generated/numpy.digitize.html>`_.
+`numpy.digitize <https://numpy.org/doc/stable/reference/generated/numpy.digitize.html>`_.
 More formally, the returned index satisfies the following rules:
 
 .. list-table::

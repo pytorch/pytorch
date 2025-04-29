@@ -207,7 +207,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python 3.9
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.9'
           architecture: x64
@@ -252,7 +252,7 @@ jobs:
           echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
       - name: Setup Old Python version
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: 3.8
           architecture: x64
@@ -262,7 +262,7 @@ jobs:
             **/requirements.txt
       - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64
@@ -280,6 +280,39 @@ jobs:
         run: |
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
+
+  lint-urls:
+    name: Lint URLs
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint')
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        if ! ./scripts/lint_urls.sh; then
+          echo
+          echo "URL lint failed. If this is a transient outage, you can bypass it by adding the `skip-url-lint` label to your PR."
+          exit 1
+        fi
+
+  lint-xrefs:
+    name: Lint Xrefs
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
+    with:
+      timeout: 60
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        ./scripts/lint_xrefs.sh
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
