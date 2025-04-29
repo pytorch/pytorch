@@ -12182,17 +12182,19 @@ class TestCOWInputs(TestCase):
                         for r in results
                     ]
                     output_grads_copy = []
-                    output_grads = []
+                    output_grads_lazy_cloned = []
+                    output_grads_lazy_cloned_2 = []
 
                     # Convert output grads to COW tensors and make copies
                     for output_grad in output_grads_raw:
                         output_grads_copy.append(output_grad.detach().clone())
-                        output_grads.append(torch._lazy_clone(output_grad))
+                        output_grads_lazy_cloned.append(torch._lazy_clone(output_grad))
+                        output_grads_lazy_cloned_2.append(torch._lazy_clone(output_grad))
 
                     torch.autograd.grad(
                         results,
                         leaf_tensors,
-                        output_grads,
+                        output_grads_lazy_cloned,
                         allow_unused=True,
                         retain_graph=True,
                     )
@@ -12207,7 +12209,7 @@ class TestCOWInputs(TestCase):
                         )
 
                     # Check that COW inputs remain COW after the backward op is executed
-                    for idx, output_grad in enumerate(output_grads):
+                    for idx, output_grad in enumerate(output_grads_lazy_cloned):
                         check_cow_input(
                             output_grads_copy[idx],
                             output_grads_raw[idx],
