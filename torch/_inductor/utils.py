@@ -2540,10 +2540,10 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
         needed_size = 0
     else:
         needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+            (sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1) * (x.storage_offset() + 1)
         )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
-    return torch.as_strided(buffer, x.size(), x.stride())
+    buffer = torch.as_strided(x._base, (needed_size,), (1,)).clone()
+    return torch.as_strided(buffer, x.size(), x.stride(), storage_offset=x.storage_offset())
 
 
 def copy_misaligned_inputs(

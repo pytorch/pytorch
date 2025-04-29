@@ -8155,6 +8155,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(x[0:]), x[16:][:16])
             self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
 
+    @requires_cuda
+    def test_alignment_cloned_storage_offset_aliasing(self):
+        def expand(x, n):
+            return x.expand((n,))
+
+        def g(n):
+            numbers = torch.arange(2, device="cuda")
+            result = []
+            for i in range(len(numbers)):
+                result.append(expand(numbers[i], n))
+            return result
+
+        g_opt = torch.compile(g, dynamic=True)
+        self.assertEqual(g(2), g_opt(2))
+
     # from GPT2ForSequenceClassification
     @skip_if_gpu_halide
     def test_index_tensor(self):
