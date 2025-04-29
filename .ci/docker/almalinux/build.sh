@@ -16,19 +16,16 @@ fi
 # Go from imagename:tag to tag
 DOCKER_TAG_PREFIX=$(echo "${image}" | awk -F':' '{print $2}')
 
-BASE_IMAGE=amd64/almalinux:8
 CUDA_VERSION=""
 ROCM_VERSION=""
+EXTRA_BUILD_ARGS=""
 if [[ "${DOCKER_TAG_PREFIX}" == cuda* ]]; then
     # extract cuda version from image name.  e.g. manylinux2_28-builder:cuda12.8 returns 12.8
     CUDA_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'cuda' '{print $2}')
-    GPU_BUILD_ARG="--build-arg CUDA_VERSION=${CUDA_VERSION}"
 elif [[ "${DOCKER_TAG_PREFIX}" == rocm* ]]; then
     # extract rocm version from image name.  e.g. manylinux2_28-builder:rocm6.2.4 returns 6.2.4
     ROCM_VERSION=$(echo "${DOCKER_TAG_PREFIX}" | awk -F'rocm' '{print $2}')
-    PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
-    GPU_BUILD_ARG="--build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}"
-    BASE_IMAGE=rocm/dev-almalinux-8:${ROCM_VERSION}-complete
+    EXTRA_BUILD_ARGS="--build-arg ROCM_IMAGE=rocm/dev-almalinux-8:${ROCM_VERSION}-complete"
 fi
 
 case ${DOCKER_TAG_PREFIX} in
@@ -57,10 +54,9 @@ tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
 DOCKER_BUILDKIT=1 docker build \
   --target final \
-  --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
   --build-arg "BASE_TARGET=${BASE_TARGET}" \
-  ${GPU_BUILD_ARG} \
   --build-arg "DEVTOOLSET_VERSION=11" \
+  ${EXTRA_BUILD_ARGS} \
   -t ${tmp_tag} \
   $@ \
   -f "${TOPDIR}/.ci/docker/almalinux/Dockerfile" \

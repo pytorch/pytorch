@@ -1,7 +1,7 @@
-# syntax = docker/dockerfile:experimental
-ARG BASE_TARGET=cuda12.8
-ARG BASE_IMAGE=amd64/almalinux:8
-FROM ${BASE_IMAGE} as base
+ARG CUDA_VERSION=12.4
+ARG BASE_TARGET=cuda${CUDA_VERSION}
+ARG ROCM_IMAGE=rocm/dev-almalinux-8:6.3-complete
+FROM amd64/almalinux:8 as base
 
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
@@ -15,12 +15,11 @@ RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl 
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
-# cmake-3.18.4 from pip; force in case cmake3 already exists
+# cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4 && \
-    ln -sf /usr/local/bin/cmake /usr/bin/cmake3
+    ln -s /usr/local/bin/cmake /usr/bin/cmake3
 RUN rm -rf /usr/local/cuda-*
 
 FROM base as openssl
@@ -63,17 +62,8 @@ FROM cuda as cuda12.8
 RUN bash ./install_cuda.sh 12.8
 ENV DESIRED_CUDA=12.8
 
-# Install ROCm
-FROM base as rocm
-ARG ROCM_VERSION=6.3
-ARG PYTORCH_ROCM_ARCH
-ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
-# Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
-# below workaround helps avoid error
-ENV ROCM_PATH /opt/rocm
-# MKL needed for magma build
-ADD ./common/install_mkl.sh install_mkl.sh
-RUN bash ./install_mkl.sh && rm install_mkl.sh
+FROM ${ROCM_IMAGE} as rocm
+ENV PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
 
 # Install MNIST test data
 FROM base as mnist
@@ -97,6 +87,7 @@ COPY ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
 ENV PATH /opt/conda/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 COPY --from=mnist  /usr/local/mnist /usr/local/mnist
 RUN rm -rf /usr/local/cuda
 RUN chmod o+rw /usr/local
