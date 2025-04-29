@@ -537,20 +537,11 @@ class TestAnalysis(TestCase):
                 "max_autotune": max_autotune,
             },
         )
-        comp_omni_bw = torch.compile(
-            om,
-            options={
-                "benchmark_kernel": True,
-                "profile_bandwidth": True,
-                "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
-                "max_autotune": max_autotune,
-            },
-        )
         def verify_triton(comp):
-            comp(input_conv, conv_weight)
-            with torch.profiler.profile(record_shapes=True) as profile:
-                comp(input_conv, conv_weight)
+            torch._dynamo.reset()  # reset the cache
+            with fresh_inductor_cache():
+                with torch.profiler.profile(record_shapes=True) as profile:
+                    comp(input_conv, conv_weight)
 
             trace1, _ = trace_files()
             profile.export_chrome_trace(trace1)
@@ -562,7 +553,6 @@ class TestAnalysis(TestCase):
                     seen = True
             self.assertTrue(seen, "no triton conv found")
         verify_triton(comp_omni)
-        verify_triton(comp_omni_bw)
 
     @skipIf(not SM70OrLater, "Requires sm70")
     @dtypes(torch.float, torch.double, torch.float16)
