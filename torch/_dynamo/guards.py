@@ -1461,6 +1461,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def DICT_VERSION(self, guard: Guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("DICT_VERSION guard cannot be serialized.")
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
         val = self.get(guard.name)

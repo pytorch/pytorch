@@ -13,9 +13,14 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.guards import CheckFunctionManager, CompileId
-from torch._dynamo.symbolic_convert import InstructionTranslator, SpeculationLog
+from torch._dynamo.symbolic_convert import (
+    ExceptionStack,
+    InstructionTranslator,
+    SpeculationLog,
+)
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
+from torch.utils import _pytree as pytree
 
 
 @dataclasses.dataclass
@@ -59,7 +64,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         assert self._frame_state is not None
 
         def guard_filter_fn(guards):
-            ret = [g.guard_type == guard_type for g in guards]
+            ret = [
+                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                for g in guards
+            ]
             self.assertTrue(any(ret))
             return ret
 
@@ -91,7 +99,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 export_constraints=None,
                 frame_state=None,
                 speculation_log=SpeculationLog(),
-                exn_vt_stack=None,
+                exn_vt_stack=ExceptionStack(),
                 distributed_state=None,
             )
             with compile_context(CompileContext(CompileId(0, 0))), tracing(
@@ -209,6 +217,15 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
+
+    def test_dict_version(self):
+        def fn(x):
+            return pytree.tree_leaves(x)[0] + 1
+
+        with self.assertRaisesRegex(
+            RuntimeError, "DICT_VERSION guard cannot be serialized."
+        ):
+            self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
 
 
 if __name__ == "__main__":
