@@ -8,10 +8,7 @@ import sys
 import torch
 import torch._dynamo.test_case
 import unittest
-from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHDYNAMO,
-    run_tests,
-)
+from torch.testing._internal.common_utils run_tests
 
 
 __TestCase = torch._dynamo.test_case.CPythonTestCase
