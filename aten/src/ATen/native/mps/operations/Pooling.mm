@@ -45,7 +45,7 @@ static void pool2d_template(const Tensor& input,
                             bool count_include_pad,
                             const std::optional<int64_t> divisor_override,
                             PoolingOpBlock poolingBlock,
-                            const c10::string& op_name) {
+                            const std::string& op_name) {
   const int64_t ndims = input.ndimension();
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
@@ -140,10 +140,10 @@ static void pool2d_template(const Tensor& input,
     padH = padW = 0;
   }
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({input, indices, grad_output}) + ":K[" + getArrayRefString(kernel_size) +
-        "]:S[" + getArrayRefString(stride) + "]:P[" + getArrayRefString(padding) + "]:D[" +
-        getArrayRefString(dilation) + "]" + (ceil_mode ? ":ceil" : "") + (count_include_pad ? ":include_pad" : "") +
-        (has_divisor ? ":divisor" : "") + ":" +
+    std::string key = op_name + getTensorsStringKey({input, indices, grad_output}) + ":K[" +
+        getArrayRefString(kernel_size) + "]:S[" + getArrayRefString(stride) + "]:P[" + getArrayRefString(padding) +
+        "]:D[" + getArrayRefString(dilation) + "]" + (ceil_mode ? ":ceil" : "") +
+        (count_include_pad ? ":include_pad" : "") + (has_divisor ? ":divisor" : "") + ":" +
         (suggested_memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
 
     MPSShape* inputShape = getMPSShape(input, memory_format);
@@ -250,7 +250,7 @@ static void avg_pool2d_template(const Tensor& input,
                                 bool ceil_mode,
                                 bool count_include_pad,
                                 const std::optional<int64_t> divisor_override,
-                                const c10::string& op_name) {
+                                const std::string& op_name) {
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const bool is_backward_pass = grad_output.defined();
   const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
