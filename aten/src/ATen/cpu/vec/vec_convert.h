@@ -15,6 +15,8 @@ template <
 struct VecConvert {
   static inline VectorizedN<dst_t, dst_n> apply(
       const VectorizedN<src_t, src_n>& src) {
+    
+    std::cout<<"--- hit the legacy cvt ----"<<std::endl;
     constexpr int count = std::min(
         VectorizedN<src_t, src_n>::size(), VectorizedN<dst_t, dst_n>::size());
     __at_align__ src_t src_buf[VectorizedN<src_t, src_n>::size()];
@@ -36,6 +38,7 @@ inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert
 template <typename dst_t, typename src_t>
 inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
 convert(const Vectorized<src_t>& src) {
+  std::cout<<"--- should hit this convert ----"<<std::endl;
   return VecConvert<dst_t, 1, src_t, 1>::apply(src);
 }
 

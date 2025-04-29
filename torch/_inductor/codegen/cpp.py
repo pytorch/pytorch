@@ -154,6 +154,7 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
     torch.int8,
     torch.int32,
     torch.int64,
+    torch.float8_e4m3fn,
 ]
 
 MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
@@ -1599,6 +1600,7 @@ class CppVecOverrides(CppOverrides):
             torch.int8,
             torch.int32,
             torch.int64,
+            torch.float8_e4m3fn,
         ], f"{__name__} does not support {dtype}"
         assert isinstance(x, CppCSEVariable)
         src_dtype = x.dtype
