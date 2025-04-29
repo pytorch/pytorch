@@ -1121,7 +1121,7 @@ class Tensor(torch._C.TensorBase):
     def __rmod__(self, other):
         return torch.remainder(other, self)
 
-    def __format__(self, format_spec):
+    def __format__(self, format_spec: str) -> str:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
         if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
@@ -1158,7 +1158,7 @@ class Tensor(torch._C.TensorBase):
     __neg__ = _C.TensorBase.neg
     __abs__ = _C.TensorBase.abs
 
-    def __len__(self):
+    def __len__(self) -> int:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
@@ -1196,7 +1196,7 @@ class Tensor(torch._C.TensorBase):
             )
         return iter(self.unbind(0))
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         # Do NOT handle __torch_function__ here as user's default
         # implementation that handle most functions will most likely do it wrong.
         # It can be easily overridden by defining this method on the user
