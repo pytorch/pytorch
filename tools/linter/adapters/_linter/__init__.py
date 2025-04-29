@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 
 __all__ = (
     "Block",
-    "bracket_pairs",
     "EMPTY_TOKENS",
     "FileLinter",
     "file_summary",
@@ -23,17 +22,15 @@ __all__ = (
     "ROOT",
 )
 
-# Python 3.12 and up have two new token types, FSTRING_START and FSTRING_END
 NO_TOKEN = -1
 
-START_OF_LINE_TOKENS = dict.fromkeys((token.DEDENT, token.INDENT, token.NEWLINE))
-IGNORED_TOKENS = dict.fromkeys(
-    (token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL)
-)
-EMPTY_TOKENS = START_OF_LINE_TOKENS | IGNORED_TOKENS
+# Python 3.12 and up have two new token types, FSTRING_START and FSTRING_END
+_START_OF_LINE_TOKENS = token.DEDENT, token.INDENT, token.NEWLINE
+_IGNORED_TOKENS = token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL
+EMPTY_TOKENS = dict.fromkeys(_START_OF_LINE_TOKENS + _IGNORED_TOKENS)
 
-LINTER = Path(__file__).absolute().parents[0]
-ROOT = LINTER.parents[3]
+_LINTER = Path(__file__).absolute().parents[0]
+ROOT = _LINTER.parents[3]
 
 
 class ParseError(ValueError):
@@ -42,7 +39,7 @@ class ParseError(ValueError):
         self.token = token
 
 
-from .bracket_pairs import bracket_pairs
+from .block import Block
 from .file_linter import FileLinter
 from .file_summary import file_summary
 from .messages import LintResult

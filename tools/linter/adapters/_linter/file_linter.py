@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import sys
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
-from typing import Generic, get_args, TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 from typing_extensions import Never
 
 from . import ParseError
@@ -27,10 +27,7 @@ class ErrorLines:
     AFTER = WINDOW - BEFORE - 1
 
 
-PythonFileT = TypeVar("PythonFileT", bound=PythonFile)
-
-
-class FileLinter(Generic[PythonFileT], ABC):
+class FileLinter:
     """The base class that all token-based linters inherit from"""
 
     description: str
@@ -41,7 +38,7 @@ class FileLinter(Generic[PythonFileT], ABC):
     report_column_numbers: bool = False
 
     @abstractmethod
-    def _lint(self, python_file: PythonFileT) -> Iterator[LintResult]:
+    def _lint(self, python_file: PythonFile) -> Iterator[LintResult]:
         raise NotImplementedError
 
     def __init__(self, argv: Sequence[str] | None = None) -> None:
@@ -67,11 +64,8 @@ class FileLinter(Generic[PythonFileT], ABC):
         return self.args.lintrunner or success
 
     @classmethod
-    def make_file(cls, pc: Path | str | None = None) -> PythonFileT:
-        c = cls.__orig_bases__[0]  # type: ignore[attr-defined]
-        # See https://github.com/microsoft/pyright/issues/3442
-        actual_python_file_type: PythonFileT = get_args(c)[0]
-        return actual_python_file_type.make(cls.linter_name, pc)
+    def make_file(cls, pc: Path | str | None = None) -> PythonFile:
+        return PythonFile.make(cls.linter_name, pc)
 
     @cached_property
     def args(self) -> Namespace:
@@ -108,10 +102,10 @@ class FileLinter(Generic[PythonFileT], ABC):
 
         return not results or self.args.fix and all(r.is_edit for r in results)
 
-    def _error(self, pf: PythonFileT, result: LintResult) -> None:
+    def _error(self, pf: PythonFile, result: LintResult) -> None:
         """Called on files that are unparseable"""
 
-    def _replace(self, pf: PythonFileT) -> tuple[str, list[LintResult]]:
+    def _replace(self, pf: PythonFile) -> tuple[str, list[LintResult]]:
         # Because of recursive replacements, we need to repeat replacing and reparsing
         # from the inside out until all possible replacements are complete
         previous_result_count = float("inf")
@@ -161,7 +155,7 @@ class FileLinter(Generic[PythonFileT], ABC):
 
         return replacement, first_results
 
-    def _display(self, pf: PythonFileT, results: list[LintResult]) -> Iterator[str]:
+    def _display(self, pf: PythonFile, results: list[LintResult]) -> Iterator[str]:
         """Emit a series of human-readable strings representing the results"""
         for r in results:
             if self.args.lintrunner:
@@ -177,7 +171,7 @@ class FileLinter(Generic[PythonFileT], ABC):
                 else:
                     yield from (i.rstrip() for i in self._display_window(pf, r))
 
-    def _display_window(self, pf: PythonFileT, r: LintResult) -> Iterator[str]:
+    def _display_window(self, pf: PythonFile, r: LintResult) -> Iterator[str]:
         """Display a window onto the code with an error"""
         if r.char is None or not self.report_column_numbers:
             yield f"{pf.path}:{r.line}: {r.name}"

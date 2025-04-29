@@ -7,11 +7,15 @@ from tokenize import generate_tokens, TokenInfo
 from typing import TYPE_CHECKING
 from typing_extensions import Self
 
-from . import NO_TOKEN, ROOT
+from . import EMPTY_TOKENS, NO_TOKEN, ParseError, ROOT
+from .blocks import blocks
+from .sets import LineWithSets
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from .block import Block
 
 
 class PythonFile:
@@ -86,6 +90,72 @@ class PythonFile:
         """The number of comments at the very top of the file."""
         it = (i for i, s in enumerate(self.lines) if not s.startswith("#"))
         return next(it, 0)
+
+    def __getitem__(self, i: int | slice) -> TokenInfo | Sequence[TokenInfo]:
+        return self.tokens[i]
+
+    def next_token(self, start: int, token_type: int, error: str) -> int:
+        for i in range(start, len(self.tokens)):
+            if self.tokens[i].type == token_type:
+                return i
+        raise ParseError(self.tokens[-1], error)
+
+    def docstring(self, start: int) -> str:
+        for i in range(start + 1, len(self.tokens)):
+            tk = self.tokens[i]
+            if tk.type == token.STRING:
+                return tk.string
+            if tk.type not in EMPTY_TOKENS:
+                return ""
+        return ""
+
+    @cached_property
+    def indent_to_dedent(self) -> dict[int, int]:
+        dedents = dict[int, int]()
+        stack = list[int]()
+
+        for i, t in enumerate(self.tokens):
+            if t.type == token.INDENT:
+                stack.append(i)
+            elif t.type == token.DEDENT:
+                dedents[stack.pop()] = i
+
+        return dedents
+
+    @cached_property
+    def errors(self) -> dict[str, str]:
+        return {}
+
+    @cached_property
+    def braced_sets(self) -> list[Sequence[TokenInfo]]:
+        lines = [t for tl in self._lines_with_sets for t in tl.braced_sets]
+        return [s for s in lines if not self.omitted(s)]
+
+    @cached_property
+    def sets(self) -> list[TokenInfo]:
+        tokens = [t for tl in self._lines_with_sets for t in tl.sets]
+        return [t for t in tokens if not self.omitted([t])]
+
+    @cached_property
+    def insert_import_line(self) -> int | None:
+        froms, imports = self.import_lines
+        for i in froms + imports:
+            tl = self.token_lines[i]
+            if any(i.type == token.NAME and i.string == "OrderedSet" for i in tl):
+                return None
+        if section := froms or imports:
+            return self._lines_with_sets[section[-1]].tokens[-1].start[0] + 1
+        return self.opening_comment_lines + 1
+
+    @cached_property
+    def _lines_with_sets(self) -> list[LineWithSets]:
+        return [LineWithSets(tl) for tl in self.token_lines]
+
+    @cached_property
+    def blocks(self) -> list[Block]:
+        res = blocks(self.tokens)
+        self.errors.update(res.errors)
+        return res.blocks
 
 
 class OmittedLines:
