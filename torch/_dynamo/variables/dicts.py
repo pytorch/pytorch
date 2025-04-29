@@ -434,14 +434,10 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
-            if len(args):
-                raise_observed_exception(TypeError, tx)
             assert not (args or kwargs)
             return DictValuesVariable(self)
         elif name == "copy":
             self.install_dict_keys_match_guard()
-            if len(args):
-                raise_observed_exception(TypeError, tx)
             assert not (args or kwargs)
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
@@ -475,17 +471,7 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
-        elif name == "popitem" and self.is_mutable():
-            self.should_reconstruct_all = True
-            tx.output.side_effects.mutation(self)
-            if not self.items:
-                raise_observed_exception(KeyError, tx)
-            k, v = self.items.popitem()
-            return variables.TupleVariable([k.vt, v])
-            # return ConstantVariable.create(self.items.popitem())
         elif name == "clear":
-            if len(args):
-                raise_observed_exception(TypeError, tx)
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
@@ -520,9 +506,7 @@ class ConstDictVariable(VariableTracker):
         elif name in ("get", "__getattr__") and args[0] in self:
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
-        elif name == "__contains__":
-            if len(args) != 1:
-                raise_observed_exception(TypeError, tx)
+        elif name == "__contains__" and len(args) == 1:
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
             return ConstantVariable.create(contains)
@@ -1003,20 +987,3 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self):
         return dict_items
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: list["VariableTracker"],
-        kwargs: dict[str, "VariableTracker"],
-    ) -> "VariableTracker":
-        if name in cmp_name_to_op_mapping:
-            if not isinstance(args[0], DictItemsVariable):
-                return ConstantVariable.create(NotImplemented)
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](
-                    self.dv_dict.items.items(), args[0].dv_dict.items.items()
-                )
-            )
-        return super().call_method(tx, name, args, kwargs)

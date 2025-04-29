@@ -15,10 +15,11 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 
-if TEST_WITH_TORCHDYNAMO:
-    __TestCase = CPythonTestCase
-else:
-    __TestCase = unittest.TestCase
+__TestCase = CPythonTestCase
+# if TEST_WITH_TORCHDYNAMO:
+#     __TestCase = CPythonTestCase
+# else:
+#     __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -350,6 +351,7 @@ class ExceptTestCases(__TestCase):
         self.assertTrue(hit_except)
 
 
+@unittest.skipIf(sys.version_info < (3, 13), "Python 3.13+ only")
 class ExceptStarTestCases(__TestCase):
     def test_try_except_else_finally(self):
         hit_except = False
@@ -628,7 +630,4 @@ class ExceptStarTestCases(__TestCase):
 
 
 if __name__ == '__main__':
-    if TEST_WITH_TORCHDYNAMO:
-        run_tests()
-    else:
-        unittest.main()
+    run_tests()
