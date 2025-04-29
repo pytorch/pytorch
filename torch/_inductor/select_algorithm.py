@@ -1842,25 +1842,30 @@ class AlgorithmSelectorCache(PersistentCache):
             # different than the original values. we explicitly restore the state
             # here to avoid this issue.
 
-            def precompile_with_captured_stdout(choice):
+            def precompile_with_captured_stdout(choice) -> tuple[None, int]:
                 log.debug("Precompiling choice with captured stdout: %s", choice)
+                start_ns = time.time_ns()
                 with restore_stdout_stderr():
                     choice.precompile()
+                elapsed_ns = time.time_ns() - start_ns
+                # Return tuple as triton async compile (_worker_compile_triton)
+                # returns tuple[CachingAutotuner, int]
+                return None, elapsed_ns // 1000
 
             def on_complete(future):
-                assert future in start_times
-                elapsed_times[future] = time.time() - start_times[future]
+                _, precompile_elapsed_us = future.result()
+                elapsed_seconds = precompile_elapsed_us / 1e6
+                elapsed_times[future] = elapsed_seconds
                 log.debug(
                     "Precompilation complete for future: %s, elapsed time: %.02fs",
                     future,
-                    elapsed_times[future],
+                    elapsed_seconds,
                 )
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
             async_compile = torch._inductor.async_compile.AsyncCompile()
 
             futures: dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
-            start_times: dict[concurrent.futures.Future[Any], float] = {}
             elapsed_times: dict[concurrent.futures.Future[Any], float] = {}
 
             # Some choices only differ in runtime arguments, so we
@@ -1889,7 +1894,6 @@ class AlgorithmSelectorCache(PersistentCache):
                         future = executor.submit(precompile_with_captured_stdout, c)
                         log.debug("Submitted precompile for choice: %s", c)
 
-                    start_times[future] = time.time()
                     future.add_done_callback(on_complete)
                     futures[future] = c
 
