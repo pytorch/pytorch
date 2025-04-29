@@ -61,6 +61,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM90OrLater,
+    xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -94,9 +95,6 @@ from torch.utils._pytree import (
     treespec_loads,
 )
 
-
-if not IS_MACOS:
-    from torch.testing._internal.distributed.fake_pg import FakeStore
 
 if HAS_GPU:
     import triton
@@ -13788,6 +13786,8 @@ class GraphModule(torch.nn.Module):
     @contextmanager
     def distributed_env(self, world_size):
         try:
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
             torch.distributed.init_process_group(
                 backend="fake",
                 world_size=world_size,
@@ -13799,7 +13799,7 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -13817,7 +13817,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -13833,7 +13833,7 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -13847,7 +13847,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -13865,7 +13865,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):
