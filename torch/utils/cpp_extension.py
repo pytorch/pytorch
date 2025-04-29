@@ -16,13 +16,7 @@ from pathlib import Path
 import errno
 import logging
 
-# Configure logging with a consistent format
 logger = logging.getLogger(__name__)
-if not logger.handlers:  # Only add handler if none exists
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)  # Default to INFO level
 
 import torch
 import torch._appdirs
@@ -2403,17 +2397,7 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
-    # If not given, determine what's best for the GPU / CUDA version that can be found
-    # Support 'native' as a special value to automatically detect only current GPU arch
-    if _arch_list == 'native':
-        if torch.cuda.is_available():
-            capability = torch.cuda.get_device_capability(0)
-            arch = f'{capability[0]}.{capability[1]}'
-            arch_list = [f'{arch}+PTX']
-        else:
-            # If CUDA is not available, fall back to default behavior
-            arch_list = []
-    elif not _arch_list:
+    if not _arch_list:
         logger.warning(
             "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
             "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to 'native' "
