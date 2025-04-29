@@ -1129,11 +1129,18 @@ class MemPool(_MemPool):
             define how memory gets allocated in the pool. If :attr:`allocator`
             is ``None`` (default), memory allocation follows the default/
             current configuration of the CUDACachingAllocator.
+        use_on_oom(bool): a bool that indicates if this pool can be used
+            as a last resort if a memory allocation outside of the pool fails due
+            to Out Of Memory. This is False by default.
 
     """
 
-    def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None):
-        super().__init__(allocator, True)
+    def __init__(
+        self,
+        allocator: Optional[_cuda_CUDAAllocator] = None,
+        use_on_oom: bool = False,
+    ):
+        super().__init__(allocator, True, use_on_oom)
 
     @property
     def id(self) -> tuple[int, int]:
