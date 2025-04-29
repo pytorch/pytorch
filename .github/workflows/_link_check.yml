@@ -1,7 +1,9 @@
+name: Link Checks
+
 on:
   workflow_call:
     inputs:
-      label-type:
+      runner:
         type: string
         required: true
       ref:
@@ -10,11 +12,12 @@ on:
 
 jobs:
   lint-urls:
+    name: Lint URLs
     if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       timeout: 120
-      runner: "${{ inputs.label-type }}linux.2xlarge"
+      runner: ${{ inputs.runner }}linux.2xlarge
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       submodules: false
@@ -31,10 +34,11 @@ jobs:
 
   lint-xrefs:
     name: Lint Xrefs
+    needs: lint-urls
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       timeout: 60
-      runner: "${{ inputs.label-type }}linux.2xlarge"
+      runner: ${{ inputs.runner }}linux.2xlarge
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       submodules: false
