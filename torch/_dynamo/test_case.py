@@ -171,7 +171,7 @@ class CPythonTestCase(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Skip test if python versions doesn't match
-        m = re.match(r"\b\d+_\d+\b", inspect.getfile(cls))
+        m = re.search(r"\b\d+_\d+\b", inspect.getfile(cls))
         if m:
             test_py_ver = tuple(map(int, m.group().split("_")))
         else:
