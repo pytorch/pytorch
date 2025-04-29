@@ -3,27 +3,50 @@ IF "%DESIRED_PYTHON%"=="" (
     exit /b 1
 )
 
-:: Create a new conda environment
-setlocal EnableDelayedExpansion
-FOR %%v IN (%DESIRED_PYTHON%) DO (
-    set PYTHON_VERSION_STR=%%v
-    set PYTHON_VERSION_STR=!PYTHON_VERSION_STR:.=!
-    conda remove -n py!PYTHON_VERSION_STR! --all -y || rmdir %CONDA_HOME%\envs\py!PYTHON_VERSION_STR! /s
-    if "%%v" == "3.9" call conda create -n py!PYTHON_VERSION_STR! -y numpy=2.0.1 cmake python=%%v
-    if "%%v" == "3.10" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1 cmake python=%%v
-    if "%%v" == "3.11" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1 cmake python=%%v
-    if "%%v" == "3.12" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.0.1 cmake python=%%v
-    if "%%v" == "3.13" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2 cmake python=%%v
-    if "%%v" == "3.13t" call conda create -n py!PYTHON_VERSION_STR! -y -c=conda-forge numpy=2.1.2 cmake python-freethreading python=3.13
-
-    call conda run -n py!PYTHON_VERSION_STR! pip install pyyaml
-    call conda run -n py!PYTHON_VERSION_STR! pip install mkl mkl-include mkl-static
-    call conda run -n py!PYTHON_VERSION_STR! pip install boto3 ninja typing_extensions setuptools==72.1.0
+set PYTHON_INSTALLER_URL=
+if "%DESIRED_PYTHON%" == "3.13t" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.13.0/python-3.13.0-amd64.exe"
+if "%DESIRED_PYTHON%" == "3.13" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.13.0/python-3.13.0-amd64.exe"
+if "%DESIRED_PYTHON%" == "3.12" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe"
+if "%DESIRED_PYTHON%" == "3.11" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.11.0/python-3.11.0-amd64.exe"
+if "%DESIRED_PYTHON%" == "3.10" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.10.0/python-3.10.0-amd64.exe"
+if "%DESIRED_PYTHON%" == "3.9" set "PYTHON_INSTALLER_URL=https://www.python.org/ftp/python/3.9.0/python-3.9.0-amd64.exe"
+if "%PYTHON_INSTALLER_URL%" == "" (
+    echo Python %DESIRED_PYTHON% not supported yet
 )
-endlocal
+
+set ADDITIONAL_OPTIONS=""
+set PYTHON_EXEC="python"
+if "%DESIRED_PYTHON%" == "3.13t" (
+    set ADDITIONAL_OPTIONS="Include_freethreaded=1"
+    set PYTHON_EXEC="python3.13t"
+)
+
+del python-amd64.exe
+curl --retry 3 -kL "%PYTHON_INSTALLER_URL%" --output python-amd64.exe
+if errorlevel 1 exit /b 1
+
+:: According to https://docs.python.org/3/using/windows.html, setting PrependPath to 1 will prepend
+:: the installed Python to PATH system-wide. Even calling set PATH=%ORIG_PATH% later on won't make
+:: a change. As the builder directory will be removed after the smoke test, all subsequent non-binary
+:: jobs will fail to find any Python executable there
+start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
+if errorlevel 1 exit /b 1
+
+set "PATH=%CD%\Python%PYTHON_VERSION%\Scripts;%CD%\Python;%PATH%"
+if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install numpy==2.2.1 cmake
+if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install numpy==2.1.2 cmake
+if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
+if "%DESIRED_PYTHON%" == "3.11" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
+if "%DESIRED_PYTHON%" == "3.10" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
+if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
+
+%PYTHON_EXEC% -m pip install pyyaml
+%PYTHON_EXEC% -m pip install mkl mkl-include mkl-static
+%PYTHON_EXEC% -m pip install boto3 ninja typing_extensions setuptools==72.1.0
+
 
 :: Install libuv
 curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o libuv-1.40.0-h8ffe710_0.tar.bz2
 7z x -aoa libuv-1.40.0-h8ffe710_0.tar.bz2
-tar -xvf libuv-1.40.0-h8ffe710_0.tar -C %CONDA_HOME%
-set libuv_ROOT=%CONDA_HOME%\Library
+tar -xvf libuv-1.40.0-h8ffe710_0.tar -C %CD%\Python%PYTHON_VERSION%\
+set libuv_ROOT=%CD%\Python%PYTHON_VERSION%\Library
