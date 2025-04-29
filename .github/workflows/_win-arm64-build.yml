@@ -83,6 +83,12 @@ jobs:
           aws-region: us-east-1
           role-duration-seconds: 18000
 
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
+
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
