@@ -28,11 +28,13 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   link-check:
+    name: Link checks
     needs: get-label-type
-    uses: ./.github/workflows/_link_check.yml@main
+    uses: ./.github/workflows/_link_check.yml
     with:
-      label-type: ${{ needs.get-label-type.outputs.label-type }}
-      ref:        ${{ github.sha }}
+      runner: ${{ needs.get-label-type.outputs.label-type }}
+      ref:    ${{ github.sha }}
+    secrets: inherit
 
   docs-build:
     name: docs build
