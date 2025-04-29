@@ -19,6 +19,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import (
     CompileEventLogger,
     dynamo_timed,
+    is_parameter_freezing,
     preserve_rng_state,
     set_feature_use,
 )
@@ -1036,7 +1037,11 @@ def _try_get_metadata_from_dynamo(
         assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
-        static_input_indices.append(i)
+
+        # For freezing, the params are not lifted in the inductor Fx graph, so
+        # don't mark the params as static.
+        if not is_parameter_freezing():
+            static_input_indices.append(i)
 
     # Collect the dynamo graph inputs
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
@@ -1051,9 +1056,13 @@ def _try_get_metadata_from_dynamo(
 
         # input[i] in dynamo is now:
         # input[i + len(extra_params)] in AOT,
-        # where extra_params are the params/buffers that dynamo baked into
-        # the OutputGraph
-        actual_pos = pos + len(param_keys)
+        # where extra_params are the params/buffers that dynamo baked into the
+        # OutputGraph. The special case is freezing, where the params are not
+        # lifted.
+        if is_parameter_freezing():
+            actual_pos = pos
+        else:
+            actual_pos = pos + len(param_keys)
 
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
             "_dynamo_static_input_type", None

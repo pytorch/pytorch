@@ -375,6 +375,21 @@ class OptimizeForInferenceTemplate(TestCase):
         ):
             mod(x)
 
+    def test_static_indices_cudagraph(self):
+        mod = torch.nn.Linear(2, 2).to(self.device)
+
+        def fn(x):
+            return mod(x) + x
+
+        x = torch.randn(2, 2, device=self.device)
+
+        opt_fn = torch.compile(fn, mode="reduce-overhead")
+
+        with torch.no_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_rng_op(self):
         @torch.compile()
         def foo():
