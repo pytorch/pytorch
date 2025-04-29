@@ -1,7 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
@@ -10,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <string_view>
 #include <utility>
 #include <vector>
 #ifndef _WIN32
