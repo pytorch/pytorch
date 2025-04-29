@@ -803,7 +803,7 @@ def slice_scatter(
     if start == 0 and end == dim_size and step == 1:
         return src.clone()
 
-    indices = [None] * input.dim()
+    indices: list[Tensor | None] = [None] * input.dim()
     idx = torch.arange(dim_size, device=input.device)
     indices[dim] = (idx - start) // step
 
@@ -1666,7 +1666,7 @@ def native_layer_norm_backward(
         )
     mean = _unsqueeze_to_dim(mean, input_cast.dim())  # type: ignore[union-attr]
     rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
-    x_hat = (input_cast - mean) * rstd
+    x_hat = (input_cast - mean) * rstd  # type: ignore[operator]
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
     else:
