@@ -26,7 +26,7 @@ jobs:
     environment: target-determinator-env
     steps:
       - name: Clone PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           path: pytorch
 
@@ -59,21 +59,21 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
 
       - name: Clone CodeLlama
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: osalpekar/codellama
           ref: 1ec50e0cfc0fadc3b6ceb146617e2119ab26eb34
           path: codellama
 
       - name: Clone Target Determination Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: osalpekar/llm-target-determinator
           ref: v0.0.2
           path: llm-target-determinator
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_target_determinator_s3_read_write
           aws-region: us-east-1
