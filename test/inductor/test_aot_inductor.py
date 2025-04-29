@@ -207,9 +207,7 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            model = Model(device=self.device)
-            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
-            self.assertTrue(same(model(*example_inputs), actual))
+            self.check_model(Model(self.device), example_inputs)
 
     def test_constant_folding_with_update(self):
         class Model(torch.nn.Module):
@@ -300,9 +298,7 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            model = Model(device=self.device)
-            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
-            self.assertTrue(same(model(*example_inputs), actual))
+            self.check_model(Model(self.device), example_inputs)
 
     @requires_gpu
     def test_multi_device(self):
@@ -624,11 +620,8 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        # Had to use legacy_run. Bug to be fixed
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            model = Model()
-            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
-            self.assertTrue(same(model(*example_inputs), actual))
+            self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -1295,6 +1288,11 @@ class AOTInductorTestsTemplate:
                     torch.ones(1, device=device, dtype=torch.float32),
                     persistent=True,
                 )
+                self.register_buffer(
+                    "_tensor_constant1",
+                    torch.ones(1, device=device, dtype=torch.float32),
+                    persistent=True,
+                )
                 self.sub_mod = SubModule(device)
 
             def forward(self, x):
@@ -1303,6 +1301,7 @@ class AOTInductorTestsTemplate:
                         x, 1, torch.tensor(self.user_float_feature_idx, device=x.device)
                     ),
                     self._tensor_constant0,
+                    self._tensor_constant1,
                     self.sub_mod._tensor_constant1,
                 )
 
@@ -3807,6 +3806,32 @@ class AOTInductorTestsTemplate:
             )
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         x_casted = x.float()
+        with self.assertRaisesRegex(Exception, ""):
+            aot_inductor_module(x_casted)
+
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_runtime_checks_device_type_failed(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(1, 4, dtype=torch.float16, device="cpu")
+        model = Model()
+        with torch.no_grad():
+            package_path: str = AOTIRunnerUtil.compile(
+                model,
+                (x,),
+            )
+
+        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        aot_inductor_module(x)
+        x_casted = x.to(GPU_TYPE)
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
