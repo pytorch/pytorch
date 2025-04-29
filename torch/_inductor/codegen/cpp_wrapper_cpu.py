@@ -23,7 +23,7 @@ from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
-from .cpp_utils import cexpr, DEVICE_TO_ATEN, DEVICE_TO_INT, DTYPE_TO_ATEN, DTYPE_TO_CPP
+from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .wrapper import (
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -102,7 +102,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
 
-    def _generate_kernel_call_helper(
+    def generate_kernel_call(
         self,
         kernel_name: str,
         call_args,
@@ -113,7 +113,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
-        graph_name="",
         original_fxnode_name=None,
     ):
         """
@@ -322,12 +321,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             raise AssertionError(f"Unknown value type: {type(value)}")
 
     def generate_input_output_runtime_checks(self):
-        """
-        In debug_compile mode, we generate checks to ensure the dtype/shape/stride/device of each
-        real input/output tensor match ones provided at compile time via sample
-        input/output.
-        """
-
+        # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
+        # real input/output tensor match ones provided at compile time via sample
+        # input/output.
         def gen_check(handle_kind, idx, name, tensor):
             # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
             self.prefix.writeline(
@@ -406,27 +402,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         }}
                     """
                 )
-
-            # check input device type
-            if isinstance(tensor, ir.TensorBox):
-                tensor_device = tensor.get_device()
-                if tensor_device is not None:
-                    expected_device_type = DEVICE_TO_INT.get(tensor_device.type)
-                    if expected_device_type is not None:
-                        self.codegen_input_device_type_var_decl(self.prefix, name)
-                        device_type_str = str(tensor_device.type)
-                        self.prefix.splice(
-                            f"""
-                                int32_t {name}_expected_device_type = {expected_device_type};
-                                if ({name}_expected_device_type != {name}_device_type) {{
-                                    std::stringstream ss;
-                                    ss << "{handle_kind}[{idx}]: unmatched device type, "
-                                    << "expected: " << {name}_expected_device_type << "{expected_device_type}({device_type_str}), "
-                                    << "but got: " << {name}_device_type << "\\n";
-                                    throw std::runtime_error(ss.str());
-                                }}
-                            """
-                        )
 
         # Create a separate function for each input check to avoid "too big to optimize" error
         for idx, (name, tensor) in enumerate(V.graph.graph_inputs.items()):
@@ -616,12 +591,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
         code.writeline(f"auto {name}_stride = {name}.strides();")
-
-    def codegen_input_device_type_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int32_t {name}_device_type;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
-        )
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -939,7 +908,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.splice(aot_mode_decls)
         self.prefix.splice(prior)
 
-    def _define_kernel_helper(
+    def define_kernel(
         self,
         kernel_name: str,
         kernel_body: str,
@@ -1148,25 +1117,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         debug_printer_manager.set_printer_args(
             debug_args if debug_args is not None else args, kernel, None, None, "extern"
         )
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel, device)
-            shim_fn_codes = (
+            self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
-            if enable_kernel_profile:
-                shim_fn_codes = textwrap.dedent(
-                    f"""
-                    {{
-                      RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
-                      {shim_fn_codes}
-                    }}
-                    """
-                )
-            self.writeline(shim_fn_codes)
 
     def generate_c_shim_extern_kernel_alloc(
         self, extern_kernel: ir.ExternKernelAlloc, args: list[str]
@@ -1191,7 +1146,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
-    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
+    def generate_extern_kernel_alloc(self, extern_kernel, args):
         if getattr(extern_kernel, "outputs", None):
             # ir.ExternKernelAlloc may have outputs if it returns a tuple
             self.generate_c_shim_fallback_kernel(extern_kernel, args)
@@ -1240,7 +1195,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
-    def _generate_extern_kernel_out_helper(
+    def generate_fallback_kernel(self, fallback_kernel, args):
+        self.generate_c_shim_fallback_kernel(fallback_kernel, args)
+
+    def generate_extern_kernel_out(
         self,
         kernel: str,
         out: str,
@@ -1610,12 +1568,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         def create_new_tensor_handle() -> tuple[str, list[str]]:
-            tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
-            tmp_call_strs = [
-                f"AtenTensorHandle {tmp_AtenTensorHandle};",
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            ]
-            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
+            # TODO (benjaminglass1): uncomment this and remove the call to
+            # create_reinterpret_view after the AOTI forwards compatibility window has
+            # passed.
+            #
+            # tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+            # tmp_call_strs = [
+            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
+            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            # ]
+            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
+            return create_reinterpret_call(), []
 
         if (
             size == data.layout.size
@@ -1680,7 +1643,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
-    def codegen_multi_output(self, node: ir.MultiOutput):
+    def codegen_multi_output(self, name, value):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
         pass
@@ -2065,7 +2028,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 codegen_args,
                 op_overload,
                 raw_args,
-                output_args,  # type: ignore[arg-type]
+                output_args,
                 outputs,
             )
 
@@ -2220,7 +2183,7 @@ if (!custom_op_wrapper) {
         codegen_args: list[str],
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
-        output_args: Optional[list[Optional[str]]] = None,
+        output_args: Optional[list[str]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
         # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
@@ -2264,9 +2227,9 @@ if (!custom_op_wrapper) {
             """
         )
 
-        if len(output_args) == 1 and (output := output_args[0]) is not None:
+        if len(output_args) == 1:
             # result is a single tensor
-            lines += f"{output} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
+            lines += f"{output_args[0]} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));\n"
         else:
             # result is a tuple of tensors
             for idx, output_arg in enumerate(output_args):

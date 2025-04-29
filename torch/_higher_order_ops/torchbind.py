@@ -150,7 +150,7 @@ def call_torchbind_fake(mode, *args, **kwargs):
         )
 
 
-call_torchbind.py_autograd_impl(
+call_torchbind.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(call_torchbind, deferred_error=True)
 )
 

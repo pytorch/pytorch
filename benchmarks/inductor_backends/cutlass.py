@@ -4,7 +4,6 @@ import os
 os.environ["TORCH_LOGS"] = "inductor"
 
 import itertools
-import logging
 import time
 from abc import abstractmethod
 from collections import defaultdict
@@ -19,9 +18,6 @@ import torch
 from torch._inductor import config as inductor_config
 
 
-log: logging.Logger = logging.getLogger(__name__)
-
-
 inductor_config.autotune_num_choices_displayed = None
 # force autotuning, but reuse compilation artifacts
 inductor_config.autotune_local_cache = False
@@ -34,7 +30,6 @@ UNITS = {
     "forward_time": " (us)",
     "compilation_time": " (s)",
 }
-PERF_OVER_ATEN_STR: str = "perf_over_aten (%)"
 
 OP_NAMES = ["mm"]
 
@@ -196,7 +191,7 @@ def run_single_experiment_group(
         try:
             _ = compiled_op(A, B)
         except Exception as e:
-            log.warning(f"Benchmark config {config.name()} failed: {e}")  # noqa: G004
+            print(f"Benchmark config {config.name()} failed: {e}")
             results.append(
                 ExperimentResults(
                     name=config.name(),
@@ -280,9 +275,10 @@ def generate_experiment_configs(
     return configs
 
 
-def calculate_table_data(results: list[ExperimentResults]) -> dict:
+def tabulate_group_results(results: list[ExperimentResults]):
     table_data = defaultdict(list)
     aten_perf: Optional[float] = None
+    perf_over_aten_str: str = "perf_over_aten (%)"
 
     for experiment_result in results:
         for key, value in experiment_result.asdict().items():
@@ -291,43 +287,24 @@ def calculate_table_data(results: list[ExperimentResults]) -> dict:
 
         if experiment_result.name == "aten":
             aten_perf = experiment_result.forward_time
-            table_data[PERF_OVER_ATEN_STR].append("NA")
+            table_data[perf_over_aten_str].append("NA")
         elif aten_perf is not None:
             perf_over_aten = (
                 (experiment_result.forward_time - aten_perf) / aten_perf * 100
             )
-            table_data[PERF_OVER_ATEN_STR].append(perf_over_aten)
+            table_data[perf_over_aten_str].append(perf_over_aten)
         else:
             # fallback in case aten is not in experiment group
-            table_data[PERF_OVER_ATEN_STR].append("NA")
+            table_data[perf_over_aten_str].append("NA")
 
-    return table_data
+    return tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f")
 
 
 def print_results(experiment_groups: list[ExperimentGroup]):
-    edge_over_aten = defaultdict(list)
     for experiment_group in experiment_groups:
         group_config_name = experiment_group.config.name()
         print(f"\nExperiment group: {group_config_name}")
-
-        table_data = calculate_table_data(experiment_group.results)
-        for name, edge in zip(table_data["name"], table_data[PERF_OVER_ATEN_STR]):
-            edge_over_aten[name].append(edge)
-        print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
-
-    if "aten" in edge_over_aten:
-        print("\nAverage edge over aten (max(-edge, 0), higher is better):")
-        for name in edge_over_aten:
-            if name != "aten":
-                # calculate average edge over aten, but need to exclude inf
-                values = [
-                    max(-v, 0.0)
-                    for v in edge_over_aten[name]
-                    if v != float("inf") and v != "NA"
-                ]
-                valid_count = len(values)
-                average_edge = sum(values) / valid_count if values else "No valid data"
-                print(f"{name}: {average_edge} (from {valid_count} valid values)")
+        print(tabulate_group_results(experiment_group.results))
 
 
 def main():

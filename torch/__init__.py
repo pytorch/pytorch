@@ -54,7 +54,6 @@ from torch._utils import (
 from torch._utils_internal import (
     get_file_path,
     prepare_multiprocessing_environment,
-    profiler_allow_cudagraph_cupti_lazy_reinit_cuda12,
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
@@ -617,7 +616,7 @@ class SymInt:
 
 class SymFloat:
     """
-    Like a float (including magic methods), but redirects all operations on the
+    Like an float (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
     """
@@ -736,7 +735,7 @@ class SymFloat:
 
 class SymBool:
     """
-    Like a bool (including magic methods), but redirects all operations on the
+    Like an bool (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
 
@@ -2100,7 +2099,7 @@ for __name in dir(_C._VariableFunctions):
     __obj.__module__ = __name__  # "torch"
     # Hide some APIs that should not be public
     if __name == "segment_reduce":
-        # TODO: Once the undocumented FC window is passed, remove the line below
+        # TODO: Once the undocumented FC window is passed, remove the line bellow
         globals()[__name] = __obj
         __name = "_" + __name
     globals()[__name] = __obj
@@ -2302,16 +2301,7 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
-        cuda_version = None
-        if hasattr(torch, "version"):
-            from torch.torch_version import TorchVersion
-
-            cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
-
-        if self.config.get("triton.cudagraphs", False) and (
-            (cuda_version and cuda_version < "12.6")
-            or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
-        ):
+        if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
             #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
@@ -2426,9 +2416,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2441,9 +2429,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
@@ -2455,9 +2441,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
-    ] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
@@ -2593,10 +2577,6 @@ def compile(
     if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
-    guard_filter_fn = None
-    if options and isinstance(options, dict):
-        guard_filter_fn = options.pop("guard_filter_fn", None)
-
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2607,7 +2587,6 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-        guard_filter_fn=guard_filter_fn,
     )(model)  # type: ignore[return-value]
 
 

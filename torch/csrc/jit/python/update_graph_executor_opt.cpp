@@ -2,7 +2,7 @@
 
 namespace torch::jit {
 
-static thread_local bool kOptimize = true;
+thread_local bool kOptimize = true;
 void setGraphExecutorOptimize(bool o) {
   kOptimize = o;
 }

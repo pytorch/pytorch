@@ -254,18 +254,11 @@ def async_save(
     )
 
     state_dict = _stateful_to_state_dict(state_dict)
-
-    @_dcp_method_logger(log_exceptions=True)
-    def stage_state_dict():
-        if isinstance(storage_writer, AsyncStager):
-            staged_state_dict = storage_writer.stage(state_dict)
-        else:  # provides bwc for storage_writers not implementing AsyncStager
-            staged_state_dict = _create_cpu_state_dict(state_dict)
-            _copy_state_dict(state_dict, staged_state_dict, type_check=False)
-
-        return staged_state_dict
-
-    staged_state_dict = stage_state_dict()
+    if isinstance(storage_writer, AsyncStager):
+        staged_state_dict = storage_writer.stage(state_dict)
+    else:  # provides bwc for storage_writers not implementing AsyncStager
+        staged_state_dict = _create_cpu_state_dict(state_dict)
+        _copy_state_dict(state_dict, staged_state_dict, type_check=False)
 
     executor: _AsyncCheckpointExecutor = (
         _ProcessBasedAsyncCheckpointExecutor()
@@ -281,20 +274,15 @@ def async_save(
         process_group=process_group,
     )
 
-    @_dcp_method_logger(log_exceptions=True)
-    def maybe_synchronize_staging():
-        if (
-            isinstance(storage_writer, AsyncStager)
-            and storage_writer.should_synchronize_after_execute
-        ):
-            storage_writer.synchronize_staging()
-
-    maybe_synchronize_staging()
+    if (
+        isinstance(storage_writer, AsyncStager)
+        and storage_writer.should_synchronize_after_execute
+    ):
+        storage_writer.synchronize_staging()
 
     return f
 
 
-@_dcp_method_logger(log_exceptions=True)
 def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object."""
     stateful_state_dict = {}

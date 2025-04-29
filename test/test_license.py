@@ -45,11 +45,7 @@ class TestLicense(TestCase):
                 'Found too many "torch-*dist-info" directories '
                 f'in "{site_packages}, expected only one'
             )
-        # setuptools renamed *dist-info/LICENSE to *dist-info/licenses/LICENSE sicne 77.0
-        license_file = os.path.join(distinfo[0], "licenses", "LICENSE")
-        if not os.path.exists(license_file):
-            license_file = os.path.join(distinfo[0], "LICENSE")
-        with open(license_file) as fid:
+        with open(os.path.join(os.path.join(distinfo[0], "LICENSE"))) as fid:
             txt = fid.read()
             self.assertTrue(starting_txt in txt)
 

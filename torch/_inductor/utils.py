@@ -16,7 +16,6 @@ import os
 import platform
 import re
 import shutil
-import statistics
 import sys
 import tempfile
 import textwrap
@@ -67,15 +66,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import (
-        Buffer,
-        ExternKernel,
-        ExternKernelOut,
-        IRNode,
-        Layout,
-        Operation,
-        ReinterpretView,
-    )
+    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -176,77 +167,6 @@ class GraphPartitionMap:
 
     # name of constants read/written by the graph partition
     constant_names: list[str]
-
-
-def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
-    """
-    Returns benchmark results by examining torch profiler events.
-    This could be more accurate as it doesn't count CPU side overhead.
-    However, this also requires manually excluding irrelevant event, e.g.
-    vectorized_elementwise_kernel which is used to fill L2 cache,
-    various CUDA events, etc, so could also be fragile.
-    """
-
-    fn()
-    torch.cuda.synchronize()
-    cache = torch.empty(int(256e6 // 4), dtype=torch.float16, device="cuda")
-
-    # Estimate the runtime of the function
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    start_event.record()
-    for _ in range(5):
-        cache.zero_()
-        fn()
-    end_event.record()
-    torch.cuda.synchronize()
-    estimate_ms = start_event.elapsed_time(end_event) / 5
-
-    # compute number of warmup and repeat
-    n_warmup = max(1, int(warmup / estimate_ms))
-    n_repeat = max(1, int(rep / estimate_ms))
-
-    # Warm-up
-    for _ in range(n_warmup):
-        fn()
-
-    start_event = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
-    end_event = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CUDA,
-        ]
-    ) as p:
-        torch.cuda.synchronize()
-        for i in range(n_repeat):
-            cache.zero_()
-            start_event[i].record()
-            with torch.cuda.nvtx.range("RunCudaModule"):
-                fn()
-            end_event[i].record()
-        torch.cuda.synchronize()
-        times = torch.tensor(
-            [s.elapsed_time(e) for s, e in zip(start_event, end_event)]
-        )
-
-    res = torch.mean(times).item()
-    log.debug("raw events")
-    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
-    filtered_events = EventList(
-        [
-            event
-            for event in p.events()
-            if event.device_type == DeviceType.CUDA and "fused_abs_max_0" in event.name
-        ]
-    )
-    if filtered_events:
-        res -= (
-            statistics.mean(event.device_time_total for event in filtered_events)
-            / 1000.0
-        )
-
-    log.debug("profiling results: %s ms", res)
-    return res
 
 
 def do_bench_using_profiling(
@@ -1404,12 +1324,6 @@ def use_max_autotune() -> bool:
 def _use_template_for_gpu(
     layout: Layout, allowed_layout_dtypes: list[torch.dtype]
 ) -> bool:
-    if layout.dtype not in allowed_layout_dtypes:
-        log.debug(
-            "Not using template since dtype %s is not in allowed layout dtypes %s",
-            layout.dtype,
-            allowed_layout_dtypes,
-        )
     return (
         is_gpu(layout.device.type)
         and layout.dtype in allowed_layout_dtypes
@@ -1502,9 +1416,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     if torch.version.hip:
         return False
 
-    # output dtype
-    # FP32 not supported: https://github.com/pytorch/pytorch/issues/145952
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = (
         _use_template_for_gpu(layout, layout_dtypes)
         and use_max_autotune()
@@ -1737,8 +1649,8 @@ def run_and_get_code(
 
 
 def run_and_get_kernels(
-    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
-) -> tuple[_T, list[str]]:
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> tuple[Any, list[str]]:
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -1755,7 +1667,7 @@ def run_fw_bw_and_get_code(fn: Callable[..., Any]) -> tuple[Any, list[str]]:
     return run_and_get_code(run_with_backward)
 
 
-def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str]:
+def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
 
@@ -1799,7 +1711,7 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
     return source_codes
 
 
-def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
+def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -1808,9 +1720,7 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
     return source_codes[0]
 
 
-def run_and_get_triton_code(
-    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
-) -> str:
+def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -1820,7 +1730,7 @@ def run_and_get_triton_code(
 
 
 def run_and_get_graph_lowering(
-    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
 ) -> tuple[Any, list[GraphLowering]]:
     from torch._inductor.graph import GraphLowering
     from torch._inductor.output_code import CompiledFxGraph
@@ -2358,7 +2268,6 @@ def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
         and dtype == torch.bfloat16
         and torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (9, 0)
-        and config.bfloat16_atomic_adds_enabled
     ):
         return False
     else:
@@ -2476,8 +2385,8 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
 
 
 def run_and_get_cpp_code(
-    fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
-) -> tuple[_T, str]:
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> tuple[Any, str]:
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
     # even if this run_and_get_cpp_code function is called multiple times.
@@ -2521,9 +2430,9 @@ def shape_env_from_inputs(inputs: Sequence[InputType]) -> Optional[ShapeEnv]:
 
 
 def align_inputs_from_check_idxs(
-    model: Callable[[list[InputType]], _T],
+    model: Callable[[list[InputType]], Any],
     inputs_to_check: Sequence[int],
-) -> Callable[[list[InputType]], _T]:
+) -> Callable[[list[InputType]], Any]:
     if len(inputs_to_check) == 0:
         return model
 
@@ -2733,13 +2642,6 @@ def register_op_dtype_propagation_rules(
     )
 
 
-op_requires_libdevice_fp64: OrderedSet[str] = OrderedSet()
-
-
-def register_op_requires_libdevice_fp64(name: str) -> None:
-    op_requires_libdevice_fp64.add(name)
-
-
 def get_current_backend() -> str:
     from torch._inductor.virtualized import V
 
@@ -2838,39 +2740,24 @@ def get_donated_idxs() -> Optional[list[int]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
-    kernel_name: str,
-    is_extern: bool = False,
+    node_schedule: Sequence[BaseSchedulerNode], kernel_name: str
 ) -> None:
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
-    from .ir import ExternKernelOut
     from .virtualized import V
 
-    if is_extern:
-        assert isinstance(node_schedule, ExternKernelOut)
-        curr_node_info = (
-            V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                kernel_name, []
-            )
-        )
-        curr_node_info.extend(
-            origin.name
-            for origin in node_schedule.origins
-            if origin.name not in curr_node_info
-        )
-    else:
-        assert isinstance(node_schedule, list)
-        for snode in node_schedule:
-            if snode not in (EnableReduction, DisableReduction):
-                if snode.node is not None:
-                    curr_node_info = V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
+    for snode in node_schedule:
+        if snode not in (EnableReduction, DisableReduction):
+            if snode.node is not None:
+                curr_node_info = (
+                    V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
                         kernel_name, []
                     )
-                    curr_node_info.extend(
-                        origin.name
-                        for origin in snode.node.origins
-                        if origin.name not in curr_node_info
-                    )
+                )
+                curr_node_info.extend(
+                    origin.name
+                    for origin in snode.node.origins  # type: ignore[attr-defined]
+                    if origin.name not in curr_node_info
+                )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):

@@ -350,8 +350,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEqual(spec_local_addr, worker_group.master_addr)
         self.assertGreater(worker_group.master_port, 0)
 
-    @patch.object(TestAgent, "_construct_event")
-    def test_initialize_workers(self, mock_construct_event):
+    def test_initialize_workers(self):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
@@ -361,9 +360,6 @@ class SimpleElasticAgentTest(unittest.TestCase):
         for i in range(spec.local_world_size):
             worker = worker_group.workers[i]
             self.assertEqual(worker.id, worker.global_rank)
-
-        mock_construct_event.assert_called()
-        self.assertEqual(mock_construct_event.call_count, 10)
 
     def test_restart_workers(self):
         spec = self._get_worker_spec()

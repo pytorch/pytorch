@@ -605,18 +605,13 @@ class TORCH_API Library final {
   /// }
   /// ```
 
+  template <typename Schema>
   Library& def(
-      c10::FunctionSchema&& s,
+      Schema&& raw_schema,
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s), nullptr, tags, rv);
-  }
-
-  Library& def(
-      const char* raw_schema,
-      const std::vector<at::Tag>& tags = {},
-      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    return _def(schema(raw_schema), nullptr, tags, rv);
   }
 
   /// Declares that for all operators that are subsequently def'ed, their
@@ -889,19 +884,13 @@ class TORCH_API Library final {
   at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
 void initialize_torch_libraries();
 #endif
 
 namespace detail {
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
-// This is an experimental feature to defer TorchLibraryInit cost to run either
-// at model load time, or when a client application explicitly calls
-// torch::initialize_torch_libraries().
-//
-// This is not thread safe, the client is required to ensure that libraries
-// containing TORCH_LIBRARY initializers are loaded in a thread safe manner.
+#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
 extern std::vector<TorchLibraryInit*> torch_library_initializers;
 class TorchLibraryInit final {
     private:

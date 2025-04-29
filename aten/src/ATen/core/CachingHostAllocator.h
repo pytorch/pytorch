@@ -1,5 +1,4 @@
 #include <c10/core/Allocator.h>
-#include <c10/core/Stream.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
@@ -47,7 +46,7 @@ namespace {
 }
 
 // Struct containing memory allocator summary statistics for host.
-struct TORCH_API HostStats {
+struct HostStats {
   // COUNT: allocations requested by client code. Note that active
   // count can be extracted by looking at current allocations
   Stat allocation;
@@ -275,8 +274,7 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  virtual bool record_event(void* ptr, void* ctx, c10::Stream s) {
-    S stream = S(s);
+  virtual bool record_event(void* ptr, void* ctx, S stream) {
     auto* block = reinterpret_cast<B*>(ctx);
 
     // Note: we need to check if the passed-in `ctx` is valid. This is because
@@ -622,49 +620,24 @@ protected:
   alignas(64) HostStatsStaged stats_;
 };
 
-struct TORCH_API HostAllocator : public at::Allocator {
-  // Associates the pinned memory allocation with a stream to track
-  // dependencies. This ensures the memory won't be reused until the stream's
-  // operations complete
-  virtual bool record_event(void* ptr, void* ctx, c10::Stream stream) = 0;
-
-  // Frees all cached pinned memory and returns it to the system, clearing the
-  // allocator's internal cache
-  virtual void empty_cache() = 0;
-
-  // Returns comprehensive statistics about the allocator's memory usage,
-  // allocation patterns, and timing metrics
-  virtual HostStats get_stats() = 0;
-
-  // Resets the cumulative allocation statistics
-  virtual void reset_accumulated_stats() = 0;
-
-  // Resets the peak memory usage metrics
-  virtual void reset_peak_stats() = 0;
-};
-
-template <typename T, c10::DeleterFnPtr deleteFunc>
-struct CachingHostAllocatorInterface : public HostAllocator {
+template <typename T>
+struct CachingHostAllocatorInterface : public at::Allocator {
   CachingHostAllocatorInterface() : impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
-    auto ptr_and_ctx = impl_->allocate(size);
-    return {
-        ptr_and_ctx.first,
-        ptr_and_ctx.second,
-        deleteFunc, // Use the template parameter deleter function
-        at::DeviceType::CPU};
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
   }
 
   void free(void* ctx) {
     impl_->free(ctx);
   }
 
-  bool record_event(void* ptr, void* ctx, c10::Stream stream) override {
+  template <typename S>
+  bool record_event(void* ptr, void* ctx, S stream) {
     return impl_->record_event(ptr, ctx, stream);
   }
 
-  void empty_cache() override {
+  void empty_cache() {
     impl_->empty_cache();
   }
 
@@ -673,54 +646,20 @@ struct CachingHostAllocatorInterface : public HostAllocator {
     impl_->copy_data(dest, src, count);
   }
 
-  HostStats get_stats() override {
+  HostStats getStats() {
     return impl_->getStats();
   }
 
-  void reset_accumulated_stats() override {
+  void resetAccumulatedStats() {
     impl_->resetAccumulatedStats();
   }
 
-  void reset_peak_stats() override {
+  void resetPeakStats() {
     impl_->resetPeakStats();
   }
 
   std::unique_ptr<T> impl_;
 };
-
-#define DECLARE_HOST_ALLOCATOR(name, impl, deleter, instance)       \
-  void deleter(void* ptr);                                          \
-  struct name final                                                 \
-      : public at::CachingHostAllocatorInterface<impl, deleter> {}; \
-  static name instance;                                                    \
-  void deleter(void* ptr) {                                         \
-    instance.free(ptr);                                             \
-  }
-
-/**
- * Set the host allocator for DeviceType `device_type`. This allocator manages
- * pinned memory on the host that can be accessed efficiently by the specified
- * device type. Note that this function is not thread-safe.
- */
-TORCH_API void setHostAllocator(
-    at::DeviceType device_type,
-    at::HostAllocator* allocator,
-    uint8_t priority = 0);
-
-TORCH_API at::HostAllocator* getHostAllocator(at::DeviceType device_type);
-
-template <DeviceType device_type>
-struct HostAllocatorRegistry {
-  explicit HostAllocatorRegistry(HostAllocator* allocator) {
-    at::setHostAllocator(device_type, allocator);
-  }
-};
-
-#define REGISTER_HOST_ALLOCATOR(device_type, allocator) \
-  namespace {                                           \
-  static at::HostAllocatorRegistry<device_type>         \
-      g_host_allocator_registry_instance(allocator);    \
-  }
 
 } // namespace at
 C10_DIAGNOSTIC_POP()

@@ -3036,7 +3036,9 @@ class TestCase(expecttest.TestCase):
                         # The path isn't strictly correct but it's arguably better than nothing.
                         return os.path.split(abs_test_path)[1]
 
-                    abs_test_path = inspect.getfile(type(self))
+                    # NB: In Python 3.8, the getfile() call will return a path relative
+                    # to the working directory, so convert that to absolute.
+                    abs_test_path = os.path.abspath(inspect.getfile(type(self)))
                     test_filename = _get_rel_test_path(abs_test_path)
                     class_name = type(self).__name__
                     test_run_cmd = f"python {test_filename} {class_name}.{method_name}"

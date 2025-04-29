@@ -465,31 +465,31 @@ def make_test_cls_with_patches(
 
 
 # test Python 3.11+ specific features
-def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def skipIfNotPy311(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
 
 
-def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def skipIfNotPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
 
 
-def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def xfailIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
     return fn
 
 
-def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def skipIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
 
 
-def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 10):
         return fn
     else:
@@ -498,19 +498,19 @@ def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
-def expectedFailureDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def expectedFailureDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
     fn._expected_failure_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
-def expectedFailureCodegenDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def expectedFailureCodegenDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
     fn._expected_failure_codegen_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls test generated in test/inductor/test_cpp_wrapper.py
-def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+def expectedFailureDynamicWrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
     fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn
 
@@ -524,9 +524,3 @@ def reset_rng_state(use_xla: bool = False) -> None:
         import torch_xla.core.xla_model as xm
 
         xm.set_rng_state(1337, str(xm.xla_device()))
-
-
-def _skipped_function_for_test_reconstruct(
-    f: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
-) -> _T:
-    return f(*args, **kwargs)

@@ -136,7 +136,6 @@ class TestXpu(TestCase):
                 device_capability["architecture"],
             )
 
-    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
             """\
@@ -159,9 +158,6 @@ if __name__ == "__main__":
         )
         self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
 
-    @unittest.skipIf(
-        IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
-    )
     def test_lazy_init(self):
         """Validate that no XPU calls are made during `import torch` call"""
 
@@ -196,11 +192,9 @@ model = torch.nn.Sequential(
     torch.nn.ReLU(),
     torch.nn.MaxPool2d(2, 2),
 )
-
-if __name__ == "__main__":
-    test_multi_process(model, input)
-    test_multi_process(model, input)
-    print(torch.xpu.device_count())
+test_multi_process(model, input)
+test_multi_process(model, input)
+print(torch.xpu.device_count())
 """
         rc = check_output(test_script)
         self.assertEqual(rc, str(torch.xpu.device_count()))

@@ -422,12 +422,11 @@ static __global__ void chunk_cat_cuda_kernel(
 }
 
 bool all_contiguous(TensorList tensors) {
+  bool contiguous = true;
   for (const auto& t : tensors) {
-    if (!t.is_contiguous()) {
-      return false;
-    }
+    contiguous &= t.is_non_overlapping_and_dense();
   }
-  return true;
+  return contiguous;
 }
 
 // Get leading dimensions before `dim`-th dimension.

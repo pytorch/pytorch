@@ -19,7 +19,6 @@ std::vector<int64_t> pool_output_sizes(
   output_size[1] = input_size[1];
 
   for (const auto i : c10::irange(2, input_size.size())) {
-    TORCH_CHECK_VALUE(stride[i -2] > 0, "Strides must be positive!");
     output_size[i] = pooling_output_shape_pad_lr<int64_t>(
       input_size[i],
       kernel_size[i - 2],
@@ -85,7 +84,7 @@ void check_mkldnn_binary_fusion_inputs(
     return ideep::attr_t::fuse_##NAME();             \
   }
 
-static AttrFunction attr_func_leaky_relu =
+AttrFunction attr_func_leaky_relu =
     [](torch::List<std::optional<at::Scalar>> scalars,
        std::optional<std::string_view> algorithm) {
       TORCH_CHECK(
@@ -97,7 +96,7 @@ static AttrFunction attr_func_leaky_relu =
       return ideep::attr_t::fuse_relu(1.0, alpha_value);
     };
 
-static AttrFunction attr_func_hardtanh =
+AttrFunction attr_func_hardtanh =
     [](torch::List<std::optional<at::Scalar>> scalars,
        std::optional<std::string_view> algorithm) {
       TORCH_CHECK(
@@ -113,7 +112,7 @@ static AttrFunction attr_func_hardtanh =
       return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
     };
 
-static AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> scalars,
+AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> scalars,
                                  std::optional<std::string_view> algorithm) {
   TORCH_CHECK(
       algorithm.has_value(),
@@ -131,7 +130,7 @@ static AttrFunction attr_func_gelu = [](torch::List<std::optional<at::Scalar>> s
   return ideep::attr_t::fuse_gelu(1.0, 0.f, 0.f, gelu_type);
 };
 
-static AttrFunction attr_func_hardsigmoid =
+AttrFunction attr_func_hardsigmoid =
     [](torch::List<std::optional<at::Scalar>> scalars,
        std::optional<std::string_view> algorithm) {
       ideep::attr_t attr;

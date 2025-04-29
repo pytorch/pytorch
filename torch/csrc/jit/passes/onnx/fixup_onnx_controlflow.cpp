@@ -347,7 +347,7 @@ void FixupONNXLoopNodeInputs(Node* node, int opset_version) {
 }
 } // anonymous namespace
 
-static std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
+std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   GRAPH_DEBUG("before FixupONNXLoopBlockInputs: ", *node->owningGraph());
   FixupONNXLoopBlockInputs(node);
@@ -368,7 +368,7 @@ static std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
 
 // Check if node is prim::Uninitialized,
 // or output of prim::Uninitialized->onnx::Identity
-static bool IsUninitializedNode(Node* n) {
+bool IsUninitializedNode(Node* n) {
   if (n->kind() == ::c10::onnx::Identity &&
       n->inputs()[0]->node()->kind() == prim::Uninitialized)
     return true;
@@ -380,7 +380,7 @@ static bool IsUninitializedNode(Node* n) {
 // Infer shape and type of the uninitialized_output from the corresponding
 // output of the other subblock. prim::Uninitialized node is proven to be
 // unused. So replace this node with one of the inferred shape and type.
-static void InferShapeTypeForUninitializedOutput(
+void InferShapeTypeForUninitializedOutput(
     Graph* graph,
     Block* block,
     Value* uninitialized_output,
@@ -456,7 +456,7 @@ static void InferShapeTypeForUninitializedOutput(
 //       -> (%1, %y.1, %7)
 //   ...
 
-static void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
+void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return;
   }
@@ -510,7 +510,7 @@ static void ONNXFixupUninitializedOutput(Node* node, int opset_version) {
   }
 }
 
-static void ONNXMergeIfBlockOutputShapes(Node* node) {
+void ONNXMergeIfBlockOutputShapes(Node* node) {
   TORCH_INTERNAL_ASSERT(node->kind() == ::c10::onnx::If);
   Block* then_block = node->blocks().at(0);
   Block* else_block = node->blocks().at(1);
@@ -663,7 +663,7 @@ static void ONNXMergeIfBlockOutputShapes(Node* node) {
   }
 }
 
-static std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
+std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return node->outputs().vec();
   }

@@ -79,7 +79,6 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
-from .device_interface import get_interface_for_device
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
@@ -272,6 +271,7 @@ class WrapperBackend:
                 return self.candidate
 
             raise RuntimeError(f"incorrect results of backend {self}")
+            return self.gm.forward
 
         except Exception:
             log.exception("error in verify_correctness")
@@ -309,6 +309,7 @@ class OutputGraph:
         f_code,
         torch_function_mode_stack,
     ):
+        super().__init__()
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
@@ -421,6 +422,8 @@ class OutputGraph:
         self.should_exit = False
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
 
+        # Note this returns true iff TF Mode and TF Subclasses are enabled
+        self.torch_function_enabled = torch._C._is_torch_function_enabled()
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
         # This records the initial torch function mode stack for guarding
@@ -681,6 +684,16 @@ class OutputGraph:
             ),
         )
 
+        # TODO - Consider having a torch level API for torch_function_state. As
+        # of now, we create a ref cycle by passing the
+        # output.set_torch_function_state to
+        # output.tracing_context.global_context.global_state. In the interim,
+        # the problem can be solved by manually set
+        # output.tracing_context.global_context.global_state to None at cleanup.
+        global_state["torch_function_enabled"] = (
+            self.set_torch_function_state,
+            self.torch_function_enabled,
+        )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
 
         global_state["autocast_enabled"] = (
@@ -1334,14 +1347,8 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
-            device_types = compile_pg._device_types
-            assert len(device_types) == 1, (
-                "Expect only one device type but got {}".format("+".join(device_types))
-            )
             with (
-                get_interface_for_device(device_types.pop()).device(  # type: ignore[attr-defined]
-                    compile_pg.rank() % torch.accelerator.device_count()
-                ),
+                torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()),
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states = [None] * compile_pg.size()
@@ -1732,11 +1739,6 @@ class OutputGraph:
                     )
                     update_used_symbols(used_symbols, fake)
 
-        # Preserve all symbols that appears in original expressions of a deferred_runtime_asserts.
-        for assertion_list in self.shape_env.deferred_runtime_asserts.values():
-            for assertion in assertion_list:
-                used_symbols |= free_symbols(assertion.expr)
-
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
             symbol = placeholder_binds_symbol(node)
@@ -1847,6 +1849,9 @@ class OutputGraph:
         self.input_source_to_var.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
+
+    def set_torch_function_state(self, enabled: bool) -> None:
+        self.torch_function_enabled = enabled
 
     def add_graph_finalizer(
         self, register_finalizer: Callable[[fx.GraphModule], None]

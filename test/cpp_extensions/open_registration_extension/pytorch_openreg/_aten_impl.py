@@ -25,6 +25,18 @@ def impl_factory(name):
     return _
 
 
+# TODO: replace it with implementing torch.openreg.device
+class DeviceContext:
+    def __init__(self, device):
+        self.idx = device.index
+
+    def __enter__(self):
+        self.prev = driver.exec("exchangeDevice", self.idx)
+
+    def __exit__(self, *args):
+        driver.exec("uncheckedSetDevice", self.prev)
+
+
 def _openreg_kernel_fallback(op, *args, **kwargs):
     def get_tensor_device(*args):
         for arg in args:
@@ -36,7 +48,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
         return _kernel_fallback(op, *args, **kwargs)
 
     # Mimicks the DeviceGuard system we have in aten
-    with torch.openreg.device(device):  # type: ignore[misc]
+    with DeviceContext(device):
         return _kernel_fallback(op, *args, **kwargs)
 
 
@@ -128,13 +140,13 @@ def _kernel_fallback(op, *args, **kwargs):
 
 
 def copy_from_device(from_):
-    with torch.openreg.device(from_.device):  # type: ignore[misc]
+    with DeviceContext(from_.device):
         args, _ = prepare_for_sending((from_,), {})
         return driver.exec("send_data", *args)
 
 
 def copy_from_host_to_device(from_, to_):
-    with torch.openreg.device(to_.device):  # type: ignore[misc]
+    with DeviceContext(to_.device):
         args, _ = prepare_for_sending((to_,), {})
         driver.exec("recv_data", from_, *args)
     return to_

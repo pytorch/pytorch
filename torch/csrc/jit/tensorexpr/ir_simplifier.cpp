@@ -8,7 +8,7 @@
 namespace torch::jit::tensorexpr {
 
 // Creates a new Expr of the given type with the provided lhs and rhs.
-static inline ExprPtr newBinaryOpOfType(
+inline ExprPtr newBinaryOpOfType(
     IRNodeType expr_type,
     const ExprPtr& lhs,
     const ExprPtr& rhs,
@@ -72,7 +72,7 @@ static ExprPtr mutateBinaryOp(
 
 // Simple recursive GCD.
 template <typename T>
-static T gcd(T a, T b) {
+T gcd(T a, T b) {
   if (b == 0) {
     return a;
   }
@@ -205,7 +205,7 @@ void MinTerm::uniquefy() {
 
 // Handles optimization cases for Broadcast/Ramp +/- Broadcast/Ramp
 template <class Op>
-static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
+ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
       if (bc->lanes() != bcother->lanes()) {

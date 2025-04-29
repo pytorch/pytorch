@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
-
 import torch
 from torch import Tensor
 from torch.autograd import Function
@@ -56,11 +54,7 @@ class Dirichlet(ExponentialFamily):
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(
-        self,
-        concentration: Tensor,
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, concentration, validate_args=None):
         if concentration.dim() < 1:
             raise ValueError(
                 "`concentration` parameter must be at least one-dimensional."

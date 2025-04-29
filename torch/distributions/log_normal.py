@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
-
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
@@ -34,14 +32,8 @@ class LogNormal(TransformedDistribution):
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.positive
     has_rsample = True
-    base_dist: Normal
 
-    def __init__(
-        self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, loc, scale, validate_args=None):
         base_dist = Normal(loc, scale, validate_args=validate_args)
         super().__init__(base_dist, ExpTransform(), validate_args=validate_args)
 

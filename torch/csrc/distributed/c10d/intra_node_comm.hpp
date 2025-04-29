@@ -87,5 +87,4 @@ class IntraNodeCommWork : public c10d::Work {
 
 TORCH_API int64_t getIntraNodeCommUsageCounter();
 
-bool isIntraNodeCommSupported();
 } // namespace c10d::intra_node_comm

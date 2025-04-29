@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
-
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
@@ -52,12 +50,7 @@ class Uniform(Distribution):
     def variance(self) -> Tensor:
         return (self.high - self.low).pow(2) / 12
 
-    def __init__(
-        self,
-        low: Union[Tensor, float],
-        high: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, low, high, validate_args=None):
         self.low, self.high = broadcast_all(low, high)
 
         if isinstance(low, _Number) and isinstance(high, _Number):
