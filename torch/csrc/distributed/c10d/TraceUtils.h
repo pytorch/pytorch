@@ -319,11 +319,12 @@ inline std::string get_python_cpp_trace() {
   const auto& s_tb = s_tbs.tracebacks.at(0);
   constexpr auto TB_FMT_CSTR = FMT_COMPILE("#{} {} from {}:{}\n");
   fmt::memory_buffer buf;
+  auto buf_iter = std::back_inserter(buf);
   for (auto idx : c10::irange(s_tb.size())) {
     auto frame_id = s_tb[idx];
     const auto& frame = s_tbs.all_frames.at(frame_id);
     fmt::format_to(
-        std::back_inserter(buf),
+        buf_iter,
         TB_FMT_CSTR,
         idx,
         frame.funcname,
