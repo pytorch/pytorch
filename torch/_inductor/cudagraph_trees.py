@@ -555,11 +555,14 @@ def _use_cuda_memory_pool_manager(
     stream.wait_stream(torch.cuda.current_stream())
 
     with torch.cuda.stream(stream), torch.device(device):
-        torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
+        # Begin allocate to mem pool for all memory allocation on the current thread.
+        # This is thread safe since a thread can only warmup or record 1 cudagraph
+        # at the same time.
+        torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
         try:
             yield
         finally:
-            torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
+            torch._C._cuda_endAllocateToPool(device, mem_pool)
             torch._C._cuda_releasePool(device, mem_pool)
 
     torch.cuda.current_stream().wait_stream(stream)
@@ -2183,6 +2186,7 @@ class CUDAGraphTreeManager:
         self, new_inputs: list[InputType], function_id: FunctionID
     ) -> OutputType:
         assert not isinstance(self.current_node, CUDAWarmupNode)
+        breakpoint()
         graph_id = self.new_graph_id()
         log.debug(
             "Recording function %d of graph recording id %d",
