@@ -967,9 +967,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @requires_cuda
     @requires_triton
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     def test_compile_selective_checkpoint_list_ops(self, device):
         def selective_checkpointing_context_fn():
             # recompute everything
