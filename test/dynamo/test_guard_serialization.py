@@ -244,6 +244,19 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ref, loaded, {"x": {"t": torch.randn(3), "d": torch.randn(3)}}, True
         )
 
+    def test_bool_match(self):
+        def fn(x, b):
+            if b:
+                return x + 1
+            else:
+                return x + 2
+
+        ref, loaded = self._test_serialization("BOOL_MATCH", fn, torch.randn(3), True)
+
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": True}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": False}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "b": None}, False)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
