@@ -1328,6 +1328,7 @@ class SkipFunctionVariable(VariableTracker):
                 if not isinstance(rebuilt_fn, SkipFunctionVariable):
                     return rebuilt_fn.call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
+            module_attr = getattr(self.value, "__module__", "<unknown module>")
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
@@ -1349,7 +1350,6 @@ class SkipFunctionVariable(VariableTracker):
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
-                module_attr = getattr(self.value, "__module__", None)
                 if module_attr in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
@@ -1361,10 +1361,7 @@ class SkipFunctionVariable(VariableTracker):
                         "Please file an issue on GitHub "
                         "so the PyTorch team can add support for it. ",
                     ]
-                elif (
-                    module_attr is not None
-                    and module_attr.startswith("optree")
-                ):
+                elif module_attr is not None and module_attr.startswith("optree"):
                     explanation = f"Dynamo cannot trace optree C/C++ function {module_attr}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
