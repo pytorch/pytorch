@@ -2710,12 +2710,7 @@ Tensor take_along_dim(
   if (opt_dim.has_value()) {
     auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
-    auto dim_size = self_broadcasted.size(dim);
-    auto fixed_indices = at::where(
-         indices_broadcasted >= 0,
-          indices_broadcasted,
-          indices_broadcasted + dim_size);
-    return self_broadcasted.gather(dim, fixed_indices);
+    return self_broadcasted.gather(dim, indices_broadcasted);
   }
 
   // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
