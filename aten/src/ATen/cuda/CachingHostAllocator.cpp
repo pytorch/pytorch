@@ -85,8 +85,8 @@ struct CUDACachingHostAllocatorImpl
       device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
     cudaPointerAttributes attr{};
-    // We do not believe that CUDA needs mutable access to the data here.
-    cudaError_t err = cudaPointerGetAttributes(&attr, data);
+    // We do not believe that CUDA needs mutable access to the ptr here.
+    cudaError_t err = cudaPointerGetAttributes(&attr, ptr);
 #if !defined(USE_ROCM)
     if (err == cudaErrorInvalidValue) {
       (void)cudaGetLastError(); // clear CUDA error
