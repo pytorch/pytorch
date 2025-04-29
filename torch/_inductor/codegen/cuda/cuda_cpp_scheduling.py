@@ -8,7 +8,7 @@ from torch.utils._ordered_set import OrderedSet
 from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
-from ...ir import Buffer, ComputedBuffer, CUDATemplateBuffer, IRNode, Pointwise
+from ...ir import Buffer, ComputedBuffer, CUDATemplateBuffer, Pointwise
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -57,7 +57,7 @@ class CUDACPPScheduling(BaseScheduling):
             return self._can_fuse_epilogue_impl(
                 cast(CUDATemplateBuffer, node1.node),
                 [],
-                node2.node,  # type: ignore[arg-type]
+                node2,  # type: ignore[arg-type]
             )
         elif self.is_cuda_cpp_fused_template(node1) and isinstance(
             node2, SchedulerNode
@@ -68,7 +68,7 @@ class CUDACPPScheduling(BaseScheduling):
             return self._can_fuse_epilogue_impl(
                 fnode1.get_template_node(),  # type: ignore[arg-type]
                 self._unwrap_epilogue_nodes(fnode1),
-                node2.node,  # type: ignore[arg-type]
+                node2,  # type: ignore[arg-type]
             )
 
         return False
@@ -126,7 +126,7 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
             "Epilogue nodes must all be instances of ir.ComputedBuffer"
         )
-        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_nodes)
 
         with kernel:
             for node in [template_node, *epilogue_nodes]:
@@ -150,21 +150,23 @@ class CUDACPPScheduling(BaseScheduling):
         self.free_buffers_in_scheduler()
 
     @staticmethod
-    def _unwrap_epilogue_nodes(fused_node: FusedSchedulerNode) -> list[IRNode]:
+    def _unwrap_epilogue_nodes(
+        fused_node: FusedSchedulerNode,
+    ) -> list[BaseSchedulerNode]:
         nodes = list(fused_node.get_nodes())
         template_node = fused_node.get_template_node()
         assert all(n.node is not None for n in nodes), (
             "All epilogue nodes should have an IRNode"
         )
         return cast(
-            list[IRNode], [n.node for n in nodes if n.node is not template_node]
+            list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
         )
 
     def _can_fuse_epilogue_impl(
         self,
         cuda_template_buffer: CUDATemplateBuffer,
-        epilogue_nodes: list[IRNode],
-        additional_node: IRNode,
+        epilogue_nodes: list[BaseSchedulerNode],
+        additional_node: BaseSchedulerNode,
     ) -> bool:
         """
         Check if the given node can be fused with the epilogue. At the moment, Kernels
@@ -178,34 +180,36 @@ class CUDACPPScheduling(BaseScheduling):
         - bool: True if the given node can be fused with the epilogue, False otherwise.
 
         """
+        additional_ir_node = additional_node.node
+
         if not isinstance(cuda_template_buffer, CUDATemplateBuffer):
             return False
         # if not cuda_template_buffer.template.can_fuse_epilogue:
         #    # The used GEMM op does not support fusing epilogues
         #    return False
-        if not isinstance(additional_node, ComputedBuffer):
+        if not isinstance(additional_ir_node, ComputedBuffer):
             return False
-        if not isinstance(additional_node.data, Pointwise):
+        if not isinstance(additional_ir_node.data, Pointwise):
             return False
         # We can fuse a Pointwise op that depends on the last fused epilogue node
         # if any. If there is no epilogue node yet, it needs to depend on the template
         # node
-        node_name = additional_node.get_computed_buffer_name()  # type: ignore[attr-defined]
+        node_name = additional_ir_node.get_computed_buffer_name()  # type: ignore[attr-defined]
         if node_name is None:
             return False
 
         if len(epilogue_nodes) == 0:
-            if cuda_template_buffer.name not in additional_node.get_read_names():
+            if cuda_template_buffer.name not in additional_ir_node.get_read_names():
                 return False
         else:
-            last_epilogue_node = epilogue_nodes[-1]
+            last_epilogue_node = epilogue_nodes[-1].node
             assert isinstance(last_epilogue_node, ComputedBuffer)  # for mypy
             last_epilogue_name = (
                 last_epilogue_node.name
                 if last_epilogue_node.name is not None
                 else last_epilogue_node.data.name  # type: ignore[attr-defined]
             )
-            if last_epilogue_name not in additional_node.get_read_names():
+            if last_epilogue_name not in additional_ir_node.get_read_names():
                 return False
         if additional_node.layout != cuda_template_buffer.layout:
             return False

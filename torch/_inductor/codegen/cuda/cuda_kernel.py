@@ -8,6 +8,7 @@ from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.scheduler import BaseSchedulerNode
 
 
 if TYPE_CHECKING:
@@ -523,7 +524,7 @@ class CUDATemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [CUDATemplateBuffer, Optional[list[IRNode]]],
+            [CUDATemplateBuffer, Optional[list[BaseSchedulerNode]]],
             tuple[CUDATemplateKernel, functools.partial[str]],
         ],
         bmreq: CUDABenchmarkRequest,
