@@ -292,7 +292,7 @@ static inline Vectorized<T> binary_fp8_op_as_fp32(const Vectorized<T>& a, const 
   o128_2 = cvtfp32_fp8e4m3(o2);
   o128_3 = cvtfp32_fp8e4m3(o3);
 
-  __m512i result;
+  __m512i result = _mm512_setzero_si512();
   result = _mm512_inserti32x4(result, o128_0, 0);
   result = _mm512_inserti32x4(result, o128_1, 1);
   result = _mm512_inserti32x4(result, o128_2, 2);
