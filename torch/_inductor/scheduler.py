@@ -4290,7 +4290,8 @@ class Scheduler:
         """
         Reorder nodes to minimize the number of partitions via a bfs
         topological sort. This is the optimal reodering such that the
-        number of partitions cannot be reduced further. This does not
+        number of partitions cannot be reduced further. This may be
+        sub-optimal for other metrics such as peak memory. This does not
         change relative orders of two cudagraphable nodes, nor the
         relative order of two non_cudagraphable nodes.
         """
