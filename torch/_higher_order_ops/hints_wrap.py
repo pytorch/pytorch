@@ -77,7 +77,7 @@ def hints_wrapper_dense(body_fn, args, kwargs, hints):
     return body_fn(*args, **kwargs)
 
 
-hints_wrapper.py_autograd_impl(
+hints_wrapper.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(hints_wrapper, deferred_error=True)
 )
 

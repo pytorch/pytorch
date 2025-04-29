@@ -58,8 +58,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Any, Callable, Optional, TypeVar
 
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -83,8 +82,7 @@ JSON = dict
 _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
-_R = TypeVar("_R")
-_P = ParamSpec("_P")
+T = TypeVar("T")
 
 
 @dataclass
@@ -307,8 +305,8 @@ class ChildFailedError(Exception):
 
 
 def record(
-    fn: Callable[_P, _R], error_handler: Optional[ErrorHandler] = None
-) -> Callable[_P, Union[_R, None]]:
+    fn: Callable[..., T], error_handler: Optional[ErrorHandler] = None
+) -> Callable[..., T]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -348,9 +346,9 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f: Callable[_P, _R]) -> Callable[_P, Union[_R, None]]:
+    def wrap(f):
         @wraps(f)
-        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
+        def wrapper(*args, **kwargs):
             assert error_handler is not None  # assertion for mypy type checker
             error_handler.initialize()
             try:

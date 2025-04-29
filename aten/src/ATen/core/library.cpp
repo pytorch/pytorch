@@ -1,7 +1,6 @@
 #include <torch/library.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <fmt/format.h>
 
 namespace torch {
 
@@ -12,7 +11,7 @@ namespace {
 #ifdef STRIP_ERROR_MESSAGES
     return std::string();
 #else
-    return fmt::format("registered at {}:{}", file, line);
+    return c10::str("registered at ", file, ":", line);
 #endif
   }
 
@@ -59,7 +58,7 @@ void Library::reset() {
 
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
 namespace detail {
   std::vector<TorchLibraryInit*> torch_library_initializers;
 } // namespace detail

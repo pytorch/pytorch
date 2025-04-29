@@ -98,7 +98,7 @@ double getScaleFromInput(Node* input_node) {
       input_name);
 }
 
-static std::vector<Node*> CreateQuantizedWeights(
+std::vector<Node*> CreateQuantizedWeights(
     std::shared_ptr<Graph>& graph,
     const at::Tensor& weight,
     int8_t* data,
@@ -191,7 +191,7 @@ static std::vector<Node*> CreateQuantizedWeights(
   return {data_node, scale_node, zero_point_node, axis_node};
 }
 
-static Node* CreateQuantizedBias(
+Node* CreateQuantizedBias(
     std::vector<float> data,
     std::shared_ptr<Graph>& graph,
     const std::vector<int64_t>& shapes) {
@@ -206,7 +206,7 @@ static Node* CreateQuantizedBias(
   return const_node_1;
 }
 
-static Node* createIntTuple(
+Node* createIntTuple(
     const std::vector<int64_t>& is,
     std::shared_ptr<Graph>& graph) {
   Node* const_node = graph->create(Symbol::onnx("Constant"));
@@ -214,13 +214,13 @@ static Node* createIntTuple(
   return const_node;
 }
 
-static Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
+Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
   Node* const_node = graph->create(Symbol::onnx("Constant"));
   const_node->i_(Symbol::attr("value"), i);
   return const_node;
 }
 
-static void ConvertQuantizedWeight(
+void ConvertQuantizedWeight(
     std::shared_ptr<Graph>& graph,
     Node* node,
     at::Tensor& weight) {
@@ -254,7 +254,7 @@ enum class QuantizedParamsType { CONV1D, CONV, LINEAR };
 // passed to the appropriate unpack function using c10::Dispatcher. We insert
 // the unpacked weights and bias into the graph using
 // caffe2::Int8GivenTensorFill nodes.
-static void unpackQuantizedWeightsHelper(
+void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
@@ -547,7 +547,7 @@ static std::
 
 // Unpack quantized tensor inputs into {value, scale, zero_point},
 // Then create a prim::TupleConstruct node based on these three values.
-static void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
+void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
   for (size_t index = 0; index < graph->inputs().size();) {
     auto g_input = graph->inputs()[index];
     TensorTypePtr shape_type = g_input->type()->cast<TensorType>();
@@ -707,7 +707,7 @@ void UnpackQuantizedWeights(
 // Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in
 // NCHW. This pass inserts permutes to convert from NCHW to NHWC before each
 // conv op and add another permute from NHWC to NCHW after the conv op.
-static void insertPermutesHelper(
+void insertPermutesHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern) {

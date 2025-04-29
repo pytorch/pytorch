@@ -4598,6 +4598,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             "polygamma",
             "pow",
             "remainder",
+            "scatter_add",
             "scatter",
             "square",
             "sub",

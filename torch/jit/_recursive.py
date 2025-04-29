@@ -129,7 +129,6 @@ _constant_types = (
     torch.device,
     torch.layout,
     torch.dtype,
-    torch.qscheme,
 )
 
 

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import json
-import os
 import queue
 from typing import Optional
 
@@ -207,40 +206,15 @@ class _HuggingFaceStorageReader(FsspecReader):
         return fut
 
     def read_metadata(self) -> Metadata:
-        metadata_path = self.fs.concat_path(self.path, _metadata_fn)
+        path = self.fs.concat_path(self.path, _metadata_fn)
+        with self.fs.create_stream(path, "r") as metadata_file:
+            metadata = json.load(metadata_file)
 
         state_dict_metadata: dict[str, STORAGE_TYPES] = {}
-        storage_data: dict[str, str] = {}
-
-        if not self.fs.exists(metadata_path):
-            # if metadata file doesn't exist, create it from the safetensors file
-            from safetensors.torch import safe_open  # type: ignore[import-not-found]
-
-            safetensors_files = []
-            for file in self.fs.ls(self.path):
-                if file.endswith(SUFFIX):
-                    safetensors_files.append(os.path.basename(file))
-
-            if len(safetensors_files) != 1:
-                raise ValueError(
-                    f"Need exactly one safetensors file to load without metadata, found {len(safetensors_files)} files"
-                )
-            storage_data = {}
-            with safe_open(safetensors_files[0], framework="pt") as f:
-                for k in f.keys():
-                    state_dict_metadata[k] = BytesStorageMetadata()
-                    storage_data[k] = safetensors_files[0]
-        else:
-            with self.fs.create_stream(metadata_path, "r") as metadata_file:
-                metadata = json.load(metadata_file)
-
-            for key in metadata["weight_map"].keys():
-                state_dict_metadata[key] = BytesStorageMetadata()
-            storage_data = metadata["weight_map"]
-
+        for key in metadata["weight_map"].keys():
+            state_dict_metadata[key] = BytesStorageMetadata()
         metadata = Metadata(
-            state_dict_metadata=state_dict_metadata,
-            storage_data=storage_data,
+            state_dict_metadata=state_dict_metadata, storage_data=metadata["weight_map"]
         )
 
         if getattr(metadata, "storage_meta", None) is None:

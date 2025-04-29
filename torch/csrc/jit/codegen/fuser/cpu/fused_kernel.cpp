@@ -40,6 +40,21 @@ constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
 
+intptr_t run(const std::string& cmd);
+
+static bool programExists(const std::string& program) {
+  std::stringstream ss;
+  c10::printQuotedString(ss, program);
+  at::jit::TemplateEnv env;
+  env.s("program", ss.str());
+  std::string cmd = format(check_exists_string, env);
+#ifdef _MSC_VER
+  return (run(cmd.c_str()) == 0);
+#else
+  return (system(cmd.c_str()) == 0);
+#endif
+}
+
 #ifdef _MSC_VER
 static std::optional<std::wstring> exec(const std::wstring& cmd) {
   std::array<wchar_t, 128> buffer;
@@ -128,7 +143,7 @@ static void activate() {
   }
 }
 
-static intptr_t run(const std::string& cmd) {
+intptr_t run(const std::string& cmd) {
   // Getting the path of `cmd.exe`
   const wchar_t* comspec = _wgetenv(L"COMSPEC");
   if (!comspec) {
@@ -152,19 +167,6 @@ static intptr_t run(const std::string& cmd) {
   return r;
 }
 #endif
-
-static bool programExists(const std::string& program) {
-  std::stringstream ss;
-  c10::printQuotedString(ss, program);
-  at::jit::TemplateEnv env;
-  env.s("program", ss.str());
-  std::string cmd = format(check_exists_string, env);
-#ifdef _MSC_VER
-  return (run(cmd.c_str()) == 0);
-#else
-  return (system(cmd.c_str()) == 0);
-#endif
-}
 
 // A single compiler config is accessed through getConfig() (below)
 // Controls compilation options and may be updated based on the result
@@ -351,5 +353,5 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-static RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
+RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
 } // namespace torch::jit::fuser::cpu

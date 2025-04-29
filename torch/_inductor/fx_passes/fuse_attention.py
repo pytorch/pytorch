@@ -641,8 +641,6 @@ def _get_sfdp_patterns():
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
-    # need 2d attn_mask to generate patterns with view op
-    m_inp_2d = functools.partial(torch.empty, (2, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -672,7 +670,6 @@ def _get_sfdp_patterns():
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
-        m_2d = functools.partial(m_inp_2d, dtype=dtype)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
@@ -782,7 +779,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
-                [g(), g(), g(), m_2d(), c()],
+                [g(), g(), g(), m(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -804,7 +801,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
-                [g(), g(), g(), m_2d(), c()],
+                [g(), g(), g(), m(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
             ),

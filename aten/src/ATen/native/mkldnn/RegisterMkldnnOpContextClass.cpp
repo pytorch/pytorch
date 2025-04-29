@@ -25,7 +25,7 @@ static bool is_mkldnn_fp16_supported() {
   return mkldnn_fp16_device_check();
 }
 
-static constexpr bool is_mkldnn_acl_supported() {
+constexpr bool is_mkldnn_acl_supported() {
   return AT_MKLDNN_ACL_ENABLED();
 }
 

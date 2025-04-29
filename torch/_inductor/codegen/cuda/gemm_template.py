@@ -3,7 +3,6 @@ import copy
 import enum
 import logging
 import re
-import time
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 
@@ -24,7 +23,6 @@ from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
-from .cutlass_presets import gen_cutlass_presets
 
 
 log = logging.getLogger(__name__)
@@ -837,10 +835,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             and self.set_alignment(self.output_node.get_layout(), op.D)
         )
         if not status:
-            log.debug(
-                "Skipping due to alignment setting failure. op: %s",
-                op.configuration_name(),
-            )
+            log.debug("Skipping due to alignment setting failure. op: %s", op)
             return None
 
         # Set epilogue.
@@ -851,33 +846,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         status = self._set_bias_layout_and_alignment(op)
         if not status:
             log.debug(
-                "Skipping due to bias layout and alignment setting failure. op: %s",
-                op.configuration_name(),
+                "Skipping due to bias layout and alignment setting failure. op: %s", op
             )
             return None
 
         # Apply regex filters at the end when configuration name doesn't change anymore
-        if (
-            inductor_cuda_config.cutlass_op_allowlist_regex
-            or inductor_cuda_config.cutlass_presets
-        ):
-            patterns = []
-            if inductor_cuda_config.cutlass_op_allowlist_regex:
-                patterns.append(inductor_cuda_config.cutlass_op_allowlist_regex)
-            if inductor_cuda_config.cutlass_presets:
-                presets = gen_cutlass_presets()
-                preset_nums = [
-                    int(x) for x in inductor_cuda_config.cutlass_presets.split(",")
-                ]
-                for preset_num in preset_nums:
-                    preset = presets.get(preset_num, {}).get(
-                        inductor_cuda_config.cutlass_instantiation_level, []
-                    )
-
-                    patterns.extend(preset)
-
-            pattern = "|".join(patterns)
-            if pattern and not re.search(pattern, op.configuration_name()):
+        if inductor_cuda_config.cutlass_op_allowlist_regex is not None:
+            if not re.search(
+                inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
+            ):
                 return None
         if inductor_cuda_config.cutlass_op_denylist_regex is not None:
             if re.search(
@@ -902,10 +879,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        # if changed, need to also change CUTLASS_OPERATION_KIND
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
-        start_time = time.time()
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:
@@ -926,11 +901,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        log.info(
-            "Got cutlass configs: total number of ops: %d. Filtering took %.2f seconds",
-            len(res),
-            time.time() - start_time,
-        )
+        log.info("Got cutlass configs: total number of ops: %d, ", len(res))
         sorted_res = sorted(res.items())
         return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
 
@@ -987,9 +958,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
-        for input_node in self.input_nodes:
-            if not isinstance(X.layout, FixedLayout):
-                input_node.freeze_layout()
+        if not isinstance(X.layout, FixedLayout):
+            raise NotImplementedError("X.layout is not fixed")
+        if not isinstance(W.layout, FixedLayout):
+            raise NotImplementedError("W.layout is not fixed")
 
         Y = self.output_node
         if template_buffer_node is not None:

@@ -361,8 +361,7 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
-    const std::string& name,
-    std::optional<at::Allocator*> allocator) {
+    const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
@@ -372,9 +371,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
-  at::Allocator* allocatorPtr =
-      allocator.has_value() ? allocator.value() : c10::GetCPUAllocator();
-  at::DataPtr retval = allocatorPtr->allocate(stat.m_uncomp_size);
+  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
   mz_zip_reader_extract_to_mem(
       ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
   valid("reading file ", name.c_str());
@@ -452,11 +449,10 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
 // read record with multi clients
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     const std::string& name,
-    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
-    std::optional<at::Allocator*> allocator) {
+    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
   if (additionalReaders.empty()) {
     // No additional readers or record too small, use single threaded version
-    return getRecord(name, allocator);
+    return getRecord(name);
   }
 
   if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
@@ -473,9 +469,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     return getRecord(name);
   }
 
-  at::Allocator* allocatorPtr =
-      allocator.has_value() ? allocator.value() : c10::GetCPUAllocator();
-  at::DataPtr retval = allocatorPtr->allocate(stat.m_uncomp_size);
+  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
   void* dst = retval.get();
   PyTorchStreamReader::getRecordMultiReaders(name, additionalReaders, dst, n);
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
@@ -766,7 +760,11 @@ void PyTorchStreamWriter::writeRecord(
   }
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size = detail::getPadding(
-      ar_->m_archive_size, full_name.size(), size, padding_, alignment_);
+      ar_->m_archive_size,
+      full_name.size(),
+      size,
+      padding_,
+      alignment_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   if (!compute_crc32_) {
 #if (!defined(FBCODE_CAFFE2))

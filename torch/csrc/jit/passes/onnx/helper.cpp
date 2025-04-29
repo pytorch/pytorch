@@ -240,7 +240,7 @@ Node* transformToONNXConcatNode(
   return concat_node;
 }
 
-static void ONNXLintGraph(
+void ONNXLintGraph(
     const Block* b,
     std::vector<NodeKind>& n_miss_source_range,
     std::vector<NodeKind>& n_miss_scope) {

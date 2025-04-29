@@ -91,9 +91,6 @@ class FileSystem(FileSystemBase):
     def rm_file(self, path: Union[str, os.PathLike]) -> None:
         self.fs.rm(path)
 
-    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
-        return self.fs.ls(path)
-
 
 # TODO: add the dcp.async_save mixin
 class FsspecWriter(FileSystemWriter):

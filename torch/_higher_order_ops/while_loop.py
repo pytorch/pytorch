@@ -215,7 +215,7 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     return carried_vals
 
 
-while_loop_op.py_autograd_impl(
+while_loop_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(while_loop_op, deferred_error=True)
 )
 

@@ -16,7 +16,7 @@ const static BackportManager backportManager;
 
 // Forward declare so that _backport_for_mobile() overloads can
 // call this method directly.
-static bool _backport_for_mobile_impl(
+bool _backport_for_mobile_impl(
     std::istream& oss,
     PyTorchStreamWriter& writer,
     const int64_t to_version);

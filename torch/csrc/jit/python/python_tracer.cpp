@@ -22,7 +22,7 @@ namespace torch::jit::tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-static std::vector<StackEntry> _pythonCallstack() {
+std::vector<StackEntry> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
   Py_XINCREF(frame);
@@ -196,11 +196,11 @@ Node* preRecordPythonTrace(
   return n;
 }
 
-static void pythonRecordSourceLocation(Node* n) {
+void pythonRecordSourceLocation(Node* n) {
   n->setSourceRange(getPythonInterpreterSourceRange());
 }
 
-static void pythonWarn(const std::string& reason) {
+void pythonWarn(const std::string& reason) {
   pybind11::gil_scoped_acquire gil;
   auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
   PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);

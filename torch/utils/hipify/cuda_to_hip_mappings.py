@@ -8747,8 +8747,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("CUDAStreamCaptureModeGuard", ("HIPStreamCaptureModeGuard", API_C10)),
         ("cuda::CUDAStreamCaptureModeGuard", ("cuda::HIPStreamCaptureModeGuard", API_C10)),
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
-        ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10)),
-        ("CUDAKernelLaunchRegistry", ("HIPKernelLaunchRegistry", API_C10)),
+        ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10))
     ]
 )
 

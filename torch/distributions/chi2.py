@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
-
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
@@ -27,11 +25,7 @@ class Chi2(Gamma):
 
     arg_constraints = {"df": constraints.positive}
 
-    def __init__(
-        self,
-        df: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, df, validate_args=None):
         super().__init__(0.5 * df, 0.5, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

@@ -1,6 +1,5 @@
 import distutils.command.clean
 import os
-import platform
 import shutil
 import sys
 from pathlib import Path
@@ -41,9 +40,6 @@ if __name__ == "__main__":
             CXX_FLAGS = ["/sdl"]
         else:
             CXX_FLAGS = ["/sdl", "/permissive-"]
-    elif platform.machine() == "s390x":
-        # no -Werror on s390x due to newer compiler
-        CXX_FLAGS = {"cxx": ["-g", "-Wall"]}
     else:
         CXX_FLAGS = {"cxx": ["-g", "-Wall", "-Werror"]}
 

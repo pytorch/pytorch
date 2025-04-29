@@ -18,9 +18,6 @@ on:
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
 
-permissions:
-  id-token: write
-
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "arm64v8/alpine"
@@ -58,8 +55,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -83,8 +79,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
@@ -107,8 +102,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
@@ -128,8 +122,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -155,8 +148,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64-12_8
@@ -175,8 +167,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -200,8 +191,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
@@ -224,8 +214,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
@@ -245,8 +234,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -272,8 +260,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64-12_8
@@ -292,8 +279,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -317,8 +303,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
@@ -341,8 +326,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
@@ -362,8 +346,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -389,8 +372,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64-12_8
@@ -409,8 +391,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -434,8 +415,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
@@ -458,8 +438,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
@@ -479,8 +458,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -506,8 +484,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64-12_8
@@ -526,8 +503,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -551,8 +527,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-aarch64
@@ -575,8 +550,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-aarch64
@@ -596,8 +570,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -623,8 +596,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda-aarch64-12_8
@@ -643,8 +615,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -668,8 +639,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu-aarch64
@@ -692,8 +662,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: manylinux2_28_aarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu-aarch64
@@ -713,8 +682,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -740,8 +708,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: manylinuxaarch64-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda-aarch64-12_8

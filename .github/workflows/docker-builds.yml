@@ -79,7 +79,7 @@ jobs:
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
-            runner: linux.arm64.m7g.4xlarge
+            runner: linux.arm64.2xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge
             timeout-minutes: 600

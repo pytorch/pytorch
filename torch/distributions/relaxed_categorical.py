@@ -1,6 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
-
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -44,13 +42,7 @@ class ExpRelaxedCategorical(Distribution):
     )  # The true support is actually a submanifold of this.
     has_rsample = True
 
-    def __init__(
-        self,
-        temperature: Tensor,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
@@ -129,15 +121,8 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
-    base_dist: ExpRelaxedCategorical
 
-    def __init__(
-        self,
-        temperature: Tensor,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
-    ) -> None:
+    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         base_dist = ExpRelaxedCategorical(
             temperature, probs, logits, validate_args=validate_args
         )

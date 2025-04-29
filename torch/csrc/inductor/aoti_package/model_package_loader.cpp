@@ -523,8 +523,7 @@ std::vector<std::string> AOTIModelPackageLoader::get_call_spec() {
 void AOTIModelPackageLoader::load_constants(
     std::unordered_map<std::string, at::Tensor>& constants_map,
     bool use_inactive,
-    bool check_full_update,
-    bool user_managed) {
+    bool check_full_update) {
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
   std::unordered_map<std::string, at::string> fqn_to_constant_name;
@@ -542,7 +541,7 @@ void AOTIModelPackageLoader::load_constants(
   }
 
   return runner_->update_constant_buffer(
-      updated_constants_map, use_inactive, check_full_update, user_managed);
+      updated_constants_map, use_inactive, check_full_update);
 }
 
 std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
@@ -559,10 +558,9 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
 void AOTIModelPackageLoader::update_constant_buffer(
     std::unordered_map<std::string, at::Tensor>& tensor_map,
     bool use_inactive,
-    bool validate_full_updates,
-    bool user_managed) {
+    bool validate_full_updates) {
   runner_->update_constant_buffer(
-      tensor_map, use_inactive, validate_full_updates, user_managed);
+      tensor_map, use_inactive, validate_full_updates);
 }
 } // namespace torch::inductor
 #endif

@@ -69,7 +69,7 @@ static std::map<int64_t, Value*> InsertSymbolicShapesCompute(
   return sym_shape_to_enclosing_graph_value;
 }
 
-static void insertDynamicShapesGuard(
+void insertDynamicShapesGuard(
     const ShapeComputeGraphMapping& shape_mapping,
     Node* guarded_node,
     bool add_composed_op,
@@ -115,7 +115,7 @@ StrideInput strideInputFromString(const std::string& si) {
 // in the runtime guard, strides are serialized as one flat
 // vector. stride_inputs_offset indexes into that vector
 // where the strides of this tensor begin
-static inline StrideInput summarizeStrideDim(
+inline StrideInput summarizeStrideDim(
     const c10::IntArrayRef sizes,
     const c10::IntArrayRef strides,
     size_t dim,
@@ -517,7 +517,7 @@ static Operation StaticRuntimeCopyOuts(const Node* node) {
   };
 }
 
-static RegisterOperators SRCopyOuts({
+RegisterOperators SRCopyOuts({
     torch::jit::Operator(
         prim::StaticRuntimeCopyOuts,
         StaticRuntimeCopyOuts,
@@ -529,7 +529,7 @@ static RegisterOperators SRCopyOuts({
 // and also the that the symbolic shape dimensions are observed.
 // For any symbolic dimension we need to set its value on its first
 // use and for all subsequent uses check that the values are equal
-static RegisterOperators reg_guard({
+RegisterOperators reg_guard({
     Operator(
         "prim::TensorExprDynamicGuard(...) -> bool",
         [](const Node* node) -> Operation {
@@ -736,7 +736,7 @@ static Operation createTensorExprDynamicGroup(const Node* node) {
   };
 }
 
-static RegisterOperators TensorExprDynamicOp({
+RegisterOperators TensorExprDynamicOp({
     torch::jit::Operator(
         prim::TensorExprDynamicGroup,
         createTensorExprDynamicGroup,

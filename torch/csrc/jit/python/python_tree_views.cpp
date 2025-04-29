@@ -12,7 +12,7 @@ namespace py = pybind11;
 
 namespace torch::jit {
 
-static std::optional<std::string> maybeConvertToString(const py::object& obj) {
+std::optional<std::string> maybeConvertToString(const py::object& obj) {
   if (obj.is_none()) {
     return std::nullopt;
   }
@@ -58,16 +58,14 @@ struct SourceRangeFactory {
 };
 
 template <typename T>
-static List<T> wrap_list(
-    const SourceRange& fallback_pos,
-    std::vector<T>&& vec) {
+List<T> wrap_list(const SourceRange& fallback_pos, std::vector<T>&& vec) {
   if (vec.empty())
     return List<T>::create(fallback_pos, std::move(vec));
   return List<T>::create(vec.front().range(), std::move(vec));
 }
 
 template <typename T>
-static Maybe<T> wrap_maybe(const SourceRange& fallback_pos, T* val) {
+Maybe<T> wrap_maybe(const SourceRange& fallback_pos, T* val) {
   return val ? Maybe<T>::create(val->range(), *val)
              : Maybe<T>::create(fallback_pos);
 }

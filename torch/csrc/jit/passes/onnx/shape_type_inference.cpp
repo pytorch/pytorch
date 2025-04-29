@@ -22,7 +22,7 @@
 
 namespace torch::jit {
 
-static inline bool PyNone_Check(PyObject* o) {
+inline bool PyNone_Check(PyObject* o) {
   return o == Py_None;
 }
 
@@ -2027,7 +2027,7 @@ void UpdateReliable(Node* n) {
 // Traverse the graph inputs and compute reliability (e.g., are shapes static).
 // Since the inputs do not change during export, we save computation time by
 // marking it as computed and subsequently skipping.
-static void SetGraphInputTypeReliable(const Graph* g) {
+void SetGraphInputTypeReliable(const Graph* g) {
   if (!ConstantValueMap::GetAllGraphInputsReliableComputed()) {
     for (auto graph_input : g->inputs()) {
       if (!ConstantValueMap::HasTypeReliable(graph_input->debugName())) {
@@ -2255,7 +2255,7 @@ void ONNXSetDynamicInputShape(
   }
 }
 
-static bool HasSequenceTypeOutput(Node* node) {
+bool HasSequenceTypeOutput(Node* node) {
   if (node->kind() == ::c10::onnx::SplitToSequence ||
       node->kind() == ::c10::onnx::SequenceInsert ||
       node->kind() == ::c10::onnx::SequenceEmpty ||
@@ -2266,7 +2266,7 @@ static bool HasSequenceTypeOutput(Node* node) {
   return false;
 }
 
-static void ONNXUpdateTypeFromTensor(
+void ONNXUpdateTypeFromTensor(
     Value* graph_output,
     const at::Tensor& output,
     bool onnx_shape_inference) {
@@ -2282,7 +2282,7 @@ static void ONNXUpdateTypeFromTensor(
 // into flattened graph outputs. `outputs_index` is passed in to point to the
 // current index in flattened graph outputs. The updated `outputs_index` is
 // returned at the end of the function.
-static size_t ONNXAssignOutputShape(
+size_t ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     size_t outputs_index,
     PyObject* output_obj,

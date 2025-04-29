@@ -38,7 +38,7 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
-# need this many ops to create an FX graph (deprecated: not used)
+# need this many ops to create an FX graph
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
@@ -322,8 +322,6 @@ do_not_emit_runtime_asserts: bool = (
 # Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
 skip_torchrec = True
 
-# Don't apply most trace_rules.py rules
-dont_skip_tracing = False
 
 # No longer used
 optimize_ddp_lazy_compile = False
@@ -403,9 +401,6 @@ enable_cpp_symbolic_shape_guards = False
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
-# Enable tracing through unittest
-enable_trace_unittest = False
-
 # Enable tracing generator functions lazily. If False, Dynamo will exhaust
 # generators upon first execution. And if True, the generator will be accessed lazily
 enable_faithful_generator_behavior = True
@@ -416,7 +411,7 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
-# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
 enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph

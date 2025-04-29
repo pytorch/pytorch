@@ -91,8 +91,7 @@ RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
 
 namespace torch::aot_inductor {
 
-using ConstantMap =
-    std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
+using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future

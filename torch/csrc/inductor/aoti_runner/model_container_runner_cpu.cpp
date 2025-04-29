@@ -33,9 +33,7 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
 }
 } // namespace
 
-static RegisterAOTIModelRunner register_cpu_runner(
-    "cpu",
-    &create_aoti_runner_cpu);
+RegisterAOTIModelRunner register_cpu_runner("cpu", &create_aoti_runner_cpu);
 
 } // namespace torch::inductor
 #endif
