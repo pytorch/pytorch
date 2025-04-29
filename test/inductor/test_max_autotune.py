@@ -166,7 +166,7 @@ class TestMaxAutotune(TestCase):
     @parametrize("autotune_multi_device", (True, False))
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
         """
-        This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
+        This crash previously due to a triton issue: https://github.com/triton-lang/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
         """
         m, n, k = 2048, 1536, 64
