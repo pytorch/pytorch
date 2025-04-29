@@ -2535,22 +2535,27 @@ def align_inputs_from_check_idxs(
 
 
 def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
-    if 0 in x.size():
-        # Short-circuits if the shape has no elements
-        needed_size: Union[int, torch.SymInt] = 0
-    else:
+    # If we are dealing with a view, we need to ensure we clone with the
+    # proper storage offset.
+    if x._base is not None:
         needed_size = (
             sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
         ) * (x.storage_offset() + 1)
-
-    if x._base is not None:
         buffer = torch.as_strided(x._base, (needed_size,), (1,)).clone()
-    else:
-        buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+        return torch.as_strided(
+            buffer, x.size(), x.stride(), storage_offset=x.storage_offset()
+        )
 
-    return torch.as_strided(
-        buffer, x.size(), x.stride(), storage_offset=x.storage_offset()
-    )
+    if 0 in x.size():
+        # Short-circuits if the shape has no elements
+        needed_size = 0
+    else:
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
+
+    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    return torch.as_strided(buffer, x.size(), x.stride())
 
 
 def copy_misaligned_inputs(
