@@ -23,6 +23,7 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
@@ -501,6 +502,29 @@ if HAS_CUDA:
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+        def test_index_put(self):
+            def fn(x, y, z):
+                x = torch.zeros_like(x)
+                return x.index_put_([y], z, True)
+
+            fn_c = torch.compile(mode="reduce-overhead")(fn)
+
+            for i in range(3):
+
+                def args():
+                    x = torch.zeros((512, 512), dtype=torch.bool, device="cuda")
+                    y = torch.arange(512, dtype=torch.int64, device="cuda")
+                    z = torch.ones((512, 512), dtype=torch.bool, device="cuda")
+                    return x, y, z
+
+                if i == 0:
+                    out, code = run_and_get_code(fn_c, *args())
+                    FileCheck().check("aten.index_put_").check_same("True").run(code[0])
+                else:
+                    out = fn_c(*args())
+
+                self.assertEqual(fn(*args()), out)
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
@@ -876,6 +900,21 @@ if HAS_CUDA:
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl(expected_clones=0)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("triton.cudagraph_trees", False)
+        def test_graph_partition_gc(self):
+            def _test_dummy():
+                def foo(x):
+                    return x + 1
+
+                foo = torch.compile(foo)
+                for _ in range(3):
+                    foo(torch.randn(2, 3, device="cuda"))
+
+            _test_dummy()
+            gc.collect()
+            self.assertIsNone(self.get_manager())
 
         def test_sparsity(self):
             def foo(view_6, buf31):

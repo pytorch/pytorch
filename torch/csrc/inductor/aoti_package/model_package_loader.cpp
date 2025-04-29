@@ -527,7 +527,7 @@ void AOTIModelPackageLoader::load_constants(
     bool user_managed) {
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
-  std::unordered_map<std::string, at::string> fqn_to_constant_name;
+  std::unordered_map<std::string, std::string> fqn_to_constant_name;
   for (const auto& it : constant_name_to_fqn) {
     fqn_to_constant_name.emplace(it.second, it.first);
   }
