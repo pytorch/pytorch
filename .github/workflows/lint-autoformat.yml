@@ -24,11 +24,11 @@ jobs:
       - name: Stuff
         run: |
           set -ex
-          python --version || exit 0
-          python3 --version || exit 0
+          python --version || true
+          python3 --version || true
           source /tmp/venv/bin/activate
-          python --version || exit 0
-          python3 --version || exit 0
+          python --version || true
+          python3 --version || true
 
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
