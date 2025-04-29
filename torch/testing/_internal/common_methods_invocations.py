@@ -2991,6 +2991,7 @@ def error_inputs_logcumsumexp(op_info, device, **kwargs):
                          error_regex='Dimension out of range')
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
+    print(f"kwargs: {kwargs}")
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     yield SampleInput(
         make_arg((S, S)), gather_variable((S, S), 1, S, True, device=device), 0)
@@ -3006,6 +3007,14 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
     # without `dim` arg
     yield SampleInput(
         make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
+
+        # ✏️ Negative indices sample — guarded against python_ref
+    if not kwargs.get('is_python_ref', False):
+        neg_idx = gather_variable((S, S), 1, S, True, device=device) - S
+        yield SampleInput(
+            make_arg((S, S)),
+            neg_idx,
+            1)
 
 
 def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
@@ -20075,7 +20084,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_take_along_dim,
+           sample_inputs_func=partial(sample_inputs_take_along_dim),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                # RuntimeError: view size is not compatible with input tensor's size and stride
