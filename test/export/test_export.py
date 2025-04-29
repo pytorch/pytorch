@@ -7424,7 +7424,7 @@ def forward(self, b_a_buffer, x):
         combine_mode = "pointwise"
 
         dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+        xs = torch.ones(3, 10, 2, device=device)
 
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
