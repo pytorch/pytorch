@@ -41,7 +41,7 @@ RUN bash ./install_conda.sh && rm install_conda.sh
 
 # Install CUDA
 FROM base as cuda
-ARG CUDA_VERSION=12.4
+ARG CUDA_VERSION=12.6
 RUN rm -rf /usr/local/cuda-*
 ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
@@ -57,17 +57,13 @@ FROM cuda as cuda11.8
 RUN bash ./install_cuda.sh 11.8
 ENV DESIRED_CUDA=11.8
 
-FROM cuda as cuda12.1
-RUN bash ./install_cuda.sh 12.1
-ENV DESIRED_CUDA=12.1
-
-FROM cuda as cuda12.4
-RUN bash ./install_cuda.sh 12.4
-ENV DESIRED_CUDA=12.4
-
 FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
 ENV DESIRED_CUDA=12.6
+
+FROM cuda as cuda12.8
+RUN bash ./install_cuda.sh 12.8
+ENV DESIRED_CUDA=12.8
 
 # Install MNIST test data
 FROM base as mnist
@@ -76,9 +72,8 @@ RUN bash ./install_mnist.sh
 
 FROM base as all_cuda
 COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
-COPY --from=cuda12.1  /usr/local/cuda-12.1 /usr/local/cuda-12.1
-COPY --from=cuda12.4  /usr/local/cuda-12.4 /usr/local/cuda-12.4
 COPY --from=cuda12.6  /usr/local/cuda-12.6 /usr/local/cuda-12.6
+COPY --from=cuda12.4  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 
 # Final step
 FROM ${BASE_TARGET} as final

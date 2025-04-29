@@ -553,8 +553,8 @@ struct TORCH_API SharedParserData {
     static_assert(stringToUint64("and") == 0x646e61);
     static_assert(stringToUint64("Ellipsis") == 0x73697370696c6c45);
 #else
-    static_assert(stringToUint64("and") == 0x616e64);
-    static_assert(stringToUint64("Ellipsis") == 0x456c6c6980836973);
+    static_assert(stringToUint64("and") == 0x616e640000000000);
+    static_assert(stringToUint64("Ellipsis") == 0x456c6c6970736973);
 #endif
 
     std::uint64_t token = 0;
