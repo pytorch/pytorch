@@ -688,16 +688,15 @@ class CachingAutotuner(KernelInterface):
             self.reset_to_zero_args(*args, **kwargs)
             args_with_constexprs = self._get_args_with_constexprs(cloned_args, launcher)
             if autograd_profiler._is_profiler_enabled:
-                breakpoint()
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
                     self.inductor_meta.get("kernel_name", "triton kernel"),
-                    args,
+                    args_with_constexprs,
                     profiler_kwargs,
                 ):
                     launcher(
-                        *args,
-                        **kwargs,
+                        *args_with_constexprs,
+                        **cloned_kwargs,
                         stream=stream,
                     )
 

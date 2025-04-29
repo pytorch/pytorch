@@ -431,14 +431,13 @@ class TritonTemplateKernel(TritonKernel):
         return sum(num_bytes)
 
     def estimate_flops(self) -> int:
-        flops = 0
         for node in self.input_nodes:
             for fx_node in node._current_origins:
                 if countable(fx_node):
                     f = count_flops_fx(fx_node)
                     if f is not None:
-                        flops += f
-        return flops
+                        return f
+        return 0
 
     def jit_lines(self):
         if self.use_jit:
@@ -476,7 +475,6 @@ class TritonTemplateKernel(TritonKernel):
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
         if config.benchmark_kernel:
-            breakpoint()
             flops = self.estimate_flops()
             inductor_meta["kernel_flop"] = flops
 

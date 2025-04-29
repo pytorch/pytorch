@@ -214,6 +214,54 @@ def omni_model(device, dtype, compile=True):
         )
     return model
 
+def omni_model_no_addmm(device, dtype, compile=True):
+    T = cT(device, dtype)
+
+    def model():
+        input_conv = T(1, 3, 56, 56)
+        conv_weight = T(12, 3, 5, 5)
+
+        # Increased matrix sizes
+        mat1 = T(400, 600)
+        mat2 = T(600, 800)
+
+        batch_mat1 = T(1, 600, 800)
+        batch_mat2 = T(1, 800, 20 * 48)
+
+        # Convolution operation
+        conv_output = F.conv2d(input_conv, conv_weight)
+
+        # a pointwise op
+        conv_output = conv_output * 10
+
+        # Batch matrix multiplication (bmm) operation
+        bmm_output = torch.bmm(batch_mat1, batch_mat2)
+
+        # Batch addition matrix multiplication (baddbmm) operation
+        baddbmm_output = torch.baddbmm(
+            torch.zeros(
+                1, 600, 20 * 48, device=batch_mat1.device, dtype=batch_mat1.dtype
+            ),
+            batch_mat1,
+            batch_mat2,
+        )
+
+        mm_output = torch.mm(mat1, mat2)
+
+        return torch.cat(
+            [
+                conv_output.flatten(),
+                bmm_output.flatten(),
+                baddbmm_output.flatten(),
+                mm_output.flatten(),
+            ]
+        )
+
+    if compile:
+        return torch.compile(
+            model, options={"benchmark_kernel": True, "profile_bandwidth": True}
+        )
+    return model
 
 def omni_model_no_bmm(device, dtype, compile=True):
     T = cT(device, dtype)
@@ -246,15 +294,6 @@ def omni_model_no_bmm(device, dtype, compile=True):
                 mm_output.flatten(),
             ]
         )
-
-    if compile:
-        return torch.compile(
-            model, options={"benchmark_kernel": True, "profile_bandwidth": True}
-        )
-    return model
-
-def omni_model_conv(device, dtype, compile=True):
-
 
     if compile:
         return torch.compile(
@@ -330,7 +369,7 @@ class TestAnalysis(TestCase):
         with torch.profiler.profile(record_shapes=True) as p:
             for _ in range(REPEAT):
                 om()
-        p.export_chrome_trace(trce2)
+        p.export_chrome_trace(trace2)
 
         print("diffing...")
         with patch(
@@ -493,27 +532,37 @@ class TestAnalysis(TestCase):
             om,
             options={
                 "benchmark_kernel": True,
+                "max_autotune_gemm_backends": backends,
+                "force_disable_caches": True,
+                "max_autotune": max_autotune,
+            },
+        )
+        comp_omni_bw = torch.compile(
+            om,
+            options={
+                "benchmark_kernel": True,
                 "profile_bandwidth": True,
                 "max_autotune_gemm_backends": backends,
                 "force_disable_caches": True,
                 "max_autotune": max_autotune,
             },
         )
-        comp_omni(input_conv, conv_weight)
-        with torch.profiler.profile(record_shapes=True) as profile:
-            comp_omni(input_conv, conv_weight)
+        def verify_triton(comp):
+            comp(input_conv, conv_weight)
+            with torch.profiler.profile(record_shapes=True) as profile:
+                comp(input_conv, conv_weight)
 
-        trace1, _ = trace_files()
-        profile.export_chrome_trace(trace1)
-        breakpoint()
-        with open(trace1) as f:
-            out_profile = json.load(f)
-        seen = False
-        for event in out_profile["traceEvents"]:
-            if "triton" in event["name"] and "conv" in event["name"]:
-                seen = True
-                breakpoint()
-        self.assertTrue(seen, "no triton conv found")
+            trace1, _ = trace_files()
+            profile.export_chrome_trace(trace1)
+            with open(trace1) as f:
+                out_profile = json.load(f)
+            seen = False
+            for event in out_profile["traceEvents"]:
+                if "triton" in event["name"] and "conv" in event["name"]:
+                    seen = True
+            self.assertTrue(seen, "no triton conv found")
+        verify_triton(comp_omni)
+        verify_triton(comp_omni_bw)
 
     @skipIf(not SM70OrLater, "Requires sm70")
     @dtypes(torch.float, torch.double, torch.float16)
@@ -521,9 +570,9 @@ class TestAnalysis(TestCase):
         "maxat",
         [
             (False, "ATEN,TRITON"),
-            # (True, "ATEN,TRITON"),
-            # (True, "ATEN"),
-            # (True, "TRITON"),
+            (True, "ATEN,TRITON"),
+            (True, "ATEN"),
+            (True, "TRITON"),
         ],
     )
     def test_augment_trace_against_flop_counter(self, device, dtype, maxat):
@@ -533,13 +582,12 @@ class TestAnalysis(TestCase):
         if dtype == torch.double:
             om = omni_model_no_addmm(device, dtype, compile=False)
         else:
-            om = omni_model_no_bmm(device, dtype, compile=False)
+            om = omni_model(device, dtype, compile=False)
 
         comp_omni = torch.compile(
             om,
             options={
                 "benchmark_kernel": True,
-                "profile_bandwidth": True,
                 "max_autotune_gemm_backends": backends,
                 "force_disable_caches": True,
                 "max_autotune": max_autotune,
@@ -576,40 +624,46 @@ class TestAnalysis(TestCase):
             if "cat" not in event or event["cat"] != "kernel" or "args" not in event or "External id" not in event["args"]:
                 continue
 
-            print(external_op["name"])
             external_op = extern_mapping[event["args"]["External id"]][0]
-            if external_op["name"].startswith("aten::mm"):
+            name = external_op["name"]
+            # print(external_op["name"])
+            # if "conv" in external_op["name"] and "cudnn" not in name:
+            #     breakpoint()
+            if name.startswith("aten::mm") or "_mm_" in name:
                 seen_mm = True
                 self.assertEqual(
                     event["args"]["kernel_flop"],
                     flop_counts["Global"][torch.ops.aten.mm],
                 )
             if (
-                external_op["name"].startswith("aten::cudnn_convolution")
-                or external_op["name"].startswith("aten::convolution")
-                or external_op["name"].startswith("aten::_convolution")
+                name.startswith("aten::cudnn_convolution")
+                or name.startswith("aten::convolution")
+                or name.startswith("aten::_convolution")
+                or "_convolution_" in name
             ):
                 seen_conv = True
                 self.assertEqual(
                     event["args"]["kernel_flop"],
                     flop_counts["Global"][torch.ops.aten.convolution],
                 )
-            if external_op["name"].startswith("aten::baddbmm"):
+            if name.startswith("aten::baddbmm") or "_baddbmm_" in name:
                 seen_baddbmm = True
                 self.assertEqual(
                     event["args"]["kernel_flop"],
                     flop_counts["Global"][torch.ops.aten.baddbmm],
                 )
-            if external_op["name"].startswith("aten::bmm"):
+            if name.startswith("aten::bmm") or "_bmm_" in name:
                 seen_bmm = True
                 self.assertEqual(
                     event["args"]["kernel_flop"],
                     flop_counts["Global"][torch.ops.aten.bmm],
                 )
         self.assertTrue(seen_mm)
-        if dtype != torch.double:
-            self.assertTrue(seen_bmm)
-            self.assertTrue(seen_baddbmm)
+        # if dtype == torch.double:
+        #     self.assertTrue(seen_bmm)
+        # else:
+        self.assertTrue(seen_bmm)
+        self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
 
