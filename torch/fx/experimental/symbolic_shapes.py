@@ -3,6 +3,8 @@ from __future__ import annotations
 import sympy
 from sympy import S
 
+from torch._prims_common import BoolLike, FloatLike, IntLike
+
 
 """
 ``torch.fx.experimental.symbolic_shapes`` provides interfaces for interacting with
@@ -15,6 +17,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import contextlib
 import dis
 import functools
 import hashlib
@@ -66,6 +69,7 @@ from torch.fx.experimental.recording import (
     ShapeEnvEvent,
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
+from torch.types import py_sym_types
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
@@ -99,7 +103,7 @@ if TYPE_CHECKING:
 
     from torch import Tensor
     from torch._subclasses.fake_tensor import FakeTensor
-    from torch.types import BoolLikeType
+    from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 
 InputList = list
@@ -130,6 +134,8 @@ __all__ = [
     "ShapeEnv",
     "is_concrete_int",
     "is_concrete_float",
+    "is_concrete_bool",
+    "has_static_value",
     "guard_int",
     "guard_float",
     "guard_scalar",
@@ -138,7 +144,6 @@ __all__ = [
     "SYMPY_INTERP",
     "free_symbols",
     "is_symbol_binding_fx_node",
-    "is_concrete_bool",
     "is_nested_int",
     "SHAPEENV_EVENT_KEY",
     "CURRENT_NODE_KEY",
@@ -236,8 +241,8 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: tuple[Union[SymInt, int], int]
-) -> tuple[int, Union[SymInt, int], int]:
+    tup: tuple[IntLikeType, int]
+) -> tuple[int, IntLikeType, int]:
     return (
         # Order nested ints by their coefficients.
         # 1 here to order nested ints after non-nested-ints.
@@ -304,8 +309,6 @@ def uninteresting_files() -> set[str]:
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
-        torch.fx.proxy,
-        torch.fx._symbolic_trace,
         torch,
         torch._compile,
         torch._dynamo.eval_frame,
@@ -365,7 +368,7 @@ def has_hint(a: Scalar) -> bool:
     return True
 
 
-def is_concrete_int(a: Union[int, SymInt]) -> bool:
+def is_concrete_int(a: IntLikeType) -> bool:
     """
     Utility to check if underlying object
     in SymInt is concrete value. Also returns
@@ -385,7 +388,7 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
     return False
 
 
-def is_concrete_float(a: Union[float, SymFloat]) -> bool:
+def is_concrete_float(a: FloatLikeType) -> bool:
     r"""Utility to check if underlying object
     in SymInt is concrete value. Also returns
     true if integer is passed in.
@@ -402,6 +405,51 @@ def is_concrete_float(a: Union[float, SymFloat]) -> bool:
         return True
 
     return False
+
+
+def is_concrete_bool(a: BoolLikeType) -> bool:
+    """
+    Utility to check if underlying object
+    in SymBool is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymBool or bool): Object to test if it bool
+    """
+    assert isinstance(a, (SymBool, bool))
+
+    if isinstance(a, bool):
+        return True
+
+    if isinstance(
+        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
+    ):
+        return True
+
+    return False
+
+
+def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> bool:
+    """
+    User-code friendly utility to check if a value is static or dynamic.
+    Returns true if given a constant, or a symbolic expression with a fixed value.
+
+    Args:
+        a (Union[SymBool, SymFloat, SymInt, bool, float, int]): Object to test
+    """
+    assert isinstance(a, BoolLike + FloatLike + IntLike)
+    if (
+        isinstance(a, BoolLike)
+        and is_concrete_bool(a)  # type: ignore[arg-type]
+        or isinstance(a, FloatLike)
+        and is_concrete_float(a)  # type: ignore[arg-type]
+        or isinstance(a, IntLike)
+        and is_concrete_int(a)  # type: ignore[arg-type]
+    ):
+        return True
+
+    assert isinstance(a, py_sym_types)
+    return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
 
 
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
@@ -775,29 +823,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     return expr
 
 
-def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
-    """
-    Utility to check if underlying object
-    in SymBool is concrete value. Also returns
-    true if integer is passed in.
-
-    Args:
-        a (SymBool or bool): Object to test if it bool
-    """
-    assert isinstance(a, (SymBool, bool))
-
-    if isinstance(a, bool):
-        return True
-
-    if isinstance(
-        a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)
-    ):
-        return True
-
-    return False
-
-
-def is_nested_int(s: Union[int, SymInt]) -> TypeGuard[SymInt]:
+def is_nested_int(s: IntLikeType) -> TypeGuard[SymInt]:
     return isinstance(s, torch.SymInt) and s.node.is_nested_int()
 
 
@@ -911,7 +937,7 @@ class ConvertIntKey:
     def __str__(self) -> str:
         return ".cast_symbool_to_symint_guardless()"
 
-    def get(self, b: bool) -> Union[int, SymInt]:
+    def get(self, b: bool) -> IntLikeType:
         """Get the int value from bool"""
         return cast_symbool_to_symint_guardless(b)
 
@@ -942,7 +968,7 @@ class InnerTensorKey:
 
 @dataclass(frozen=True)
 class DivideByKey:
-    divisor: Union[int, SymInt]
+    divisor: IntLikeType
 
     def __str__(self) -> str:
         return f".__floordiv__({self.divisor})"
@@ -1070,7 +1096,7 @@ def _free_unbacked_symbols_with_path(
             )
 
         unbacked = lhs if lhs in pending else rhs
-        divisor: Union[int, SymInt] = (
+        divisor: IntLikeType = (
             int(coeff)
             if shape_env and isinstance(coeff, sympy.Integer)
             else _symint_wrap(coeff)
@@ -1189,6 +1215,17 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+    sloc, extra = a.node.shape_env._get_stack_summary(True)
+    log.info(
+        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        a,
+        assumed_value,
+        sloc,
+        extra,
+    )
+
+
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1197,34 +1234,42 @@ def compute_unbacked_bindings(
 #  (1) It's an optimization/additional check I do not want to fail for not performing it.
 #  (2) I am willing to deviate from the normal semantics when I have unbacked for the
 #      benefit of not failing.
+def _guard_or(a: BoolLikeType, default: bool) -> bool:
+    if not isinstance(a, SymBool):
+        assert isinstance(a, bool)
+        return a
+
+    # if backed_size_oblivious is True we treat backed as unbacked here.
+    if torch.fx.experimental._config.backed_size_oblivious:
+        result = _static_eval_sym_bool(a)
+        return result if result is not None else default
+
+    shape_env = getattr(a.node, "shape_env", None)
+
+    # xla symnode path.
+    if shape_env is None:
+        return guard_bool(a)
+
+    with a.node.shape_env.dde_suppressed():
+        try:
+            return guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            _log_suppressed_dde(a, default)
+            return default
+
+
 def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
     """
-    if torch.fx.experimental._config.backed_size_oblivious:
-        return statically_known_true(a)
-    else:
-        try:
-            return bool(guard_bool(a))
-        except GuardOnDataDependentSymNode:
-            return False
+    return _guard_or(a, False)
 
 
 def guard_or_true(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return true.
     """
-    if torch.fx.experimental._config.backed_size_oblivious:
-        result = _static_eval(a)
-        if result is not None:
-            return result
-        else:
-            return True
-    else:
-        try:
-            return bool(guard_bool(a))
-        except GuardOnDataDependentSymNode:
-            return True
+    return _guard_or(a, True)
 
 
 def definitely_true(a: BoolLikeType) -> bool:
@@ -1269,24 +1314,25 @@ def definitely_false(a: BoolLikeType) -> bool:
     return not bool(a)
 
 
-def _static_eval(x: Union[bool, SymBool]) -> Optional[bool]:
-    if isinstance(x, SymBool):
-        expr = x.node.expr
+def _static_eval_sym_bool(x: SymBool) -> Optional[bool]:
+    assert isinstance(x, SymBool)
+    expr = x.node.expr
+
+    try:
+        # Shape env access is inside the try on purpose. xla symnode does not
+        # have it on its attributes.
         shape_env = x.node.shape_env
-        try:
-            simplified = shape_env._maybe_evaluate_static(expr)
-            if simplified is not None:
-                return bool(simplified)
-            else:
-                return None
-        except Exception:
-            log.debug("Could not simplify %s", expr)
+        simplified = shape_env._maybe_evaluate_static(expr)
+        if simplified is not None:
+            return bool(simplified)
+        else:
             return None
-    assert isinstance(x, bool)
-    return x
+    except Exception:
+        log.debug("Could not simplify %s", expr)
+        return None
 
 
-def statically_known_true(x: Union[bool, SymBool]) -> bool:
+def statically_known_true(x: BoolLikeType) -> bool:
     """
     Returns True if x can be simplified to a constant and is true.
 
@@ -1297,16 +1343,18 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     Args:
         x (bool, SymBool): The expression to try statically evaluating
     """
-    result = _static_eval(x)
+    if not isinstance(x, SymBool):
+        assert isinstance(x, bool)
+        return x
+
+    result = _static_eval_sym_bool(x)
     if result is None:
         return False
-    else:
-        return result
+
+    return result
 
 
-def sym_and(
-    x: Union[bool, SymBool], *others: Union[bool, SymBool]
-) -> Union[bool, SymBool]:
+def sym_and(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     and, but for symbolic expressions, without bool casting.
     """
@@ -1319,7 +1367,7 @@ def sym_and(
     return x
 
 
-def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
+def sym_eq(x: _T, y: _T) -> BoolLikeType:
     """
     Like ==, but when run on list/tuple, it will recursively test equality
     and use sym_and to join the results together, without guarding.
@@ -1336,9 +1384,7 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
         raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
 
 
-def sym_or(
-    x: Union[bool, SymBool], *others: Union[bool, SymBool]
-) -> Union[bool, SymBool]:
+def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
     """
     or, but for symbolic expressions, without bool casting.
     """
@@ -1412,7 +1458,7 @@ def _advise_is_size(a: SymInt) -> None:
         _constrain_range_for_size(a)
 
 
-def _advise_is_bounded(a: SymInt, upper_bound: Union[int, SymInt]) -> None:
+def _advise_is_bounded(a: SymInt, upper_bound: IntLikeType) -> None:
     if (
         isinstance(a, SymInt)
         and isinstance(a.node, SymNode)
@@ -1536,7 +1582,7 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: Union[SymBool, bool], skip: int = 0) -> bool:
+def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1551,21 +1597,21 @@ def expect_true(a: Union[SymBool, bool], skip: int = 0) -> bool:
     return a
 
 
-def guard_bool(a: Union[SymBool, bool]) -> bool:
+def guard_bool(a: BoolLikeType) -> bool:
     if isinstance(a, SymBool):
         return a.node.guard_bool("", 0)  # NB: uses Python backtrace
     assert type(a) is bool, a
     return a
 
 
-def guard_int(a: Union[SymInt, int]) -> int:
+def guard_int(a: IntLikeType) -> int:
     if isinstance(a, SymInt):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
     assert type(a) is int, a
     return a
 
 
-def guard_float(a: Union[SymFloat, float]) -> float:
+def guard_float(a: FloatLikeType) -> float:
     if isinstance(a, SymFloat):
         return a.node.guard_float("", 0)  # NB: uses Python backtrace
     assert isinstance(a, float), a
@@ -3278,6 +3324,10 @@ class ShapeEnv:
             else []
         )
 
+        # Set true when data dependent errors are handled by caller side and not thrown. Ex: guard_or_false
+        # and guard_or_true. When its true, a different error message is produced.
+        self._dde_suppressed = False
+
         # FakeTensor per-ShapeEnv operation cache. This is used for caching
         # operations that contain symbolic shapes which have guards on the
         # ShapeEnv (so are ShapeEnv-dependent).
@@ -3289,6 +3339,18 @@ class ShapeEnv:
             torch._subclasses.fake_tensor._DispatchCacheKey,
             torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
+
+    @contextlib.contextmanager
+    def dde_suppressed(self) -> Iterator[None]:
+        """Suppressed GuardOnDataDependent error logs"""
+
+        # We do not expect this to be called recursively.
+        assert not self._dde_suppressed, "not expected value for _dde_suppressed"
+        self._dde_suppressed = True
+        try:
+            yield
+        finally:
+            self._dde_suppressed = False
 
     # Pro-tip: if you add new field to ShapeEnv, this affects some accept
     # tests.  Accept their output with:
@@ -3589,6 +3651,7 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
+            "_dde_suppressed",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -3960,7 +4023,7 @@ class ShapeEnv:
 
     def _produce_dyn_sizes(
         self,
-        ex_size: Sequence[Union[int, SymInt]],
+        ex_size: Sequence[IntLikeType],
         source: Source,
         symbolic_context: SymbolicContext,
     ) -> list[sympy.Expr]:
@@ -3970,7 +4033,7 @@ class ShapeEnv:
 
     def _produce_dyn_sizes_from_int_tuple(
         self,
-        tensor_size: Sequence[Union[int, SymInt]],
+        tensor_size: Sequence[IntLikeType],
         source: Source,
         symbolic_context: SymbolicContext,
     ) -> list[sympy.Expr]:
@@ -4007,11 +4070,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> tuple[
-        tuple[Union[int, SymInt], ...],
-        tuple[Union[int, SymInt], ...],
-        Union[int, SymInt],
-    ]:
+    ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -4072,8 +4131,8 @@ class ShapeEnv:
     # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
     # we may have an unnessary shape speciliazation for y.
     def _maybe_specialize_sym_int_with_hint(
-        self, maybe_sym: Union[int, SymInt]
-    ) -> Union[int, SymInt]:
+        self, maybe_sym: IntLikeType
+    ) -> IntLikeType:
         assert isinstance(maybe_sym, (int, torch.SymInt))
         if is_symbolic(maybe_sym):
             assert (
@@ -4087,18 +4146,14 @@ class ShapeEnv:
         self,
         # NB: SymInt is allowed here due to nested int, normally you don't
         # actually pass true symbolic sizes to this function
-        ex_size: Sequence[Union[int, SymInt]],
-        ex_stride: Sequence[Union[int, SymInt]],
-        ex_storage_offset: Union[int, SymInt],
+        ex_size: Sequence[IntLikeType],
+        ex_stride: Sequence[IntLikeType],
+        ex_storage_offset: IntLikeType,
         is_dim_dynamic: Sequence[bool],
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-    ) -> tuple[
-        tuple[Union[int, SymInt], ...],
-        tuple[Union[int, SymInt], ...],
-        Union[int, SymInt],
-    ]:
+    ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
         dim = len(ex_size)
 
         # Reimplement the legacy behavior
@@ -4205,8 +4260,8 @@ class ShapeEnv:
         self,
         source: Source,
         size: Sequence[sympy.Expr],
-        ex_size: Sequence[Union[int, SymInt]],
-        ex_stride: Sequence[Union[int, SymInt]],
+        ex_size: Sequence[IntLikeType],
+        ex_stride: Sequence[IntLikeType],
         dynamic_strides: Sequence[DimDynamic],
         constraint_strides: Sequence[
             Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
@@ -4217,7 +4272,7 @@ class ShapeEnv:
         from torch._dynamo.source import TensorProperty, TensorPropertySource
 
         stride: list[Optional[sympy.Expr]] = [None] * len(size)
-        candidates: dict[Union[int, SymInt], sympy.Expr] = {}
+        candidates: dict[IntLikeType, sympy.Expr] = {}
 
         # iterate over unbound strides in val ascending order with
         # index descending as a tie breaker since for cases like
@@ -4266,7 +4321,7 @@ class ShapeEnv:
         *,
         hint: Optional[int],
         source: Optional[Source] = None,
-    ) -> Union[int, SymInt]:
+    ) -> IntLikeType:
         """Create a SymInt value from a symbolic expression
 
         If you know what the current hint value of the SymInt to be created
@@ -4287,7 +4342,7 @@ class ShapeEnv:
         else:
             fx_node = None
 
-        out: Union[int, SymInt]
+        out: IntLikeType
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
@@ -4310,7 +4365,7 @@ class ShapeEnv:
         *,
         hint: Optional[int],
         source: Optional[Source] = None,
-    ) -> Union[float, SymFloat]:
+    ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
@@ -4325,7 +4380,7 @@ class ShapeEnv:
         else:
             fx_node = None
 
-        out: Union[float, SymFloat]
+        out: FloatLikeType
         if isinstance(sym, sympy.Float):
             if hint is not None:
                 assert float(sym) == hint
@@ -4343,7 +4398,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_unspecified_symint_and_symbol(
         self, value: int, source: Source, dynamic_dim: DimDynamic
-    ) -> Union[int, SymInt]:
+    ) -> IntLikeType:
         """Create a SymInt wrapping a new unspecified symbol"""
         return self.create_symintnode(
             self.create_unspecified_symbol(
@@ -5057,7 +5112,7 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(
-            source: Source, val: Union[SymInt, int], constraint: DimConstraint = None
+            source: Source, val: IntLikeType, constraint: DimConstraint = None
         ) -> None:
             log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
@@ -5139,7 +5194,7 @@ class ShapeEnv:
                         constraint.warn_only, self._debug_name(source), msg
                     )
 
-        def track_symfloat(source: Source, val: Union[float, SymFloat]) -> None:
+        def track_symfloat(source: Source, val: FloatLikeType) -> None:
             log.debug("track_symfloat %s %s", LazyString(source.name), val)
             assert not isinstance(val, SymFloat) or is_symbolic(val)
 
@@ -5951,7 +6006,6 @@ class ShapeEnv:
                         min_max_replacements[atom] = a if atom.func is Max else b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
-                expr = safe_expand(expr)
 
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
@@ -6087,6 +6141,12 @@ class ShapeEnv:
         size_oblivious_result: Optional[sympy.Basic] = None,
         expr_sym_node_id: Optional[int] = None,
     ) -> GuardOnDataDependentSymNode:
+        if self._dde_suppressed:
+            return GuardOnDataDependentSymNode(
+                expr,
+                "This data dependent error is suppressed and handled by the caller",
+            )
+
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         size_like_symbols = []
@@ -6799,14 +6859,17 @@ class ShapeEnv:
                 size_oblivious,
                 forcing_spec=forcing_spec,
             )
-        except Exception:
-            self.log.warning(
-                "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
-                orig_expr,
-                hint,
-                size_oblivious,
-                forcing_spec,
-            )
+        except Exception as e:
+            if isinstance(e, GuardOnDataDependentSymNode) and self._dde_suppressed:
+                pass
+            else:
+                self.log.warning(
+                    "failed during evaluate_expr(%s, hint=%s, size_oblivious=%s, forcing_spec=%s",
+                    orig_expr,
+                    hint,
+                    size_oblivious,
+                    forcing_spec,
+                )
             raise
 
     def _evaluate_expr(
