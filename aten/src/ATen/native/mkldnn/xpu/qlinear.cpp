@@ -151,11 +151,11 @@ static Tensor q_linear_pointwise_binary(
     std::optional<c10::ScalarType> output_dtype,
     double other_scale,
     int64_t other_zero_point,
-    c10::string_view binary_post_op,
+    std::string_view binary_post_op,
     double binary_alpha,
-    c10::string_view unary_post_op,
+    std::string_view unary_post_op,
     torch::List<std::optional<at::Scalar>> unary_post_op_args,
-    c10::string_view unary_post_op_algorithm) {
+    std::string_view unary_post_op_algorithm) {
   TORCH_CHECK(
       act.device() == weight.device() &&
           act.device() == weight_scales.device() &&
@@ -222,11 +222,11 @@ static Tensor q_linear_pointwise_binary_tensor(
     std::optional<c10::ScalarType> output_dtype,
     double other_scale,
     int64_t other_zero_point,
-    c10::string_view binary_post_op,
+    std::string_view binary_post_op,
     double binary_alpha,
-    c10::string_view unary_post_op,
+    std::string_view unary_post_op,
     torch::List<std::optional<at::Scalar>> unary_post_op_args,
-    c10::string_view unary_post_op_algorithm) {
+    std::string_view unary_post_op_algorithm) {
   return q_linear_pointwise_binary(
       act,
       act_scale.item().toDouble(),
