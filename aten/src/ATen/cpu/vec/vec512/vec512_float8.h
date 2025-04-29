@@ -145,7 +145,7 @@ private:
     o128_2 = cvtfp32_fp8e4m3(o2);
     o128_3 = cvtfp32_fp8e4m3(o3);
 
-    __m512i result;
+    __m512i result = _mm512_setzero_si512();
     result = _mm512_inserti32x4(result, o128_0, 0);
     result = _mm512_inserti32x4(result, o128_1, 1);
     result = _mm512_inserti32x4(result, o128_2, 2);
@@ -171,7 +171,6 @@ public:
   T& operator[](int idx) = delete;
   const T& operator[](int idx) const  = delete;
   static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
-    std::cout<<"---- hit fp8 load ----"<<std::endl;
     if (count == size()) {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else if (count == 16) {
@@ -184,7 +183,6 @@ public:
     }
   }
   void store(void* ptr, int count = size()) const {
-    std::cout<<"---- hit fp8 store ----"<<std::endl;
     if (count == size()) {
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
@@ -201,7 +199,6 @@ public:
   }
 
   Vectorized<T> abs() const {
-    std::cout<<"---- hit fp8 abs ----"<<std::endl;
     return _mm512_andnot_si512(_mm512_set1_epi8(0x80), values);
   }
 
@@ -313,7 +310,6 @@ Vectorized<Float8_e4m3fn> inline operator-(const Vectorized<Float8_e4m3fn>& a, c
 }
 
 Vectorized<Float8_e4m3fn> inline operator*(const Vectorized<Float8_e4m3fn>& a, const Vectorized<Float8_e4m3fn>& b) {
-  std::cout<<"---- hit fp8 mul ----"<<std::endl;
   return binary_fp8_op_as_fp32(a, b, [](const __m512& x, const __m512& y) { return _mm512_mul_ps(x, y); });
 }
 

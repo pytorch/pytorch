@@ -1397,9 +1397,15 @@ class CPUReproTests(TestCase):
         use_quant_list = [False, True]
         use_tensor_overload_list = [False, True]
 
-        assert dtype in [torch.uint8, torch.int8]
+        assert dtype in [torch.uint8, torch.int8, torch.float8_e4m3fn]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
+        if dtype == torch.float8_e4m3fn:
+            quant_min = int(torch.finfo(dtype).min)
+            quant_max = int(torch.finfo(dtype).max)
+            use_tensor_overload_list = [
+                False,
+            ]
 
         for (
             use_dequant,
@@ -1454,6 +1460,10 @@ class CPUReproTests(TestCase):
         self._test_dequant_quant_lowering_helper(
             torch.int8, dequant_out_dtype=torch.bfloat16
         )
+
+    @requires_vectorization
+    def test_dequant_quant_lowering_fp8_e4m3(self):
+        self._test_dequant_quant_lowering_helper(torch.float8_e4m3fn)
 
     def _test_dequant_maxpool2d_lowering_helper(self, dtype):
         def fn(x, scale, zero_point, quant_min, quant_max, dtype):
