@@ -393,9 +393,12 @@ def export(
         from torch.onnx.utils import export
 
         warnings.warn(
-            "The legacy ONNX export logic is deprecated and will be removed in a future release. "
-            "Please use the new export logic by setting `dynamo=True` in the `torch.onnx.export` API "
-            "for better performance and support for modern features.",
+            "You are using the legacy ONNX export logic. Starting with PyTorch 2.8, we recommend using the new export "
+            "logic by setting `dynamo=True` in the `torch.onnx.export` API. The new logic offers better performance, "
+            "support for modern features, and improved debugging capabilities. When using the new logic, prefer "
+            "using `dynamic_shapes` instead of `dynamic_axes` for specifying dynamic dimensions. Additionally, "
+            "consider using `torch.cond` and `torch.scan` to replace control flow constructs in your model for better "
+            "compatibility with ONNX export. Please try it out and report any issues you encounter to help us improve.",
             category=DeprecationWarning,
             stacklevel=3,
         )
