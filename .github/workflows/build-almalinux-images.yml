@@ -36,7 +36,7 @@ jobs:
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
-        cuda_version: ["11.8", "12.4", "12.6", "cpu"]
+        cuda_version: ["11.8", "12.6", "12.8", "cpu"]
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
