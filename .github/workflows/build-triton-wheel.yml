@@ -54,7 +54,7 @@ jobs:
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
-            rocm_version: "6.3"
+            rocm_version: "6.4"
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
@@ -161,7 +161,7 @@ jobs:
           fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts/wheelhouse
 
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
@@ -215,7 +215,7 @@ jobs:
           # in https://github.com/actions/checkout/issues/1018
           git config --global core.fsmonitor false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: false
@@ -248,7 +248,7 @@ jobs:
           .github/scripts/windows/build_triton.bat
           mkdir -p "${RUNNER_TEMP}/artifacts/"
           mv ./*.whl "${RUNNER_TEMP}/artifacts/"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
@@ -267,24 +267,24 @@ jobs:
       image: continuumio/miniconda3:4.12.0
     environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'nightly-wheel-upload' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Configure AWS credentials(PyTorch account) for main
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
           aws-region: us-east-1
 
       - name: Configure AWS credentials(PyTorch account) for RC builds
         if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
           aws-region: us-east-1
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         with:
           # Download all available artifacts
           path: ${{ runner.temp }}/artifacts-all
