@@ -33,6 +33,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -661,7 +662,7 @@ class DTensorMeshTest(DTensorTestBase):
             self.assertEqual(sharded_tensor.to_local().shape, torch.Size([3, 3]))
 
             mesh_2d = DeviceMesh(
-                self.device_type, torch.arange(self.world_size).reshape(2, 4)
+                self.device_type, torch.arange(self.world_size).reshape(2, self.world_size // 2)
             )
 
             with mesh_2d:
@@ -675,7 +676,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_2d_mesh(self):
-        mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
+        mesh_tensor = torch.arange(self.world_size).reshape(2, self.world_size // 2)
         # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
@@ -697,6 +698,7 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.size(), torch.Size([3 * self.world_size, 3]))
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_device_mesh_nd(self):
         # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
@@ -720,7 +722,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_spec_local_shard_offset(self):
         device_mesh = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 4)
+            self.device_type, torch.arange(self.world_size).reshape(2, self.world_size // 2 )
         )
         tensor_shape = (3 * self.world_size, 3 * self.world_size)
         # sharding specs and its corresponding local shard offsets

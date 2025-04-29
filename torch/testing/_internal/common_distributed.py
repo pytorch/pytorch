@@ -420,7 +420,12 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     Returns True if the device's compute capability is (major, minor) or higher.
     Error out if the device is not a CUDA device.
     Returns False if device is a RoCM device.
+    Returns True if device is an XPU device.
     """
+    if device.type == "xpu":
+        # XPU devices have different compute capability codes
+        return True
+
     if device.type != "cuda":
         raise ValueError("sm_is_or_later() is only supported for CUDA devices")
 
