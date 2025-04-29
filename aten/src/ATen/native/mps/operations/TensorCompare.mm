@@ -80,7 +80,7 @@ static void clamp_mps_graph(CachedGraph* cachedGraph,
   cachedGraph->outputTensor = outputTensor;
 }
 
-static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, string op_name) {
+static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& input_t, std::string op_name) {
   if (!clamp_opt->is_same_size(input_t)) {
     auto num_clamp_dims = clamp_opt->dim();
     auto num_input_dims = input_t.dim();
@@ -119,7 +119,7 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
                                  const OptionalTensorRef min_opt,
                                  const OptionalTensorRef max_opt,
                                  const Tensor& output_t,
-                                 string op_name) {
+                                 std::string op_name) {
   const bool has_min = (min_opt.has_value() && min_opt->defined());
   const bool has_max = (max_opt.has_value() && max_opt->defined());
 
@@ -173,7 +173,7 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
                    : getTensorsStringKey({input_t, min_opt_tensor}))
         : (has_max ? getTensorsStringKey({input_t, max_opt_tensor}) : getTensorsStringKey({input_t}));
 
-    string key = op_name + (has_min ? "_min" : "") + (has_max ? "_max" : "") + "_tensor" + tensor_key;
+    std::string key = op_name + (has_min ? "_min" : "") + (has_max ? "_max" : "") + "_tensor" + tensor_key;
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       if (has_min) {
         newCachedGraph->minTensor = mpsGraphRankedPlaceHolder(mpsGraph, min_opt_tensor);
@@ -221,7 +221,7 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
                                  const OptionalScalarRef min_opt,
                                  const OptionalScalarRef max_opt,
                                  const Tensor& output_t,
-                                 string op_name) {
+                                 std::string op_name) {
   using scalar_t = double;
 
   const bool has_min = (min_opt.has_value());
@@ -243,7 +243,7 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
 
   @autoreleasepool {
     // the optional min/max refs could affect how we build the cached graph
-    string key = op_name + (has_min ? ("_min:" + std::to_string(min_scalar)) : "") +
+    std::string key = op_name + (has_min ? ("_min:" + std::to_string(min_scalar)) : "") +
         (has_max ? ("_max:" + std::to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       if (has_min)
@@ -278,7 +278,7 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
                                        bool assume_unique,
                                        bool invert,
                                        const Tensor& out,
-                                       string op_name) {
+                                       std::string op_name) {
   if (elements.numel() == 0) {
     return;
   }
@@ -301,7 +301,7 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
               common_type);
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({elements, test_elements}) + std::to_string(invert);
+    std::string key = op_name + getTensorsStringKey({elements, test_elements}) + std::to_string(invert);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));
@@ -440,7 +440,7 @@ static void where_kernel_mps(TensorIterator& iter) {
   MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
 
   @autoreleasepool {
-    string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
+    std::string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, conditionDataType, getMPSShape(cond_bool));
@@ -508,7 +508,7 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
-    string key = "nan_to_num" + getTensorsStringKey({self});
+    std::string key = "nan_to_num" + getTensorsStringKey({self});
     MPSDataType self_dtype = getMPSScalarType(self.scalar_type());
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
