@@ -1013,13 +1013,11 @@ static Tensor _batch_tile_tensor(
 
 static Tensor _mask_to_indices(const Tensor& mask) {
   // This function returns a vector of the indices at which given
-  // boolean mask is True. at::nonzero can achieve the same, but
-  // we yet have to compare the performance difference.
+  // boolean mask is True. Here at::nonzero performs test (time/mem).
   TORCH_CHECK(
       mask.dim() == 1, "Currently _mask_to_indices only supports 1-d masks.");
   TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
-  return at::native::arange(mask.numel(), at::kLong, kStrided, mask.device())
-      .masked_select(mask);
+  return at::native::flatten(at::nonzero(mask));
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
@@ -1695,7 +1693,7 @@ static Tensor sparse_compressed_to_flipped(
 
   // Step 4:
   // Convert the COO indices to the CSC/BSC indices and form the output.
-  // We need to sort COO indices along the "tranposed" dim to satisfy the
+  // We need to sort COO indices along the "transposed" dim to satisfy the
   // invariant of sorted plain indices.
   // Hash coo indices by converting 2d indices to linear offsets with
   // more "weight" (aka stride) placed on the "transposed" dimension.

@@ -423,9 +423,7 @@ def dim_view_as_real(shape: Shape) -> DimMap:
     return tuple(results)
 
 
-def dim_reduction(
-    ndim: int, dim_or_dims: Optional[Union[int, Sequence[int]]], keepdim: bool
-) -> DimMap:
+def dim_reduction(ndim: int, dim_or_dims: Optional[DimsType], keepdim: bool) -> DimMap:
     """
     General fallback for reduction ops where Partial() does not apply.
 
@@ -560,9 +558,11 @@ def propagate_shape_and_sharding(
             shard_dim_map[in_dim.input_dim] = dim
 
     input_tgt_placements = [
-        Replicate()
-        if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
-        else p
+        (
+            Replicate()
+            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
+            else p
+        )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
     output_placements = [

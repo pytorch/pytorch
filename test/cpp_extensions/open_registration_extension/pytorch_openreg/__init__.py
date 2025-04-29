@@ -1,11 +1,9 @@
 import types
 
-# Create our python implementation dict so that the C++ module
-# can access it during its initialization and also register aten impls.
-from typing import Union
-
 import torch
 
+# Create our python implementation dict so that the C++ module
+# can access it during its initialization and also register aten impls.
 from ._aten_impl import impl_factory as impl_factory  # noqa: F401
 from ._device_daemon import driver
 
@@ -45,7 +43,7 @@ def _create_module():
     def current_device():
         return torch.accelerator.current_device_index()
 
-    def get_rng_state(device: Union[int, str, torch.device]):
+    def get_rng_state(device):
         if isinstance(device, str):
             device = torch.device(device)
         elif isinstance(device, int):
