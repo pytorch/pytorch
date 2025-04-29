@@ -79,3 +79,5 @@ visualize_sharding(
     dt.DTensor.from_local(tensor, mesh, [dt.Shard(dim=1), dt.Shard(dim=0)]),
     use_rich=True,
 )
+
+torch.distributed.destroy_process_group()
