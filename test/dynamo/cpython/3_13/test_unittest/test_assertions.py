@@ -14,8 +14,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-if TEST_WITH_TORCHDYNAMO:
-    unittest.TestCase = torch._dynamo.test_case.CPythonTestCase
+__TestCase = torch._dynamo.test_case.CPythonTestCase
 
 
 # redirect import statements
@@ -61,7 +60,7 @@ from test.support import gc_collect
 from itertools import product
 
 
-class Test_Assertions(unittest.TestCase):
+class Test_Assertions(__TestCase):
     def test_AlmostEqual(self):
         self.assertAlmostEqual(1.00000001, 1.0)
         self.assertNotAlmostEqual(1.0000001, 1.0)
@@ -196,7 +195,7 @@ class Test_Assertions(unittest.TestCase):
             self.fail('assertNotRegex should have failed.')
 
 
-class TestLongMessage(unittest.TestCase):
+class TestLongMessage(__TestCase):
     """Test that the individual asserts honour longMessage.
     This actually tests all the message behaviour for
     asserts that use longMessage."""
@@ -470,7 +469,4 @@ class TestLongMessage(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    if TEST_WITH_TORCHDYNAMO:
-        run_tests()
-    else:
-        unittest.main()
+    run_tests()
