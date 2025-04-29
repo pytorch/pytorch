@@ -266,6 +266,10 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
 guess_tangent_strides_as_outputs = False
 
+# By default apply inlined saved_tensors_hooks only for "donated" buffers.
+# If this config is True - saved_tensors_hooks are applied for all saved.
+saved_tensors_hooks_no_filtering = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

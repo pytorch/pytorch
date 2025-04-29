@@ -870,7 +870,7 @@ def prepare_hook_gm(aot_config, fn, args):
 # All tensors to save for backward will be grouped together at front.
 # Sym scalars grouped on another end. Constants are inlined in the graph.
 def maybe_inline_graph_saved_tensors_hooks(
-    fw_module, bw_module, num_inner_fwd_outputs, static_input_indices, aot_config
+    fw_module, bw_module, num_inner_fwd_outputs, inner_meta, aot_config
 ):
     if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         return
@@ -903,6 +903,18 @@ def maybe_inline_graph_saved_tensors_hooks(
     )
     fw_g = fw_module.graph
     bw_g = bw_module.graph
+
+    fw_g_names = {node.name for node in fw_g.nodes}
+    bw_g_names = {node.name for node in bw_g.nodes}
+
+    def _gen_unused_name(candidate: str):
+        c = candidate
+        i = 0
+        while c in fw_g_names or c in bw_g_names:
+            c = f"{candidate}_{i}"
+            i = i + 1
+        return c
+
     bw_g_inputs = bw_g.find_nodes(op="placeholder")
 
     fw_out_n = fw_g.output_node()
@@ -913,21 +925,42 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_outs_packed_tensors = []
     fw_outs_packed_syms = []
 
-    static_inputs = set()
-    if static_input_indices:
-        fw_g_inputs = list(fw_g.find_nodes(op="placeholder"))
-        for idx in static_input_indices:
-            static_inputs.add(fw_g_inputs[idx])
+    # The main use case for saved_tensors_hooks is activation quantization,
+    # for memory usage optimization.
+    # Desired behavior is to quantize saved activations to free the original saved tensor.
+    # Saved nodes may include forward inputs, outputs, parameters.
+    # They may be held by something else and will not be deallocated after quantization.
+    # Donated buffers are intermediates in the graph invisible for the user,
+    # this guarantees that they can be deallocated.
+    # Using this as a default behavior to select saved nodes to apply hooks.
+    # There is also a config to apply hooks for all saved nodes without any filtering.
+    # The plan is to propagate meta about the source of the saved node to the user hook function.
+    run_hooks_only_on_donated_buffers = (
+        not torch._functorch.config.saved_tensors_hooks_no_filtering
+    )
+    fw_outs_whitelist_to_run_hooks = None
+
+    if run_hooks_only_on_donated_buffers:
+        symint_outs_saved_for_bw = [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
+        # collect_bw_donated_buffer_idxs requires inner_meta to have num_symints_saved_for_bw
+        inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+        bw_donated_idxs = collect_bw_donated_buffer_idxs(
+            fw_module,
+            bw_module,
+            inner_meta,
+        )
+        fw_donated_idxs = [
+            i - inner_meta.num_symints_saved_for_bw for i in bw_donated_idxs
+        ]
+        fw_outs_whitelist_to_run_hooks = [
+            fw_outs_saved_for_bw[i] for i in fw_donated_idxs
+        ]
 
     for saved in fw_outs_saved_for_bw:
-        if saved in static_inputs:
-            # Do not run hooks on static_input_indices,
-            # as they correspond to model parameters,
-            # which have more users than autograd save context.
-            # The main use case for saved_tensors_hooks is activation quantization.
-            # Where desired behavior is to quantize saved activations
-            # to free the original saved tensor.
-            # That can not be done for parameters (static_input_indices).
+        if (
+            fw_outs_whitelist_to_run_hooks
+            and saved not in fw_outs_whitelist_to_run_hooks
+        ):
             fw_outs_saved_tensors_unchanged.append(saved)
             continue
 
@@ -976,6 +1009,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                 if node.op == "placeholder":
                     continue
                 new_n = fw_g.node_copy(node, lambda n: env[n])
+                fw_g_names.add(new_n.name)
                 env[node] = new_n
                 # Output node is temporarily copied to have remapped arguments.
                 # Removed in the end.
@@ -985,14 +1019,32 @@ def maybe_inline_graph_saved_tensors_hooks(
 
         env.clear()
         assert fw_pack_out_args
-        for out_idx, n in enumerate(pytree.tree_leaves(fw_pack_out_args)):
-            if not isinstance(n, torch.fx.Node):
+        fw_outs_bw_ins_node_names = []
+        for out_idx, _n in enumerate(pytree.tree_leaves(fw_pack_out_args)):
+            if not isinstance(_n, torch.fx.Node):
+                fw_outs_bw_ins_node_names.append("")
                 continue
-            n.meta["__debug_hooks_origin"] = f"{saved.name}_{out_idx}"
-            if isinstance(n.meta["val"], torch.Tensor):
-                fw_outs_packed_tensors.append(n)
-            elif is_sym_node(n):
-                fw_outs_packed_syms.append(n)
+            with fw_g.inserting_before(fw_out_n):
+                new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
+                # We can not specify desired name in node_copy.
+                # Copying node manually to set specifc name,
+                # to have matching fw_outs, bw_inputs names.
+                n = fw_g.create_node(
+                    _n.op,
+                    _n.target,
+                    _n.args,
+                    _n.kwargs,
+                    name=new_node_name,
+                )
+                assert n.name == new_node_name
+                fw_outs_bw_ins_node_names.append(new_node_name)
+                n.meta = _n.meta
+                _n.replace_all_uses_with(n)
+                fw_g.erase_node(_n)
+                if isinstance(n.meta["val"], torch.Tensor):
+                    fw_outs_packed_tensors.append(n)
+                elif is_sym_node(n):
+                    fw_outs_packed_syms.append(n)
 
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
@@ -1025,7 +1077,10 @@ def maybe_inline_graph_saved_tensors_hooks(
         ):
             is_sym = isinstance(val, py_sym_types)
             if isinstance(val, torch.Tensor) or is_sym:
-                new_node_name = bw_g_input.name + "_" + unp_in_n.name
+                # We want forward_outputs names to match backward_inputs,
+                # Potentially backward may already have "{saved.name}_hook_{idx}",
+                # In this case fx.Graph will add suffix.
+                new_node_name = fw_outs_bw_ins_node_names[out_idx]
                 # Backward calling convention: ctx_symints,ctx_saved_tensors
                 # Inserting packed sym scalars before first saved tensor input.
                 # Inserting packed tensors before last saved tensor input.
@@ -1034,9 +1089,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                     bw_g_inputs[0]
                 ) if is_sym else bw_g.inserting_before(bw_g_inputs[num_saved_for_bw]):
                     new_n = bw_g.placeholder(new_node_name)
-                    if not n.meta:
-                        n.meta = {}
-                    new_n.meta["__debug_hooks_origin"] = f"{saved.name}_{out_idx}"
+                    assert new_n.name == new_node_name
                 new_n.meta["val"] = val
                 env[unp_in_n] = new_n
             else:
@@ -1050,6 +1103,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                 if node.op == "placeholder":
                     continue
                 new_n = bw_g.node_copy(node, lambda n: env[n])
+                bw_g_names.add(new_n.name)
                 env[node] = new_n
                 # Temporary insert output, to have remapped by node_copy args.
                 # Removed in the end.
@@ -1090,17 +1144,13 @@ def maybe_inline_graph_saved_tensors_hooks(
     bw_ins_saved_syms = bw_new_ins[:_fw_num_s]
     bw_ins_saved_tensors = bw_new_ins[_fw_num_s : _fw_num_s + _fw_num_t]
 
-    def _get_origin(n):
-        if n.meta and (_n := n.meta.pop("__debug_hooks_origin", None)):
-            return _n
-        return n.name
+    fw_t_names = [n.name for n in fw_outs_saved_tensors]
+    bw_t_names = [n.name for n in bw_ins_saved_tensors]
+    fw_s_names = [n.name for n in fw_outs_saved_syms]
+    bw_s_names = [n.name for n in bw_ins_saved_syms]
 
-    fw_t_origins = [_get_origin(n) for n in fw_outs_saved_tensors]
-    bw_t_origins = [_get_origin(n) for n in bw_ins_saved_tensors]
-    fw_s_origins = [_get_origin(n) for n in fw_outs_saved_syms]
-    bw_s_origins = [_get_origin(n) for n in bw_ins_saved_syms]
-    assert fw_t_origins == bw_t_origins
-    assert fw_s_origins == bw_s_origins
+    assert fw_t_names == bw_t_names
+    assert fw_s_names == bw_s_names
 
     fw_g.lint()
     bw_g.lint()
@@ -1230,7 +1280,7 @@ def aot_dispatch_autograd(
                 fw_module,
                 bw_module,
                 num_inner_fwd_outputs,
-                fw_metadata.static_input_indices,
+                inner_meta,
                 aot_config,
             )
             static_lifetime_input_indices = fw_metadata.static_input_indices
