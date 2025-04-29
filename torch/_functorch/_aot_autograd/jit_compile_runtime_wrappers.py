@@ -549,7 +549,7 @@ def run_joint_graph_passes_on_hops(
     # fw subgraph pairs without relying on the identifier. This is important
     # because we can have different subgraphs for bwd for same subgraph in the
     # fwd because of differing strides in the backward.
-    bw_to_fw_hop_node = dict(zip(list(reversed(bw_hop_nodes)), fw_hop_nodes))
+    bw_to_fw_hop_node = dict(zip(reversed(bw_hop_nodes), fw_hop_nodes))
 
     for node in bw_hop_nodes:
         identifier = node.args[1].replace("___backward", "")

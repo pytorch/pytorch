@@ -2892,9 +2892,11 @@ class PythonWrapperCodegen(CodeGen):
             "," if len(outer_inputs) == 1 else ""
         )
 
+        self.writeline(f"{subgraph.graph.name}_args = [{outer_input_names}]")
+
         # Call the subgraph launcher function
         self.writeline(
-            f"({outer_output_names}) = {subgraph.graph.name}([{outer_input_names}])"
+            f"({outer_output_names}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
         )
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
