@@ -91,12 +91,18 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::min only supported for 2 args")
-        return f"metal::min({', '.join(map(self._print, expr.args))})"
+        a, b = map(self._print, expr.args)
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::min({typecast_a}, {typecast_b})"
 
     def _print_Max(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::max only supported for 2 args")
-        return f"metal::max({', '.join(map(self._print, expr.args))})"
+        a, b = map(self._print, expr.args)
+        typecast_a = f"static_cast<decltype({a}+{b})>({a})"
+        typecast_b = f"static_cast<decltype({a}+{b})>({b})"
+        return f"metal::max({typecast_a}, {typecast_b})"
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -552,14 +558,26 @@ class MetalKernel(SIMDKernel):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-        """Codegen a reduction operation.
-        Only sum and prod operations are somewhat reasonable optimized"""
-        # Return cached reduction
-        assert self.inside_reduction
-        assert not self._load_mask
+        "Caching wrapper around _reduction_nocache"
         cache_key = (src_dtype, reduction_type, value)
+        # Return cached reduction
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
+        result = self._reduction_nocache(dtype, src_dtype, reduction_type, value)
+        self.cse.reduction_cache[cache_key] = result  # type: ignore[assignment]
+        return result
+
+    def _reduction_nocache(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        """Codegen a reduction operation.
+        Only sum and prod operations are somewhat reasonable optimized"""
+        assert self.inside_reduction
+        assert not self._load_mask
 
         # Establish reduction buffer size and index expression
         reduction_idx = ""
@@ -665,10 +683,7 @@ class MetalKernel(SIMDKernel):
                     self.compute,
                     f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
                 )
-                self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
-                    (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
-                )
-                return result_tuple
+                return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
             acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -679,10 +694,7 @@ class MetalKernel(SIMDKernel):
                 self.stores,
                 f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
             )
-            self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
-                (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
-            )
-            return result_tuple
+            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
         if reduction_type == "welford_combine":
             assert isinstance(value, tuple), "Input to welford combine must be tuple"
             acc_buf = self._new_idxvar("float3", acc_buf_size)
@@ -700,10 +712,7 @@ class MetalKernel(SIMDKernel):
                 self.stores if self.multistage_reduction else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
             )
-            self.cse.reduction_cache[cache_key] = result_tuple = OpsWrapper._unwrap(
-                (f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z")
-            )
-            return result_tuple
+            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
