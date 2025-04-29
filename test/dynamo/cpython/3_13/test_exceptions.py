@@ -15,10 +15,11 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 
-if TEST_WITH_TORCHDYNAMO:
-    __TestCase = CPythonTestCase
-else:
-    __TestCase = unittest.TestCase
+__TestCase = CPythonTestCase
+# if TEST_WITH_TORCHDYNAMO:
+#     __TestCase = CPythonTestCase
+# else:
+#     __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
@@ -2460,7 +2461,4 @@ class PEP626Tests(__TestCase):
         self.lineno_after_raise(after_with, 1, 1)
 
 if __name__ == "__main__":
-    if TEST_WITH_TORCHDYNAMO:
-        run_tests()
-    else:
-        unittest.main()
+    run_tests()
