@@ -92,6 +92,12 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
     bundle_triton_into_fx_graph_cache_default()
 )
 
+non_blocking_remote_cache_write: bool = Config(
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
+    default=True,
+)
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
