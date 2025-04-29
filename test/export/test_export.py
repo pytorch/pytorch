@@ -13029,6 +13029,29 @@ def forward(self, x):
         for node in decomposed_program.graph.nodes:
             self.assertEqual(node.meta["custom"]["my_field"], "dummy")
 
+    def test_run_decompositions_keep_tensor_constant_metadata(self):
+        """Make sure the metadata of tensor constants are kept after run_decompositions."""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.ones(3, 3)
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.b + self.linear(x)
+
+        ep = export(M(), (torch.ones(3, 3),))
+        for node in ep.graph.nodes:
+            node.meta["custom"] = {"my_field": "dummy"}
+
+        for node in ep.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
+        decomp_ep = ep.run_decompositions()
+        for node in decomp_ep.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
     def test_export_linear_preserve_dynamic_shape(self):
         class M(torch.nn.Module):
             def __init__(self):
