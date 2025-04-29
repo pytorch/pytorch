@@ -2459,11 +2459,18 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
 
 def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # If cflags is given, there may already be user-provided arch flags in it
-    # (from `extra_compile_args`)
+    # (from `extra_compile_args`). If user also specified -fgpu-rdc or -fno-gpu-rdc, we
+    # assume they know what they're doing. Otherwise, we force -fno-gpu-rdc default.
     if cflags is not None:
+        has_custom_flags = False
+        has_gpu_rdc_flag = False
         for flag in cflags:
             if 'amdgpu-target' in flag or 'offload-arch' in flag:
-                return ['-fno-gpu-rdc']
+                has_custom_flags = True
+            elif 'gpu-rdc' in flag:
+                has_gpu_rdc_flag = True
+        if has_custom_flags:
+            return '' if has_gpu_rdc_flag else '-fno-gpu-rdc'
     # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
     _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
@@ -2674,8 +2681,8 @@ def _write_ninja_file_to_build_library(path,
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
-        cuda_flags += extra_cuda_cflags
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
+        cuda_flags += extra_cuda_cflags
     elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
         if IS_WINDOWS:
