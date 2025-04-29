@@ -760,8 +760,8 @@ MPSGraphTensor* convertNHWCtoNCHW(MPSGraph* mpsGraph, MPSGraphTensor* tensor) {
                               name:nil];
 }
 
-string get_mem_format_string(c10::MemoryFormat memory_format) {
-  string mem_format_key;
+std::string get_mem_format_string(c10::MemoryFormat memory_format) {
+  std::string mem_format_key;
   switch (memory_format) {
     case at::MemoryFormat::Contiguous:
       mem_format_key = "Contiguous";
