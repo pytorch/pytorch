@@ -223,6 +223,7 @@ class CUDATemplateKernel(CUDAKernel):
         outputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
+        dtype_to_cpp_type: Optional[dict[torch_dtype, str]] = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -260,7 +261,7 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(dtype_to_cpp_type)
 
         self.init_layout_args()
         size_args = [

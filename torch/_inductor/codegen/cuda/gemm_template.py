@@ -1007,11 +1007,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_reorder = self.input_reorder
         else:
             input_reorder = None
+
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs,  # type: ignore[arg-type]
             outputs=[Y],
             names_str=names_str,
             input_reorder=input_reorder,
+            dtype_to_cpp_type=cutlass_utils.DTYPE_TO_CUTLASS_TYPE,
         )
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
@@ -1083,7 +1085,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         Returns a C++ statement that calls the GEMM operation with the correct arguments.
         """
-        _, __, arg_types = kernel.args.cpp_argdefs()
+        _, __, arg_types = kernel.args.cpp_argdefs(cutlass_utils.DTYPE_TO_CUTLASS_TYPE)
         arg_names = [name.strip() for name in names_str.strip().split(",")]
         arg_names = self._update_arg_names_for_test_call_statement(
             arg_names, input_nodes
