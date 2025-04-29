@@ -131,7 +131,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "lstm_" + getTensorsStringKey({input, hx[0], hx[1]}) + getMPSTypeString(input) + "_num_layers_" +
+    std::string key = "lstm_" + getTensorsStringKey({input, hx[0], hx[1]}) + getMPSTypeString(input) + "_num_layers_" +
         std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) + "_has_biases_" +
         std::to_string(has_biases) + "_dropout_" + std::to_string(dropout_p) + "_batch_first_" +
         std::to_string(batch_first);
@@ -408,10 +408,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
   // Get stream
   MPSStream* stream = getCurrentMPSStream();
   @autoreleasepool {
-    string key = "lstm_backward_" + getTensorsStringKey({input, z_state, cell_state_fwd, grad_y, grad_cy, grad_hy}) +
-        getMPSTypeString(input) + "_num_layers_" + std::to_string(num_layers) + "_bidirectional_" +
-        std::to_string(bidirectional) + "_has_biases_" + std::to_string(has_biases) + "_batch_first_" +
-        std::to_string(batch_first);
+    std::string key = "lstm_backward_" +
+        getTensorsStringKey({input, z_state, cell_state_fwd, grad_y, grad_cy, grad_hy}) + getMPSTypeString(input) +
+        "_num_layers_" + std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) +
+        "_has_biases_" + std::to_string(has_biases) + "_batch_first_" + std::to_string(batch_first);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       NSMutableArray<MPSGraphTensor*>* kernelWeightsList = [[NSMutableArray alloc] initWithCapacity:params.size()];
       NSMutableArray<MPSGraphTensor*>* recurrentKernelWeightsList =
