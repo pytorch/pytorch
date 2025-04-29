@@ -31,8 +31,9 @@ jobs:
         continue-on-error: true
         # we can't run all files here because only changes around where the diff are shown in the PR UI
         run: |
-          python --version
-          python3 --version
+          set -ex
+          python --version || exit 0
+          python3 --version || exit 0
           export ADDITIONAL_LINTRUNNER_ARGS="format"
           bash .github/scripts/lintrunner.sh
       - name: Check for changes
