@@ -34,6 +34,7 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
+    TypeAlias,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -1530,17 +1531,15 @@ k_splits_limit = 5
 # Hand-tuned
 default_k_splits = [16, 32, 64, 128, 256]
 
-
-def use_decompose_k_choice(m: int, n: int, k: int) -> bool:
+_IntLike: TypeAlias = Union[int, sympy.Expr]
+def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
-    return V.graph.sizevars.evaluate_expr(
-        sympy.Ge(k, decompose_k_threshold * m)
-    ) and V.graph.sizevars.evaluate_expr(sympy.Ge(k, decompose_k_threshold * n))
+    return V.graph.sizevars.is_expr_static_and_true(sympy.And(sympy.Ge(k, decompose_k_threshold * m), sympy.Ge(k, decompose_k_threshold * n)))
 
 
 @functools.lru_cache(None)
-def get_k_splits(m: int, n: int, k: Union[int, sympy.Expr]) -> list[int]:
+def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # If k is a sympy expression, we can't do any splitting
     if isinstance(k, sympy.Expr) and not k.is_number:
         return default_k_splits
@@ -1560,8 +1559,13 @@ def get_k_splits(m: int, n: int, k: Union[int, sympy.Expr]) -> list[int]:
 
     for d in divisors:
         kPart = k // d
-        # power of 2 divisors are best performing, conform to hardware
-        if (kPart & kPart - 1) == 0:
+
+        # Smaller than 128 might not even fit in a single tile, BLOCK_K can be 128
+        if kPart < 128:
+            continue
+
+        # Power of 2 divisors are best performing, conform to hardware
+        if (kPart & kPart - 1) == 0 and kPart >= 128:
             pow_of_2_divisors.append(d)
         # Else check if creates a multiple of 32
         elif kPart % 32 == 0:
@@ -1569,9 +1573,16 @@ def get_k_splits(m: int, n: int, k: Union[int, sympy.Expr]) -> list[int]:
         # otherwise, take the smallest values
         else:
             rest_of_splits.append(d)
-
-    best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
-    return best_splits[:k_splits_limit]
+        
+    # If the # of power of 2 divisors are greater than k_splits_limit, return all
+    # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
+    # should never be a massive amount
+    if len(pow_of_2_divisors) >= k_splits_limit:
+        return pow_of_2_divisors
+    else:
+        best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+        # Otherwise, conform results to k_splits_limit
+        return best_splits[:k_splits_limit]
 
 
 @functools.lru_cache(None)
