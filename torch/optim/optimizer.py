@@ -881,6 +881,7 @@ class Optimizer:
             >>> scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=80, eta_min=3e-5)
             >>> lr = torch.optim.lr_scheduler.SequentialLR(optim, schedulers=[scheduler1, scheduler2], milestones=[20])
             >>> lr.load_state_dict(torch.load('./save_seq.pt'))
+            >>> // now load the optimizer checkpoint after loading the LRScheduler
             >>> optim.load_state_dict(torch.load('./save_optim.pt'))
 
         """
