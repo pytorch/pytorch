@@ -13,6 +13,7 @@
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -309,37 +310,35 @@ std::string getMPSShapeString(MPSShape* shape) {
 }
 
 std::string getArrayRefString(const IntArrayRef s) {
-  std::stringstream ss;
-  std::copy(s.begin(), s.end(), std::ostream_iterator<int>(ss, ","));
-  return ss.str();
+  return fmt::to_string(fmt::join(s, ","));
 }
 
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
-  std::string str;
-  // The key format per tensor would look like ":Float32[1,1,1,10]:"
+  fmt::basic_memory_buffer<char, 100> buffer;
+  auto buf_iterator = std::back_inserter(buffer);
+
   for (const Tensor& tensor : tensors) {
-    str += ":";
+    fmt::format_to(buf_iterator, ":");
     if (tensor.defined()) {
-      str += getMPSTypeString(tensor.scalar_type(), short_dtype) + "[";
-      // if tensor is a scalar
+      fmt::format_to(buf_iterator, "{}[", getMPSTypeString(tensor.scalar_type(), short_dtype));
       if (tensor.dim() == 0) {
-        str += "Scalar";
+        fmt::format_to(buf_iterator, "Scalar");
       } else {
         if (exclude_shape) {
-          str += "-1";
+          fmt::format_to(buf_iterator, "-1");
         } else {
-          str +=
-              std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
+          fmt::format_to(buf_iterator, getArrayRefString(tensor.sizes()));
         }
       }
-      str += "]";
-      if (tensor.is_conj())
-        str += "_conj";
+      fmt::format_to(buf_iterator, "]");
+      if (tensor.is_conj()) {
+        fmt::format_to(buf_iterator, "_conj");
+      }
     } else {
-      str += "Undefined";
+      fmt::format_to(buf_iterator, "Undefined");
     }
   }
-  return str;
+  return fmt::to_string(buffer);
 }
 
 Tensor getTensorView(const Tensor& t, MPSShape* shape) {
