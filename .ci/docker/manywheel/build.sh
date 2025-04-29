@@ -59,6 +59,13 @@ case ${image} in
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
         MANY_LINUX_VERSION="2_28"
         ;;
+    manylinuxaarch64-builder:cuda*)
+        TARGET=cuda_final
+        GPU_IMAGE=amd64/almalinux:8
+        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
+        MANY_LINUX_VERSION="aarch64"
+        DOCKERFILE_SUFFIX="_cuda_aarch64"
+        ;;
     manylinux2_28-builder:rocm*)
         TARGET=rocm_final
         MANY_LINUX_VERSION="2_28"
