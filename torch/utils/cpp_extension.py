@@ -431,7 +431,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
-        logger.warning(WRONG_COMPILER_WARNING % (compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0]))
+        logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0])
         return (False, TorchVersion('0.0.0'))
 
     if IS_MACOS:
@@ -460,7 +460,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
         return (True, TorchVersion('.'.join(numeric_version)))
 
     compiler = f'{compiler} {".".join(numeric_version)}'
-    logger.warning(ABI_INCOMPATIBILITY_WARNING % compiler)
+    logger.warning(ABI_INCOMPATIBILITY_WARNING, compiler)
 
     return (False, TorchVersion('.'.join(numeric_version)))
 
@@ -489,7 +489,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
         if getattr(cuda_ver, "major", None) is None:
             raise ValueError("setuptools>=49.4.0 is required")
         if cuda_ver.major != torch_cuda_version.major:
-            raise RuntimeError(CUDA_MISMATCH_MESSAGE % (cuda_str_version, torch.version.cuda))
+            raise RuntimeError(CUDA_MISMATCH_MESSAGE, cuda_str_version, torch.version.cuda)
         logger.warning(CUDA_MISMATCH_WARN, cuda_str_version, torch.version.cuda)
 
     if not (sys.platform.startswith('linux') and
