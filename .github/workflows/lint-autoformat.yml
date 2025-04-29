@@ -14,16 +14,15 @@ jobs:
     runs-on: lf.linux.2xlarge
     if: ${{ github.repository_owner == 'pytorch' && github.event.pull_request.user.login != 'ezyang' && github.event.pull_request.user.login != 'malfet' && !startsWith(github.head_ref, 'export-') }}
     steps:
-      - name: Install python
-        shell: bash
-        run: |
-          sudo dnf install -y python3.12
-
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: true
           fetch-depth: 0
+      - name: Install python
+        shell: bash
+        run: |
+          sudo dnf install -y python3.12
       - name: Run lintrunner (nonretryable)
         continue-on-error: true
         # we can't run all files here because only changes around where the diff are shown in the PR UI
