@@ -277,8 +277,6 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
   m.def("nvshmem_broadcast(Tensor(a!) input, str group_name) -> Tensor(a!)");
   m.def(
-      "nvshmem_reduce_scatter_out(Tensor input, str group_name, Tensor(a!) out) -> Tensor(a!)");
-  m.def(
       "nvshmem_sendrecv(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
 }
 
