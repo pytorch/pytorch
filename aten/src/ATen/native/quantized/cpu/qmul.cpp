@@ -81,7 +81,7 @@ Tensor _mul_out_xnnpack(
     const Tensor& other,
     double output_scale,
     int64_t output_zero_point) {
-  const string func_name = "xnnp_mul()";
+  const std::string_view func_name = "xnnp_mul()";
   TORCH_CHECK(self.ndimension() > 0, func_name, ": Got empty input tensor.");
   TORCH_CHECK(
       at::native::xnnpack::available(), func_name, ": XNNPACK is not available")
