@@ -216,7 +216,7 @@ using qnormalize_nhwc_fn = void (*)(
 using qprelu_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
                            const Tensor& /*qw*/);
 
-using qmul_tensor_cpu_fn = void (*)(
+using qbinary_eltwise_cpu_fn = void (*)(
     Tensor& /*out*/,
     const Tensor& /*qx*/,
     double /*qx_scale*/,
@@ -263,6 +263,8 @@ DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub)
 DECLARE_DISPATCH(qmean_inner_dim_fn, qmean_inner_dim_stub)
 DECLARE_DISPATCH(qstd_inner_dim_fn, qstd_inner_dim_stub)
 DECLARE_DISPATCH(qprelu_fn, qprelu_stub)
-DECLARE_DISPATCH(qmul_tensor_cpu_fn, qmul_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qmul_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_tensor_cpu_stub)
+DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_relu_tensor_cpu_stub)
 
 } // namespace at::native
