@@ -212,7 +212,7 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_input_indices
+    return context.fw_metadata.static_input_indices
 
 
 def record_original_output_strides(gm: GraphModule) -> None:
@@ -1745,7 +1745,6 @@ def fw_compiler_freezing(
     )
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
-    num_fixed = len(preserved_arg_indices) - num_example_inputs
 
     fake_mode = detect_fake_mode(aot_example_inputs)
 
@@ -1756,7 +1755,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = list(range(num_fixed))
+    static_input_idxs = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -1788,7 +1787,7 @@ def fw_compiler_freezing(
                 tracing_context.params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_input_indices
+            static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
