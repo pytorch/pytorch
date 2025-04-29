@@ -260,15 +260,18 @@ def register_comm_lowerings():
         )
         return inputs
 
+    def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
+        node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
+        assert isinstance(node, ir.IRNode)
+        return ir.TensorBox.create(node)
+
     @register_comm_lowering(c10d.all_gather_into_tensor)
     def _all_gather_into_tensor(inp, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                c10d.all_gather_into_tensor.default,
-                inp,
-                group_size,
-                group_name,
-            )
+        return _create_out_of_place(
+            c10d.all_gather_into_tensor.default,
+            inp,
+            group_size,
+            group_name,
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_coalesced)
@@ -296,14 +299,12 @@ def register_comm_lowerings():
 
     @register_comm_lowering(c10d.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                c10d.reduce_scatter_tensor.default,
-                inp,
-                reduce_op,
-                group_size,
-                group_name,
-            )
+        return _create_out_of_place(
+            c10d.reduce_scatter_tensor.default,
+            inp,
+            reduce_op,
+            group_size,
+            group_name,
         )
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
@@ -321,14 +322,12 @@ def register_comm_lowerings():
 
     @register_comm_lowering(c10d.all_to_all_single)
     def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                c10d.all_to_all_single.default,
-                inp,
-                output_split_sizes,
-                input_split_sizes,
-                group_name,
-            )
+        return _create_out_of_place(
+            c10d.all_to_all_single.default,
+            inp,
+            output_split_sizes,
+            input_split_sizes,
+            group_name,
         )
 
     @register_comm_lowering(c10d.broadcast)
@@ -348,14 +347,12 @@ def register_comm_lowerings():
 
     @register_comm_lowering(torch.ops._dtensor.shard_dim_alltoall)
     def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                torch.ops._dtensor.shard_dim_alltoall.default,
-                inp,
-                gather_dim,
-                shard_dim,
-                group_name,
-            )
+        return _create_out_of_place(
+            torch.ops._dtensor.shard_dim_alltoall.default,
+            inp,
+            gather_dim,
+            shard_dim,
+            group_name,
         )
 
     @register_comm_lowering(c10d.wait_tensor)
