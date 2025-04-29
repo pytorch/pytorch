@@ -12132,7 +12132,6 @@ class TestCOWInputs(TestCase):
             except NotImplementedError:
                 raise unittest.SkipTest("Op not implemented") from None
 
-
             # Check that COW inputs remain COW after the forward op is executed
             for idx, arg in enumerate(args):
                 check_cow_input(args_copy[idx], args_raw[idx], idx)
