@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
+    from .wrapper_fxir import FxConverter
 
 
 log = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ pexpr = PythonPrinter().doprint
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
+FxConversionFunc = Callable[["WrapperLine"], None]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -348,7 +350,8 @@ class MemoryPlanningState:
 
 
 class WrapperLine:
-    pass
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        raise NotImplementedError("FX codegen not yet supported for type {type(self)}")
 
 
 @dataclasses.dataclass
@@ -363,6 +366,9 @@ class EnterSubgraphLine(WrapperLine):
         self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_enter_subgraph
+
 
 @dataclasses.dataclass
 class CommentLine(WrapperLine):
@@ -370,6 +376,10 @@ class CommentLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         code.writeline(self.line)
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_comment
 
 
 @dataclasses.dataclass
@@ -382,6 +392,9 @@ class ExitSubgraphLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.pop_codegened_graph()
         code.do_unindent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_exit_subgraph
 
 
 @dataclasses.dataclass
@@ -418,11 +431,17 @@ class EnterDeviceContextManagerLine(WrapperLine):
             code.do_indent()
             code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_enter_device_context_manager
+
 
 class ExitDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if not V.graph.cpp_wrapper:
             code.do_unindent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_exit_device_context_manager
 
 
 @dataclasses.dataclass
@@ -434,6 +453,9 @@ class ExternKernelAllocLine(WrapperLine):
         node = self.node
         args = [*node.codegen_args(), *node.codegen_kwargs()]
         self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_extern_kernel_alloc
 
 
 @dataclasses.dataclass
@@ -462,6 +484,9 @@ class ExternKernelOutLine(WrapperLine):
             device,
         )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_extern_kernel_out
+
 
 @dataclasses.dataclass
 class FreeLine(WrapperLine):
@@ -471,6 +496,9 @@ class FreeLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         code.writeline(self.wrapper.make_buffer_free(self.node))
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_free
 
 
 @dataclasses.dataclass
@@ -501,6 +529,9 @@ class KernelCallLine(WrapperLine):
             original_fxnode_name=self.original_fxnode_name,
         )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_kernel_call
+
 
 @dataclasses.dataclass
 class KernelDefinitionLine(WrapperLine):
@@ -519,6 +550,9 @@ class KernelDefinitionLine(WrapperLine):
             gpu=self.gpu,
             cpp_definition=self.cpp_definition,
         )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_kernel_definition
 
 
 @dataclasses.dataclass
@@ -576,6 +610,9 @@ class AllocateLine(MemoryPlanningLine):
         line = self.wrapper.make_buffer_allocation(self.node)
         code.writeline(line)
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_allocate
+
 
 @dataclasses.dataclass
 class FreeIfNotReusedLine(MemoryPlanningLine):
@@ -599,6 +636,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         if not self.is_reused:
             code.writeline(self.wrapper.make_buffer_free(self.node))
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_free_if_not_reused
+
 
 @dataclasses.dataclass
 class ReinterpretLine(MemoryPlanningLine):
@@ -615,6 +655,9 @@ class ReinterpretLine(MemoryPlanningLine):
         self.wrapper.codegen_deferred_allocation(
             self.reused_as.get_name(), self.layout.view
         )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_reinterpret
 
 
 @dataclasses.dataclass
@@ -637,9 +680,13 @@ class ReuseLine(MemoryPlanningLine):
             self.wrapper.make_buffer_reuse(self.node, self.reused_as, self.delete_old)
         )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_reuse
+
 
 class NullLine(MemoryPlanningLine):
-    pass
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_null
 
 
 @dataclasses.dataclass
@@ -713,12 +760,18 @@ class CommBufferAllocateLine(CommBufferLine):
                 f"Unsupported comm buffer type: {comm_buffer_type}"
             )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_comm_buffer_allocate
+
 
 @dataclasses.dataclass
 class CommBufferFreeLine(CommBufferLine):
     def codegen(self, code: IndentedBuffer) -> None:
         line = self.wrapper.make_buffer_free(self.node)
         code.writeline(f"{line} # {self.comm_buffer_type.value} buffer free")
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_comm_buffer_free
 
 
 @dataclasses.dataclass
@@ -755,6 +808,9 @@ class MultiOutputLine(WrapperLine):
         code.writeline(
             f"{self.wrapper.declare}{self.result_name} = {value}{self.wrapper.ending}"
         )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_multi_output
 
 
 BufferName = str

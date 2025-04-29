@@ -32,7 +32,6 @@ from .wrapper import (
     BufferLike,
     CommBufferAllocateLine,
     CommBufferFreeLine,
-    CommBufferLine,
     CommentLine,
     EnterDeviceContextManagerLine,
     EnterSubgraphLine,
@@ -50,6 +49,7 @@ from .wrapper import (
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
+    WrapperLine,
 )
 
 
@@ -290,37 +290,19 @@ class FxConverter:
         Main entrypoint for FX codegen.
         """
         self._generate_graph_inputs()
-        for line in self.lines:
-            line_type = type(line)
-            conversion_func = {
-                AllocateLine: self._generate_allocate,
-                CommentLine: self._generate_comment,
-                EnterDeviceContextManagerLine: self._generate_enter_device_context_manager,
-                ExitDeviceContextManagerLine: self._generate_exit_device_context_manager,
-                EnterSubgraphLine: self._generate_enter_subgraph,
-                ExternKernelAllocLine: self._generate_extern_kernel_alloc,
-                ExternKernelOutLine: self._generate_extern_kernel_out,
-                ExitSubgraphLine: self._generate_exit_subgraph,
-                FreeLine: self._generate_free,
-                FreeIfNotReusedLine: self._generate_free_if_not_reused,
-                LineContext: self._generate_line_context,
-                ReinterpretLine: self._generate_reinterpret,
-                ReuseLine: self._generate_reuse,
-                MultiOutputLine: self._generate_multi_output,
-                NullLine: self._generate_null,
-                CommBufferLine: self._generate_comm_buffer,
-                CommBufferAllocateLine: self._generate_comm_buffer_allocate,
-                CommBufferFreeLine: self._generate_comm_buffer_free,
-                KernelDefinitionLine: self._generate_kernel_definition,
-                KernelCallLine: self._generate_kernel_call,
-            }.get(line_type)
 
-            # FX conversion only supports Wrapper IR, not Python/C++ lines.
-            if conversion_func is None:
+        # Generate FX IR from Wrapper IR lines.
+        for line in self.lines:
+            if isinstance(line, WrapperLine):
+                line.codegen_fx(self)(line)
+            elif isinstance(line, LineContext):
+                # Ignore line context in FX IR.
+                pass
+            else:
                 raise NotImplementedError(
                     textwrap.dedent(
                         f"""
-                    Found line of unrecognized type '{line_type}':
+                    Found line of unrecognized type '{type(line)}':
                         '{line}'
 
                     FX conversion only supports Wrapper IR lines.
@@ -328,13 +310,11 @@ class FxConverter:
                     )
                 )
 
-            conversion_func(line)
-
         self._generate_output()
         self.gm.recompile()
         return self.gm
 
-    def _generate_allocate(self, line: Line) -> None:
+    def _generate_allocate(self, line: WrapperLine) -> None:
         assert isinstance(line, AllocateLine)
         buffer = line.node
         name = buffer.get_name()
@@ -355,27 +335,27 @@ class FxConverter:
         self._create_meta_from_buffer(node, buffer)
         self._record_allocation(buffer, node)
 
-    def _generate_comment(self, line: Line) -> None:
+    def _generate_comment(self, line: WrapperLine) -> None:
         assert isinstance(line, CommentLine)
         # We ignore comments in FX IR.
 
-    def _generate_enter_device_context_manager(self, line: Line) -> None:
+    def _generate_enter_device_context_manager(self, line: WrapperLine) -> None:
         assert isinstance(line, EnterDeviceContextManagerLine)
         # We ignore the device context in FX IR.
 
-    def _generate_exit_device_context_manager(self, line: Line) -> None:
+    def _generate_exit_device_context_manager(self, line: WrapperLine) -> None:
         assert isinstance(line, ExitDeviceContextManagerLine)
         # We ignore the device context in FX IR.
 
-    def _generate_enter_subgraph(self, line: Line) -> None:
+    def _generate_enter_subgraph(self, line: WrapperLine) -> None:
         assert isinstance(line, EnterSubgraphLine)
         raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
 
-    def _generate_exit_subgraph(self, line: Line) -> None:
+    def _generate_exit_subgraph(self, line: WrapperLine) -> None:
         assert isinstance(line, ExitSubgraphLine)
         raise NotImplementedError("Subgraphs are not yet supported by FX conversion")
 
-    def _generate_free(self, line: Line) -> None:
+    def _generate_free(self, line: WrapperLine) -> None:
         assert isinstance(line, FreeLine)
 
         buf = line.node
@@ -386,18 +366,18 @@ class FxConverter:
 
         self._free(buf)
 
-    def _generate_free_if_not_reused(self, line: Line) -> None:
+    def _generate_free_if_not_reused(self, line: WrapperLine) -> None:
         assert isinstance(line, FreeIfNotReusedLine)
         buf = line.node
         assert buf.get_name() not in V.graph.removed_buffers
         if not line.is_reused:
             self._free(buf)
 
-    def _generate_line_context(self, line: Line) -> None:
+    def _generate_line_context(self, line: WrapperLine) -> None:
         assert isinstance(line, LineContext)
         # We ignore line context in FX IR.
 
-    def _generate_reinterpret(self, line: Line) -> None:
+    def _generate_reinterpret(self, line: WrapperLine) -> None:
         assert isinstance(line, ReinterpretLine)
         self._generate_reinterpret_helper(line.node, line.reused_as, line.layout)
 
@@ -426,7 +406,7 @@ class FxConverter:
         )
         self._record_allocation(result_buffer, result_node)
 
-    def _generate_reuse(self, line: Line) -> None:
+    def _generate_reuse(self, line: WrapperLine) -> None:
         assert isinstance(line, ReuseLine)
         old = line.node
         new = line.reused_as
@@ -460,7 +440,7 @@ class FxConverter:
         ):
             self._free(old)
 
-    def _generate_multi_output(self, line: Line) -> None:
+    def _generate_multi_output(self, line: WrapperLine) -> None:
         assert isinstance(line, MultiOutputLine)
 
         # Extract the index for tuple access.
@@ -474,23 +454,19 @@ class FxConverter:
         node.name = line.result_name
         self.buffer_to_node[line.result_name] = node
 
-    def _generate_null(self, line: Line) -> None:
+    def _generate_null(self, line: WrapperLine) -> None:
         assert isinstance(line, NullLine)
         # Does nothing.
 
-    def _generate_comm_buffer(self, line: Line) -> None:
-        assert isinstance(line, CommBufferLine)
-        # Does nothing. Comm buffers are handled by the respective allocate/free lines.
-
-    def _generate_comm_buffer_allocate(self, line: Line) -> None:
+    def _generate_comm_buffer_allocate(self, line: WrapperLine) -> None:
         assert isinstance(line, CommBufferAllocateLine)
         raise NotImplementedError("Comm buffer allocation is not yet supported")
 
-    def _generate_comm_buffer_free(self, line: Line) -> None:
+    def _generate_comm_buffer_free(self, line: WrapperLine) -> None:
         assert isinstance(line, CommBufferFreeLine)
         self._free(line.node)
 
-    def _generate_triton_call(self, line: Line) -> None:
+    def _generate_triton_call(self, line: WrapperLine) -> None:
         assert isinstance(line, KernelCallLine)
 
         # Collect all kwargs, including autotuned block sizes.
@@ -524,14 +500,14 @@ class FxConverter:
             },
         )
 
-    def _generate_extern_kernel_alloc(self, line: Line) -> None:
+    def _generate_extern_kernel_alloc(self, line: WrapperLine) -> None:
         assert isinstance(line, ExternKernelAllocLine)
         node = line.node
         self._generate_extern_kernel_common(node, node)
 
     def _generate_extern_kernel_out(
         self,
-        line: Line,
+        line: WrapperLine,
     ) -> None:
         assert isinstance(line, ExternKernelOutLine)
         node = line.node
@@ -587,14 +563,14 @@ class FxConverter:
             # Run the operation to propagate metadata.
             fx_node.meta["val"] = op(*arg_tensors, **kwargs)
 
-    def _generate_kernel_call(self, line: Line) -> None:
+    def _generate_kernel_call(self, line: WrapperLine) -> None:
         assert isinstance(line, KernelCallLine)
         if not line.triton:
             raise NotImplementedError("FX conversion only supports Triton kernels.")
 
         self._generate_triton_call(line)
 
-    def _generate_kernel_definition(self, line: Line) -> None:
+    def _generate_kernel_definition(self, line: WrapperLine) -> None:
         assert isinstance(line, KernelDefinitionLine)
 
         # Generate code for the kernel.
