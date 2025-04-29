@@ -32,6 +32,7 @@ jobs:
           set -ex
           python3.12 -m venv /tmp/venv
           source /tmp/venv/bin/activate
+          pip install setuptools==68.2.2
           export ADDITIONAL_LINTRUNNER_ARGS="format"
           bash .github/scripts/lintrunner.sh
       - name: Check for changes
