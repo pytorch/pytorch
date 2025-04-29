@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint_sequential
+from torch.utils.cpp_extension import ROCM_HOME
 from torch.utils.viz._cycles import observe_tensor_cycles
 
 
@@ -4375,6 +4376,7 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
+    @unittest.skipIf(TEST_WITH_ROCM and not ROCM_HOME, "ROCm requires hipcc compiler")
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
