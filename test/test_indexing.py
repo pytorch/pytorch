@@ -875,7 +875,7 @@ class TestIndexing(TestCase):
         v[0, 1::2] = torch.tensor([3.0, 4.0], device=device)
         self.assertEqual(v[0].tolist(), [0, 3, 0, 4])
         self.assertEqual(v[1:].sum(), 0)
-        
+
     def test_bool_indices(self, device):
         v = torch.randn(5, 7, 3, device=device)
         boolIndices = torch.tensor(
