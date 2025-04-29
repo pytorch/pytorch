@@ -64,7 +64,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         assert self._frame_state is not None
 
         def guard_filter_fn(guards):
-            ret = [g.guard_type == guard_type for g in guards]
+            ret = [
+                g.guard_type == guard_type or guard_type in g.derived_guard_types
+                for g in guards
+            ]
             self.assertTrue(any(ret))
             return ret
 
