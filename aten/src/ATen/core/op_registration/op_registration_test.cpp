@@ -2139,6 +2139,19 @@ TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_mixedCall
   EXPECT_TRUE(called_kernel_cpu);
 }
 
+TEST(OperatorRegistrationTest, unsafeSetTags) {
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> ()");
+  m.impl("fn", c10::DispatchKey::CPU, cpu_kernel);
+
+  Dispatcher::singleton().unsafeSetTags({at::Tag::core}, "test::fn", "");
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  auto res = op->getTags();
+
+  ASSERT_EQ(res.size(), 1);
+  ASSERT_EQ(res[0], at::Tag::core);
+}
+
 TEST(OperatorRegistrationTest, getRegistrationsForDispatchKey) {
   // should return every registered op
   auto all_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(std::nullopt);

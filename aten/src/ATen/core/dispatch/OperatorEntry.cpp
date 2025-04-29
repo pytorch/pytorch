@@ -157,6 +157,12 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug,
   #endif
 }
 
+void OperatorEntry::unsafeSetTags(const std::vector<at::Tag>& tags) {
+  #ifndef C10_MOBILE
+    tags_ = std::move(tags);
+  #endif
+}
+
 void OperatorEntry::deregisterSchema() {
   TORCH_INTERNAL_ASSERT(schema_.has_value());
   schema_ = std::nullopt;

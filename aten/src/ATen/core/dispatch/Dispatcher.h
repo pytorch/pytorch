@@ -159,6 +159,17 @@ class TORCH_API Dispatcher final {
    */
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
+  // set tag for operator, this func is not lock protected
+  void unsafeSetTags(
+      const std::vector<at::Tag>& tags,
+      const char* name,
+      const char* overload_name);
+
+  // get tags for operator, this func is not lock protected
+  const std::vector<at::Tag> getTags(
+      const char* name,
+      const char* overload_name);
+
   // Like findSchema, but also returns OperatorHandle even if there is no schema
   std::optional<OperatorHandle> findOp(const OperatorName& operator_name);
 
