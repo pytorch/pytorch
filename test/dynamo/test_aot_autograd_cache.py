@@ -369,7 +369,9 @@ class AOTAutogradCacheTests(InductorTestCase):
                 "Allow in graph produces an unserializable cache artifact"
             )
 
-        with inductor_config.patch("unsafe_marked_cacheable_functions", [fn_name]):
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", {fn_name: "key1"}
+        ):
             fn(*args)
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
@@ -382,6 +384,36 @@ class AOTAutogradCacheTests(InductorTestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+        self._clear_dynamo_and_codecache()
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", {fn_name: "key2"}
+        ):
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+            self._clear_dynamo_and_codecache()
+
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+        # On second try with same key, it should hit once more
+        with inductor_config.patch(
+            "unsafe_marked_cacheable_functions", {fn_name: "key1"}
+        ):
+            self._clear_dynamo_and_codecache()
+
+            fn(*args)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 3)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
