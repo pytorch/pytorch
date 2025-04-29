@@ -251,10 +251,6 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
-    elif arch == "90":
-        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + arch)
@@ -279,6 +275,23 @@ def gen_ops() -> dict[Any, Any]:
     arch = get_cuda_arch()
     version = get_cuda_version()
     return _gen_ops_cached(arch, version)
+
+
+DTYPE_TO_CUTLASS_TYPE = {
+    torch.float32: "float",
+    torch.float64: "double",
+    torch.float16: "cutlass::half_t",
+    torch.int64: "int64_t",
+    torch.int32: "int32_t",
+    torch.int16: "int16_t",
+    torch.int8: "int8_t",
+    torch.uint64: "uint64_t",
+    torch.uint32: "uint32_t",
+    torch.uint16: "uint16_t",
+    torch.uint8: "uint8_t",
+    torch.bool: "bool",
+    torch.bfloat16: "cutlass::bfloat16_t",
+}
 
 
 def torch_dtype_to_cutlass_type(

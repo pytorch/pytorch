@@ -584,6 +584,9 @@ class TestFxGraphCache(TestCase):
             f(torch.randn(2, 6))
             self.assertEqual(backend.frame_count, 1)
 
+    def test_cache_hot_load_empty(self):
+        self.assertIsNone(torch.compiler.save_cache_artifacts())
+
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})

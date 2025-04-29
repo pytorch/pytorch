@@ -282,11 +282,6 @@ COMMON_HIPCC_FLAGS = [
     '-DHIP_ENABLE_WARP_SYNC_BUILTINS=1'
 ]
 
-_COMMON_SYCL_FLAGS = [
-    '-fsycl',
-    '-fsycl-targets=spir64_gen,spir64',
-]
-
 def _get_sycl_arch_list():
     if 'TORCH_XPU_ARCH_LIST' in os.environ:
         return os.environ.get('TORCH_XPU_ARCH_LIST')
@@ -297,11 +292,19 @@ def _get_sycl_arch_list():
     arch_list = [x for x in arch_list if not x.startswith('dg2')]
     return ','.join(arch_list)
 
+# If arch list returned by _get_sycl_arch_list() is empty, then sycl kernels will be compiled
+# for default spir64 target and avoid device specific compilations entirely. Further, kernels
+# will be JIT compiled at runtime.
+_COMMON_SYCL_FLAGS = [
+    '-fsycl',
+    '-fsycl-targets=spir64_gen,spir64' if _get_sycl_arch_list() != '' else '',
+]
+
 _SYCL_DLINK_FLAGS = [
     *_COMMON_SYCL_FLAGS,
     '-fsycl-link',
     '--offload-compress',
-    f'-Xs "-device {_get_sycl_arch_list()}"',
+    f'-Xs "-device {_get_sycl_arch_list()}"' if _get_sycl_arch_list() != '' else '',
 ]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
