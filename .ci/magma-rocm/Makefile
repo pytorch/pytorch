@@ -12,7 +12,7 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	-w /builder \
 	-e PACKAGE_NAME=${PACKAGE_NAME}${DESIRED_ROCM_SHORT} \
 	-e DESIRED_ROCM=${DESIRED_ROCM} \
-	"rocm/dev-almalinux-8:${DESIRED_ROCM}-complete" \
+	"pytorch/almalinux-builder:rocm${DESIRED_ROCM}" \
 	magma-rocm/build_magma.sh
 
 .PHONY: all
