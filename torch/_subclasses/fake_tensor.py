@@ -1429,7 +1429,9 @@ class FakeTensorMode(TorchDispatchMode):
                 cache = FakeTensorMode.cache
             entry = cache.get(key, None)
             if entry is not None:
-                output = self._output_from_cache_entry(state, entry, key, func, args)
+                output = self._output_from_cache_entry(
+                    state, entry, key, func, args, True
+                )
                 FakeTensorMode.cache_hits += 1
                 if self.cache_crosscheck_enabled:
                     # For debugging / testing: Validate that the output synthesized
@@ -1589,10 +1591,6 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if is_sparse_any(arg):
                     raise _BypassDispatchCache(f"{arg.layout} tensor")
-                # FIXME: For now back out caching when there are symbolic nbytes
-                # - this doesn't seem to play nice with set(). See T196779132 for examples.
-                if isinstance(arg.untyped_storage().nbytes(), SymInt):
-                    raise _BypassDispatchCache("symbolic nbytes")
                 metadata = extract_tensor_metadata(arg)
                 metadata._flatten_into(result, self, state)
             elif isinstance(arg, Tensor):
@@ -1722,7 +1720,7 @@ class FakeTensorMode(TorchDispatchMode):
             output_infos=(entry,), is_output_tuple=False
         )
         synth_output = self._output_from_cache_entry(
-            state, entry_for_synth_output, key, func, args
+            state, entry_for_synth_output, key, func, args, False
         )
 
         # Make sure the dispatch_key_set from the synthesized output tensor will
@@ -1813,6 +1811,7 @@ class FakeTensorMode(TorchDispatchMode):
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
+        suppress_guards: bool,
     ) -> Optional[FakeTensor]:
         if (
             entry.inplace_idx is None
@@ -1851,7 +1850,7 @@ class FakeTensorMode(TorchDispatchMode):
             check_value(metadata.storage_bytes, state)
 
         maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
-        if self.shape_env is not None:
+        if suppress_guards and self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 
         with in_kernel_invocation_manager(self), maybe_suppress():
@@ -1886,6 +1885,7 @@ class FakeTensorMode(TorchDispatchMode):
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
+        suppress_guards: bool,
     ) -> Union[Optional[FakeTensor], tuple[Optional[FakeTensor], ...]]:
         """
         Create a new FakeTensor from the cache entry.
@@ -1894,18 +1894,14 @@ class FakeTensorMode(TorchDispatchMode):
         if entry.is_output_tuple:
             outputs = [
                 self._get_output_tensor_from_cache_entry(
-                    state,
-                    output_info,
-                    key,
-                    func,
-                    args,
+                    state, output_info, key, func, args, suppress_guards
                 )
                 for output_info in entry.output_infos
             ]
             return tuple(outputs)
         else:
             return self._get_output_tensor_from_cache_entry(
-                state, entry.output_infos[0], key, func, args
+                state, entry.output_infos[0], key, func, args, suppress_guards
             )
 
     def _crosscheck_cache_output(

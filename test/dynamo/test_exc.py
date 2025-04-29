@@ -312,7 +312,7 @@ Failed Source Expressions:
 translation validation failed when evaluating: Eq(s3 + s52 + s86, s77)
 
 Failure occurred while running node:
-    %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
+    %split : [num_users=0] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
   ==> L['shape'][0]: 1
