@@ -29,6 +29,9 @@ struct TensorIteratorBase;
 
 namespace at::native::mps {
 
+// Forward declaration of MPSScalar - for exec_binary_alpha_kernel()
+struct MPSScalar;
+
 namespace detail {
 template <typename T>
 class has_size_type {
@@ -138,6 +141,10 @@ class MetalShaderLibrary {
       const std::string& name,
       std::optional<int64_t> extra = std::nullopt);
   void exec_binary_kernel(TensorIteratorBase& iter, const std::string& name);
+  void exec_binary_alpha_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const MPSScalar& alpha);
 
  protected:
   virtual MTLLibrary_t getLibrary();
