@@ -2400,8 +2400,7 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     if not _arch_list:
         logger.warning(
             "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. "
-            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to 'native' "
-            "to only use the current GPU's architecture, or to specific architectures."
+            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures."
         )
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
