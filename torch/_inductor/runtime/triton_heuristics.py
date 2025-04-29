@@ -1743,7 +1743,7 @@ def cached_autotune(
                 regex_filter=inductor_meta["profile_bandwidth_regex"],
                 with_profiler=inductor_meta[
                     "profile_bandwidth_with_do_bench_using_profiling"
-                ],
+                ] or autograd_profiler._is_profiler_enabled,
                 configs=configs,
                 save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,
