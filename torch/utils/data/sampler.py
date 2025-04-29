@@ -3,9 +3,6 @@ import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import Generic, Optional, TypeVar, Union
 
-import numpy as np
-from numpy.typing import NDArray
-
 import torch
 
 
@@ -170,12 +167,7 @@ class RandomSampler(Sampler[int]):
 
     def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
-        if self.generator is None:
-            seed = int(torch.empty((), dtype=torch.int64).random_().item())
-            generator = torch.Generator()
-            generator.manual_seed(seed)
-        else:
-            generator = self.generator
+        generator = self.init_generator()
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
@@ -195,9 +187,17 @@ class RandomSampler(Sampler[int]):
                 : self.num_samples % n
             ]
 
+    def init_generator(self):
+        if self.generator is None:
+            seed = int(torch.empty((), dtype=torch.int64).random_().item())
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        else:
+            generator = self.generator
+        return generator
+
     def __len__(self) -> int:
         return self.num_samples
-
 
 class SubsetRandomSampler(Sampler[int]):
     r"""Samples elements randomly from a given list of indices, without replacement.
@@ -214,7 +214,7 @@ class SubsetRandomSampler(Sampler[int]):
         self.generator = generator
 
     def __iter__(self) -> Iterator[int]:
-        for i in torch.randperm(len(self.indices), generator=self.generator):
+        for i in torch.randperm(len(self.indices), generator=self.generator).tolist():
             yield self.indices[i]
 
     def __len__(self) -> int:
@@ -351,44 +351,36 @@ class BatchSampler(Sampler[list[int]]):
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
 
-
-class RandomBatchSampler(Sampler[list[int]]):
+class RandomBatchSampler(RandomSampler, BatchSampler):
     def __init__(
         self,
         data_source: Sized,
         replacement: bool = False,
-        generator: Optional[np.random.Generator] = None,
         batch_size: int = 32,
         drop_last: bool = False,
+        generator=None,
     ) -> None:
-        super().__init__()
-        self.data_source = data_source
-        self.replacement = replacement
-        self.generator = generator
-        self.batch_size = batch_size
-        self.drop_last = drop_last and len(data_source) % self.batch_size > 0
+        RandomSampler.__init__(self, data_source, replacement, None, generator)
+        BatchSampler.__init__(self, [], batch_size, drop_last)
 
-        if not isinstance(self.replacement, bool):
-            raise TypeError(
-                f"replacement should be a boolean value, but got replacement={self.replacement}"
-            )
+        self.n_batches = len(self.data_source) // self.batch_size
+        last_size = len(self.data_source) % self.batch_size
+        if not self.drop_last and last_size > 0:
+            self.n_batches += 1
 
-        self.n_batches = len(data_source) // batch_size
 
-    def sample_indices(self) -> NDArray[np.int_]:
-        generator = (
-            self.generator if self.generator is not None else np.random.default_rng()
-        )
+    def sample_indices(self) -> torch.Tensor:
+        n = len(self.data_source)
+        generator = self.init_generator()
 
         if self.replacement:
-            indices = generator.integers(0, len(self.data_source), len(self.data_source))
+            indices = torch.randint(high=n, size=(n,), dtype=torch.int64, generator=generator)
         else:
-            indices = np.arange(len(self.data_source))
-            generator.shuffle(indices)
+            indices = torch.randperm(n, generator=generator)
 
         return indices
 
-    def __iter__(self) -> Iterator[list[int]]:
+    def __iter__(self) -> Iterator[torch.Tensor]:
         indices = self.sample_indices()
         indices_batches = [
             indices[i : i + self.batch_size]
