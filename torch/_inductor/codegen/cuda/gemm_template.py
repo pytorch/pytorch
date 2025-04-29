@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
 
 import torch
+from torch._inductor.scheduler import BaseSchedulerNode
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -966,7 +967,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         kernel: CUDATemplateKernel,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
         template_buffer_node: Optional[CUDATemplateBuffer] = None,
-        epilogue_nodes: Optional[list[IRNode]] = None,
+        epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
         **kwargs,
     ) -> str:
         """
