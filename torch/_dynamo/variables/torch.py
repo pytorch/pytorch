@@ -40,6 +40,7 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
+import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
@@ -213,6 +214,14 @@ def get_overridable_functions():
     }
     funcs.update(more)
     return funcs
+
+
+def is_python_dispatcher_op_overload(op):
+    return (
+        isinstance(op, torch._ops.PythonDispatcherOpOverload)
+        or isinstance(op, torch._ops.OpOverloadPacket)
+        and op._has_pytree_arg_overload
+    )
 
 
 class BaseTorchVariable(VariableTracker):
@@ -1065,11 +1074,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        import torch._higher_order_ops.flat_apply as flat_apply
+
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
         if self.nonstrict_traceable:
-            import torch._higher_order_ops.flat_apply as flat_apply
             from torch._higher_order_ops.flat_apply import (
                 func_to_graphable,
                 is_graphable_type,
@@ -1237,6 +1247,50 @@ If the above doesn't work, please subtmit an issue to GitHub.
             result = special_handler(self, tx, *args, **kwargs)
             if result:
                 return result
+
+        # If the function is custom op, we need to wrap it as flat_apply call in the fx graph.
+        if is_python_dispatcher_op_overload(self.value):
+            if isinstance(self.value, torch._ops.OpOverload):
+                opoverload = self.value
+            else:
+                assert isinstance(self.value, torch._ops.OpOverloadPacket)
+                opoverload = self.value.default
+            packed_input_vt = TupleVariable.build(
+                tx,
+                (
+                    variables.TupleVariable.build(tx, args),
+                    variables.ConstDictVariable.build(tx, kwargs),
+                ),
+            )
+            flat_args_and_spec = variables.UserFunctionVariable(
+                pytree.tree_flatten
+            ).call_function(tx, [packed_input_vt], {})
+
+            assert isinstance(flat_args_and_spec, variables.TupleVariable)
+            flat_args_vt, in_spec_vt = flat_args_and_spec.items
+            assert isinstance(flat_args_vt, variables.ListVariable)
+            in_spec = in_spec_vt.as_python_constant()
+            in_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+                f"{opoverload._namespace}_{opoverload._opname}_input_spec", in_spec
+            )
+
+            proxified_flat_args = [
+                flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vt.items
+            ]
+
+            in_spec_proxy.node.type = type(in_spec)
+            all_args = (opoverload, in_spec_proxy, *proxified_flat_args)
+
+            out_vt = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    flat_apply,
+                    all_args,
+                    {},
+                ),
+            )
+            return out_vt
 
         any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
 

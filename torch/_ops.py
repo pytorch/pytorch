@@ -4,6 +4,7 @@ import contextlib
 import ctypes
 import importlib
 import inspect
+import itertools
 import sys
 import types
 from typing import Any, Callable, final, Optional, TYPE_CHECKING, TypeVar, Union
@@ -46,6 +47,23 @@ def dl_open_guard():
         sys.setdlopenflags(old_flags)
 
 
+class Kernel:
+    """
+    A kernel is a callable that is registered to a particular operator.
+    It is the thing that is called when you call the operator.
+    """
+
+    def __init__(self, func, with_keyset=False):
+        self.func = func
+        self.with_keyset = with_keyset
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def __repr__(self):
+        return f"Kernel(func={self.func})"
+
+
 class OperatorBase:
     """
     Base class for OpOverload (which represents C++ ATen operators) and HigherOrderOperator
@@ -79,7 +97,7 @@ class OperatorBase:
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
         # API.
-        self.py_kernels: dict[DispatchKey, Callable[..., Any]] = {}
+        self.py_kernels: dict[DispatchKey, Kernel] = {}
 
         # This table allows you to override the behavior of a particular
         # operator for a particular TorchDispatchMode.  In practice,
@@ -116,6 +134,7 @@ class OperatorBase:
             TransformType,
             DispatchKey,
         ],
+        with_keyset: bool = False,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         def inner(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             if inspect.isclass(k) and (
@@ -123,7 +142,7 @@ class OperatorBase:
             ):
                 assert k not in self.python_key_table
                 # TODO(voz): Should we replace setting DispatchKey.Python entirely with setting mode keys?
-                self.python_key_table[k] = fn
+                self.python_key_table[k] = Kernel(fn, False)
                 self._dispatch_cache.clear()
                 return fn
 
@@ -141,7 +160,7 @@ class OperatorBase:
                 raise RuntimeError(
                     f"Trying to override a python impl for {k} on operator {self.name()}"
                 )
-            self.py_kernels[k] = fn
+            self.py_kernels[k] = Kernel(fn, with_keyset=with_keyset)
             self._dispatch_cache.clear()
             return fn
 
@@ -301,6 +320,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             TransformType,
             DispatchKey,
         ],
+        with_keyset: bool = False,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         if isinstance(k, DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
@@ -975,6 +995,94 @@ class OpOverload(OperatorBase):
     # TODO: add more methods to expose information about input and output arguments
 
 
+class PythonDispatcherOpOverload(OpOverload):
+    def __repr__(self):
+        return "<PythonDispatcherOpOverload(op='{}.{}', overload='{}')>".format(
+            *self._schema.name.split("::"), self._overloadname
+        )
+
+    def _fallthrough_keys(self) -> list[DispatchKey]:
+        # TODO: we should be calling the fallback for these, but a fallthrough is almost close
+        # enough to the fallback in most cases that we care about.
+        _DEFAULT_FALLTHROUGH_KEYS = [
+            DispatchKey.ADInplaceOrView,
+            DispatchKey.BackendSelect,
+            DispatchKey.PythonTLSSnapshot,
+            DispatchKey.PythonDispatcher,
+        ]
+
+        def _may_use_fallthrough_instead_of_fallback(key: DispatchKey):
+            if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), key):
+                return torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                    self.name(), key
+                )
+
+            return (
+                key not in self.py_kernels
+                or self.py_kernels[key] is torch.library.fallthrough_kernel
+            )
+
+        return [
+            key
+            for key in _DEFAULT_FALLTHROUGH_KEYS
+            if _may_use_fallthrough_instead_of_fallback(key)
+        ]
+
+    def __call__(self, /, *args, **kwargs):
+        return self._dispatch_in_python(args, kwargs, self._fallthrough_keys())
+
+    def redispatch(self, /, keyset, *args, **kwargs):
+        return self._dispatch_in_python(args, kwargs, self._fallthrough_keys())
+
+    def _dispatch_in_python(self, args, kwargs, fallthrough_keys):
+        non_fallthrough_keys = torch._C._dispatch_keyset_full()
+        for key in fallthrough_keys:
+            non_fallthrough_keys = non_fallthrough_keys.remove(key)
+
+        dispatch_key_set = _compute_keyset(args, kwargs, non_fallthrough_keys)
+        dispatch_key = dispatch_key_set.highestPriorityTypeId()
+
+        handler = (
+            self._get_dispatch(dispatch_key)
+            if dispatch_key not in self._dispatch_cache
+            else self._dispatch_cache[dispatch_key]
+        )
+
+        if isinstance(handler, DispatchKey):
+            # fallthrough keys can be registered at runtime via torch.library.impl
+            # so need to add it to fallthrough_keys and re-dispatch.
+            if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                self.name(), dispatch_key
+            ):
+                return self._dispatch_in_python(
+                    args, kwargs, fallthrough_keys + [dispatch_key]
+                )
+
+            raise RuntimeError(
+                f"Custom op {self} received a Pytree input when dispatching {handler}."
+                f" but no python implementation is found."
+                f" Please file an issue on this when you encounter this error."
+            )
+
+        assert isinstance(handler, Callable)  # type: ignore[arg-type]
+        if isinstance(handler, Kernel) and handler.with_keyset:
+            return handler(dispatch_key_set, *args, **kwargs)
+        else:
+            return handler(*args, **kwargs)
+
+
+def _has_pytree_object_arg(schema: torch.FunctionSchema) -> bool:
+    return any(isinstance(arg.type, torch.AnyType) for arg in schema.arguments)
+
+
+def _has_pytree_type_in_args_or_kwargs(args, kwargs) -> bool:
+    return any(
+        not isinstance(x, (list, tuple))
+        and type(x) in torch.utils._pytree.SUPPORTED_NODES
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
 # TorchBindOpOverload are those custom ops which have at least one overload's
 # schema consists of torch.ScriptObject (i.e. custom class) input.
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
@@ -1109,6 +1217,9 @@ class OpOverloadPacket:
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
         )
+        self._has_pytree_arg_overload = any(
+            _has_pytree_object_arg(schema) for schema in self._schemas.values()
+        )
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
@@ -1175,11 +1286,12 @@ class OpOverloadPacket:
 
             op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
-            overload = (
-                OpOverload(self, op_, op_dk_, schema, tags)
-                if not _has_script_object_arg(schema)
-                else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
-            )
+            if _has_pytree_object_arg(schema):
+                overload = PythonDispatcherOpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
+            elif _has_script_object_arg(schema):
+                overload = TorchBindOpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
+            else:
+                overload = OpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
             # cache the overload object
             setattr(self, key, overload)
             self._dir.append(key)
@@ -1203,7 +1315,11 @@ class OpOverloadPacket:
         # Directly calling OverloadPacket goes into C++, which will check
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
-        if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
+        if (
+            self._has_torchbind_op_overload
+            and _must_dispatch_in_python(args, kwargs)
+            or self._has_pytree_arg_overload
+        ):
             return _call_overload_packet_from_python(self, args, kwargs)
         return self._op(*args, **(kwargs or {}))
 
@@ -1222,6 +1338,10 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
 
     if torch_function_called:
         return ret
+
+    if _has_pytree_type_in_args_or_kwargs(args, kwargs):
+        op_overload = getattr(op, op.overloads()[0])
+        return op_overload(*args, **kwargs)
 
     # The following mirrors getOpWithStack.
     # In cpp, we do a schema matching for the arguments, and call ToIValue to
