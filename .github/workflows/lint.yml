@@ -281,6 +281,13 @@ jobs:
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
 
+  link-check:
+    needs: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_link_check.yml@main
+    with:
+      label-type: ${{ needs.get-label-type.outputs.label-type }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
