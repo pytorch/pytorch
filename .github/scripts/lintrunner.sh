@@ -2,7 +2,7 @@
 set -ex
 
 # Use uv to speed up lintrunner init
-python3 -m pip install uv==0.1.45 setuptools==80.0.0
+python3 -m pip install uv==0.1.45 setuptools
 
 CACHE_DIRECTORY="/tmp/.lintbin"
 # Try to recover the cached binaries
