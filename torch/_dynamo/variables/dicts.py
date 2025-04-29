@@ -282,6 +282,13 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
+    def realize(self) -> VariableTracker:
+        # Realize the dictionary by realizing all k/v in the dictionary
+        for k, v in self.items.items():
+            k.vt.realize()
+            v.realize()
+        return self
+
     def reconstruct(self, codegen: "PyCodegen"):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:

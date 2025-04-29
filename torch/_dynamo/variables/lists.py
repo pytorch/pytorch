@@ -191,6 +191,12 @@ class BaseListVariable(VariableTracker):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def realize(self) -> VariableTracker:
+        for item in self.items:
+            item.realize()
+
+        return self
+
 
 class RangeVariable(BaseListVariable):
     def __init__(self, items, **kwargs) -> None:
