@@ -35,7 +35,7 @@ import torch.utils._pytree as pytree
 from .. import config, graph_break_hints, trace_rules, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
@@ -1089,13 +1089,44 @@ class GetAttrVariable(VariableTracker):
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not isinstance(self.obj, variables.NNModuleVariable):
-            raise NotImplementedError
+            unimplemented_v2(
+                gb_type="Unsupported instance variable access",
+                context=f"const_getattr {self} {name}",
+                explanation="Dynamo only supports constant attribute lookups "
+                "on NNModuleVariable instances.",
+                hints=[
+                    f"Ensure that `{self.obj}` is an `NNModuleVariable` instance.",
+                ],
+            )
         step1 = tx.output.get_submodule(self.obj.module_key)
         if self.name not in step1.__dict__:
-            raise NotImplementedError
+            unimplemented_v2(
+                gb_type="Unsupported constant folding",
+                context=f"const_getattr {self} {name}",
+                explanation="Dynamo tried to access the nested attribute "
+                f"`{self.obj}.{self.name}.{name}` during constant folding, "
+                "but could not find the intermediate attribute "
+                f"`{self.name}` directly in the `{self.obj}` instance "
+                f"(key: {self.obj.module_key}).",
+                hints=[
+                    f"Ensure that the attribute `{self.name}` is defined "
+                    f"directly in the `__dict__` of `{self.obj}`.",
+                ],
+            )
         step2 = inspect.getattr_static(step1, self.name)
         if name not in step2.__dict__:
-            raise NotImplementedError
+            unimplemented_v2(
+                gb_type="Unsupported constant folding",
+                context=f"const_getattr {self} {name}",
+                explanation="Dynamo tried to access the nested attribute "
+                f"`{self.obj}.{self.name}.{name}` during constant folding. "
+                f"but could not find the attribute `{name}` directly in the "
+                f"`{self.obj}.{self.name}` instance (type: {type(step2).__name__}). ",
+                hints=[
+                    f"Ensure that the attribute `{name}` is defined "
+                    f"directly in the `__dict__` of `{self.obj}.{self.name}`.",
+                ],
+            )
         return inspect.getattr_static(step2, name)
 
     def reconstruct(self, codegen: "PyCodegen"):
@@ -1294,7 +1325,16 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
-        unimplemented("unsupported method call on typing variablel")
+        unimplemented_v2(
+            gb_type="Unsupported method call on typing variable",
+            context=f"call_method {self} {name}",
+            explanation=f"Dynamo does not support calling the method `{name}` "
+            "on `typing` module objects. Only `__getitem__` is supported.",
+            hints=[
+                "Avoid calling methods other than `__getitem__` in the traced code.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1403,16 +1443,28 @@ class NumpyVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not config.trace_numpy:
-            unimplemented(f"numpy.{self.value}()")
+            unimplemented_v2(
+                gb_type="NumPy tracing disabled",
+                context=f"call_function {self} {args} {kwargs}",
+                explanation="A NumPy function was called, but NumPy tracing is disabled.",
+                hints=[
+                    "Set `torch._dynamo.config.trace_numpy=True` to enable "
+                    "tracing of NumPy functions.",
+                ],
+            )
 
         from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
         func = get_np_to_tnp_map().get(self.value)
         if func is None:
-            unimplemented(
-                f"Can't find numpy function {self.value} in torch._numpy. "
-                " Please file an issue to request support for this function."
+            unimplemented_v2(
+                gb_type="Unsupported NumPy function",
+                context=f"call_function {self} {args} {kwargs}",
+                explanation="Dynamo's NumPy tracing relies on `torch._numpy`, "
+                "which does not currently have an implementation "
+                f"for `numpy.{self.value.__name__}`.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
 
         # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
@@ -1426,18 +1478,33 @@ class NumpyVariable(VariableTracker):
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     )
                 )
-            except NotImplementedError:
-                unimplemented(
-                    f"{self.value.__name__} with non-const args: {args} {kwargs}"
+            except NotImplementedError as exc:
+                unimplemented_v2(
+                    gb_type="Unsupported NumPy usage",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation="Dynamo expects all arguments to be constants, "
+                    f"but encountered a non-constant argument in `numpy.{self.value.__name__}`.",
+                    hints=[
+                        "Ensure arguments to functions are constants.",
+                    ],
+                    from_exc=exc,
                 )
         else:
             if (
                 func.__module__ == "torch._numpy.random"
                 and config.use_numpy_random_stream
             ):
-                msg = f"delegate '{func.__qualname__}' to NumPy itself via "
-                msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
-                unimplemented(msg)
+                unimplemented_v2(
+                    gb_type="Unsupported function call",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation="Dynamo cannot trace `numpy.random` functions "
+                    "when `config.use_numpy_random_stream` is set to `True`, "
+                    f"as this delegates '{func.__qualname__}' to NumPy itself.",
+                    hints=[
+                        "Set `torch._dynamo.config.use_numpy_random_stream=False` "
+                        "to use PyTorch's PRNG instead.",
+                    ],
+                )
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
@@ -1467,7 +1534,19 @@ class NumpyVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented("numpy")
+        unimplemented_v2(
+            gb_type="Unsupported NumPy operation",
+            context=f"call_method {self} {name} {args} {kwargs}",
+            explanation="Dynamo does not currently support tracing method "
+            f"calls on NumPy objects ({self.value}.{name}). Only calling "
+            "NumPy functions directly is supported.",
+            hints=[
+                "Use the equivalent NumPy function if available "
+                "(e.g., `np.add(a, b)` instead of `a.add(b)`).",
+                "Convert NumPy objects to PyTorch tensors before "
+                "calling methods if applicable.",
+            ],
+        )
 
     def as_python_constant(self):
         return self.value
@@ -1492,7 +1571,16 @@ class NullVariable(VariableTracker):
 
     def reconstruct(self, codegen: "PyCodegen"):
         if sys.version_info < (3, 11):
-            unimplemented("cannot reconstruct NullVariable in < Python 3.11")
+            unimplemented_v2(
+                gb_type="Python version incompatibility",
+                context=f"reconstruct {self}",
+                explanation="Dynamo encountered bytecode (`PUSH_NULL`) specific "
+                "to Python 3.11+ but is running in an older Python version.",
+                hints=[
+                    "Run your code with Python 3.11 or newer if you need to "
+                    "trace functions using this bytecode pattern."
+                ],
+            )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
 
@@ -1573,9 +1661,19 @@ class DebuggingVariable(VariableTracker):
             return
 
         if not self.can_reorder_logs(self.value, args, kwargs):
-            unimplemented(
-                f"Reordering debugging function {self.value} "
-                f"with inputs {args} {kwargs} is not yet implemented."
+            unimplemented_v2(
+                gb_type="Unsupported logging/debugging call",
+                context=f"call_function {self} {args} {kwargs}",
+                explanation="Dynamo encountered a call to the logging/debugging "
+                f"function `{self.value.__name__}` with arguments it cannot "
+                "safely reorder during tracing. Only constants, tensors, and "
+                "formatted strings are currently supported as arguments for "
+                "reorderable logging.",
+                hints=[
+                    "Ensure arguments passed to functions listed in "
+                    "`config.reorderable_logging_functions` are constants, "
+                    "tensors, or simple formatted strings.",
+                ],
             )
 
         tx.debug_locals.append((self, list(args)))
@@ -1627,10 +1725,15 @@ class LoggingLoggerVariable(VariableTracker):
         function = getattr(method, "__func__", None)
         if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
             return variables.ConstantVariable.create(None)
-        unimplemented(
-            "Logger not supported for non-export cases. "
-            "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
-            " disable logging by adding logging methods to config.ignore_logger_methods"
+        unimplemented_v2(
+            gb_type="Unsupported logging method",
+            context=f"call_method {self} {name} {args} {kwargs}",
+            explanation="Logger not supported for non-export cases.",
+            hints=[
+                "To avoid graph breaks caused by logger in compile-mode, "
+                "it is recommended to disable logging by adding logging "
+                "methods to config.ignore_logger_methods.",
+            ],
         )
 
 
@@ -1666,8 +1769,18 @@ class ConstantLikeVariable(VariableTracker):
             # we only support constant propagation for methods
             cargs = [x.as_python_constant() for x in args]
             ckwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-        except NotImplementedError:
-            unimplemented(f"{self._error_prefix}.{name}(*{args}, **{kwargs})")
+        except NotImplementedError as exc:
+            unimplemented_v2(
+                gb_type="Unsupported operation on constant-like object",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation="Dynamo expects all arguments to be constants, but "
+                "encountered a non-constant argument in the method call "
+                f"`{self._error_prefix}.{name}`.",
+                hints=[
+                    "Ensure arguments passed to methods of these objects are constants.",
+                ],
+                from_exc=exc,
+            )
 
         result = getattr(self.value, name)(*cargs, **ckwargs)
 
@@ -1676,7 +1789,18 @@ class ConstantLikeVariable(VariableTracker):
         if isinstance(result, re.Match):
             return ConstantRegexMatchVariable(result)
 
-        unimplemented(f"{self._error_prefix}.{name}() -> {result}")
+        unimplemented_v2(
+            gb_type="Unsupported result type from constant-like object",
+            context=f"call_method {self} {name} {args} {kwargs}",
+            explanation="Dynamo encountered a method call on a constant-like "
+            f"object (`{self._error_prefix}.{name}`) that produced a result of "
+            f"type `{type(result).__name__}`. This type is not currently "
+            "supported for tracing.",
+            hints=[
+                "Check the return type of the method call.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = getattr(self.value, name)
@@ -1740,9 +1864,27 @@ class RandomClassVariable(VariableTracker):
 
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
         if len(args) > 1:
-            unimplemented("random.Random() with > 1 arg")
+            unimplemented_v2(
+                gb_type="Unsupported random usage",
+                context=f"call_function {self} {args} {kwargs}",
+                explanation="Dynamo only supports calling `random.Random()` "
+                "with zero or one argument (the seed).",
+                hints=[
+                    "Ensure arguments to `random.Random()` are correct.",
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         elif kwargs:
-            unimplemented("random.Random() with kwargs")
+            unimplemented_v2(
+                gb_type="Unsupported random usage",
+                context=f"call_function {self} {args} {kwargs}",
+                explanation="Dynamo does not support calling `random.Random()` "
+                "with keyword arguments.",
+                hints=[
+                    "Ensure arguments to `random.Random()` are correct.",
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
