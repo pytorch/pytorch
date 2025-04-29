@@ -2298,12 +2298,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             line = textwrap.dedent(
                 f"""
-                out_desc = tl.make_tensor_descriptor(
-                    {var},
-                    shape = [{ROW_DIM}, {COL_DIM}],
-                    strides = [{COL_DIM}, 1],
-                    block_shape = [{ROW_BLOCK_SIZE}, {COL_BLOCK_SIZE}],
-                )
                 tl.store_tensor_descriptor(out_desc, [{ROW_OFFSET}, {COL_OFFSET}], {value})
                 """
             )
