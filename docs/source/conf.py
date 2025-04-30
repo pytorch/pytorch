@@ -183,7 +183,7 @@ community_links = [
 ]
 # For these links to appear in the right nav, there is an override in
 # /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
-language_bindings_links = [
+language_bindings_links = [ 
     {"url": "/cpp_index", "name": "C++"},
     {"url": "https://pytorch.org/javadoc/", "name": "Javadoc"},
     {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"},
