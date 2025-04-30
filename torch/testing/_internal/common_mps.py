@@ -69,7 +69,6 @@ if torch.backends.mps.is_available():
             "isreal",
             "item",
             "kron",
-            "lerp",
             "linalg.diagonal",
             "linalg.svd",
             "mH",
