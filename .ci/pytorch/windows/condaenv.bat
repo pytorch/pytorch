@@ -25,13 +25,11 @@ del python-amd64.exe
 curl --retry 3 -kL "%PYTHON_INSTALLER_URL%" --output python-amd64.exe
 if errorlevel 1 exit /b 1
 
-:: According to https://docs.python.org/3/using/windows.html, setting PrependPath to 1 will prepend
-:: the installed Python to PATH system-wide. Even calling set PATH=%ORIG_PATH% later on won't make
-:: a change. As the builder directory will be removed after the smoke test, all subsequent non-binary
-:: jobs will fail to find any Python executable there
-start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
+
+start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
 if errorlevel 1 exit /b 1
 
+%PYTHON_EXEC% --version
 set "PATH=%CD%\Python\Lib\site-packages\cmake\data\bin;%CD%\Python%PYTHON_VERSION%\Scripts;%CD%\Python;%PATH%"
 if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install numpy==2.2.1 cmake
 if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install numpy==2.1.2 cmake
@@ -44,6 +42,7 @@ if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
 %PYTHON_EXEC% -m pip install mkl mkl-include mkl-static
 %PYTHON_EXEC% -m pip install boto3 ninja typing_extensions setuptools==72.1.0
 
+where cmake.exe
 
 :: Install libuv
 curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o libuv-1.40.0-h8ffe710_0.tar.bz2
