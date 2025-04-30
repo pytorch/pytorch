@@ -149,7 +149,7 @@ static PyObject* THPSize_repr(THPSize* self) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPSize_radd(PyObject* self, PyObject* other) {
+static PyObject* THPSize_add(PyObject* self, PyObject* other) {
   HANDLE_TH_ERRORS
   if (!PyTuple_Check(other)) {
     Py_RETURN_NOTIMPLEMENTED;
@@ -249,8 +249,15 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
 static PyMethodDef THPSize_methods[] = {
     {"numel", THPSize_numel, METH_NOARGS, nullptr},
     {"__reduce__", THPSize_reduce, METH_NOARGS, nullptr},
-    {"__radd__", THPSize_radd, METH_O, nullptr},
     {nullptr}};
+
+// Needed to ensure tuple + Size returns a Size instead of a tuple
+static PyNumberMethods THPSize_as_number = {
+    THPSize_add, // nb_add
+    nullptr, // nb_subtract
+    nullptr, // nb_multiply
+    // ... rest nullptr
+};
 
 PyTypeObject THPSizeType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
@@ -263,7 +270,7 @@ PyTypeObject THPSizeType = {
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
     (reprfunc)THPSize_repr, /* tp_repr */
-    nullptr, /* tp_as_number */
+    &THPSize_as_number, /* tp_as_number */
     &THPSize_as_sequence, /* tp_as_sequence */
     &THPSize_as_mapping, /* tp_as_mapping */
     nullptr, /* tp_hash  */
