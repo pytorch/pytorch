@@ -7011,7 +7011,6 @@ class TestCtxSideEffectfulInit:
         global _test_global_state
 
         _test_global_state = x if _test_global_state is None else _test_global_state + x
-        pass
 
     def __enter__(self):
         return None

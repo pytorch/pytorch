@@ -2172,7 +2172,9 @@ class VariableBuilder:
         self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
         unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
-        self.tx.output.tracers[-1].fx_node_name_to_vt[unspec_var.proxy.node.name] = unspec_var
+        self.tx.output.tracers[-1].fx_node_name_to_vt[unspec_var.proxy.node.name] = (
+            unspec_var
+        )
 
         if not is_constant_source(self.get_source()):
             if self.tx.export and not isinstance(self.get_source(), LocalSource):

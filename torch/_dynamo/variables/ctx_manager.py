@@ -26,10 +26,10 @@ import warnings
 from typing import TYPE_CHECKING, Union
 
 import torch._C
-from torch._guards import Guard
-
 import torch.fx.node
+from torch._guards import Guard
 from torch.utils import _pytree as pytree
+
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import (
     create_call_function,
@@ -208,7 +208,10 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         # subgraph). To know what those VTs are, we maintain a mapping from
         # fx graph node name to the VTs which is updated everytime a new
         # TensorVariable is created.
-        self.hopify = cm_obj.__class__ in torch._dynamo.config._enable_hopify_generic_context_manager
+        self.hopify = (
+            cm_obj.__class__
+            in torch._dynamo.config._enable_hopify_generic_context_manager
+        )
 
     def module_name(self):
         return self.cm_obj.__module__
@@ -237,11 +240,10 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def exit(self, tx: "InstructionTranslator", *args):
         # Avoid a circular import
-        from .higher_order_ops import (
-            _call_function_and_unflatten_output,
-            make_attr,
-        )
         from torch._higher_order_ops.wrap import wrap_generic
+
+        from .higher_order_ops import _call_function_and_unflatten_output, make_attr
+
         source = None if self.source is None else AttrSource(self.source, "__exit__")
 
         if self.hopify:
@@ -249,7 +251,9 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
             graph = tx.output.graph
 
             for node in graph.nodes:
-                if node.op != "placeholder" and self.subtracer.fx_node_name_to_vt.get(node.name):
+                if node.op != "placeholder" and self.subtracer.fx_node_name_to_vt.get(
+                    node.name
+                ):
                     all_intermediates.append(node)
 
             tx.output.create_node(
@@ -290,9 +294,11 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
                     torch.fx.node.Node,
                     lambda node: node.meta.get("example_value", None),
                     all_intermediates,
-                )
+                ),
             )
-            for i, (subgraph_node, new_variable) in enumerate(zip(all_intermediates, output_variables.items)):
+            for i, (subgraph_node, new_variable) in enumerate(
+                zip(all_intermediates, output_variables.items)
+            ):
                 vt = self.subtracer.fx_node_name_to_vt[subgraph_node.name]
                 vt.proxy = new_variable.as_proxy()
                 # Everytime a Tensor's VT is created it will update the mapping

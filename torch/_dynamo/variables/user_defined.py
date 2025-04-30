@@ -558,13 +558,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 def get_val(x):
                     if isinstance(x, variables.ConstantVariable):
                         return x.value
-                    elif isinstance(x, BaseUserFunctionVariable) and "apply_ac_policy" in str(self.value):
+                    elif isinstance(
+                        x, BaseUserFunctionVariable
+                    ) and "apply_ac_policy" in str(self.value):
                         # Allow passing in a function specifically for AC
                         return x.get_function()
                     else:
                         raise RuntimeError(
                             f"Unsupported argument type {type(x)} for context manager {cm_obj.cls_fqn}"
                         )
+
                 cm_obj.arg_values = [get_val(x) for x in args]
                 cm_obj.kwarg_values = {k: get_val(v) for k, v in kwargs.items()}
 
