@@ -116,39 +116,6 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   return input;
 }
 
-
-#define THREADS_PER_BLOCK 512
-
-__global__ void sendrecv(float *send_data, float *recv_data, int num_elems, int mype,
-                                     int npes) {
-    int peer = (mype + 1) % npes;
-    int block_offset = blockIdx.x * blockDim.x;
-    // All threads in a block call the API with the same arguments
-    nvshmemx_float_put_block(recv_data + block_offset, send_data + block_offset,
-                             min(blockDim.x, num_elems - block_offset),
-                             peer);
-}
-
-at::Tensor nvshmem_sendrecv(
-    at::Tensor& input,
-    at::Tensor& out,
-    std::string group_name) {
-  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
-  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
-  int rank = input_hdl->get_rank();
-  int world_size = input_hdl->get_world_size();
-
-  float* input_ptr = (float*)(input_hdl->get_buffer_ptrs()[rank]);
-  float* output_ptr = (float*)(out_hdl->get_buffer_ptrs()[rank]);
-  size_t numel = input.numel();
-
-  assert(numel % THREADS_PER_BLOCK == 0); /* for simplicity */
-  int num_blocks = numel / THREADS_PER_BLOCK;
-
-  sendrecv<<<num_blocks, THREADS_PER_BLOCK>>>(input_ptr, output_ptr, numel, rank, world_size);
-  return out;
-}
-
 at::Tensor nvshmem_all_to_all(
     at::Tensor& input,
     at::Tensor& out,
@@ -321,7 +288,6 @@ at::Tensor nvshmem_all_to_all_vdev(
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
-  m.impl("nvshmem_sendrecv", c10d::nvshmem_extension::nvshmem_sendrecv);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
 }
