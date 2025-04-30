@@ -901,6 +901,21 @@ if HAS_CUDA:
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl(expected_clones=0)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("triton.cudagraph_trees", False)
+        def test_graph_partition_gc(self):
+            def _test_dummy():
+                def foo(x):
+                    return x + 1
+
+                foo = torch.compile(foo)
+                for _ in range(3):
+                    foo(torch.randn(2, 3, device="cuda"))
+
+            _test_dummy()
+            gc.collect()
+            self.assertIsNone(self.get_manager())
+
         def test_sparsity(self):
             def foo(view_6, buf31):
                 return aten._sparse_coo_tensor_with_dims_and_tensors(
@@ -2671,8 +2686,8 @@ if HAS_CUDA:
                 loss.backward()
                 optimizer.step()
 
-            # 2 graph partitions lead to 2 fwd cudagraphs and 2 bwd cudagraphs
-            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+            # 2 graph partitions lead to 2 fwd cudagraphs and 1 bwd cudagraphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
@@ -3072,6 +3087,89 @@ if HAS_CUDA:
             run(shape_x=(3, 4), shape_y=(10, 11))
 
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_cpu_and_gpu(self):
+            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+                x_cuda0 = x_cuda + 1
+                x_cuda1 = x_cuda0 @ weight_cuda
+                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+
+                y_cpu0 = y_cpu + 1
+                y_cpu1 = y_cpu0 @ weight_cpu
+
+                z_cuda0 = z_cuda + 1
+                z_cuda1 = z_cuda0 @ weight_cuda
+                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+
+                return x_cuda2, y_cpu1, z_cuda2
+
+            x_cuda = torch.randn(3, 3, device="cuda")
+            y_cpu = torch.randn(3, 3, device="cpu")
+            z_cuda = torch.randn(3, 3, device="cuda")
+            weight_cuda = torch.randn(3, 3, device="cuda")
+            weight_cpu = torch.randn(3, 3, device="cpu")
+
+            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+            for _ in range(3):
+                compiled_out = compiled_f(
+                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                )
+                self.assertEqual(eager_out, compiled_out)
+
+            # reorder merges ops on cuda into 1 graph partition
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
+            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+                # partition 1 on cuda, no dependency
+                x_cuda0 = x_cuda + 1
+                x_cuda1 = x_cuda0 @ weight_cuda
+                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+
+                # partition 2 on cpu w/ dependency on partition 1
+                y_cpu0 = y_cpu + 1
+                x_cuda2_cpu = x_cuda2.cpu()  # adds dependency on gpu computations
+                y_cpu1 = y_cpu0 @ weight_cpu + x_cuda2_cpu
+
+                # partition 3 on cuda w/o dependency
+                z_cuda0 = z_cuda + 1
+                z_cuda1 = z_cuda0 @ weight_cuda
+                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+
+                # partition 4 on cpu w/o dependency
+                y_cpu2 = y_cpu + 5
+                y_cpu3 = y_cpu2 @ weight_cpu
+
+                # partition 5 on cuda w/o dependency
+                u_cuda0 = z_cuda + 3
+                u_cuda1 = u_cuda0 @ weight_cuda
+                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+
+                return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
+
+            x_cuda = torch.randn(3, 3, device="cuda")
+            y_cpu = torch.randn(3, 3, device="cpu")
+            z_cuda = torch.randn(3, 3, device="cuda")
+            weight_cuda = torch.randn(3, 3, device="cuda")
+            weight_cpu = torch.randn(3, 3, device="cpu")
+
+            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+            for _ in range(3):
+                compiled_out = compiled_f(
+                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                )
+                self.assertEqual(eager_out, compiled_out)
+
+            # the optimal order is
+            # [[partition 4 on cpu], [partition 1,3,5 on cuda], [partition 2 on cpu]]
+            # since partition2 depends on partition1. So we have 1 cudagraph in total.
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
