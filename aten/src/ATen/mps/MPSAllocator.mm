@@ -853,7 +853,18 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     } else if (isSharedBufferCPUPtr(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
     }
+    // CHECK: Do we need to sync here?
+    auto stream = getDefaultMPSStream();
+    dispatch_sync(stream->queue(), ^() {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    });
+
     default_copy_data(dest, src, count);
+
+    // CHECK: Do we need to sync here?
+    dispatch_sync(stream->queue(), ^() {
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    });
   }
 
   void* get_cpu_ptr_from_device_ptr(void* device_ptr) const override {
