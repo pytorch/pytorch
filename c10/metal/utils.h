@@ -154,12 +154,21 @@ inline ::metal::enable_if_t<::metal::is_same_v<U, T>, T> cast_to(const U from) {
 }
 
 template <typename T, typename U>
-inline ::metal::enable_if_t<is_complex_v<T>, T> cast_to(const U from) {
+inline ::metal::enable_if_t<is_complex_v<T> && !is_complex_v<U>, T> cast_to(
+    const U from) {
   return T(float(from), 0.0);
 }
 
 template <typename T, typename U>
-inline ::metal::enable_if_t<!::metal::is_same_v<U, T> && !is_complex_v<T>, T>
+inline ::metal::enable_if_t<!is_complex_v<T> && is_complex_v<U>, T> cast_to(
+    const U from) {
+  return static_cast<T>(from.x);
+}
+
+template <typename T, typename U>
+inline ::metal::enable_if_t<
+    !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>),
+    T>
 cast_to(const U from) {
   return static_cast<T>(from);
 }
