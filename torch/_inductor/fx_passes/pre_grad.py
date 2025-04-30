@@ -148,14 +148,6 @@ def use_triton_lce_replace_normal_LCE(graph):
     return use_triton_lce_replace_simple_LCE_helper(graph.owning_module, shape_prop)
 
 
-def use_matmul_lce_replace_normal_LCE(graph):
-    return None
-
-
-def use_matmul_fuse_lce_replace_first_LCE(graph):
-    return None
-
-
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
@@ -209,8 +201,6 @@ def _run_pre_dispatch_passes(
         use_triton_dot_compress,
         use_triton_lce_replace_simple_LCE,
         use_triton_lce_replace_normal_LCE,
-        use_matmul_fuse_lce_replace_first_LCE,
-        use_matmul_lce_replace_normal_LCE,
     ]
 
     log.info(
@@ -282,7 +272,6 @@ def pre_grad_passes(
     Consider adding a new pass to post_grad.py or joint_graph.py which
     are after functionalization and normalization.
     """
-    log.info("Running pre_grad_passes")
     if config.pattern_matcher:
         lazy_init()
         if hasattr(
