@@ -17,10 +17,4 @@ void* nvshmem_ptr(const void* dest, int pe);
 
 at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
 
-at::Tensor nvshmem_sendrecv(
-    at::Tensor& input,
-    at::Tensor& out,
-    std::string group_name);
-
-
 } // namespace c10d::nvshmem_extension
