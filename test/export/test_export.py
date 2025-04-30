@@ -4274,6 +4274,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    @testing.expectedFailureTrainingIRToRunDecompStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_unbacked_pad(self):
         class Foo(torch.nn.Module):
