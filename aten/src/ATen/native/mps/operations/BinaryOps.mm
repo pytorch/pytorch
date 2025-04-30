@@ -272,49 +272,12 @@ static void add_sub_lerp_template(const Tensor& self,
     return;
   }
 
-  auto self_complex = c10::isComplexType(self.scalar_type());
-  auto other_complex = c10::isComplexType(other.scalar_type());
-  auto commonDtype = at::result_type(self, other);
-  if (self.is_mps() && other.is_mps() && (output.scalar_type() == commonDtype) && (self_complex == other_complex)) {
-    if (alpha_has_value) {
-      at::native::alpha_check(commonDtype, alpha);
-      mps::binary_op_kernel(op_name + "_alpha", self, other, output, alpha);
-    } else {
-      mps::binary_op_kernel(op_name, self, other, output);
-    }
-    return;
+  if (alpha_has_value) {
+    at::native::alpha_check(commonDtype, alpha);
+    mps::binary_op_kernel(op_name + "_alpha", self, other, output, alpha);
+  } else {
+    mps::binary_op_kernel(op_name, self, other, output);
   }
-
-  BinaryOpBlock add_sub_lerp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* secondaryTensor = secondaryCastTensor;
-
-    if (op_name == "lerp") {
-      secondaryCastTensor = [mpsGraph subtractionWithPrimaryTensor:secondaryCastTensor
-                                                   secondaryTensor:primaryCastTensor
-                                                              name:nil];
-    }
-
-    // if alpha is 1.0, then we don't bother adding another multiply to graph
-    if (alpha_has_value) {
-      auto commonDtype = c10::promoteTypes(self.scalar_type(), other.scalar_type());
-      cachedGraph->alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(commonDtype), @[ @1 ]);
-      secondaryTensor = [mpsGraph multiplicationWithPrimaryTensor:secondaryCastTensor
-                                                  secondaryTensor:cachedGraph->alphaTensor
-                                                             name:nil];
-    }
-    if (op_name == "add" || op_name == "lerp")
-      return [mpsGraph additionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
-    else
-      return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
-  };
-  // add alpha's type to the key only if multiply was added to graph
-  binaryOpTensor(self,
-                 other,
-                 alpha,
-                 output,
-                 op_name + "_out_mps:" + (alpha_has_value ? getMPSTypeString(alpha.type()) : ""),
-                 add_sub_lerp_op_block);
 }
 
 } // namespace mps
