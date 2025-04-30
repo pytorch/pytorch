@@ -1578,7 +1578,7 @@ def expect_true(
         return a.node.expect_true(
             frame.f_code.co_filename if frame else "",
             frame.f_lineno if frame else 0,
-            "" if message is None else "",
+            "" if message is None else message,
         )
     assert type(a) is bool, a
     return a
