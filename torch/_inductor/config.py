@@ -341,6 +341,9 @@ reorder_for_compute_comm_overlap_passes: list[
     "raise_comms",
 ]
 
+# Maximum number of positions to advance a given collective, unlimited by default
+reorder_prefetch_limit: Optional[int] = None
+
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
