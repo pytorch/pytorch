@@ -945,16 +945,18 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[8, 8]"):
+        clone: "f32[8, 8]" = torch.ops.aten.clone.default(tangents_1);  tangents_1 = None
+
         ___backward_invoke_subgraph_0_post_graph = self.___backward_invoke_subgraph_0_post_graph
 
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_post_graph, '___backward_invoke_subgraph_0_post_graph', (tangents_1, tangents_1));  ___backward_invoke_subgraph_0_post_graph = tangents_1 = None
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_post_graph, '___backward_invoke_subgraph_0_post_graph', (clone, clone));  ___backward_invoke_subgraph_0_post_graph = clone = None
         getitem_3: "f32[8, 8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
         return (getitem_3,)
 
     class ___backward_invoke_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
-            mul_2: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 3)
-            mul_3: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+            mul_2: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 3);  tangents_1 = None
+            mul_3: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_0, 2);  tangents_0 = None
 
             add: "f32[8, 8]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
             return (add,)
@@ -1081,9 +1083,11 @@ class GraphModule(torch.nn.Module):
     def forward(self, getitem_6: "f32[8, 8]", getitem_5: "f32[8, 8]", getitem_4: "f32[8, 8]", cos: "f32[8, 8]", tangents_1: "f32[8, 8]"):
         mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
 
+        clone: "f32[8, 8]" = torch.ops.aten.clone.default(mul);  mul = None
+
         ___backward_invoke_subgraph_0_post_graph = self.___backward_invoke_subgraph_0_post_graph
 
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_post_graph, '___backward_invoke_subgraph_0_post_graph', (getitem_4, getitem_5, getitem_6, mul));  ___backward_invoke_subgraph_0_post_graph = getitem_4 = getitem_5 = getitem_6 = mul = None
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_post_graph, '___backward_invoke_subgraph_0_post_graph', (getitem_4, getitem_5, getitem_6, clone));  ___backward_invoke_subgraph_0_post_graph = getitem_4 = getitem_5 = getitem_6 = clone = None
         getitem_1: "f32[8, 8]" = invoke_subgraph_3[0]
         getitem_2: "f32[8, 8]" = invoke_subgraph_3[1];  invoke_subgraph_3 = None
         return (getitem_1, getitem_2)
