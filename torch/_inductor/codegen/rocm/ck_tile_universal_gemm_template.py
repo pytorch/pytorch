@@ -128,8 +128,10 @@ def _default_ops_list():
         for m_is_padded in ["true", "false"]
         for n_is_padded in ["true", "false"]
         for k_is_padded in ["true", "false"]
-        for pipeline in ["CompV3", "Mem"]
-        for scheduler in ["Interwave", "Intrawave"]
+        for pipeline in ["CompV3"]
+        # for pipeline in ["CompV3", "Mem"]
+        for scheduler in ["Intrawave"]
+        # for scheduler in ["Interwave", "Intrawave"]
         for epilogue in ["Default", "CShuffle"]
     ]
 
@@ -361,25 +363,25 @@ class CKTileGemmTemplate(CKTileTemplate):
                                                                           WarpTileM,
                                                                           WarpTileN,
                                                                           WarpTileK,
-                                                                          UniversalGemmProblem::TransposeC>;
+                                                                          TransposeC>;
             using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<EpilogueProblem>;
         """
             elif epilogue_type == "CShuffle":
                 return r"""
             using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
-                                                    BDataType,
-                                                    AccDataType,
-                                                    CDataType,
-                                                    CLayout,
-                                                    GemmPipelineProblem::kBlockSize,
-                                                    TilePartitioner::MPerBlock,
-                                                    TilePartitioner::NPerBlock,
-                                                    WarpM,
-                                                    WarpN,
-                                                    WarpTileM,
-                                                    WarpTileN,
-                                                    WarpTileK,
-                                                    TransposeC>;
+                                                                     BDataType,
+                                                                     AccDataType,
+                                                                     CDataType,
+                                                                     CLayout,
+                                                                     GemmPipelineProblem::kBlockSize,
+                                                                     TilePartitioner::MPerBlock,
+                                                                     TilePartitioner::NPerBlock,
+                                                                     WarpM,
+                                                                     WarpN,
+                                                                     WarpTileM,
+                                                                     WarpTileN,
+                                                                     WarpTileK,
+                                                                     TransposeC>;
 
             using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;
         """
@@ -449,7 +451,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 default:
                     std::ostringstream err;
                     err << "Unsupported dispatch: "
-                        << "Pipeline: " << {{pipeline}}
+                        << "Pipeline: " << "{{pipeline}}"
                         << "Prefetch stages: " << {{instance_namespace}}::BaseGemmPipeline::PrefetchStages
                         << "Tail num: " << tail_num;
                     throw std::runtime_error(err.str());
@@ -471,7 +473,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 rendered_with_hot_loop=self._template_from_string(
                     switch_tailnum_template
                 ).render(
-                    has_hot_loop="ck_tile::integral_constant<bool, true>",
+                    has_hot_loop="ck_tile::integral_constant<bool, true>{}",
                     valid_tailnums=pipeline_to_valid_tailnums.get(
                         pipeline_type, tuple()
                     ),
@@ -481,7 +483,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 rendered_without_hot_loop=self._template_from_string(
                     switch_tailnum_template
                 ).render(
-                    has_hot_loop="ck_tile::integral_constant<bool, false>",
+                    has_hot_loop="ck_tile::integral_constant<bool, false>{}",
                     valid_tailnums=("Full", "Odd", "Even"),
                     pipeline=pipeline_type,
                     instance_namespace=op_name,
