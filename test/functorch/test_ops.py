@@ -436,13 +436,6 @@ class TestOperators(TestCase):
                 ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
-                # RuntimeError: Expected contiguous tensor, but got
-                # non-contiguous tensor for argument #2 'grad_output'
-                decorate(
-                    "_batch_norm_with_update",
-                    decorator=expectedFailureIf(TEST_WITH_ROCM),
-                    device_type="cuda",
-                ),
             }
         ),
     )
@@ -2368,13 +2361,6 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-            # RuntimeError: Expected contiguous tensor, but got
-            # non-contiguous tensor for argument #2 'grad_output'
-            decorate(
-                "_batch_norm_with_update",
-                decorator=expectedFailureIf(TEST_WITH_ROCM),
-                device_type="cuda",
-            ),
         },
     )
     @opsToleranceOverride(
