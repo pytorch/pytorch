@@ -2353,7 +2353,9 @@ def searchsorted(
     )
 
 
-@register_lowering(aten.bucketize, type_promotion_kind=None)
+@register_lowering(
+    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+)
 def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
@@ -3591,17 +3593,6 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    deterministic = torch.are_deterministic_algorithms_enabled()
-    if is_triton(values) and (accumulate or deterministic):
-        msg = (
-            "index put with accumulate."
-            if not deterministic
-            else "deterministic index put."
-        )
-        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
-            msg = f"{msg} Found from : \n {stack_trace}"
-        V.graph.disable_cudagraphs_reason = msg
-
     ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
     return self
 
@@ -6103,7 +6094,7 @@ def div_mode(a, b, rounding_mode=None):
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
-    # see the discussion at https://github.com/openai/triton/issues/605
+    # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
         return floordiv(a, b) if both_integer else floor(div(a, b))
