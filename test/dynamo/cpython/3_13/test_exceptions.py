@@ -70,8 +70,7 @@ from textwrap import dedent
 from test.support import (captured_stderr, check_impl_detail,
                           cpython_only, gc_collect,
                           no_tracing, script_helper,
-                          SuppressCrashReport,
-                          force_not_colorized)
+                          SuppressCrashReport)
 from test.support.import_helper import import_module
 from test.support.os_helper import TESTFN, unlink
 from test.support.warnings_helper import check_warnings
@@ -2058,7 +2057,6 @@ class AssertionErrorTests(__TestCase):
         return err.decode('utf-8').splitlines()
 
     @xfailIfTorchDynamo
-    @force_not_colorized
     def test_assertion_error_location(self):
         cases = [
             ('assert None',
@@ -2136,7 +2134,6 @@ class AssertionErrorTests(__TestCase):
                 self.assertEqual(result[-3:], expected)
 
     @xfailIfTorchDynamo
-    @force_not_colorized
     def test_multiline_not_highlighted(self):
         cases = [
             ("""
@@ -2169,7 +2166,6 @@ class AssertionErrorTests(__TestCase):
 
 
 class SyntaxErrorTests(__TestCase):
-    @force_not_colorized
     def test_range_of_offsets(self):
         cases = [
             # Basic range from 2->7
