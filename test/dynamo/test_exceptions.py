@@ -128,6 +128,14 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
     @make_dynamo_test
+    def test_isinstance_custom_exc(self):
+        if isinstance(CustomException, type):
+            x = True
+        else:
+            x = False
+        assert x is True
+
+    @make_dynamo_test
     def test_propagate_exception_inside_ctx_manager(self):
         @contextlib.contextmanager
         def cm():

@@ -1671,6 +1671,33 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_ctor_iterable(x):
+        var = set(["apple", "banana", "cherry"])
+        if isinstance(var, set):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_set_equality_frozenset(x):
+        var = set("abc")
+        other = frozenset("abc")
+        if var == other:
+            return x + 1
+        else:
+            return x - 1
+
+    @unittest.expectedFailure
+    @make_test
+    def test_set_in_frozenset(x):
+        var = set("abc")
+        other = set([frozenset("abc")])
+        if var in other:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_set_update_bytecode(x):
         # This produces bytecode SET_UPDATE since python 3.9
         var = {"apple", "banana", "cherry"}
@@ -1733,7 +1760,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_set_union(a, b):
         set1 = {"apple", "banana", "cherry"}
         set2 = {"google", "microsoft", "apple"}
-        union_set = set1.union(set2)
+        set3 = ("shoes", "flipflops", "sneakers")
+        union_set = set1.union(set2, set3)
         if "apple" in union_set:
             x = a + b
         else:
@@ -1742,7 +1770,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a + b
         else:
             y = a - b
-        return x, y
+        if "shoes" in union_set:
+            z = a + b
+        else:
+            z = a - b
+        return x, y, z
 
     @make_test
     def test_set_difference(a, b):
