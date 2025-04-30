@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._decomp import decomposition_table
@@ -4005,6 +4006,78 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             run_time_msg="Expected input.*to be equal to 3, but got 4",
             compile_time_msg=r"Constraints violated.*\n.*was inferred to be a constant \(3\)",
         )
+
+    def test_additional_inputs_constants(self):
+        @dataclass
+        class D:
+            b: bool
+            i: int
+            f: float
+            t: torch.Tensor
+
+        pytree.register_dataclass(D)
+
+        class M(torch.nn.Module):
+            def forward(self, d: D):
+                return d.i + d.f + d.t
+
+        input1 = (D(True, 3, 3.0, torch.ones(3)),)
+
+        # int and tensor change
+        input2 = (D(True, 4, 3.0, torch.ones(4)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        dynamic_shapes = ai.dynamic_shapes(M(), input1)
+        self.assertEqual(
+            dynamic_shapes, {"d": [None, Dim.DYNAMIC, None, (Dim.DYNAMIC,)]}
+        )
+        torch.export.export(M(), input1, dynamic_shapes=ai)
+
+        # float changes, error
+        input2 = (D(True, 3, 4.0, torch.ones(3)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(3\.0, 3\.0, 4\.0\)"
+        ):
+            ai.dynamic_shapes(M(), input1)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(3\.0, 3\.0, 4\.0\)"
+        ):
+            torch.export.export(M(), input1, dynamic_shapes=ai)
+
+        # bool changes, error
+        input2 = (D(False, 3, 3.0, torch.ones(3)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(True, True, False\)"
+        ):
+            ai.dynamic_shapes(M(), input1)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(True, True, False\)"
+        ):
+            torch.export.export(M(), input1, dynamic_shapes=ai)
+
+        # Differing types
+        input1 = (D(True, 0, 3.0, torch.ones(3)),)
+        input2 = (D(True, False, 3.0, torch.ones(3)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        with self.assertRaisesRegex(
+            ValueError,
+            r"differing types, so they cannot be marked as dynamic: \(0, 0, False\)",
+        ):
+            print(ai.dynamic_shapes(M(), input1))
+        with self.assertRaisesRegex(
+            ValueError,
+            r"differing types, so they cannot be marked as dynamic: \(0, 0, False\)",
+        ):
+            torch.export.export(M(), input1, dynamic_shapes=ai)
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
