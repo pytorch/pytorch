@@ -98,7 +98,7 @@ if(NOT __AOTRITON_INCLUDED)
                                   "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
-    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
+    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"  # @lint-ignore
                                  "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"

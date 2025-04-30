@@ -2652,7 +2652,7 @@ Tensor mexp_impl(
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
     // and better performance overall (benchmarked).
     const auto norm_cpu = (a.device().type() == at::kCUDA)
       ? norm.to(at::kCPU) : norm;
