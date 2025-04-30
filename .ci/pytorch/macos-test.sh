@@ -178,21 +178,24 @@ torchbench_setup_macos() {
 }
 
 install_benchmark_deps() {
+  # TODO: We should probably update this to use the latest version of numpy
+  #       but it appears as though torchbench itself installs 1.22.3 by default
+  #       and this is causing issues with the build.
   pip_install \
     astunparse==1.6.3 \
-    numpy==2.0.2 \
-    scipy==1.13.1 \
+    numpy==1.22.3 \
+    scipy==1.10.1 \
     ninja==1.11.1.4 \
-    pyyaml==6.0.2 \
-    setuptools==58.0.4 \
-    cmake==4.0.0 \
-    typing-extensions==4.13.2 \
+    pyyaml==6.0 \
+    setuptools==72.1.0 \
+    cmake==3.22.* \
+    typing-extensions==4.11.0 \
     requests==2.32.3 \
-    protobuf==6.30.2 \
-    numba==0.60.0 \
+    protobuf==3.20.2 \
+    numba==0.56.0 \
     cython==3.0.12 \
     scikit-learn==1.6.1 \
-    librosa==0.11.0
+    librosa>=0.6.2
 }
 
 
