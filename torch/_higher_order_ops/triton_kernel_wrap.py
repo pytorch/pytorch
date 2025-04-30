@@ -25,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.types import IntLikeType
 
 
 if TYPE_CHECKING:
@@ -71,9 +72,9 @@ log = logging.getLogger("torch._dynamo")
 TMADescriptorMetadata = dict[
     str,  # kernel parameter name
     tuple[
-        list[Union[int, SymInt]],  # dims
-        list[Union[int, SymInt]],  # block_dims
-        Union[int, SymInt],  # element_size
+        list[IntLikeType],  # dims
+        list[IntLikeType],  # block_dims
+        IntLikeType,  # element_size
     ],
 ]
 
@@ -1473,7 +1474,13 @@ class TritonHOPifier:
             new_var = type(variable)(new_kernel, None, variable.grid)
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
-        SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
+        SPECIAL_CONFIG_NAMES = {
+            "num_warps",
+            "num_stages",
+            "num_ctas",
+            "num_consumer_groups",
+            "num_buffers_warp_spec",
+        }
 
         # move special config names to configs out of kwargs
         special_kwargs = {}
