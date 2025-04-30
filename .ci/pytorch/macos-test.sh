@@ -177,9 +177,22 @@ torchbench_setup_macos() {
   checkout_install_torchbench
 }
 
-conda_benchmark_deps() {
-  conda install -y astunparse numpy scipy ninja pyyaml setuptools cmake typing-extensions requests protobuf numba cython scikit-learn
-  conda install -y -c conda-forge librosa
+install_benchmark_deps() {
+  pip install \
+    astunparse==1.6.3 \
+    numpy==2.2.5 \
+    scipy==1.15.2 \
+    ninja==1.11.1.4 \
+    pyyaml==6.0.2 \
+    setuptools==80.1.0 \
+    cmake==4.0.0 \
+    typing-extensions==4.13.2 \
+    requests==2.32.3 \
+    protobuf==6.30.2 \
+    numba==0.61.2 \
+    cython==3.0.12 \
+    scikit-learn==1.6.1 \
+    librosa==0.11.0
 }
 
 
@@ -187,7 +200,7 @@ test_torchbench_perf() {
   print_cmake_info
 
   echo "Launching torchbench setup"
-  conda_benchmark_deps
+  install_benchmark_deps
   torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -214,7 +227,7 @@ test_torchbench_smoketest() {
   print_cmake_info
 
   echo "Launching torchbench setup"
-  conda_benchmark_deps
+  install_benchmark_deps
   # shellcheck disable=SC2119,SC2120
   torchbench_setup_macos
 
@@ -263,7 +276,7 @@ test_hf_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  conda_benchmark_deps
+  install_benchmark_deps
   torchbench_setup_macos
 
   echo "Launching HuggingFace training perf run"
@@ -279,7 +292,7 @@ test_timm_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  conda_benchmark_deps
+  install_benchmark_deps
   torchbench_setup_macos
 
   echo "Launching timm training perf run"
