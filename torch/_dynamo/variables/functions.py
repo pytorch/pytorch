@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
@@ -63,7 +63,12 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 
 
@@ -225,9 +230,18 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
-            f"expected FunctionType found {typestr(fn)} {fn}"
-        )
+        # TODO putting this here to avoid duplication, because we could hit this
+        # from several paths (e.g., SuperVariable or `var_getattr`s).
+        if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
+            unimplemented_v2(
+                gb_type="can't handle functions not implemented in python ",
+                context=f"{fn}",
+                explanation="Dynamo can only handle functions defined in python",
+                hints=[
+                    "Move usage of this function out of `torch.compile` region",
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -362,6 +376,23 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle patch_dynamo_config call
+        if self.fn is torch._dynamo.patch_dynamo_config:
+            try:
+                args_const = [arg.as_python_constant() for arg in args]
+                kwargs_const = {
+                    key: val.as_python_constant() for key, val in kwargs.items()
+                }
+                changes = torch._dynamo.patch_dynamo_config(
+                    *args_const, **kwargs_const
+                ).changes
+                return variables.DynamoConfigPatchVariable(changes)
+            except AsPythonConstantNotImplementedError as e:
+                raise RuntimeError(
+                    "Cannot convert patch_dynamo_config args/kwargs to constants. "
+                    "Please fix your call to patch_dynamo_config by using simpler inputs. "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
         # Handle a `nonstrict_trace(fn)` call
         if self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -1289,16 +1320,15 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch._dynamo.graph_break()` call.",
                 ],
             )
-        elif isinstance(self.value, types.WrapperDescriptorType):
-            unimplemented_v2(
-                gb_type="Calling unsupported type of SkipFunctionVariable",
-                context=f"{self.value}",
-                explanation="`torch.compile` cannot arbitrary C functions",
-                hints=[
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
         else:
+            if config.dont_skip_tracing:
+                from .builder import SourcelessBuilder
+
+                # re-build the function, attempting to not skip
+                rebuilt_fn = SourcelessBuilder.create(tx, self.value)
+                # if we still get SkipFunctionVariable, then we *really* should skip this function
+                if not isinstance(rebuilt_fn, SkipFunctionVariable):
+                    return rebuilt_fn.call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
@@ -1314,11 +1344,10 @@ class SkipFunctionVariable(VariableTracker):
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{qualname}` or the file `{path}` "
-                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                        "attempting to trace into the function.",
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
-                        # TODO suggest mark_force_inline when implemented
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
@@ -1523,10 +1552,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented_v2(
                 gb_type="async_op=True for distributed collectives",
-                context=f"{self.fn}",
-                explanation="`torch.compile` currently can't trace these",
+                context=f"{self.fn}, {args=}, {kwargs=}",
+                explanation=f"`torch.compile` doesn't support `async_op=True for {self.fn}",
                 hints=[
-                    *graph_break_hints.DIFFICULT,
+                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
 
@@ -1564,9 +1593,9 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
                 unimplemented_v2(
                     gb_type="functools.wraps",
                     context=f"{fn}",
-                    explanation="`torch.compile` currently can't trace these",
+                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
                     hints=[
-                        *graph_break_hints.DIFFICULT,
+                        *graph_break_hints.SUPPORTABLE,
                     ],
                 )
 
@@ -1599,7 +1628,7 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
             context=f"{args=}, {kwargs=}",
             explanation="`torch.compile` only support certain input types for namedtuple",
             hints=[
-                *graph_break_hints.DIFFICULT,
+                *graph_break_hints.SUPPORTABLE,
             ],
         )
 
@@ -1665,6 +1694,8 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "keywords":
             items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         raise_observed_exception(AttributeError, tx)
 
     def as_python_constant(self):
@@ -1877,9 +1908,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
             unimplemented_v2(
                 gb_type="unsupported grid type for triton hop check_grid",
                 context=f"grid type = {type(grid)}",
-                explanation="`torch.compile` currently can't trace this",
+                explanation="`torch.compile` only supports list-like grid for check_grid",
                 hints=[
-                    *graph_break_hints.DIFFICULT,
+                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
 
