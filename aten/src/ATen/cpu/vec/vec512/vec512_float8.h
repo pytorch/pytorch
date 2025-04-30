@@ -19,60 +19,67 @@ inline namespace CPU_CAPABILITY {
 static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
   // Zero Extend
   __m512i x = _mm512_cvtepu8_epi32(a);
-
+  __m512i val = _mm512_and_epi32(_mm512_slli_epi32(x, 24), _mm512_set1_epi32(0x7FFFFFFF)); // nonsign_val
   __m512i mant = _mm512_and_si512(x, _mm512_set1_epi32(0x07));        // mantissa = x & 0x07
   __m512i exp  = _mm512_and_si512(_mm512_srli_epi32(x, 3), _mm512_set1_epi32(0x0F)); // exp = (x >> 3) & 0x0F
   __m512i sign = _mm512_and_si512(x, _mm512_set1_epi32(0x80));        // sign = x & 0x80
+  __m512i _zeros = _mm512_setzero_si512();
 
-  // --- Step 1: Normal case (exp != 0) ---
-  __mmask16 normal_mask = _mm512_cmpneq_epi32_mask(exp, _mm512_setzero_si512());
-
-  __m512i exp_norm = _mm512_add_epi32(exp, _mm512_set1_epi32(120));  // exponent_bias = 127 - 7 = 120
-  __m512i mant_norm = _mm512_slli_epi32(mant, 20);                   // << 20 to align in FP32 mantissa
-  __m512i val_norm = _mm512_maskz_mov_epi32(normal_mask,
-      _mm512_or_si512(mant_norm, _mm512_slli_epi32(exp_norm, 23)));
-
-  __m512i val = val_norm;
-  // exp == 0xF && mant == 0x07
-  __mmask16 nan_mask = _mm512_cmpeq_epi32_mask(exp, _mm512_set1_epi32(0xF)) &
-      _mm512_cmpeq_epi32_mask(mant, _mm512_set1_epi32(0x07));
-  if (nan_mask) {
-    // --- Step 2: Nan case (exp == 0xF && mant == 0x07) ---
-    const __m512i nan_values = _mm512_set1_epi32(0x7FC00000);
-    val = _mm512_mask_mov_epi32(val, nan_mask, nan_values);
-  }
-
-  // exp == 0 && mant != 0
-  __mmask16 denormal_mask = _mm512_cmpeq_epi32_mask(exp, _mm512_setzero_si512()) &
-      _mm512_cmpneq_epi32_mask(mant, _mm512_setzero_si512());
+  // --- Step 1: Calculate the renorm_shift
+  __m512i renorm_shift = _zeros;
+  // Denorm case (exp == 0 && mant != 0) ---
+  __mmask16 denormal_mask = _mm512_cmpeq_epi32_mask(exp, _zeros) &
+      _mm512_cmpneq_epi32_mask(mant, _zeros);
   if (denormal_mask) {
-    // --- Step 3: Denorm case (exp == 0 && mant != 0) ---
     // An alternative solution is as what scalar did in pytorch/c10/util/Float8_e4m3fn.h
     // To count the num of leading zeros, since here we know the unsigned denorm value has
     // zero sign and exp which is 5 leading zeros, we need to count the leading zero of mant (3bit)
     // which may done through table lookup for example:
-    // const uint8_t lz_table[8] = {3, 2, 1, 1, 0, 0, 0, 0};
-    // num_leading_zero = lz_table[mant] + 5;
-    __m512i lg2mant = _mm512_mask_mov_epi32(
-        _mm512_mask_mov_epi32(
-            _mm512_setzero_si512(),
-            _mm512_test_epi32_mask(x, _mm512_set1_epi32(2)),
-            _mm512_set1_epi32(1)),
-        _mm512_test_epi32_mask(x, _mm512_set1_epi32(4)),
-        _mm512_set1_epi32(2));
+    // const uint8_t lz_table[8] = {3, 2, 1, 1, 0, 0, 0, 0}; num_leading_zero = lz_table[mant] + 5;
 
-    __m512i denorm_values = _mm512_or_si512(
-        _mm512_and_si512(
-            _mm512_sllv_epi32(
-                _mm512_and_si512(x, _mm512_set1_epi32(3)), _mm512_sub_epi32(_mm512_set1_epi32(23), lg2mant)),
-            _mm512_set1_epi32(0x7fffff)),
-        _mm512_slli_epi32(_mm512_add_epi32(lg2mant, _mm512_set1_epi32(118)), 23)
-      );
+    __m512i _ones = _mm512_set1_epi32(1);
+    __m512i _twos = _mm512_set1_epi32(2);
+    __m512i _threes = _mm512_set1_epi32(3);
 
-    val = _mm512_mask_mov_epi32(val, denormal_mask, denorm_values);
+    // Default leading zero number for denorm value is 1 = 5 - 4
+    __m512i denorm_renorm_shift = _ones;
+    // For mant 001, leading zero number is 3 = 7 -4
+    __mmask16 leading_Zero_mask = _mm512_cmpeq_epi32_mask(mant, _ones);
+    denorm_renorm_shift = _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _threes);
+    // For mant 010 and 011, leading zero number is 2 = 6 -4
+    leading_Zero_mask = _mm512_cmpeq_epi32_mask(mant, _twos);
+    denorm_renorm_shift = _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _twos);
+    leading_Zero_mask = _mm512_cmpeq_epi32_mask(mant, _threes);
+    denorm_renorm_shift = _mm512_mask_mov_epi32(denorm_renorm_shift, leading_Zero_mask, _twos);
+
+    renorm_shift = _mm512_mask_mov_epi32(renorm_shift, denormal_mask, denorm_renorm_shift);
   }
 
-  // --- OR with sign (sign bit << 24 to get to bit 31) ---
+  // --- Step 2: calculate norm and denorm ---
+  __m512i norm_shifted = _mm512_srli_epi32(_mm512_sllv_epi32(val, renorm_shift), 4);
+  // exponent bias adjustment: (0x78 - renorm_shift) << 23
+  __m512i exp_bias = _mm512_slli_epi32(
+      _mm512_sub_epi32(_mm512_set1_epi32(0x78), renorm_shift),
+      23
+  );
+  val = _mm512_add_epi32(norm_shifted, exp_bias);
+
+  // --- Step 3: Nan case (exp == 0xF && mant == 0x07) ---
+  __mmask16 nan_mask = _mm512_cmpeq_epi32_mask(exp, _mm512_set1_epi32(0xF)) &
+      _mm512_cmpeq_epi32_mask(mant, _mm512_set1_epi32(0x07));
+  if (nan_mask) {
+    const __m512i nan_values = _mm512_set1_epi32(0x7FC00000);
+    val = _mm512_mask_mov_epi32(val, nan_mask, nan_values);
+  }
+
+  // --- Step 4: Zero case (exp == 0x00 && mant == 0x00) ---
+  __mmask16 zero_mask = _mm512_cmpeq_epi32_mask(exp, _zeros) &
+      _mm512_cmpeq_epi32_mask(mant, _zeros);
+  if (zero_mask) {
+    val = _mm512_mask_mov_epi32(val, zero_mask, _zeros);
+  }
+
+  // --- Step 5: OR with sign (sign bit << 24 to get to bit 31) ---
   val = _mm512_or_si512(val, _mm512_slli_epi32(sign, 24));
 
   o = _mm512_castsi512_ps(val);
