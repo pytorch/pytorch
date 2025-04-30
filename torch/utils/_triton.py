@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+from typing import Optional
 
 
 @functools.lru_cache(None)
@@ -112,3 +113,20 @@ def triton_hash_with_backend():
 
     # Hash is upper case so that it can't contain any Python keywords.
     return hashlib.sha256(key.encode("utf-8")).hexdigest().upper()
+
+
+@functools.lru_cache(None)
+def triton_set_allocator(device):
+    if has_triton_tma_device():
+        import torch
+
+        assert torch.cuda.current_device() == device
+
+        def alloc_fn(size: int, alignment: int, stream: Optional[int]):
+            return torch.empty(size, device=device, dtype=torch.int8)
+
+        import triton
+
+        triton.set_allocator(alloc_fn)
+
+    return None

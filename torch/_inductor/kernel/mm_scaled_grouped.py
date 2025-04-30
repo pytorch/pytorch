@@ -10,7 +10,6 @@ from torch.utils._triton import has_triton_tma_device
 
 from ..ir import ChoiceCaller, Layout, TensorBox
 from ..lowering import register_lowering
-from ..runtime.runtime_utils import next_power_of_2
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -93,11 +92,6 @@ def early_config_prune(configs, named_args):
             config.num_warps,
             getattr(config, "num_consumer_groups", 0),
         )
-        M_PER_GROUP, N_PER_GROUP, G_TIMES_M_PER_GROUP = (
-            named_args["M_PER_GROUP"],
-            named_args["N_PER_GROUP"],
-            named_args["G_TIMES_M_PER_GROUP"],
-        )
 
         # 1. make sure we have enough smem
         max_shared_memory = get_gpu_shared_memory()
@@ -111,34 +105,7 @@ def early_config_prune(configs, named_args):
 
         use_warp_specialization = num_consumer_groups >= 1
 
-        MIN_M_TILES = 32 if torch.version.hip else 64
-        # 2. make sure we don't load M tiles that are too big
-        if (
-            not use_warp_specialization
-            and BLOCK_M > MIN_M_TILES
-            and BLOCK_M > (M_PER_GROUP * 2)
-        ):
-            continue
-        # 3. make sure we don't load M tiles that are too small
-        if BLOCK_M < 128 and BLOCK_M < (M_PER_GROUP // 2):
-            continue
-
-        num_sm = get_num_sms()
-
-        N_TILES = N_PER_GROUP // BLOCK_N
-        MIN_N_TILES = 32 if torch.version.hip else 64
-        # 4. make sure we don't load N tiles that are too big
-        if (
-            not use_warp_specialization
-            and BLOCK_N > MIN_N_TILES
-            and G_TIMES_M_PER_GROUP * N_TILES < num_sm
-        ):
-            continue
-        # 5. make sure we don't load N tiles that are too small
-        if BLOCK_N < 128 and G_TIMES_M_PER_GROUP * N_TILES > 2 * num_sm:
-            continue
-
-        # 6. make sure we can partition for ws
+        # 2. make sure we can partition for ws
         if use_warp_specialization:
             if num_warps != 4:
                 continue
@@ -479,19 +446,10 @@ def can_use_triton_kernel(
     if scale_result is not None:
         return False
 
-    m1_size = mat_a.get_size()
-    m2_size = mat_b.get_size()
-
-    if len(m1_size) == 2:
-        if len(m2_size) == 2:
-            return offs is not None and m2_size[-1] >= 32
-        else:
-            return offs is not None and m1_size[-1] >= 32 and m2_size[-2] >= 32
+    if len(mat_a.get_size()) == 2 or len(mat_b.get_size()) == 2:
+        return offs is not None
     else:
-        if len(m2_size) == 2:
-            return offs is not None and m2_size[-2] >= 32
-        else:
-            return offs is None and m1_size[-1] >= 32 and m2_size[-1] >= 32
+        return offs is None
 
 
 @register_lowering(aten._scaled_grouped_mm.default, type_promotion_kind=None)
@@ -546,30 +504,29 @@ def tuned_scaled_grouped_mm(
     if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
         if len(m1_size) == 2:
             if len(m2_size) == 2:
-                g = offs.layout.size[0]
-                m, k1 = m1_size
-                k2, n = m2_size
+                _, k1 = m1_size
+                k2, _ = m2_size
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = True, True
             else:
                 g1 = offs.layout.size[0]
-                m, k1 = m1_size
-                g2, k2, n = m2_size
-                g = V.graph.sizevars.guard_equals(g1, g2)
+                _, k1 = m1_size
+                g2, k2, _ = m2_size
+                V.graph.sizevars.guard_equals(g1, g2)
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = True, False
         else:
             if len(m2_size) == 2:
                 g1 = offs.layout.size[0]
-                g2, m, k1 = m1_size
-                k2, n = m2_size
-                g = V.graph.sizevars.guard_equals(g1, g2)
+                g2, _, k1 = m1_size
+                k2, _ = m2_size
+                V.graph.sizevars.guard_equals(g1, g2)
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = False, True
             else:
-                g1, m, k1 = m1_size
-                g2, k2, n = m2_size
-                g = V.graph.sizevars.guard_equals(g1, g2)
+                g1, _, k1 = m1_size
+                g2, k2, _ = m2_size
+                V.graph.sizevars.guard_equals(g1, g2)
                 V.graph.sizevars.guard_equals(k1, k2)
                 a_is_2d, b_is_2d = False, False
 
@@ -579,11 +536,6 @@ def tuned_scaled_grouped_mm(
             "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
             "USE_TMA_LOAD": True,
-            # fixme: remove these!
-            "M_PER_GROUP": next_power_of_2(m) // g if a_is_2d and not b_is_2d else m,
-            "N_PER_GROUP": next_power_of_2(n) // g if not a_is_2d and b_is_2d else n,
-            "G_TIMES_M_PER_GROUP": g
-            * (next_power_of_2(m) // g if a_is_2d and not b_is_2d else m),
         }
 
         for config in early_config_prune(scaled_grouped_mm_configs(), kwargs):
@@ -596,14 +548,5 @@ def tuned_scaled_grouped_mm(
                 **kwargs,
                 **config.kwargs,
             )
-
-    if has_triton_tma_device():
-        # TMA descriptors require a global memory allocation
-        def alloc_fn(size: int, alignment: int, stream: Optional[int]):
-            return torch.empty(size, device=mat_a.get_device(), dtype=torch.int8)
-
-        import triton
-
-        triton.set_allocator(alloc_fn)
 
     return autotune_select_algorithm("scaled_grouped_mm", choices, input_nodes, layout)
