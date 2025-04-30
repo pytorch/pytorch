@@ -265,29 +265,26 @@ static void add_sub_lerp_template(const Tensor& self,
   }
 
   const bool alpha_has_value = alpha.isComplex() || alpha.toDouble() != 1.0;
-  auto self_complex = c10::isComplexType(self.scalar_type());
-  auto other_complex = c10::isComplexType(other.scalar_type());
-  auto commonDtype = at::result_type(self, other);
-  if (self.is_mps() && other.is_mps() && (output.scalar_type() == commonDtype) && (self_complex == other_complex)) {
-    if (alpha_has_value) {
-      at::native::alpha_check(commonDtype, alpha);
-      mps::binary_op_kernel((self_complex || other_complex) ? "complex_" + op_name : op_name,
-                            self,
-                            other,
-                            output,
-                            getMPSScalar(alpha, commonDtype));
-    } else {
-      mps::binary_op_kernel(op_name, self, other, output);
-    }
-    return;
-  }
-
   if (!alpha_has_value && op_name == "lerp") {
     if (!self.is_alias_of(other)) { // if inplace, no-op
       output.copy_(other);
     }
     return;
   }
+
+  auto self_complex = c10::isComplexType(self.scalar_type());
+  auto other_complex = c10::isComplexType(other.scalar_type());
+  auto commonDtype = at::result_type(self, other);
+  if (self.is_mps() && other.is_mps() && (output.scalar_type() == commonDtype) && (self_complex == other_complex)) {
+    if (alpha_has_value) {
+      at::native::alpha_check(commonDtype, alpha);
+      mps::binary_op_kernel(op_name, self, other, output, getMPSScalar(alpha, commonDtype));
+    } else {
+      mps::binary_op_kernel(op_name, self, other, output);
+    }
+    return;
+  }
+
 
   BinaryOpBlock add_sub_lerp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
