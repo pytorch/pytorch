@@ -35,7 +35,7 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
-bool file_exists(std::string& path) {
+bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
@@ -68,7 +68,7 @@ const std::string k_separator = "/";
 namespace torch::inductor {
 
 namespace {
-const nlohmann::json& load_json_file(std::string json_path) {
+const nlohmann::json& load_json_file(const std::string& json_path) {
   if (!file_exists(json_path)) {
     throw std::runtime_error("File not found: " + json_path);
   }
@@ -436,12 +436,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       size_t extension_idx = output_path_str.find_last_of('.');
       if (extension_idx != std::string::npos) {
         std::string filename_extension = output_path_str.substr(extension_idx);
-        // use strcmp to correctly compare strings with extra null terminator
-        if (std::strcmp(filename_extension.c_str(), ".cpp") == 0) {
+        if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        } else if (std::strcmp(filename_extension.c_str(), ".o") == 0) {
+        } else if (filename_extension == ".o") {
           consts_filename = output_path_str;
-        } else if (std::strcmp(filename_extension.c_str(), ".so") == 0) {
+        } else if (filename_extension == ".so") {
           so_filename = output_path_str;
         }
       }
