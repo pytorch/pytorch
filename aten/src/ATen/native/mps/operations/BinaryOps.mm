@@ -273,6 +273,7 @@ static void add_sub_lerp_template(const Tensor& self,
   }
 
   if (alpha_has_value) {
+    auto commonDtype = at::result_type(self, other);
     at::native::alpha_check(commonDtype, alpha);
     mps::binary_op_kernel(op_name + "_alpha", self, other, output, alpha);
   } else {
