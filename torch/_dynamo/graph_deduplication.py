@@ -20,7 +20,7 @@ from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._ordered_set import OrderedSet
 
 from .graph_region_tracker import Node, Region
-from .graph_utils import _detect_cycles, _flatten_args_kwargs
+from .graph_utils import _detect_cycles, _get_flat_args, _get_flat_args_unique
 
 
 log = logging.getLogger(__name__)
@@ -94,7 +94,10 @@ when they are created in output_graph.
                 node_to_additional_deps,
             )
 
-    _stable_topological_sort(output_graph.graph, node_to_additional_deps)
+    _stable_topological_sort(
+        output_graph.graph,
+        node_to_additional_deps,  # type: ignore[arg-type]
+    )
     return sub_gms
 
 
@@ -111,7 +114,7 @@ def _replace_region_with_subgraph(
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
         node = region[node_ind]
-        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
+        flattened_args_kwargs = _get_flat_args(node, {})
         sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
@@ -139,7 +142,7 @@ def _replace_region_with_subgraph(
     # Erase in reverse topological order
     for node in reversed(region):
         graph.erase_node(node)
-        node_to_additional_deps.pop(node)
+        node_to_additional_deps.pop(node, None)
         for deps in node_to_additional_deps.values():
             try:
                 deps.remove(node)
@@ -162,7 +165,7 @@ def _get_external_inputs(
     external_node_to_indices = dict()
     region_unique = set(region)
     for node_ind, node in enumerate(region):
-        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
+        flattened_args_kwargs = _get_flat_args(node, {})
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
             if (
                 isinstance(in_node, Node)
@@ -283,7 +286,9 @@ def _stable_topological_sort(
             continue
 
         waiting_for = [
-            x for x in _args(node, node_to_additional_deps) if x not in ready
+            x
+            for x in _get_flat_args_unique(node, node_to_additional_deps)
+            if x not in ready
         ]
         if waiting_for:
             # We have unprocessed input nodes. Might as well wait for the last
@@ -334,10 +339,15 @@ def _add_global_state_dependencies(
             prev_nodes.append(cur_node)
 
     for prev_nodes, cur_node in prev_cur_nodes(all_nodes):
-        args_unique = _args(cur_node)
-        additional_deps = node_to_additional_deps[cur_node]
-        additional_deps.update(n for n in all_nodes_dep_on if n not in args_unique)
+        args_unique = _get_flat_args_unique(cur_node, {})
+        new_deps = [n for n in all_nodes_dep_on if n not in args_unique]
+
+        if new_deps:
+            additional_deps = node_to_additional_deps[cur_node]
+            additional_deps.update(new_deps)
+
         if cur_node.target in global_state_targets:
+            additional_deps = node_to_additional_deps[cur_node]
             additional_deps.update(n for n in prev_nodes if n not in args_unique)
             all_nodes_dep_on.append(cur_node)
 
@@ -347,7 +357,7 @@ def _add_mutation_dependencies(
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
 ) -> None:
     for node, indices in node_to_mutated_arg_positions.items():
-        flat_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
+        flat_args_kwargs = _get_flat_args(node, {})
 
         # for all mutated args,
         # add dependency on usages which occur after node to ensure
@@ -359,7 +369,7 @@ def _add_mutation_dependencies(
             for user in mutated_arg.users:
                 if user is node:
                     continue
-                elif user > node:
-                    node_to_additional_deps[node].add(user)
                 elif user < node:
+                    node_to_additional_deps[node].add(user)
+                elif user > node:
                     node_to_additional_deps[user].add(node)
