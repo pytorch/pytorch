@@ -2847,17 +2847,6 @@ class PythonWrapperCodegen(CodeGen):
         finally:
             self.pop_codegened_graph()
 
-    def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        # All inputs of hops must be explicitly passed in.
-        # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
-        assert len(outer_inputs) == len(subgraph.graph.graph_input_names), (
-            f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
-        )
-        for inner_input, outer_input in zip(
-            subgraph.graph.graph_input_names, outer_inputs
-        ):
-            self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
-
     def codegen_partition_call(
         self,
         partition_id: int,
@@ -2896,19 +2885,14 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
-        input_names = subgraph.graph.graph_input_names
-        inner_inputs = ", ".join(input_names)
-        if len(input_names) == 1:
-            inner_inputs += ","
-
         outer_output_names = ", ".join(outer_outputs) + (
             "," if len(outer_outputs) == 1 else ""
         )
+        outer_input_names = ", ".join(outer_inputs) + (
+            "," if len(outer_inputs) == 1 else ""
+        )
 
-        # Create a list of inputs for the subgraph call
-        self.writeline(f"{subgraph.graph.name}_args = [{inner_inputs}]")
-        for inner_input in input_names[: len(outer_inputs)]:
-            self.writeline(f"del {inner_input}")
+        self.writeline(f"{subgraph.graph.name}_args = [{outer_input_names}]")
 
         # Call the subgraph launcher function
         self.writeline(
@@ -2925,7 +2909,6 @@ class PythonWrapperCodegen(CodeGen):
         self.push_codegened_graph(subgraph.graph)
         self.writeline("")
         self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-        self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 
         parent_graph = V.graph
         subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
