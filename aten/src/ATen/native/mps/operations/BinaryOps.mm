@@ -265,6 +265,13 @@ static void add_sub_lerp_template(const Tensor& self,
   }
 
   const bool alpha_has_value = alpha.toDouble() != 1.0;
+  if (!alpha_has_value && op_name == "lerp") {
+    if (!self.is_alias_of(other)) { // if inplace, no-op
+      output.copy_(other);
+    }
+    return;
+  }
+
   auto self_complex = c10::isComplexType(self.scalar_type());
   auto other_complex = c10::isComplexType(other.scalar_type());
   auto commonDtype = at::result_type(self, other);
@@ -278,13 +285,6 @@ static void add_sub_lerp_template(const Tensor& self,
                             getMPSScalar(alpha, commonDtype));
     } else {
       mps::binary_op_kernel(op_name, self, other, output);
-    }
-    return;
-  }
-
-  if (!alpha_has_value && op_name == "lerp") {
-    if (!self.is_alias_of(other)) { // if inplace, no-op
-      output.copy_(other);
     }
     return;
   }
