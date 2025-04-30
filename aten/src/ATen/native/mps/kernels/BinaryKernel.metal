@@ -18,13 +18,6 @@ struct sub_functor {
   }
 };
 
-struct lerp_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return static_cast<T>(b);
-  }
-};
-
 struct add_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
@@ -229,13 +222,6 @@ struct complex_lerp_alpha_functor {
   }
 };
 
-struct complex_lerp_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return T(b.x, b.y);
-  }
-};
-
 REGISTER_BINARY_OP(copysign, long, float);
 REGISTER_BINARY_OP(copysign, int, float);
 REGISTER_BINARY_OP(copysign, float, float);
@@ -282,14 +268,6 @@ REGISTER_BINARY_OP(sub, short, short);
 REGISTER_BINARY_OP(sub, uchar, uchar);
 REGISTER_BINARY_OP(sub, char, char);
 REGISTER_BINARY_OP(sub, bool, bool);
-REGISTER_BINARY_OP(lerp, long, long);
-REGISTER_BINARY_OP(lerp, int, int);
-REGISTER_BINARY_OP(lerp, float, float);
-REGISTER_BINARY_OP(lerp, half, half);
-REGISTER_BINARY_OP(lerp, short, short);
-REGISTER_BINARY_OP(lerp, uchar, uchar);
-REGISTER_BINARY_OP(lerp, char, char);
-REGISTER_BINARY_OP(lerp, bool, bool);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float);
@@ -330,7 +308,6 @@ REGISTER_BINARY_OP(hermite_polynomial_h, bfloat, bfloat);
 REGISTER_BINARY_OP(hermite_polynomial_he, bfloat, bfloat);
 REGISTER_BINARY_OP(add, bfloat, bfloat);
 REGISTER_BINARY_OP(sub, bfloat, bfloat);
-REGISTER_BINARY_OP(lerp, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat);
@@ -347,8 +324,6 @@ REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
 REGISTER_BINARY_OP(sub, float2, float2);
 REGISTER_BINARY_OP(sub, half2, half2);
-REGISTER_BINARY_OP(lerp, float2, float2);
-REGISTER_BINARY_OP(lerp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(complex_add_alpha, float2, float2);
 REGISTER_BINARY_ALPHA_OP(complex_add_alpha, half2, half2);
 REGISTER_BINARY_ALPHA_OP(complex_sub_alpha, float2, float2);
