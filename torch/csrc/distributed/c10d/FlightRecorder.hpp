@@ -1,8 +1,4 @@
 #pragma once
-
-// TODO: Make Fligth Recorder device agnostic
-#ifdef USE_C10D_NCCL
-
 #include <cstdio>
 #include <cstdlib>
 
@@ -10,7 +6,9 @@
 #include <mutex>
 
 #include <ATen/ATen.h>
+#ifdef USE_C10D_NCCL
 #include <ATen/cuda/CUDAEvent.h>
+#endif // USE_C10D_NCCL
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
@@ -88,11 +86,6 @@ class TORCH_API DebugInfoWriter {
   static std::atomic<bool> hasWriterRegistered_;
 };
 
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent);
-
 struct FlightRecorder {
   static FlightRecorder* get() {
     // intentionally leak on exit
@@ -105,7 +98,6 @@ struct FlightRecorder {
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
-  using Event = at::cuda::CUDAEvent;
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
@@ -129,7 +121,7 @@ struct FlightRecorder {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
-    Event *start_, *end_;
+    c10d::Event *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -188,8 +180,8 @@ struct FlightRecorder {
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
-      Event* start,
-      Event* end,
+      c10::Event* start,
+      c10::Event* end,
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
@@ -202,7 +194,7 @@ struct FlightRecorder {
 
   void update_state(Entry& r);
 
-  std::vector<Entry> dump_entries();
+  virtual std::vector<Entry> dump_entries();
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
@@ -236,6 +228,55 @@ struct FlightRecorder {
   const std::map<std::string, std::map<std::string, std::string>>
   getPgStatusJson();
 
+  std::string get_dump_json(bool includeCollectives, bool onlyActive);
+
+  // dump all collectives + ncclDumpMap
+  std::string get_dump(
+      bool includeCollectives,
+      bool includeStackTraces,
+      bool onlyActive);
+
+  std::string dump_json(bool includeCollectives, bool onlyActive);
+
+  // dump all collectives + ncclDumpMap
+  std::string dump(
+      bool includeCollectives,
+      bool includeStackTraces,
+      bool onlyActive);
+};
+
+/* Helper used by work::getDuration() and flight recorder */
+float getDurationFromEvent(
+    c10::Event& ncclStartEvent,
+    c10::Event& ncclEndEvent);
+
+#ifdef USE_C10D_NCCL
+using Event = at::cuda::CUDAEvent;
+
+struct FlightRecorderNCCL : public FlightRecorder {
+  struct EntryNCCL : public Entry {
+    // we borrow pointers to start_ and end_ so we can query the state
+    // on reporting. However, once the event is completed, the call
+    // to `complete` will clear these.
+    Event *start_, *end_;
+  };
+  std::vector<EntryNCCL> entries_;
+
+  std::optional<size_t> record(
+      size_t pg_id,
+      const std::tuple<std::string, std::string>& pg_name,
+      size_t collective_seq_id,
+      size_t p2p_seq_id,
+      size_t op_id,
+      std::string profiling_name,
+      const std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& outputs,
+      Event* start,
+      Event* end,
+      std::chrono::milliseconds timeout_ms,
+      std::shared_ptr<ProcessGroupStatus> pg_status,
+      bool isP2P);
+
   std::string dump_json(
       const std::optional<std::unordered_map<
           std::string,
@@ -251,8 +292,20 @@ struct FlightRecorder {
       bool includeCollectives,
       bool includeStackTraces,
       bool onlyActive);
+
+  void FlightRecorder::update_state(Entry& r);
+  std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries();
+  void FlightRecorder::retire_id(
+      std::optional<size_t> id,
+      bool compute_duration);
+  const c10::List<c10::IValue> getCollectiveTrace(
+      bool includeStacktraces,
+      bool onlyActive);
 };
 
-} // namespace c10d
+/* Helper used by work::getDuration() and nccl flight recorder */
+float getDurationFromEvent(Event& ncclStartEvent, Event& ncclEndEvent);
 
-#endif // USE_C10D_NCCL
+#else // USE_C10D_NCCL
+
+} // namespace c10d

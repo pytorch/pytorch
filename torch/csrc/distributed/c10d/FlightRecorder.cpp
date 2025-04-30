@@ -1,7 +1,6 @@
-// TODO: Make Fligth Recorder device agnostic
 #ifdef USE_C10D_NCCL
-
 #include <cuda_runtime.h>
+#endif // USE_C10D_NCCL
 #include <nlohmann/json.hpp>
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -15,7 +14,9 @@
 #include <c10/util/WaitCounter.h>
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+#ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#endif // USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 namespace c10d {
@@ -249,8 +250,8 @@ std::optional<size_t> FlightRecorder::record(
     std::string profiling_name,
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs,
-    Event* start,
-    Event* end,
+    c10::Event* start,
+    c10::Event* end,
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
@@ -333,7 +334,15 @@ void FlightRecorder::record_accelerator_version(
   nccl_version_ = std::move(nccl_version);
 }
 
-void FlightRecorder::update_state(Entry& r) {
+float getDurationFromEvent(c10::Event& startEvent, c10::Event& endEvent) {
+  TORCH_CHECK(
+      endEvent.query(),
+      "getDuration can only be called after work is succeeded.")
+  return startEvent.elapsed_time(endEvent);
+}
+
+template <typename EntryT>
+void update_state_impl(EntryT& r) {
   if (r.start_ != nullptr) {
     bool started = r.start_->query();
     if (started && !r.time_discovered_started_) {
@@ -348,18 +357,26 @@ void FlightRecorder::update_state(Entry& r) {
   }
 }
 
-std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
-  std::lock_guard<std::mutex> guard(mutex_);
-  std::vector<Entry> result;
-  result.reserve(entries_.size());
+void FlightRecorder::update_state(Entry& r) {
+  update_state_impl(r);
+}
+
+template <typename EntryT>
+std::vector<EntryT> dump_entries_impl(
+    std::vector<EntryT> entries,
+    size_t next,
+    std::mutex mutex) {
+  std::lock_guard<std::mutex> guard(mutex);
+  std::vector<EntryT> result;
+  result.reserve(entries.size());
   result.insert(
       result.end(),
-      entries_.begin() + static_cast<std::ptrdiff_t>(next_),
-      entries_.end());
+      entries.begin() + static_cast<std::ptrdiff_t>(next),
+      entries.end());
   result.insert(
       result.end(),
-      entries_.begin(),
-      entries_.begin() + static_cast<std::ptrdiff_t>(next_));
+      entries.begin(),
+      entries.begin() + static_cast<std::ptrdiff_t>(next));
   // query any remaining events
   for (auto& r : result) {
     update_state(r);
@@ -368,16 +385,24 @@ std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
   return result;
 }
 
+std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
+  return dump_entries_impl<FlightRecorder::Entry>(entries_, next_, mutex_);
+}
+
 // Returns the entry with the given id, if it exists. Otherwise, returns
 // std::nullopt.
-std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
-    std::optional<size_t> id) {
-  if (!enabled_ || !id) {
+template <typename EntryT>
+std::optional<EntryT> FlightRecorder::getEntryImpl(
+    std::vector<EntryT> entries,
+    bool enabled,
+    std::mutex mutex,
+    size_t max_entries std::optional<size_t> id) {
+  if (!enabled || !id) {
     return std::nullopt;
   }
 
-  std::unique_lock<std::mutex> guard(mutex_);
-  Entry entry = entries_.at(*id % max_entries_);
+  std::unique_lock<std::mutex> guard(mutex);
+  EntryT entry = entries.at(*id % max_entries);
   if (entry.id_ == *id) {
     return entry;
   } else {
@@ -385,7 +410,20 @@ std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
   }
 }
 
-void FlightRecorder::retire_id(
+// Returns the entry with the given id, if it exists. Otherwise, returns
+// std::nullopt.
+std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
+    std::optional<size_t> id) {
+  return getEntryImpl<FlightRecorder::Entry>(
+      entries_, enabled_, mutex_, max_entries_, id);
+}
+
+template <typename EntryT, EventType>
+void retire_id_impl(
+    bool enabled,
+    std::vector<EntryT> entries,
+    size_t max_entries,
+    std::mutex mutex,
     std::optional<size_t> id,
     bool compute_duration) {
   if (!enabled_ || !id) {
@@ -393,13 +431,11 @@ void FlightRecorder::retire_id(
   }
 
   bool can_compute_duration = false;
-  Event* startEvent = nullptr;
-  Event* endEvent = nullptr;
+  EventType* startEvent = nullptr;
+  EventType* endEvent = nullptr;
   std::optional<float> duration = std::nullopt;
-
-  std::unique_lock<std::mutex> guard(mutex_);
-
-  Entry* entry = &entries_.at(*id % max_entries_);
+  std::unique_lock<std::mutex> guard(mutex);
+  EntryT* entry = &entries.at(*id % max_entries);
   if (entry->id_ == *id) {
     update_state(*entry);
 
@@ -422,7 +458,7 @@ void FlightRecorder::retire_id(
     guard.lock();
 
     // Refresh the entry pointer, see if the entry has been overwritten
-    entry = &entries_.at(*id % max_entries_);
+    entry = &entries.at(*id % max_entries);
     if (entry->id_ != *id) {
       LOG(INFO) << "retire_id abandoned for id " << *id
                 << ", event was overwritten while waiting to compute duration.";
@@ -434,12 +470,20 @@ void FlightRecorder::retire_id(
   }
 }
 
-const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
+void FlightRecorder::retire_id(
+    std::optional<size_t> id,
+    bool compute_duration) {
+  retire_id_impl<T, c10::Event>(
+      enabled_, entries_, max_entries_, mutex_, id, compute_duration);
+}
+
+template <typename T>
+const c10::List<c10::IValue> getCollectiveTraceImpl(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
   // Entries are returned in the order they were recorded
-  auto result = dump_entries();
+  auto result = static_cast<const T*>(this)->dump_entries();
   std::vector<torch::CapturedTraceback*> tracebacks;
   torch::SymbolizedTracebacks stracebacks;
   std::vector<c10::IValue> all_frames;
@@ -538,6 +582,12 @@ const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
   return entries;
 }
 
+const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
+    bool includeStacktraces,
+    bool onlyActive) {
+  return getCollectiveTraceImpl<FlightRecorder>(includeStacktraces, onlyActive);
+}
+
 const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgConfig() {
   auto pg_config = new_dict();
   for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
@@ -591,13 +641,9 @@ const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
   return result;
 }
 
-std::string FlightRecorder::dump_json(
-    const std::optional<std::unordered_map<
-        std::string,
-        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
-    bool includeCollectives,
-    bool onlyActive) {
-  using json = nlohmann::json;
+using json = nlohmann::json;
+template <typename T>
+json get_dump_json(bool includeCollectives, bool onlyActive) {
   json result;
   result[version_key_str] = version_val_str;
   result[nccl_version_key_str] = nccl_version_;
@@ -607,7 +653,7 @@ std::string FlightRecorder::dump_json(
   // collective trace
   if (includeCollectives) {
     std::list<json> entries;
-    for (auto& e : dump_entries()) {
+    for (auto& e : static_cast<const T*>(this)->dump_entries()) {
       json j;
       if (onlyActive && e.time_discovered_completed_.has_value()) {
         continue;
@@ -675,18 +721,17 @@ std::string FlightRecorder::dump_json(
       result[entries_key_str] = entries;
     }
   }
-
-  if (ncclDumpMap.has_value()) {
-    result[nccl_comm_key_str] = ncclDumpMap.value();
-  }
-
-  return result.dump();
+  return result;
 }
 
-std::string FlightRecorder::dump(
-    const std::optional<std::unordered_map<
-        std::string,
-        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+std::string FlightRecorder::dump_json(
+    bool includeCollectives,
+    bool onlyActive) {
+  return get_dump_json<FlightRecorder>(includeCollectives, onlyActive).dump();
+}
+
+template <typename T>
+c10::Dict<c10::IValue, c10::IValue> get_dump(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
@@ -701,8 +746,143 @@ std::string FlightRecorder::dump(
   // collective trace
   if (includeCollectives) {
     result.insert(
-        entries_key, getCollectiveTrace(includeStackTraces, onlyActive));
+        entries_key,
+        static_cast<const T*>(this)->getCollectiveTrace(
+            includeStackTraces, onlyActive));
   }
+  // convert ncclDumpMap into a dictionary
+  auto per_comm_dict = new_dict();
+  if (ncclDumpMap.has_value()) {
+    for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
+      auto inner_dict = new_dict();
+      for (const auto& [key, value] : ncclDump) {
+        inner_dict.insert(key, value);
+      }
+      per_comm_dict.insert(ncclId, inner_dict);
+    }
+  }
+  return result;
+}
+
+std::string FlightRecorder::dump(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return pickle_str(get_dump<FlightRecorder>(
+      includeCollectives, includeStackTraces, onlyActive));
+}
+
+std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
+std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
+
+#ifdef USE_C10D_NCCL
+
+float getDurationFromEvent(Event& ncclStartEvent, Event& ncclEndEvent) {
+  TORCH_CHECK(
+      ncclEndEvent.query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvent.elapsed_time(ncclEndEvent);
+}
+
+std::optional<size_t> FlightRecorderNCCL::record(
+    size_t pg_id,
+    const std::tuple<std::string, std::string>& pg_name,
+    size_t collective_seq_id,
+    size_t p2p_seq_id,
+    size_t op_id,
+    std::string profiling_name,
+    const std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& outputs,
+    Event* start,
+    Event* end,
+    std::chrono::milliseconds timeout_ms,
+    std::shared_ptr<ProcessGroupStatus> pg_status,
+    bool isP2P) {
+  if (!enabled_) {
+    return std::nullopt;
+  }
+  if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
+    // Current pg_status is not in FR.
+    all_pg_status_[pg_id] = std::move(pg_status);
+  }
+  auto traceback =
+      torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
+  std::lock_guard<std::mutex> guard(mutex_);
+
+  auto te = EntryNCCL{
+      id_,
+      pg_id,
+      pg_name,
+      collective_seq_id,
+      p2p_seq_id,
+      op_id,
+      std::move(profiling_name),
+      std::move(traceback),
+      start,
+      end,
+      c10::getTime(),
+      timeout_ms.count(),
+      isP2P,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      {},
+      {},
+      {},
+      {},
+      {},
+      false};
+
+  for (const auto& input : inputs) {
+    c10::IntArrayRef sizes = input.sizes();
+    te.input_dtypes_.push_back(input.dtype().toScalarType());
+    te.input_dims_.push_back(static_cast<int64_t>(sizes.size()));
+    te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
+  }
+
+  for (const auto& output : outputs) {
+    c10::IntArrayRef sizes = output.sizes();
+    te.output_dtypes_.push_back(output.dtype().toScalarType());
+    te.output_dims_.push_back(static_cast<int64_t>(sizes.size()));
+    te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
+  }
+
+  if (entries_.size() < max_entries_) {
+    entries_.emplace_back(std::move(te));
+  } else {
+    entries_[next_++] = std::move(te);
+    if (next_ == max_entries_) {
+      next_ = 0;
+    }
+  }
+  return id_++;
+}
+
+std::string FlightRecorderNCCL::dump_json(
+    const std::optional<std::unordered_map<
+        std::string,
+        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+    bool includeCollectives,
+    bool onlyActive) {
+  auto result = FlightRecorder::get_dump_json<FlightRecorderNCCL>(
+      includeCollectives, onlyActive);
+
+  if (ncclDumpMap.has_value()) {
+    result[nccl_comm_key_str] = ncclDumpMap.value();
+  }
+
+  return result.dump();
+}
+
+std::string FlightRecorderNCCL::dump(
+    const std::optional<std::unordered_map<
+        std::string,
+        std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  auto result = get_dump<FlightRecorderNCCL>(
+      includeCollectives, includeStackTraces, onlyActive);
   // convert ncclDumpMap into a dictionary
   auto per_comm_dict = new_dict();
   if (ncclDumpMap.has_value()) {
@@ -720,18 +900,26 @@ std::string FlightRecorder::dump(
   return pickle_str(result);
 }
 
-std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
-std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
-
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent) {
-  TORCH_CHECK(
-      ncclEndEvent.query(),
-      "getDuration can only be called after work is succeeded.")
-  return ncclStartEvent.elapsed_time(ncclEndEvent);
+void FlightRecorderNCCL::update_state(Entry& r) {
+  update_state_impl(r);
 }
 
-} // namespace c10d
+std::vector<FlightRecorderNCCL::EntryNCCL> FlightRecorderNCCL::dump_entries() {
+  return dump_entries_impl<FlightRecorder::EntryNCCL>();
+}
 
+const c10::List<c10::IValue> FlightRecorderNCCL::getCollectiveTrace(
+    bool includeStacktraces,
+    bool onlyActive) {
+  return getCollectiveTraceImpl<FlightRecorderNCCL>(
+      includeStacktraces, onlyActive);
+}
+
+void FlightRecorderNCCL::retire_id(
+    std::optional<size_t> id,
+    bool compute_duration) {
+  retire_id_impl<T, c10::Event>(
+      enabled_, entries_, max_entries_, mutex_, id, compute_duration);
+}
 #endif // USE_C10D_NCCL
+} // namespace c10d
