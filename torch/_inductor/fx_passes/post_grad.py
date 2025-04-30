@@ -1117,19 +1117,23 @@ def decompose_auto_functionalized(graph):
             assert len(args) == 1
             mutable_op = args[0]
             return auto_functionalized_v2_dense(
-                mutable_op, only_clone_these_bases, **kwargs
+                mutable_op, only_clone_these_bases, _inline_epilogue=True, **kwargs
             )
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
 
-    # We need to remove the get_attr registered for _constant_schema
-    # when auto_functionalize a hop.
+    # We need to remove the get_attr registered for _constant_schema and the
+    # auto_functioanlized's graph module (it's replaced with original ) when auto_functionalize a hop.
     _to_remove = []
     for node in graph.nodes:
         if node.op == "get_attr" and len(node.users) == 0:
             _to_remove.append(node)
+            if isinstance(
+                getattr(graph.owning_module, node.target), torch.fx.GraphModule
+            ):
+                delattr(graph.owning_module, node.target)
     for node in _to_remove:
         graph.erase_node(node)
 

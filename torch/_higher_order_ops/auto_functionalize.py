@@ -558,6 +558,26 @@ def do_auto_functionalize_v2(
         if isinstance(op, HigherOrderOperator)
         else op._schema
     )
+
+    def _functionalize_callable(arg: Any):
+        if callable(arg):
+
+            def functional_fn(*args, **kwargs):
+                return tuple(
+                    pytree.tree_leaves(
+                        ctx.functionalize(arg, return_mutated_inputs=True)(
+                            *args, **kwargs
+                        )
+                    )
+                )
+
+            return torch._higher_order_ops.base_hop.FunctionWithNoFreeVars(
+                functional_fn
+            )
+        return arg
+
+    args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
+
     for idx, arg in enumerate(schema.arguments):
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
         if arg.name in kwargs:
@@ -654,10 +674,15 @@ def do_auto_functionalize_v2(
     )
 
     if isinstance(op, HigherOrderOperator):
+        # Since we functionalize the hops callable inputs by returninig
+        # the mutated inputs, we need to slice it to get the actual_output
+        # as they're redundant with unwrapped_mutable_out.
         assert (
             len(schema.returns) > 0
         ), f"hop is expected to return at least on output {schema}."
-        assert len(unwrapped_actual_out) == len(schema.returns)
+        num_mutated_inputs = sum(1 for arg in schema.arguments if arg.is_write)
+        assert len(unwrapped_actual_out) == len(schema.returns) + num_mutated_inputs
+        unwrapped_actual_out = unwrapped_actual_out[: len(schema.returns)]
     else:
         if len(schema.returns) == 0:
             assert unwrapped_actual_out[0] is None
@@ -777,6 +802,7 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 def auto_functionalized_v2_dense(
     _mutable_op: Union[OpOverload, HigherOrderOperator],
     _only_clone_these_bases: Optional[tuple[int, ...]] = None,
+    _inline_epilogue: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     _all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
@@ -795,7 +821,12 @@ def auto_functionalized_v2_dense(
         _only_clone_these_bases,
     )
 
-    out = _invoke_op_with_kwargs_and_schema(_mutable_op, op_kwargs_new, schema)
+    # _inline_epilogue is only be set to True when call the dense kernel in decompose_auto_functionalized pass
+    # When set to True, the subgraph will contain nodes that in-place copy inputs' updated values back to placeholders.
+    # It should be set to False in all other cases, to avoid introducing mutation into the subgraph.
+    out = _invoke_op_with_kwargs_and_schema(
+        _mutable_op, op_kwargs_new, schema, _inline_epilogue
+    )
 
     if isinstance(out, tuple):
         return (*out, *all_bases_new)  # type: ignore[return-value]
@@ -803,10 +834,45 @@ def auto_functionalized_v2_dense(
         return (out, *all_bases_new)  # type: ignore[return-value]
 
 
+# TODO: can probably make it part of functionalzation key implementation.
+# The logic of inlining the epilogue into subgraph varies from one hop to the other.
+# For example, in cond, we need to merge and inline into two subgraphs but for invoke_subgraph
+# we only need to inline one graph.
+def _call_hop_with_epilogue_inlined(
+    hop: HigherOrderOperator, schema: torch.FunctionSchema, args: Any, kwargs: Any
+):
+    if isinstance(hop, torch._higher_order_ops.base_hop.BaseHOP):
+
+        def _normalize_args(subgraph, *operands, **kwargs):
+            return subgraph, operands, kwargs
+
+        subgraph, operands, kwargs = _normalize_args(*args, **kwargs)
+        assert callable(subgraph)
+
+        def wrapped_subgraph(*operands):
+            flat_outputs = subgraph(*operands)
+
+            # execute the epilogue
+            mutated_args = []
+            for arg, arg_schema in zip(operands, schema.arguments[1:]):
+                if arg_schema.is_write:
+                    mutated_args.append(arg)
+            inputs_after_mutate = flat_outputs[-len(mutated_args) :]
+            for inp, after_mutate in zip(mutated_args, inputs_after_mutate):
+                inp.copy_(after_mutate)
+
+            return flat_outputs
+
+        return hop(wrapped_subgraph, *operands, **kwargs)
+    else:
+        raise NotImplementedError(f"call {hop} with epilogue is not implemented")
+
+
 def _invoke_op_with_kwargs_and_schema(
     op: Union[OpOverload, HigherOrderOperator],
     kwargs: dict[str, Any],
     schema: torch._C.FunctionSchema,
+    inline_epilogue=False,
 ):
     if isinstance(op, OpOverload):
         return op(**kwargs)
@@ -820,6 +886,8 @@ def _invoke_op_with_kwargs_and_schema(
             bound_args.append(val)
         else:
             bound_kwargs[arg.name] = val
+    if inline_epilogue:
+        return _call_hop_with_epilogue_inlined(op, schema, bound_args, bound_kwargs)
     return op(*bound_args, **bound_kwargs)
 
 
@@ -874,7 +942,7 @@ def auto_functionalized_v2_fake(
 ) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_v2_dense(
-            _mutable_op, _only_clone_these_bases=None, **kwargs
+            _mutable_op, _only_clone_these_bases=None, _inline_epilogue=False, **kwargs
         )
         return result
 

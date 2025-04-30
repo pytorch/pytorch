@@ -1067,7 +1067,7 @@ class ForeachTests(TestCase):
         # will gets copied if they're used downstream.
         with self.assertRaisesRegex(
             torch._inductor.exc.InductorError,
-            "Buffer mutation detected during lowering of aten.add_.Tensor",
+            "Buffer mutation detected during lowering of aten.copy_.default",
         ):
             with mock.patch(
                 "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
