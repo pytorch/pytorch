@@ -30,7 +30,7 @@ from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
-    to_int,
+    unwrap_maybe_dynamic_int,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
@@ -326,12 +326,12 @@ class AutogradCompilerInstance:
 
         # We want to mark every size as dynamic, but since there's no way to
         # mark a primitive `int` as dynamic, we need to wrap it in a tensor.
-        # In the graph, we unwrap it with `to_int` back into a primitive.
+        # In the graph, we unwrap it with `unwrap_maybe_dynamic_int` back into a primitive.
         proxies = [self.sizes_proxy[i] for i in range(len(sizes))]  # type: ignore[index]
         for i, symint in enumerate(sizes):
             proxies[i] = self.fx_tracer.create_proxy(
                 "call_function",
-                to_int,
+                unwrap_maybe_dynamic_int,
                 (proxies[i],),
                 {},
             )
@@ -983,7 +983,7 @@ class AutogradCompilerInstance:
                     # can't create negative size
                     if sizes[idx] > 0:
                         sizes[idx] = torch.empty(0, sizes[idx])
-                        torch._dynamo.maybe_mark_dynamic(sizes[idx], 1)
+                        torch._dynamo.maybe_mark_dynamic(sizes[idx], 0)
                 if self.nan_checker:
                     self.nan_checker.prep_with_inputs(inputs)
 
