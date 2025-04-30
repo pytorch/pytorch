@@ -10,8 +10,13 @@ fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
-get_conda_version() {
-  as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}'
+get_version() {
+  package_version=$(as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}')
+  if [ -z "${package_version}" ]; then
+    # Get pip version
+    package_version=$(conda_run pip list | grep -w $* | head -n 1 | awk '{print $2}')
+  fi
+  echo "${package_version}"
 }
 
 conda_reinstall() {
@@ -93,7 +98,7 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # causes inconsistent environment.  Without this, conda will attempt to install the
   # latest numpy version, which fails ASAN tests with the following import error: Numba
   # needs NumPy 1.20 or less.
-  pip_install cmake="${CMAKE_VERSION}"
+  pip_install cmake=="${CMAKE_VERSION}"
   # Note that we install numpy with pip as conda might not have the version we want
   pip_install --force-reinstall numpy=="${NUMPY_VERSION}"
 fi
