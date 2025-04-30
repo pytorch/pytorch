@@ -930,6 +930,15 @@ def check_cpu_supported():
     return supported
 
 
+def contiguous_last_dim(x):
+    """Ensure that realized IR node has a contigous stride in the last dimension."""
+    strides = x.maybe_get_stride()
+    if strides and strides[-1] != 1:
+        contiguous_stride_order = list(reversed(range(len(x.get_size()))))
+        return ExternKernel.require_stride_order(x, contiguous_stride_order)
+    return x
+
+
 def lower_cpu(
     query,
     key,
@@ -1091,6 +1100,9 @@ def lower_cpu(
     for item in buffer_list:
         if isinstance(item, TensorBox):
             fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
+
+    # CPU kernel requires last dim to be contiguous
+    query, key, value = map(contiguous_last_dim, [query, key, value])
 
     (
         query,
@@ -1258,7 +1270,6 @@ def set_head_dim_values(
     )
 
 
-# TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(
     query,
@@ -1413,11 +1424,9 @@ def flex_attention(
     else:
         kernel_options.setdefault("IS_DIVISIBLE", True)
 
-    # Reuse query strides for output layout despite different last dimension.
-    # This works because only the last dim differs and we check it is contiguous.
+    # NB it is okay that the v_head_dim is different
+    # We are using these to match fill order of the output.
     q_strides = query.get_stride()
-    assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
-
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
     out_strides = infer_dense_strides(out_size, q_strides)
@@ -1481,6 +1490,9 @@ def flex_attention(
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
     original_kernel_options = kernel_options.copy()
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             if len(configs) == 1:
@@ -1502,6 +1514,12 @@ def flex_attention(
                 cur_kernel_options.pop(k)
         cur_kernel_options.setdefault("num_stages", num_stages)
         cur_kernel_options.setdefault("num_warps", num_warps)
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
+
         cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
@@ -2557,8 +2575,11 @@ def flex_attention_backward(*args, **kwargs):
     choices: list[Any] = []
     configs: list[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
     if config.max_autotune:
         num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]
+
         configs.extend(
             [
                 (BLOCK1, BLOCK2, w, s)
@@ -2570,7 +2591,12 @@ def flex_attention_backward(*args, **kwargs):
             ]
         )
     original_kernel_options = kernel_options.copy()
-    for BLOCK1, BLOCK2, num_warps, num_stages in configs:
+    for (
+        BLOCK1,
+        BLOCK2,
+        num_warps,
+        num_stages,
+    ) in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
             or SPARSE_Q_BLOCK_SIZE % BLOCK1 != 0
@@ -2591,6 +2617,12 @@ def flex_attention_backward(*args, **kwargs):
                 cur_kernel_options.pop(k)
         cur_kernel_options.setdefault("num_warps", num_warps)
         cur_kernel_options.setdefault("num_stages", num_stages)
+
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
 
         cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
         cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
@@ -2672,7 +2704,7 @@ def flex_attention_backward(*args, **kwargs):
     broadcasted_grad_key = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
-        inputs_for_autotuning,
+        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
         layout_broadcasted_k,
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
