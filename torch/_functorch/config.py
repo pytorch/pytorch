@@ -41,7 +41,7 @@ treat_parameters_as_free_to_save = True
 # Applies CSE to the graph before partitioning
 cse = True
 
-from torch._inductor.config import is_fbcode
+from torch._environment import is_fbcode
 
 
 enable_autograd_cache: bool = Config(
@@ -258,6 +258,17 @@ unsafe_allow_optimization_of_collectives = False
 # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
 # TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
 disable_guess_zero_tangent_for_mutated_input_subclass = False
+
+# See Note [Tangents memory format]
+# By default tangents strideness is guessed to be contiguous,
+# At runtime non contiguous tangents will be coerced to be contiguous.
+# This config changes this guess for tangents strides to be the same as outputs.
+# TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
+guess_tangent_strides_as_outputs = False
+
+# This is a temporary config to ensure all ranks take the same decision in the partitioner
+# it will untimately be removed once we share size_hints across ranks through compiler collectives
+_broadcast_rank0_decision = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
