@@ -7,8 +7,6 @@
 #include <fmha_bwd.hpp>
 #include <mask.hpp>
 
-#include <iostream>
-
 namespace pytorch_flash {
 
 fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
@@ -45,10 +43,10 @@ aiter::mha_bwd_traits get_mha_bwd_traits(fmha_bwd_traits t, mask_info mask)
                           t.has_dropout,
                           t.is_store_randval,
                           t.is_deterministic,
-                          true,                 // use_ext_asm
-                          false,                // is_v3_atomic_fp32,
+                          true,                  // use_ext_asm
+                          true,                  // is_v3_atomic_fp32,
                           1);                    // how_v3_bf16_cvt
-    
+
 }
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
@@ -399,15 +397,6 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     if (seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};
         dq.zero_(); // ck use atomic operation on dq
-        auto traits =
-            get_ck_fmha_bwd_traits(mask,
-                                   q_dtype_str,
-                                   head_size_8x,
-                                   is_dropout,
-                                   attn_bias_.has_value(),
-                                   deterministic,
-                                   bias_requires_grad);
-
 
         auto args =
             get_ck_fmha_bwd_args(
@@ -435,12 +424,23 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-        std::cout << "ABOUT TO CALL V3" << std::endl;
-        auto new_traits = get_mha_bwd_traits(traits, mask);
-        float test = aiter::fmha_bwd_v3(new_traits, args, stream_config);
-        std::cout << "BACK FROM V3" << std::endl;
 
-        float t = fmha_bwd(traits, args, stream_config);
+        float t = aiter::mha_bwd(args,
+                                 stream_config,
+                                 q_dtype_str,
+                                 false,             // is_group_mode
+                                 mask,
+                                 attn_bias_.has_value() ? bias_enum::elementwise_bias : bias_enum::no_bias,
+                                 bias_requires_grad,
+                                 false,             // is_store_randval
+                                 deterministic,
+                                 true,              // use_ext_asm
+                                 true,             // is_v3_atomic_fp32
+                                 1);                // how_v3_bf16_cvt
+
+
+
+
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.

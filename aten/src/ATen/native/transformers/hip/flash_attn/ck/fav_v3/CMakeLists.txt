@@ -7,7 +7,7 @@ execute_process(
 )
 
 if(ret AND NOT ret EQUAL 0)
-    message( FATAL_ERROR "Faled to generate FAv3 CK Kernels")
+    message( FATAL_ERROR "Failed to generate FAv3 CK Kernels")
 endif()
 
 execute_process(
