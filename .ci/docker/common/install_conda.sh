@@ -68,7 +68,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   if [[ $(uname -m) == "aarch64" ]]; then
     conda_install "openblas==0.3.29=*openmp*"
   else
-    conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
+    pip_install "mkl=2021.4.0" "mkl-include=2021.4.0"
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -80,7 +80,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # following builds that we know should use conda. Specifically, Ubuntu bionic
   # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
   if [ -n "${CONDA_CMAKE}" ]; then
-    conda_install cmake
+    pip_install cmake
   fi
 
   # Magma package names are concatenation of CUDA major and minor ignoring revision
