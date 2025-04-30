@@ -1130,7 +1130,9 @@ class TestMaxAutotune(TestCase):
 
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
-    @unittest.skipIf(config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
     @parametrize("dynamic", (True, False))
     @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
     @config.patch(
