@@ -86,8 +86,20 @@ class CUDAKernel(Kernel):
         matches = [
             arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
         ]
-        assert len(matches) <= 1, matches
-        return None if len(matches) == 0 else matches[0]
+        if len(matches) >= 1:
+            # Verify all matches have the same node, attribute, and dimension
+            # And if they come from the same node, whichever symbol we use is fine.
+            # if in runtime the logic changes, this would trigger guard
+            first_match = matches[0]
+            if not all(
+                match.node == first_match.node
+                and match.attr == first_match.attr
+                and match.dim == first_match.dim
+                for match in matches
+            ):
+                raise AssertionError("All matching layout args should be identical")
+            return first_match
+        return None
 
     def add_layout_arg(
         self, symbol: ValidLayoutSymbols, node: IRNode, attr: ValidLayoutAttrs, dim: int
@@ -211,6 +223,7 @@ class CUDATemplateKernel(CUDAKernel):
         outputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
+        dtype_to_cpp_type: Optional[dict[torch_dtype, str]] = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -248,7 +261,7 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(dtype_to_cpp_type)
 
         self.init_layout_args()
         size_args = [
@@ -341,7 +354,6 @@ class CUDATemplateKernel(CUDAKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
@@ -496,7 +508,9 @@ class CUDATemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[
+            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+        ],  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)

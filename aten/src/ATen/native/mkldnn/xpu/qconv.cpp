@@ -1,14 +1,25 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarType.h>
 #include <torch/library.h>
-
-#include <iostream>
 
 using namespace at::native::onednn;
 namespace at::native::xpu {
 
-at::Tensor qconv_prepack_xpu(
+static inline c10::ScalarType qconv_decide_out_dtype(
+    const at::Tensor& act,
+    const std::optional<c10::ScalarType> output_dtype) {
+  bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
+  bool bfloat16_output =
+      output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  auto dst_dtype = fp32_output
+      ? c10::kFloat
+      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+  return dst_dtype;
+}
+
+static at::Tensor qconv_prepack_xpu(
     at::Tensor weight,
     at::Tensor weight_scales,
     double input_scale,
@@ -75,8 +86,9 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
-    Tensor output = at::empty(
-        dst_tz, act.options().dtype(output_dtype).memory_format(mfmt));
+    auto dst_dtype = qconv_decide_out_dtype(act, output_dtype);
+    Tensor output =
+        at::empty(dst_tz, act.options().dtype(dst_dtype).memory_format(mfmt));
 
     return quantized_convolution(
         act,
@@ -100,6 +112,44 @@ class QConvoneDNNXPU final {
         /*output_dtype*/ output_dtype,
         /*binary_attr*/ std::nullopt,
         /*binary_alpha*/ std::nullopt,
+        /*unary_attr*/ attr,
+        /*unary_scalars*/ scalars,
+        /*unary_algorithm*/ algorithm);
+  }
+
+  static at::Tensor run_pointwise_tensor(
+      at::Tensor act,
+      at::Tensor act_scale,
+      at::Tensor act_zero_point,
+      at::Tensor weight,
+      at::Tensor weight_scales,
+      at::Tensor weight_zero_points,
+      std::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point,
+      std::optional<c10::ScalarType> output_dtype,
+      std::string_view attr,
+      torch::List<std::optional<at::Scalar>> scalars,
+      std::optional<std::string_view> algorithm) {
+    return run_pointwise(
+        act,
+        act_scale.item().toDouble(),
+        act_zero_point.item().toLong(),
+        weight,
+        weight_scales,
+        weight_zero_points,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        output_scale,
+        output_zero_point,
+        output_dtype,
         /*unary_attr*/ attr,
         /*unary_scalars*/ scalars,
         /*unary_algorithm*/ algorithm);
@@ -155,11 +205,11 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
+    auto dst_dtype = qconv_decide_out_dtype(act, output_dtype);
     bool has_accum_postop_sum = binary_attr == "sum";
     Tensor output = has_accum_postop_sum
         ? accum
-        : at::empty(
-              dst_tz, act.options().dtype(output_dtype).memory_format(mfmt));
+        : at::empty(dst_tz, act.options().dtype(dst_dtype).memory_format(mfmt));
 
     output = quantized_convolution(
         act,
@@ -211,6 +261,12 @@ TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"),
       QConvoneDNNXPU::run_pointwise_binary);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv_pointwise"),
+      QConvoneDNNXPU::run_pointwise);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv_pointwise.tensor"),
+      QConvoneDNNXPU::run_pointwise_tensor);
 }
 
 } // namespace at::native::xpu

@@ -285,7 +285,7 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
+static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -1639,7 +1639,7 @@ TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tens
 }
 
 template <typename scalar_t, bool is_bmm>
-inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
+static inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
   int64_t bs = result.size(0);
   int64_t is = result.size(1);
   int64_t js = result.size(2);
@@ -2652,7 +2652,7 @@ Tensor mexp_impl(
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
     // and better performance overall (benchmarked).
     const auto norm_cpu = (a.device().type() == at::kCUDA)
       ? norm.to(at::kCPU) : norm;

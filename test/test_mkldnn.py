@@ -4,6 +4,7 @@ import copy
 import itertools
 import functools
 import unittest
+import warnings
 from contextlib import nullcontext
 
 try:
@@ -1611,6 +1612,22 @@ class TestMkldnn(TestCase):
                 ((1, 300, 1), (1, 1, 300), torch.bmm),
             ]:
                 common(self, shape1, shape2, op, dtype)
+
+    def test_mkldnn_setflags_nowarn(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/149829
+        with warnings.catch_warnings(record=True) as w:
+            rc = torch.backends.mkldnn.set_flags()
+            # torch.backends.mkldnn. returns previously set flags
+            # That one should be able to set back without cauinsg a warning
+            torch.backends.mkldnn.set_flags(*rc)
+        # Above should trigger no warnings regardless of configuration
+        self.assertEqual(len(w), 0)
+
+    def test_mkldnn_error_on_zero_stride(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/149274
+        x = torch.rand(1, 2, 3, 3).to_mkldnn()
+        with self.assertRaises(ValueError):
+            torch.mkldnn_max_pool2d(x, kernel_size=3, stride=0)
 
 
 instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))

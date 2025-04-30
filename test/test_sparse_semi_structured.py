@@ -859,7 +859,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 
     def tearDown(self):
         SparseSemiStructuredTensor._FORCE_CUTLASS = False
-        super(self.__class__, self).tearDown()
+        super().tearDown()
 
     @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @inference_dtypes
@@ -1223,12 +1223,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # CUDA 11.8 has cuSPARSELt v0.4.0 support
         if version == (11, 8):
             assert torch.backends.cusparselt.version() == 400
-        # PyTorch CUDA 12.4 using cuSPARSELt v0.6.2
+        # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
         elif version >= (12, 4):
-            assert torch.backends.cusparselt.version() == 602
-        # PyTorch CUDA 12.6+ using cuSPARSELt v0.6.3
-        elif version >= (12, 6):
-            assert torch.backends.cusparselt.version() == 603
+            assert torch.backends.cusparselt.version() >= 602
         else:
             assert torch.backends.cusparselt.version() is None
 

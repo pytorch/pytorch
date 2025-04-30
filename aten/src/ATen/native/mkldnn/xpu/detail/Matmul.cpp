@@ -30,9 +30,8 @@ sycl::event matmul(
       "oneDNN input matrixes must have the same ranks");
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
-  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = mat1;
   at::Tensor m2 = mat2;
@@ -42,7 +41,7 @@ sycl::event matmul(
   m1 = is_onednn_matmul_strides(m1) ? m1 : m1.contiguous();
   m2 = is_onednn_matmul_strides(m2) ? m2 : m2.contiguous();
   at::Tensor dst =
-      is_onednn_matmul_strides(result, true) ? result : result.contiguous();
+      is_onednn_matmul_strides(result) ? result : result.contiguous();
 
   int64_t m = dst.size(-2);
   int64_t n = dst.size(-1);
