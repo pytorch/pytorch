@@ -266,6 +266,10 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
 guess_tangent_strides_as_outputs = False
 
+# This is a temporary config to ensure all ranks take the same decision in the partitioner
+# it will untimately be removed once we share size_hints across ranks through compiler collectives
+_broadcast_rank0_decision = False
+
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.
 # "donated" buffers are invisible to the user, they are intermediates of the forward graph.
 # Applying saved tensors hooks for memory optimizations only for intermediates
