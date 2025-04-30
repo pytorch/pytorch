@@ -4,10 +4,12 @@ from __future__ import annotations
 import io
 import logging
 import os
-from typing import Any, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._inductor.config
 import torch.fx
+
+from .standalone_compile import CompiledArtifact  # noqa: TC001
 
 
 if TYPE_CHECKING:
@@ -20,6 +22,7 @@ __all__ = [
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
+    "standalone_compile",
 ]
 
 
@@ -283,12 +286,14 @@ def aot_compile(
     flat_example_inputs, options = _aoti_flatten_inputs(
         gm, args, kwargs, options=options
     )
+    from torch._export.utils import _compiling_state_context
 
-    return compile_fx_aot(
-        gm,
-        flat_example_inputs,  # type: ignore[arg-type]
-        config_patches=options,
-    )
+    with _compiling_state_context():
+        return compile_fx_aot(
+            gm,
+            flat_example_inputs,  # type: ignore[arg-type]
+            config_patches=options,
+        )
 
 
 def list_mode_options(
@@ -356,3 +361,46 @@ def cudagraph_mark_step_begin():
     from .cudagraph_trees import mark_step_begin
 
     mark_step_begin()
+
+
+def standalone_compile(
+    gm: torch.fx.GraphModule,
+    example_inputs: list[InputType],
+    *,
+    dynamic_shapes: Literal[
+        "from_example_inputs", "from_tracing_context", "from_graph"
+    ] = "from_graph",
+    options: Optional[dict[str, Any]] = None,
+) -> CompiledArtifact:
+    """
+    Precompilation API for inductor.
+
+    .. code-block:: python
+
+        compiled_artifact = torch._inductor.standalone_compile(gm, args)
+        compiled_artifact.save(path=path, format="binary")
+
+        # Later on a new process
+        loaded = torch._inductor.CompiledArtifact.load(path=path, format="binary")
+        compiled_out = loaded(*args)
+
+    Args:
+        gm: Graph Module
+        example_inputs: Inputs for the graph module
+        dynamic_shapes: If "from_graph" (default), we will use the dynamic
+            shapes in the passed-in graph module.
+            If "from_tracing_context", we use the dynamic shape info in the
+            ambient tracing context.
+            If "from_example_inputs", we will specialize the graph on the
+            example_inputs.
+        options: Inductor compilation options
+
+    Returns:
+        CompiledArtifact that can be saved to disk or invoked directly.
+    """
+    from .standalone_compile import standalone_compile
+
+    options = options if options else {}
+    return standalone_compile(
+        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options
+    )

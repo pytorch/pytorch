@@ -235,25 +235,18 @@ class TuningProcessPool:
     """
 
     def __init__(self) -> None:
-        self.processes: Optional[queue.Queue[TuningProcess]] = None
-        self.executor: Optional[ThreadPoolExecutor] = None
-
-    def initialize(self) -> None:
         """
         Start the child processes.
         """
-        assert (self.processes is None) == (self.executor is None)
-        if self.processes is not None:
-            return
-
         devices = self.get_device_list()
         autotuning_log.debug("Sub-process autotune device list: %s", devices)
 
         # Launch the child processes.
-        self.processes = queue.Queue()
-        for device in devices:
-            p = TuningProcess(device=device)
-            self.processes.put(p)
+        self.processes = [TuningProcess(device=device) for device in devices]
+
+        self.process_queue: queue.Queue[TuningProcess] = queue.Queue()
+        for p in self.processes:
+            self.process_queue.put(p)
 
         # Use a thread pool to manage distributing work to the subprocesses.
         # Threads block on an available process, so it makes sense to match
@@ -285,16 +278,12 @@ class TuningProcessPool:
         """
         Signal all child processes to exit.
         """
-        if self.executor is not None:
-            self.executor.shutdown()
-            self.executor = None
+        self.executor.shutdown()
 
-        if self.processes is not None:
-            for p in self.processes.queue:
-                p.shutdown(wait=False)
-            for p in self.processes.queue:
-                p.wait()
-            self.processes = None
+        for p in self.processes:
+            p.shutdown(wait=False)
+        for p in self.processes:
+            p.wait()
 
     def target(self, choice: TritonTemplateCaller) -> float:
         """
@@ -303,9 +292,8 @@ class TuningProcessPool:
         the TuningProcess to the queue.
         """
         assert choice.bmreq is not None
-        assert self.processes is not None
 
-        process = self.processes.get()
+        process = self.process_queue.get()
         process.put(choice.bmreq.benchmark)
         try:
             return process.get(
@@ -326,7 +314,7 @@ class TuningProcessPool:
             # Set to INF so this choice will be ignored
             return float("inf")
         finally:
-            self.processes.put(process)
+            self.process_queue.put(process)
 
     def benchmark(
         self,
@@ -335,18 +323,12 @@ class TuningProcessPool:
         """
         Benchmark each choice in a separate process.
         """
-        assert self.processes is not None, "Tuning process pool is not initialized"
-        assert self.executor is not None
 
         # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
         results = dict(zip(choices, self.executor.map(self.target, choices)))
 
         return results
-
-
-tuning_pool = TuningProcessPool()
-atexit.register(tuning_pool.shutdown)
 
 
 LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
@@ -596,6 +578,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         module_cache_key: str,
         num_stages: int,
         num_warps: int,
+        num_consumer_groups: int = 0,
+        num_buffers_warp_spec: int = 0,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
         waves_per_eu: int = 0,  # only used for hip to schedule waves per execution unit
         kpack: int = 0,  # ROCm specific gemm paramete
@@ -606,6 +590,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.module_cache_key = module_cache_key
         self.num_stages = num_stages
         self.num_warps = num_warps
+        self.num_consumer_groups = num_consumer_groups
+        self.num_buffers_warp_spec = num_buffers_warp_spec
         self.matrix_instr_nonkdim = matrix_instr_nonkdim
         self.waves_per_eu = waves_per_eu
         self.kpack = kpack
@@ -893,10 +879,17 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
         return f"{self.kernel_name=}"
 
 
+@functools.lru_cache(None)
+def get_tuning_process_pool() -> TuningProcessPool:
+    pool = TuningProcessPool()
+    atexit.register(pool.shutdown)
+    return pool
+
+
 def benchmark_in_sub_process(
     choices: list[TritonTemplateCaller],
 ) -> dict[TritonTemplateCaller, float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).
     """
-    return tuning_pool.benchmark(choices)
+    return get_tuning_process_pool().benchmark(choices)

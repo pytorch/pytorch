@@ -85,12 +85,16 @@ class StaticallyLaunchedCudaKernel:
     def load_kernel(self, device: int) -> None:
         from torch._C import _StaticCudaLauncher
 
-        assert hasattr(self, "cubin_path")
         if self.function is not None:
             return
+
+        assert hasattr(self, "cubin_path")
+        assert self.cubin_path is not None
         (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
             self.cubin_path, self.name, self.shared, device
         )
+        # Don't need the cubin path anymore now that we've loaded
+        self.cubin_path = None
 
     @staticmethod
     @functools.lru_cache
@@ -160,6 +164,15 @@ class StaticallyLaunchedCudaKernel:
             else:
                 params.append(self.extract_type(ty))
         return "".join(params)
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Remove objects that are no longer valid for pickling
+        state = self.__dict__.copy()
+        state["function"] = None
+        # Cubin paths aren't consistent across processes, so we clear
+        # and reload them.
+        state["cubin_path"] = None
+        return state
 
     def run(
         self,

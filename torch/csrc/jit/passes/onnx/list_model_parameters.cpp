@@ -22,7 +22,7 @@ using namespace ::c10::onnx;
 //   ...
 //   %weight = prim::GetAttr[name="scale"](%B)
 //   ...
-std::deque<std::string> findSubModuleAttr(
+static std::deque<std::string> findSubModuleAttr(
     Value* input,
     std::string& name,
     Module& attrModule,
@@ -48,7 +48,10 @@ std::deque<std::string> findSubModuleAttr(
   return moduleNames;
 }
 
-Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
+static Value* addParamAsArgument(
+    Function* function,
+    std::string& name,
+    IValue& attr) {
   auto schema = function->getSchema();
   auto args = schema.arguments();
   args.emplace_back(name, nullptr, std::nullopt, attr);
@@ -64,7 +67,7 @@ Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
       attr.type());
 }
 
-std::vector<IValue> getParamAttributes(
+static std::vector<IValue> getParamAttributes(
     Block* block,
     std::shared_ptr<Graph>& graph,
     const Module& module_,
@@ -163,7 +166,7 @@ std::vector<IValue> getParamAttributes(
   return parameterIValues;
 }
 
-void insertMainModuleAsConstant(const std::shared_ptr<Graph>& graph) {
+static void insertMainModuleAsConstant(const std::shared_ptr<Graph>& graph) {
   auto* constNode = graph->create(prim::CreateObject);
   constNode->output()->setType(graph->inputs().at(0)->type());
   auto it = graph->nodes().begin();
