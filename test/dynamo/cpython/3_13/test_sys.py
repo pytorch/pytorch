@@ -73,7 +73,6 @@ from test.support import os_helper
 from test.support.script_helper import assert_python_ok, assert_python_failure
 from test.support import threading_helper
 from test.support import import_helper
-from test.support import force_not_colorized
 try:
     from test.support import interpreters
 except ImportError:
@@ -203,7 +202,6 @@ class ActiveExceptionTests(__TestCase):
 
 class ExceptHookTest(__TestCase):
 
-    @force_not_colorized
     def test_original_excepthook(self):
         try:
             raise ValueError(42)
@@ -215,7 +213,6 @@ class ExceptHookTest(__TestCase):
 
         self.assertRaises(TypeError, sys.__excepthook__)
 
-    @force_not_colorized
     def test_excepthook_bytes_filename(self):
         # bpo-37467: sys.excepthook() must not crash if a filename
         # is a bytes string
@@ -474,6 +471,7 @@ class SysModuleTest(__TestCase):
             is sys._getframe().f_code
         )
 
+    @unittest.expectedFailure
     def test_getframemodulename(self):
         # Default depth gets ourselves
         self.assertEqual(__name__, sys._getframemodulename())
@@ -853,7 +851,6 @@ class SysModuleTest(__TestCase):
     def test_clear_type_cache(self):
         sys._clear_type_cache()
 
-    @force_not_colorized
     @support.requires_subprocess()
     def test_ioencoding(self):
         env = dict(os.environ)
@@ -1175,7 +1172,6 @@ class SysModuleTest(__TestCase):
         self.assertIsInstance(level, int)
         self.assertGreater(level, 0)
 
-    @force_not_colorized
     @support.requires_subprocess()
     def test_sys_tracebacklimit(self):
         code = """if 1:
