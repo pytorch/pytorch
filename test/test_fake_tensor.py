@@ -1502,10 +1502,6 @@ class FakeTensorOperatorInvariants(TestCase):
             m.to('cuda')
             _check_device(m.state_dict(), 'cuda')
 
-
-
-
-
 make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
 
