@@ -121,9 +121,10 @@ def set_intersection(set1, set2):
     return intersection_set
 
 
-def set_union(set1, set2):
+def set_union(set1, *others):
     union_set = set1.copy()
-    set_update(union_set, set2)
+    for set2 in others:
+        set_update(union_set, set2)
     return union_set
 
 
