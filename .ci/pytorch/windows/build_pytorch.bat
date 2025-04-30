@@ -36,17 +36,11 @@ set DESIRED_PYTHON_PREFIX=py%DESIRED_PYTHON_PREFIX:;=;py%
 set SRC_DIR=%~dp0
 pushd %SRC_DIR%
 
-:: Install Miniconda3
-set "CONDA_HOME=%CD%\conda"
-set "tmp_conda=%CONDA_HOME%"
-set "miniconda_exe=%CD%\miniconda.exe"
-rmdir /s /q conda
-del miniconda.exe
-curl --retry 3 -k https://repo.anaconda.com/miniconda/Miniconda3-py311_23.9.0-0-Windows-x86_64.exe -o "%miniconda_exe%"
-start /wait "" "%miniconda_exe%" /S /InstallationType=JustMe /RegisterPython=0 /AddToPath=0 /D=%tmp_conda%
-if ERRORLEVEL 1 exit /b 1
+
 set "ORIG_PATH=%PATH%"
-set "PATH=%CONDA_HOME%;%CONDA_HOME%\scripts;%CONDA_HOME%\Library\bin;%PATH%"
+set CMAKE_LIBRARY_PATH="%CD%\Python%PYTHON_VERSION%\Library\lib\"
+set CMAKE_INCLUDE_PATH="%CD%\Python%PYTHON_VERSION%\Library\include\"
+
 
 :: create a new conda environment and install packages
 :try
