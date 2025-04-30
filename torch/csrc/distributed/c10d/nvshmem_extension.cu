@@ -13,6 +13,8 @@ namespace c10d::nvshmem_extension {
 
 const std::string store_comm_prefix = "nvshmem_extension";
 
+#define THREADS_PER_BLOCK 512
+
 void maybe_initialize_env_vars() {
   auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
   auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
