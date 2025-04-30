@@ -1986,8 +1986,12 @@ class GraphModuleDeserializer(metaclass=Final):
             )
             self.deserialize_outputs(serialized_node, fx_node)
         else:
+            _additional_msg = (f"We failed to resolve {target} to an operator. "
+                               + "If it's a custom op/custom triton op, this is usally because the custom op is not registered"
+                               + " when deserializing. Please import the custom op to register it before deserializing."
+                               + " Otherwise, please file an issue on github.") if isinstance(target, str) else ""
             raise SerializeError(
-                f"Unsupported target type for node {serialized_node}: {type(target)}"
+                _additional_msg + f" Unsupported target type for node {serialized_node}: {type(target)}."
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
