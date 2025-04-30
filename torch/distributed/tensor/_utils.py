@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from typing import cast, Optional
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed.device_mesh import DeviceMesh
@@ -280,9 +281,9 @@ def compute_global_tensor_shape(
     local_shape = torch.tensor(list(shape))
     gathered_shape_tensors = [
         torch.empty_like(local_shape, device=local_shape.device)
-        for _ in range(torch.distributed.get_world_size())
+        for _ in range(mesh.size())
     ]
-    torch.distributed.all_gather(gathered_shape_tensors, local_shape)
+    funcol.all_gather_inplace(gathered_shape_tensors, local_shape)
 
     global_shape = _compute_global_tensor_shape(
         gathered_shape_tensors, mesh_tensor, placements
@@ -312,10 +313,18 @@ def _compute_global_tensor_shape(
         return global_shape
     elif placements[0].is_shard():
         shard_placement = cast(Shard, placements[0])
+        shard_dim = shard_placement.dim
+        other_dims = [d for d in range(len(global_shape)) if d != shard_dim]
         sharded_dim_sum = 0
         for sub_shape in sub_shapes:
-            sharded_dim_sum += sub_shape[shard_placement.dim]
-        global_shape[shard_placement.dim] = sharded_dim_sum
+            if not [global_shape[i] for i in other_dims] == [
+                sub_shape[i] for i in other_dims
+            ]:
+                raise RuntimeError(
+                    "Non-sharded dimentions should have identical size across ranks."
+                )
+            sharded_dim_sum += sub_shape[shard_dim]
+        global_shape[shard_dim] = sharded_dim_sum
     else:
         raise NotImplementedError(
             f"placement type {type(placements[0])} not supported."

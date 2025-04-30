@@ -150,29 +150,56 @@ class UtilTest(DTensorTestBase):
             if isinstance(placements[0], Shard):
                 uneven_dim = list(range(self.world_size))
                 local_shape = (
-                    torch.Size([5, uneven_dim[device_mesh.get_rank()]])
+                    torch.Size([5, uneven_dim[self.rank]])
                     if placements[0].dim == 1
-                    else torch.Size([uneven_dim[device_mesh.get_rank()], 5])
+                    else torch.Size([uneven_dim[self.rank], 5])
                 )
                 expected_global_shape = (
                     torch.Size([5, sum(uneven_dim)])
                     if placements[0].dim == 1
                     else torch.Size([sum(uneven_dim), 5])
                 )
-                global_shape = compute_global_tensor_shape(
-                    local_shape,
-                    device_mesh,
-                    placements,
-                )
-                self.assertEqual(
-                    global_shape,
-                    expected_global_shape,
-                )
             else:
-                global_shape = compute_global_tensor_shape(
-                    torch.Size([5, 5]), device_mesh, placements
-                )
-                self.assertEqual(global_shape, torch.Size([5, 5]))
+                expected_global_shape = torch.Size([5, 5])
+                local_shape = torch.Size([5, 5])
+            global_shape = compute_global_tensor_shape(
+                local_shape, device_mesh, placements
+            )
+            self.assertEqual(global_shape, expected_global_shape)
+
+    @with_comms
+    def test_compute_global_tensor_shape_1D_invalid_shape(self):
+        one_d_placement = [Shard(1)]
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        uneven_dim = list(range(self.world_size))
+        local_shape = (
+            torch.Size([5, uneven_dim[self.rank]])
+            if self.rank % 2 == 0
+            else torch.Size([6, uneven_dim[self.rank]])
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Non-sharded dimentions should have identical size across ranks.",
+        ):
+            _ = compute_global_tensor_shape(
+                local_shape,
+                device_mesh,
+                one_d_placement,
+            )
+
+    @with_comms
+    def test_compute_global_tensor_shape_failure(self):
+        device_mesh_2D = init_device_mesh(self.device_type, (2, 2))
+        placement_1D = [Shard(0)]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected one placement per mesh dim",
+        ):
+            _ = compute_global_tensor_shape(
+                torch.Size([2, 2]),
+                device_mesh_2D,
+                placement_1D,
+            )
 
     @with_comms
     def test_compute_global_tensor_shape(self):
@@ -207,9 +234,32 @@ class UtilTest(DTensorTestBase):
         ]
         placement = [Shard(0), Shard(1), Shard(2)]
         global_shape = compute_global_tensor_shape(
-            torch.Size(local_shapes[device_mesh.get_rank()]), device_mesh, placement
+            torch.Size(local_shapes[self.rank]), device_mesh, placement
         )
         self.assertEqual(global_shape, torch.Size([3, 5, 9]))
+
+    @with_comms
+    def test_compute_global_tensor_shape_uneven_invalid_shape(self):
+        device_mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        local_shapes = [
+            (1, 3, 7),
+            (1, 4, 2),
+            (1, 2, 4),
+            (1, 2, 5),
+            (2, 4, 6),
+            (2, 4, 3),
+            (2, 1, 8),
+            (2, 2, 1),
+        ]
+        placement = [Shard(0), Shard(1), Shard(2)]
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Non-sharded dimentions should have identical size across ranks.",
+        ):
+            _ = compute_global_tensor_shape(
+                torch.Size(local_shapes[self.rank]), device_mesh, placement
+            )
 
     @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):
