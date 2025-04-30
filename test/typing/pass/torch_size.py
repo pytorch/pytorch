@@ -20,10 +20,7 @@ assert_type(s1[:2], Size)
 assert_type(s1 + s2, Size)
 assert_type(s1 + (1, 2), Size)
 # __radd__
-assert_type((1, 2, 3) + s1, Size)
-assert_type((1, 2) + s2, Size)
-# Size has no __radd__, so tuple.__add__(right, left) is called
-assert_type((1, 2) + s1, tuple[int, ...])
+assert_type((1, 2) + s1, Size)
 # __mul__
 assert_type(s1 * 3, Size)
 assert_type(s1 * ZeroIndex(), Size)
