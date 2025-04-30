@@ -46,10 +46,10 @@ from torch.utils import _pytree as pytree
 from .. import graph_break_hints, variables
 from ..exc import (
     IncorrectUsage,
+    ObservedException,
     UncapturedHigherOrderOpError,
     unimplemented,
     unimplemented_v2,
-    ObservedException,
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
