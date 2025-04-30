@@ -177,6 +177,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             for name, dtensor in state_dict.items():
                 self.assertEqual(dtensor.device.type, "cpu")
 
+    @skip_if_lt_x_gpu(2)
     def test_2d_state_dict_correctness(self):
         dp_size = 2
         global_mesh = init_device_mesh(

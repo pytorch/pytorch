@@ -62,6 +62,7 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())
+device_module = torch.get_device_module(device_type)
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -71,7 +72,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(device_type)
+        return torch.device(device_type.type, 0)
 
     def _get_param_sizes(self) -> list[torch.Size]:
         # For world size 128, the fp32 all-gather and reduce-scatter testing
@@ -90,7 +91,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def _init_params(self, param_sizes: list[torch.Size]) -> list[nn.Parameter]:
         torch.manual_seed(42)
         orig_params = [
-            nn.Parameter(torch.randn(size, device=torch.device(device_type.type))) for size in param_sizes
+            nn.Parameter(torch.randn(size, device=self.device)) for size in param_sizes
         ]
         # Since seed is per process, not per thread, we broadcast to ensure the
         # same original parameters across ranks
@@ -122,10 +123,10 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_all_gather_fp32(self):
         param_sizes = self._get_param_sizes()
-        default_stream = torch.get_device_module(device_type).current_stream()
+        default_stream = device_module.current_stream()
         stream1, stream2 = (
-            torch.get_device_module(device_type).Stream(),
-            torch.get_device_module(device_type).Stream(),
+            device_module.Stream(),
+            device_module.Stream(),
         )
         for async_op, streams, reshard_after_forward in itertools.product(
             (False, True),
@@ -211,8 +212,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_reduce_scatter_fp32(self):
         param_sizes = self._get_param_sizes()
-        default_stream = torch.get_device_module(device_type).current_stream()
-        stream = torch.get_device_module(device_type).Stream()
+        default_stream = device_module.current_stream()
+        stream = device_module.Stream()
         for reduce_scatter_stream in (default_stream, stream):
             self._test_reduce_scatter(
                 param_sizes,
@@ -224,7 +225,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def test_reduce_scatter_fp16(self):
         param_sizes = self._get_param_sizes()
         default_stream = torch.get_device_module(device_type).current_stream()
-        stream = torch.get_device_module(device_type).Stream()
+        stream = device_module.Stream()
         for reduce_scatter_stream in (default_stream, stream):
             self._test_reduce_scatter(
                 param_sizes,
@@ -254,7 +255,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
-        all_reduce_stream = torch.get_device_module(device_type).Stream()
+        all_reduce_stream = device_module.Stream()
         (
             _,
             _,
