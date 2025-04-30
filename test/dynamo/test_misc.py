@@ -54,7 +54,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -7855,6 +7855,31 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertEqual(counter.frame_count, 1)
 
+    @torch.compiler.config.patch(dynamic_sources="L['self']._modules['inner'].x")
+    def test_dynamic_sources_precedence_over_int_specialization(self):
+        builder._DYNAMIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        class Model(torch.nn.Module):
+            def __init__(self, x) -> None:
+                super().__init__()
+                self.inner = torch.nn.Linear(10, 10)
+                # attach attribute to builtin nn module.
+                self.inner.x = x
+
+            @torch.compile(fullgraph=True, backend=counter)
+            def forward(self, a):
+                return a * self.inner.x
+
+        m1 = Model(50)
+        m2 = Model(60)
+        with fresh_inductor_cache():
+            m1(torch.rand(1, 2, 3))
+            m2(torch.rand(1, 2, 3))
+
+        self.assertEqual(counter.frame_count, 1)
+
     @torch.compiler.config.patch(dynamic_sources="L['x']")
     def test_dynamic_sources_int(self):
         counter = CompileCounter()
@@ -10950,7 +10975,7 @@ fn
         torch._dynamo.decorators.mark_unbacked(x, 1, strict=True)
         y = torch.randn(5, 5)
 
-        with self.assertRaisesRegex(RuntimeError, "RelaxedUnspecConstraint"):
+        with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
 
     def test_sym_max_unbacked_sizelike_simplification(self):
