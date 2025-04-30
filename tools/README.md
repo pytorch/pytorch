@@ -46,6 +46,7 @@ Important if you want to run on AMD GPU:
 
 Tools which are only situationally useful:
 
+<!-- Needs update -->
 * [docker](docker) - Dockerfile for running (but not developing)
   PyTorch, using the official conda binary distribution.  Context:
   https://github.com/pytorch/pytorch/issues/1619
