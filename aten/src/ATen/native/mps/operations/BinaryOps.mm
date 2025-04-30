@@ -257,14 +257,14 @@ static void add_sub_lerp_template(const Tensor& self,
                                   const Scalar& alpha,
                                   const Tensor& output,
                                   std::string op_name) {
-  if (alpha.toDouble() == 0.0) {
+  if (!alpha.isComplex() && alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
       output.copy_(self);
     }
     return;
   }
 
-  const bool alpha_has_value = alpha.toDouble() != 1.0;
+  const bool alpha_has_value = alpha.isComplex() || alpha.toDouble() != 1.0;
   if (!alpha_has_value && op_name == "lerp") {
     if (!self.is_alias_of(other)) { // if inplace, no-op
       output.copy_(other);
