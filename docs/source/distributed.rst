@@ -141,8 +141,11 @@ network bandwidth. These two environment variables have been pre-tuned by NCCL
 for some cloud providers, such as AWS or GCP.
 
 For a full list of NCCL environment variables, please refer to
-`NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
+`NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html>`_
 
+You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`
+and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
+(e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
 .. _distributed-basics:
 
@@ -283,6 +286,13 @@ The machine with rank 0 will be used to set up all connections.
 
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
+
+Improving initialization time
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* ``TORCH_GLOO_LAZY_INIT`` - establishes connections on demand rather than
+  using a full mesh which can greatly improve initialization time for non all2all
+  operations.
 
 Post-Initialization
 -------------------
