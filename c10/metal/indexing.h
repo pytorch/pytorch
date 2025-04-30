@@ -294,6 +294,134 @@ kernel void alpha_binary_dense_cast(
   out[tid] = f(a, b, *alpha);
 }
 
+template <typename T, typename F>
+kernel void binary_scalar_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant uint3& ndim [[buffer(6)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
+  const auto a = val_at_offs<T>(input, input_offs);
+  ref_at_offs<result_of<F, T, T>>(output, output_offs) = f(a, *other);
+}
+
+template <typename T, typename F>
+kernel void alpha_binary_scalar_strided(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant T* alpha [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant uint3& ndim [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
+  const auto a = val_at_offs<T>(input, input_offs);
+  ref_at_offs<result_of<F, T, T, T>>(output, output_offs) = f(a, *other, *alpha);
+}
+
+template <typename T, typename F>
+kernel void binary_scalar_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant uint3& ndim_types [[buffer(6)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto a =
+      val_at_offs<T>(input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  ref_at_offs<result_of<F, T, T>>(output, output_offs) = f(a, *other);
+}
+
+template <typename T, typename F>
+kernel void alpha_binary_scalar_strided_cast(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant T* alpha [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant uint3& ndim_types [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto a =
+      val_at_offs<T>(input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  ref_at_offs<result_of<F, T, T, T>>(output, output_offs) = f(a, *other, *alpha);
+}
+
+template <typename T, typename F>
+kernel void binary_scalar_dense(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], *other);
+}
+
+template <typename T, typename F>
+kernel void alpha_binary_scalar_dense(
+    device result_of<F, T, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant T* alpha [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], *other, *alpha);
+}
+
+template <typename T, typename F>
+kernel void binary_scalar_dense_cast(
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant uint2& sizes_types [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  const auto a = val_at_offs<T>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.y));
+  out[tid] = f(a, *other);
+}
+
+template <typename T, typename F>
+kernel void alpha_binary_scalar_dense_cast(
+    device result_of<F, T, T, T>* out [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
+    constant T* alpha [[buffer(3)]],
+    constant uint2& sizes_types [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  const auto a = val_at_offs<T>(
+      input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.y));
+  out[tid] = f(a, *other, *alpha);
+}
+
 #define REGISTER_BINARY_OP(NAME, DTYPEI, DTYPEO)                               \
   static_assert(                                                               \
       ::metal::is_same_v<                                                      \
@@ -386,6 +514,97 @@ kernel void alpha_binary_dense_cast(
           constant void* other,                                                \
           constant DTYPEI* alpha,                                              \
           constant uint4& sizes_types,                                         \
+          uint tid)
+
+// The following are for binary ops which can take a scalar as the other input
+#define REGISTER_BINARY_SCALAR_OP(NAME, DTYPEI, DTYPEO)                        \
+  static_assert(                                                               \
+      ::metal::is_same_v<                                                      \
+          DTYPEO,                                                              \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI>>,            \
+      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);     \
+  template [[host_name(#NAME "scalar_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
+      c10::metal::binary_scalar_strided<DTYPEI, NAME##_functor>(               \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant DTYPEI* other,                                              \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant uint3& ndim,                                                \
+          uint tid);                                                           \
+  template [[host_name(#NAME "scalar_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
+      metal::binary_scalar_strided_cast<DTYPEI, NAME##_functor>(               \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant DTYPEI* other,                                              \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant uint2& ndim_types,                                          \
+          uint tid);                                                           \
+  template [[host_name(#NAME "scalar_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
+      c10::metal::binary_scalar_dense<DTYPEI, NAME##_functor>(                 \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other_,                                            \
+          uint tid);                                                           \
+  template [[host_name(#NAME "scalar_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
+      metal::binary_scalar_dense_cast<DTYPEI, NAME##_functor>(                 \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
+              out_,                                                            \
+          constant void* input,                                                \
+          constant DTYPEI* other,                                              \
+          constant uint2& sizes_types,                                         \
+          uint tid)
+
+#define REGISTER_BINARY_SCALAR_ALPHA_OP(NAME, DTYPEI, DTYPEO)                  \
+  static_assert(                                                               \
+      ::metal::is_same_v<                                                      \
+          DTYPEO,                                                              \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI>>,    \
+      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);     \
+  template [[host_name(#NAME "scalar_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
+      c10::metal::alpha_binary_scalar_strided<DTYPEI, NAME##_functor>(         \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant DTYPEI* other,                                              \
+          constant DTYPEI* alpha,                                              \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant uint3& ndim,                                                \
+          uint tid);                                                           \
+  template [[host_name(#NAME "scalar_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
+      metal::alpha_binary_scalar_strided_cast<DTYPEI, NAME##_functor>(         \
+          device void* out,                                                    \
+          constant void* input,                                                \
+          constant DTYPEI* other,                                              \
+          constant DTYPEI* alpha,                                              \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant uint2& ndim_types,                                          \
+          uint tid);                                                           \
+  template [[host_name(#NAME "scalar_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
+      c10::metal::alpha_binary_scalar_dense<DTYPEI, NAME##_functor>(           \
+          device ::c10::metal::                                                \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI> *          \
+              out_,                                                            \
+          constant DTYPEI * input_,                                            \
+          constant DTYPEI * other_,                                            \
+          constant DTYPEI * alpha,                                             \
+          uint tid);                                                           \
+  template [[host_name(#NAME "scalar_dense_cast_" #DTYPEI)]] kernel void ::c10::     \
+      metal::alpha_binary_scalar_dense_cast<DTYPEI, NAME##_functor>(           \
+          device ::c10::metal::                                                \
+                  result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEI> *          \
+              out_,                                                            \
+          constant void* input,                                                \
+          constant DTYPEI* other,                                              \
+          constant DTYPEI* alpha,                                              \
+          constant uint2& sizes_types,                                         \
           uint tid)
 } // namespace metal
 } // namespace c10

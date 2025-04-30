@@ -142,6 +142,11 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt);
+  void exec_binary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const c10::Scalar other,
+      const std::optional<c10::Scalar> alpha = std::nullopt);
 
  protected:
   virtual MTLLibrary_t getLibrary();
