@@ -27,7 +27,7 @@ from .graph_utils import _detect_cycles, _get_flat_args, _get_flat_args_unique
 # to select a node and then
 # an index into that node's
 # flattened arguments
-InputIndex = tuple[int, int]
+UsageIndex = tuple[int, int]
 
 log = logging.getLogger(__name__)
 
@@ -79,11 +79,11 @@ when they are created in output_graph.
         region = region_group[0]
         (
             subgraph,
-            placeholder_ind_to_usages,
+            external_node_usages,
         ) = _create_subgraph(region, inds_with_external_users)
 
         # Ignore regions with no args for now, could they possibly be evaluated at compile time?
-        if not list(placeholder_ind_to_usages):
+        if not list(external_node_usages):
             continue
 
         sub_gm = torch.fx.GraphModule(output_graph.nn_modules, subgraph)
@@ -99,7 +99,7 @@ when they are created in output_graph.
                 output_graph.graph,
                 region,
                 get_subgraph_node,
-                placeholder_ind_to_usages,
+                external_node_usages,
                 inds_with_external_users,
                 subgraph_name,
                 node_to_additional_deps,
@@ -121,14 +121,14 @@ def _replace_region_with_subgraph(
     graph: torch.fx.Graph,
     region: Region,
     get_subgraph_node: Node,
-    placeholder_ind_to_usages: Iterable[OrderedSet[InputIndex]],
+    external_node_usages: Iterable[OrderedSet[UsageIndex]],
     inds_with_external_users: list[int],
     subgraph_name: str,
     node_to_additional_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
     node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
 ) -> None:
     sub_args = []
-    for usages in placeholder_ind_to_usages:
+    for usages in external_node_usages:
         node_ind, usage_ind = next(iter(usages))
         node = region[node_ind]
         flattened_args_kwargs = _get_flat_args(node, {})
@@ -183,8 +183,8 @@ def _replace_region_with_subgraph(
 
 def _get_external_inputs(
     region: Region,
-) -> dict[Node, OrderedSet[InputIndex]]:
-    external_node_to_usages = defaultdict[Node, OrderedSet[InputIndex]](OrderedSet)
+) -> dict[Node, OrderedSet[UsageIndex]]:
+    external_node_to_usages = defaultdict[Node, OrderedSet[UsageIndex]](OrderedSet)
     region_unique = set(region)
     for node_ind, node in enumerate(region):
         flattened_args_kwargs = _get_flat_args(node, {})
@@ -219,14 +219,14 @@ def _get_inds_with_external_users(region: Region, inds_unique: set[int]) -> None
 
 def _copy_nodes_and_remap_inputs(
     subgraph: torch.fx.Graph, region: Region
-) -> list[OrderedSet[InputIndex]]:
+) -> list[OrderedSet[UsageIndex]]:
     external_input_to_usages = _get_external_inputs(region)
-    placeholder_ind_to_usages = list[OrderedSet[InputIndex]]()
+    external_node_usages = list[OrderedSet[UsageIndex]]()
     region_to_subgraph_node = {}
     for node, usage_indices in external_input_to_usages.items():
         placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
         region_to_subgraph_node[node] = placeholder
-        placeholder_ind_to_usages.append(usage_indices)
+        external_node_usages.append(usage_indices)
 
     def map_arg(node: Node) -> Node:
         if node in region_to_subgraph_node:
@@ -238,7 +238,7 @@ def _copy_nodes_and_remap_inputs(
         subgraph_node = subgraph.node_copy(node, lambda old: map_arg(old))
         region_to_subgraph_node[node] = subgraph_node
 
-    return placeholder_ind_to_usages
+    return external_node_usages
 
 
 def _create_subgraph_outputs(
@@ -252,11 +252,11 @@ def _create_subgraph_outputs(
 def _create_subgraph(
     region: Region,
     inds_with_external_users: list[int],
-) -> tuple[torch.fx.Graph, list[OrderedSet[InputIndex]]]:
+) -> tuple[torch.fx.Graph, list[OrderedSet[UsageIndex]]]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
-    placeholder_ind_to_usages = _copy_nodes_and_remap_inputs(subgraph, region)
+    external_node_usages = _copy_nodes_and_remap_inputs(subgraph, region)
     _create_subgraph_outputs(subgraph, inds_with_external_users)
-    return subgraph, placeholder_ind_to_usages
+    return subgraph, external_node_usages
 
 
 def _stable_topological_sort(
