@@ -681,7 +681,7 @@ class CppOptions(BuildOptionsBase):
             passthrough_args,
         ) = get_cpp_options(
             cpp_compiler=self._compiler,
-            compile_only=compile_only,
+            compile_only=compile_only or precompiling or preprocessing,
             extra_flags=extra_flags,
             warning_all=warning_all,
             min_optimize=min_optimize,
@@ -1099,15 +1099,15 @@ def get_cpp_torch_options(
         + omp_include_dir_paths
     )
     cflags = sys_libs_cflags + omp_cflags
-    ldflags = omp_ldflags
-    libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
-    libraries = torch_libraries + omp_lib
-    passthrough_args = (
-        sys_libs_passthrough_args
-        + isa_ps_args_build_flags
-        + cxx_abi_passthrough_args
-        + omp_passthrough_args
-    )
+    passthrough_args = isa_ps_args_build_flags + cxx_abi_passthrough_args
+
+    if not compile_only:
+        ldflags = omp_ldflags
+        libraries_dirs = (
+            python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
+        )
+        libraries = torch_libraries + omp_lib
+        passthrough_args += sys_libs_passthrough_args + omp_passthrough_args
 
     return (
         definitions,
@@ -1174,7 +1174,7 @@ class CppTorchOptions(CppOptions):
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
-            compile_only=compile_only,
+            compile_only=compile_only or precompiling or preprocessing,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
         )

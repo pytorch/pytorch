@@ -39,6 +39,14 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
     )
 
 
+def static_cuda_launcher_default() -> bool:
+    result = get_tristate_env(
+        "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", True if not is_fbcode() else False
+    )
+    assert result is not None
+    return result
+
+
 def prologue_fusion_enabled() -> bool:
     ENABLE_PROLOGUE_FUSION_VERSION = 0
 
@@ -124,6 +132,9 @@ force_disable_caches: bool = Config(
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
+# Unsafe way to mark function as cacheable
+unsafe_marked_cacheable_functions: list[str] = []
+
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
@@ -149,7 +160,7 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
-cpp_cache_precompile_headers: bool = True
+cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
@@ -291,9 +302,7 @@ dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1")
 # but the mul gets fused with other pointwise ops instead.
 force_fuse_int_mm_with_mul = False
 
-# for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
-# enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
-# Autotune will compare perf with normal cast->then->mm option
+# DEPRECATED. This setting is ignored.
 use_mixed_mm = True
 
 # enable runtime numeric check for pre/post grad fx passes
@@ -308,19 +317,7 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# mixed_mm_choice can be used to control the behaviour for pattern torch.mm(a, b.to(dtype)) with cuda tensors.
-# The fallback aten implementation is normal cast->then->mm option.
-# If mixed_mm_choice is "default": this flag will be ignored.
-# If mixed_mm_choice is "triton":
-# - Always use torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
-# - Autotune will not compare with fallback.
-# If mixed_mm_choice is "aten": always use the fallback aten implementation.
-# If mixed_mm_choice is "heuristic":
-# - Enables the heuristic.
-# - If the heuristic decides to add a config, it will add the config as the first choice.
-# - If autotune is disabled, this config will always be chosen.
-# - If autotune is enabled, it will also compare with fallback aten implementation and fused kernel.
-# The use_mixed_mm flag will be ignored if mixed_mm_choice != "default".
+# DEPRECATED. This setting is ignored.
 mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
@@ -343,6 +340,9 @@ reorder_for_compute_comm_overlap_passes: list[
     "sink_waits",
     "raise_comms",
 ]
+
+# Maximum number of positions to advance a given collective, unlimited by default
+reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
@@ -421,7 +421,7 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # NOTE: This feature is deprecated and will be defauled to False in the future.
 # Whether we fall back to ATen or hard error when no matches are found during autotuning
 autotune_fallback_to_aten = (
-    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "0") == "1"
 )
 
 # the value used as a fallback for the unbacked SymInts
@@ -745,9 +745,7 @@ compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads
 
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
-use_static_cuda_launcher: bool = (
-    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
-)
+use_static_cuda_launcher: bool = static_cuda_launcher_default()
 
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
@@ -1163,7 +1161,7 @@ class triton:
     # of registers being benchmarked.
     #
     # NOTE: triton will always report >0 register spills for kernels using sin/cos.
-    # (check this issue https://github.com/openai/triton/issues/1756 )
+    # (check this issue https://github.com/triton-lang/triton/issues/1756 )
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
@@ -1285,7 +1283,7 @@ class aot_inductor:
     package_constants_in_so: bool = True
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
-    precompile_headers: bool = False
+    precompile_headers: bool = not is_fbcode()
 
 
 class cuda:
