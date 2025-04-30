@@ -128,8 +128,6 @@ dtensor_fails = {
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
-    xfail("cumsum"),
-    xfail("cumulative_trapezoid"),
     xfail("diagonal_scatter"),
     xfail("dist"),
     xfail("dot"),
@@ -233,7 +231,6 @@ dtensor_fails = {
     xfail("masked.argmax"),
     xfail("masked.argmin"),
     xfail("masked.cumprod"),
-    xfail("masked.cumsum"),
     xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("matrix_exp"),
@@ -597,7 +594,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
 
                         # we need to skip tests containing tensors of zero elements for now.
-                        # see issue: https://github.com/pytorch/tau/issues/470
+                        # see issue: https://github.com/pytorch/PiPPy/issues/470
                         # TODO remove this once issue above fixed.
                         flat_args = pytree.tree_leaves(dtensor_rs)
                         if any(
