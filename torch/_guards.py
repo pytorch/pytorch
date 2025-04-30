@@ -410,7 +410,7 @@ torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class GuardEnvExpr:
     pass
 
@@ -421,7 +421,7 @@ input_pos_a and input_pos_b are input positions we have deduped.
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DuplicateInputs(GuardEnvExpr):
     input_source_a: Source
     input_source_b: Source
@@ -444,7 +444,7 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 """
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
@@ -561,7 +561,6 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 
     _supported_global_states = {
         "grad_enabled",
-        "torch_function_enabled",
         "autocast_enabled",
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
@@ -1043,7 +1042,7 @@ class ChainedSource(Source):
         return current
 
 
-def detect_fake_mode(inputs: Any = None, ignore_context=False):
+def detect_fake_mode(inputs: Any = None):
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
@@ -1058,11 +1057,10 @@ def detect_fake_mode(inputs: Any = None, ignore_context=False):
 
     fake_modes = []
 
-    if not ignore_context:
-        if context := TracingContext.try_get():
-            fake_mode = context.fake_mode
-            if fake_mode is not None:
-                fake_modes.append((fake_mode, "tracing context", 0))
+    if context := TracingContext.try_get():
+        fake_mode = context.fake_mode
+        if fake_mode is not None:
+            fake_modes.append((fake_mode, "tracing context", 0))
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
