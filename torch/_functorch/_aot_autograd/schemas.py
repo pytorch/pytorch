@@ -172,7 +172,10 @@ class MemoryFormatMeta:
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
         # 2. Dynamic shape tensors
         # Support for symbolic shapes is not implemented yet.
-        use_memory_format: bool = is_traceable_wrapper_subclass(t)
+        use_memory_format: bool = (
+            not torch._functorch.config.guess_tangent_strides_as_outputs
+            or is_traceable_wrapper_subclass(t)
+        )
         if not use_memory_format:
             is_static_shape = True
             for s in itertools.chain(t.shape, t.stride()):
@@ -910,6 +913,7 @@ class GraphSignature:
 class AOTAutogradCacheInfo:
     cache_key: str
     start_time_ns: int
+    forward_symints: list[torch.SymInt]
 
 
 @dataclass
@@ -936,6 +940,11 @@ class AOTConfig:
     pre_dispatch: bool = False
     # Key to use for AOTAutogradCache
     cache_info: Optional[AOTAutogradCacheInfo] = None
+    # If we should ignore the shape_env in the ambient tracing_context.
+    # The net effect is that if dynamic shapes are on, we end up
+    # specializing on example_inputs.
+    # Used only by standalone_compile.
+    ignore_shape_env: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
