@@ -87,7 +87,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
     switch (pstate) {
       case DeviceStringParsingState::START:
         if (ch != ':') {
-          if (isalpha(uch) || ch == '_') {
+          if (std::isalpha(uch) || ch == '_') {
             device_name.push_back(ch);
           } else {
             pstate = DeviceStringParsingState::ERROR;
@@ -98,7 +98,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
         break;
 
       case DeviceStringParsingState::INDEX_START:
-        if (isdigit(uch)) {
+        if (std::isdigit(uch)) {
           device_index_str.push_back(ch);
           pstate = DeviceStringParsingState::INDEX_REST;
         } else {
@@ -111,7 +111,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
           pstate = DeviceStringParsingState::ERROR;
           break;
         }
-        if (isdigit(uch)) {
+        if (std::isdigit(uch)) {
           device_index_str.push_back(ch);
         } else {
           pstate = DeviceStringParsingState::ERROR;
