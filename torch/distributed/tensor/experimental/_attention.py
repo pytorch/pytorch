@@ -1509,9 +1509,14 @@ def context_parallel(
     ):
         yield
 
-    return
     for buffer, original_buffer in zip(buffers, original_buffers):
         if original_buffer is not None:
+            # tensor cannot resize if requires_grad is True
+            # key and value's requires_grad has been set to False in manual comm calls
+            # unless via DTensor.
+            if buffer.requires_grad:
+                buffer.requires_grad = False
+
             buffer.resize_(original_buffer.shape)
             buffer.copy_(original_buffer)
 

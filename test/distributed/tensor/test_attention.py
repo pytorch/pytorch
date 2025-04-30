@@ -449,7 +449,6 @@ class RingFlexAttentionTest(DTensorTestBase):
     def test_ring_flex_attention(self) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
-            # return q_idx >= 0
 
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
