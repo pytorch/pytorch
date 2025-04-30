@@ -2025,6 +2025,91 @@ class AlgorithmSelectorCache(PersistentCache):
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
+    @staticmethod
+    def _benchmark_choice(choice: ChoiceCaller, autotune_args: AutotuneArgs) -> float:
+        is_extern = isinstance(choice, ExternKernelCaller)
+        benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
+        inpts, output = benchmark_tensors.unpack()
+        output.zero_()
+        result = choice.benchmark(*inpts, out=output)
+        device_type = next(
+            (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
+            "cuda",
+        )
+        device_interface = get_interface_for_device(device_type)
+        if device_interface.is_available():
+            device_interface.synchronize()  # shake out any CUDA errors
+
+        if VERIFY and autotune_args.expected is not None:
+            autotune_args.verify(**VERIFY)
+        return result
+
+    @staticmethod
+    def benchmark_in_current_process(
+        inputs: AutotuneArgs,
+        choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
+    ) -> dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
+        timings = {}
+        for choice in choices:
+            try:
+                timing = AlgorithmSelectorCache._benchmark_choice(choice, inputs)
+            except CUDACompileError as e:
+                log.error(
+                    "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                    str(e),
+                )
+                timing = float("inf")
+            except NotImplementedError as e:
+                log.warning("Not yet implemented: %s", e)
+                timing = float("inf")
+            except RuntimeError as e:
+                msg = str(e)
+                if "invalid argument" in msg:
+                    msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
+                else:
+                    if "illegal memory access" in msg:
+                        msg += "\n\nEither error in template or triton bug.\n"
+                log.error(
+                    "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                    msg,
+                )
+                timing = float("inf")
+            except AssertionError as e:
+                raise AssertionError(  # noqa: B904
+                    f"Incorrect result from choice {choice}\n\n{e}"
+                )
+            except Exception as e:
+                try:
+                    from triton.runtime.autotuner import OutOfResources
+
+                    if isinstance(e, OutOfResources):
+                        log.warning(e)
+                        timing = float("inf")
+                    else:
+                        raise e
+                except ImportError:
+                    raise e from None
+
+            timings[choice] = timing
+
+        return timings
+
+    @staticmethod
+    def benchmark_in_sub_process(
+        inputs: AutotuneArgs,
+        choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
+    ):
+        from . import autotune_process
+
+        # only benchmark triton kernel in sub process for now.
+        # ATen/Extern kernel are still benchmarked in the current process.
+        extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
+        triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
+
+        timings = AlgorithmSelectorCache.benchmark_in_current_process(inputs, extern)
+        timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
+        return timings
+
     @classmethod
     def make_benchmark_fn(
         cls,
@@ -2087,96 +2172,18 @@ class AlgorithmSelectorCache(PersistentCache):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        def benchmark_choice_in_current_process(
-            choice: ChoiceCaller, autotune_args: AutotuneArgs
-        ) -> float:
-            is_extern = isinstance(choice, ExternKernelCaller)
-            benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
-            inpts, output = benchmark_tensors.unpack()
-            output.zero_()
-            result = choice.benchmark(*inpts, out=output)
-            device_type = next(
-                (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
-                "cuda",
+        inputs = get_inputs(choices)
+        if config.autotune_in_subproc:
+            assert not input_gen_fns, (
+                "autotune_in_subproce setting is incompatible with input_gen_fns"
             )
-            device_interface = get_interface_for_device(device_type)
-            if device_interface.is_available():
-                device_interface.synchronize()  # shake out any CUDA errors
-
-            if VERIFY and autotune_args.expected is not None:
-                autotune_args.verify(**VERIFY)
-            return result
-
-        def benchmark_in_current_process(
-            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
-        ) -> dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
-            inputs = get_inputs(choices)
-            timings = {}
-            for choice in choices:
-                try:
-                    timing = benchmark_choice_in_current_process(choice, inputs)
-                except CUDACompileError as e:
-                    log.error(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        str(e),
-                    )
-                    timing = float("inf")
-                except NotImplementedError as e:
-                    log.warning("Not yet implemented: %s", e)
-                    timing = float("inf")
-                except RuntimeError as e:
-                    msg = str(e)
-                    if "invalid argument" in msg:
-                        msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                    else:
-                        if "illegal memory access" in msg:
-                            msg += "\n\nEither error in template or triton bug.\n"
-                    log.error(
-                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                        msg,
-                    )
-                    timing = float("inf")
-                except AssertionError as e:
-                    raise AssertionError(  # noqa: B904
-                        f"Incorrect result from choice {choice}\n\n{e}"
-                    )
-                except Exception as e:
-                    try:
-                        from triton.runtime.autotuner import OutOfResources
-
-                        if isinstance(e, OutOfResources):
-                            log.warning(e)
-                            timing = float("inf")
-                        else:
-                            raise e
-                    except ImportError:
-                        raise e from None
-
-                timings[choice] = timing
-
-            return timings
-
-        def benchmark_in_sub_process(
-            choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
-        ):
-            from . import autotune_process
-
-            # only benchmark triton kernel in sub process for now.
-            # ATen/Extern kernel are still benchmarked in the current process.
-            extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
-            triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
-
-            timings = benchmark_in_current_process(extern)
-            timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
-            return timings
-
-        benchmark = (
-            benchmark_in_sub_process
-            if config.autotune_in_subproc
-            else benchmark_in_current_process
-        )
-
-        return benchmark
+            return functools.partial(
+                AlgorithmSelectorCache.benchmark_in_sub_process, inputs
+            )
+        else:
+            return functools.partial(
+                AlgorithmSelectorCache.benchmark_in_current_process, inputs
+            )
 
     @staticmethod
     def log_results(
