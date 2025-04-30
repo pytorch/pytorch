@@ -644,8 +644,12 @@ TEST(ExternalCall, BinaryFloat) {
   tests.push_back(
       Test{{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
   tests.push_back(Test{{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
-  tests.push_back(
-      Test{{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
+  tests.push_back(Test{
+      {100, 200},
+      {200, 300},
+      {100, 300},
+      [&](const at::Tensor& a, const at::Tensor& b) { return at::mm(a, b); },
+      "nnc_aten_mm"});
   for (auto curTest : tests) {
     auto [aShape, bShape, resShape, torchFunc, externCallName] = curTest;
     auto toExprHandleVec = [](std::vector<int64_t> v) {

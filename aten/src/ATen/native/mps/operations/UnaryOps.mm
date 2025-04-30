@@ -82,7 +82,7 @@ static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::st
   }
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, output});
+    std::string key = op_name + getTensorsStringKey({self, output});
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
       MPSGraphTensor* castTensor = newCachedGraph->inputTensor_;
@@ -305,14 +305,12 @@ Tensor angle_mps(const Tensor& self) {
 }
 
 TORCH_IMPL_FUNC(sigmoid_out_mps)(const Tensor& self, const Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support sigmoid op with int64 input");
   mps::unary_op(self, output, "sigmoid_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return [mpsGraph sigmoidWithTensor:inputTensor name:nil];
   });
 }
 
 TORCH_IMPL_FUNC(log1p_out_mps)(const Tensor& self, const Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support log1p op with int64 input");
   mps::unary_op(self, output, "log1p_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return mps::log1p(mpsGraph, inputTensor);
   });
@@ -339,7 +337,7 @@ TORCH_IMPL_FUNC(expm1_out_mps)(const Tensor& self, const Tensor& output) {
   });
 }
 
-static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string op_name) {
+static void logit_mps_impl(const Tensor& self, std::optional<double> eps, Tensor& output, const std::string& op_name) {
   std::string key = op_name + ":[" + (eps.has_value() ? std::to_string(eps.value()) : "NULL") + "]";
 
   mps::unary_op(self, output, key, ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -373,7 +371,11 @@ Tensor& logit_out_mps(const Tensor& self, std::optional<double> eps, Tensor& res
 }
 
 Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
-  Tensor result = at::empty(self.sizes(), ScalarType::Float, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  auto out_dtype = self.scalar_type();
+  if (c10::isIntegralType(out_dtype, /*includeBool*/ true)) {
+    out_dtype = kFloat;
+  }
+  Tensor result = at::empty(self.sizes(), out_dtype, std::nullopt, kMPS, std::nullopt, std::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
 }

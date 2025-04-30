@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/inductor-nightly.yml
+      - benchmarks/dynamo/ci_expected_accuracy/dynamic_cpu_max_autotune_inductor_amp_freezing_huggingface_inference.csv
+      - benchmarks/dynamo/ci_expected_accuracy/dynamic_cpu_max_autotune_inductor_amp_freezing_timm_inference.csv
+      - benchmarks/dynamo/ci_expected_accuracy/dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench_inference.csv
   workflow_dispatch:
   schedule:
     # Run every day at 7:00 AM UTC
