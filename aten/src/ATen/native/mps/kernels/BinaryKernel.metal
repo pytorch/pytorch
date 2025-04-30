@@ -21,21 +21,21 @@ struct sub_functor {
 struct add_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a + (alpha * b));
+    return static_cast<T>(a + c10::metal::mul(alpha, b));
   }
 };
 
 struct sub_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a - (alpha * b));
+    return static_cast<T>(a - c10::metal::mul(alpha, b));
   }
 };
 
 struct lerp_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a + (alpha * (b - a)));
+    return static_cast<T>(a + c10::metal::mul(alpha, b - a));
   }
 };
 
@@ -183,42 +183,7 @@ struct make_complex_functor {
 struct complex_mul_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return T(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
-  }
-};
-
-struct complex_add_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    return T(
-        a.x + (alpha.x * b.x - alpha.y * b.y),
-        a.y + (alpha.x * b.y + alpha.y * b.x));
-  }
-};
-
-struct complex_add_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    return T(a.x + b.x, a.y + b.y);
-  }
-};
-
-struct complex_sub_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    return T(
-        a.x - (alpha.x * b.x - alpha.y * b.y),
-        a.y - (alpha.x * b.y + alpha.y * b.x));
-  }
-};
-
-struct complex_lerp_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    auto intr = T(b.x - a.x, b.y - a.y);
-    return T(
-        a.x + (alpha.x * intr.x - intr.y * intr.y),
-        a.y + (alpha.x * intr.y + alpha.y * intr.x));
+    return c10::metal::mul(a, b);
   }
 };
 
@@ -324,9 +289,9 @@ REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
 REGISTER_BINARY_OP(sub, float2, float2);
 REGISTER_BINARY_OP(sub, half2, half2);
-REGISTER_BINARY_ALPHA_OP(complex_add_alpha, float2, float2);
-REGISTER_BINARY_ALPHA_OP(complex_add_alpha, half2, half2);
-REGISTER_BINARY_ALPHA_OP(complex_sub_alpha, float2, float2);
-REGISTER_BINARY_ALPHA_OP(complex_sub_alpha, half2, half2);
-REGISTER_BINARY_ALPHA_OP(complex_lerp_alpha, float2, float2);
-REGISTER_BINARY_ALPHA_OP(complex_lerp_alpha, half2, half2);
+REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2);
+REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2);
+REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2);
