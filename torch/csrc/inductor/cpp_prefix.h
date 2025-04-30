@@ -88,7 +88,7 @@ struct WelfordHelper {
   // 2. Save the welford stack, which is used to combine welford reduction
   //    with cascade summation to improve numerical stability.
   static std::vector<typename T::value_type> weight_recps;
-  std::vector<Welford<T>> welford_stk{};
+  std::vector<Welford<T>> welford_stk;
   uint64_t depth{0}; // depth of welford_stk.
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
   WelfordHelper() = default;
@@ -249,7 +249,8 @@ T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
 #endif
 
 // Refer to
-// https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/aten/src/ATen/native/SharedReduceOps.h#L419-L445
+// https://github.com/pytorch/pytorch/blob/b5b36cf0c4e1958f1ff25120f5d4beeef3288187/
+// aten/src/ATen/native/SharedReduceOps.h#L419-L445
 template <typename scalar_t>
 inline bool greater_or_nan(
     scalar_t a,
@@ -355,11 +356,15 @@ inline at::vec::VectorizedN<scalar_t, N> div_floor_floating_vec(
 
 template <typename T, int NV, int NI>
 struct IndexValueVec {
-  at::vec::VectorizedN<T, NV> value{};
-  at::vec::VectorizedN<int64_t, NI> index{0};
+  at::vec::VectorizedN<T, NV> value;
+  at::vec::VectorizedN<int64_t, NI> index;
 
-  IndexValueVec(const T _value) : value{_value} {}
-  IndexValueVec() = default;
+  IndexValueVec(const T _value) {
+    value = at::vec::VectorizedN<T, NV>(_value);
+    index = at::vec::VectorizedN<int64_t, NI>(0);
+  };
+
+  IndexValueVec(){};
 };
 
 template <
@@ -505,10 +510,10 @@ template <typename T, int NV, int NI>
 inline IndexValue<T> argmin_vec_reduce_all(
     const IndexValueVec<T, NV, NI>& vec) {
   constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ std::array<T, len> tmpval;
-  __at_align__ std::array<int64_t, len> tmpidx;
-  vec.value.store(tmpval.data());
-  vec.index.store(tmpidx.data());
+  __at_align__ T tmpval[len];
+  __at_align__ int64_t tmpidx[len];
+  vec.value.store(tmpval);
+  vec.index.store(tmpidx);
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
   for (int i = 1; i < len; i++) {
     res = argmin_combine(res, tmpval[i], tmpidx[i]);
@@ -520,10 +525,10 @@ template <typename T, int NV, int NI>
 inline IndexValue<T> argmax_vec_reduce_all(
     const IndexValueVec<T, NV, NI>& vec) {
   constexpr int len = at::vec::VectorizedN<T, NV>::size();
-  __at_align__ std::array<T, len> tmpval;
-  __at_align__ std::array<int64_t, len> tmpidx;
-  vec.value.store(tmpval.data());
-  vec.index.store(tmpidx.data());
+  __at_align__ T tmpval[len];
+  __at_align__ int64_t tmpidx[len];
+  vec.value.store(tmpval);
+  vec.index.store(tmpidx);
   IndexValue res = IndexValue<T>(tmpidx[0], tmpval[0]);
   for (int i = 1; i < len; i++) {
     res = argmax_combine(res, tmpval[i], tmpidx[i]);
@@ -552,12 +557,12 @@ inline at::vec::Vectorized<scalar_t> vec_shuffle_down(
     at::vec::Vectorized<scalar_t> x,
     size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;
-  alignas(alignof(Vec)) std::array<scalar_t, Vec::size()> array;
-  x.store(array.data());
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  x.store(array);
   for (size_t i = 0; i + n < Vec::size(); i += 2 * n) {
     array[i] = array[i + n];
   }
-  return Vec::loadu(array.data());
+  return Vec::loadu(array);
 }
 
 #ifdef CPU_CAPABILITY_AVX2
@@ -573,10 +578,9 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
       return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
     case 4:
       return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
-    default:
-      throw std::runtime_error(
-          "Unhandled vec_shuffle_down value " + std::to_string(n));
   }
+  throw std::runtime_error(
+      "Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -599,10 +603,9 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
     case 8:
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
-    default:
-      throw std::runtime_error(
-          "Unhandled vec_shuffle_down value " + std::to_string(n));
   }
+  throw std::runtime_error(
+      "Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -627,14 +630,14 @@ Welford<scalar_t> welford_vec_reduce_all(
     acc = welford_combine(acc, shuffled, use_index);
   }
 
-  alignas(alignof(Vec)) std::array<scalar_t, Vec::size()> array;
-  acc.mean.store(array.data());
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  acc.mean.store(array);
   result.mean = array[0];
 
-  acc.m2.store(array.data());
+  acc.m2.store(array);
   result.m2 = array[0];
 
-  acc.weight.store(array.data());
+  acc.weight.store(array);
   result.weight = array[0];
   result.index = result.weight;
 

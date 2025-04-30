@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
 
@@ -1407,8 +1407,8 @@ class GraphModule(torch.nn.Module):
             z = gn(x, y)
             return gn(z, y)
 
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device=GPU_TYPE)
+        t2 = torch.rand(5, device=GPU_TYPE)
 
         ref = fn(t1, t2)
         backend = AotEagerAndRecordGraphs()
@@ -1462,6 +1462,24 @@ class GraphModule(torch.nn.Module):
             return (sin,)
 """,
             )
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_symbol(self):
+        @mark_compile_region
+        def gn(x):
+            return torch.sin(torch.nonzero(x))
+
+        def fn(x):
+            return gn(x) + gn(x)
+
+        x = torch.randn(64, 1, requires_grad=True)
+
+        # Inductor fails with a lowering error
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
     @unittest.skip("Repro for an issue which is not fixed yet")
     def test_div(self):
