@@ -7,6 +7,7 @@ IF NOT "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
     exit /b 1
 )
 
+set "PATH=%CD%\Python%PYTHON_VERSION%\Scripts;%CD%\Python;%PATH%"
 echo "Cmake check"
 IF "%BUILD_VISION%" == "" (
     where /q cmake.exe
