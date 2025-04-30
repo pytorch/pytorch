@@ -2909,6 +2909,10 @@ class PythonWrapperCodegen(CodeGen):
 
         self.writeline(f"{subgraph.graph.name}_args = [{outer_input_names}]")
 
+        # Since the buffers are already put into the args list, we can free the
+        # buffers here.
+        V.graph.scheduler.free_buffers()
+
         # Call the subgraph launcher function
         self.writeline(
             f"{outer_buffer_name} = {subgraph.graph.name}({subgraph.graph.name}_args)"
