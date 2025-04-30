@@ -1430,8 +1430,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
 
-        from . import TensorVariable
-
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         def arg_extractor(combine_fn, xs, additional_inputs):
@@ -1523,7 +1521,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         output_node.args = (pytree.tree_leaves(output_node.args),)
         combine_graph.lint()
 
-        # Collect the results from the comnbine_fn
+        # Collect the results from the combine_fn
         results, _combine_treespec = _make_inlined(tx, pytree.tree_flatten)(
             combine_result
         ).unpack_var_sequence(tx)
@@ -1570,6 +1568,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             _maybe_fake_tracing,
         )
         from torch._inductor.utils import is_pointwise_use
+        from torch._subclasses.fake_tensor import FakeTensor
 
         with tx.fake_mode:
             xs_fake = [
@@ -1581,7 +1580,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 for leaf in additional_inputs_vars
             ] + [
                 leaf.node.meta["example_value"].clone()
-                if isinstance(leaf.node.meta["example_value"], TensorVariable)
+                if isinstance(leaf.node.meta["example_value"], FakeTensor)
                 else leaf.node.meta["example_value"]
                 for leaf in combine_lifted_freevars.keys()
             ]
