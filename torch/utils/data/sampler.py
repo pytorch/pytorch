@@ -189,15 +189,15 @@ class RandomSampler(Sampler[int]):
 
     def init_generator(self):
         if self.generator is None:
-            seed = int(torch.empty((), dtype=torch.int64).random_().item())
-            generator = torch.Generator()
-            generator.manual_seed(seed)
+            seed = int(torch.empty((), dtype=torch.int64).random_())
+            generator = torch.Generator().manual_seed(seed)
         else:
             generator = self.generator
         return generator
 
     def __len__(self) -> int:
         return self.num_samples
+
 
 class SubsetRandomSampler(Sampler[int]):
     r"""Samples elements randomly from a given list of indices, without replacement.
@@ -355,9 +355,9 @@ class RandomBatchSampler(RandomSampler, BatchSampler):
     def __init__(
         self,
         data_source: Sized,
+        batch_size: int,
+        drop_last: bool,
         replacement: bool = False,
-        batch_size: int = 32,
-        drop_last: bool = False,
         generator=None,
     ) -> None:
         RandomSampler.__init__(self, data_source, replacement, None, generator)
@@ -384,8 +384,8 @@ class RandomBatchSampler(RandomSampler, BatchSampler):
         indices = self.sample_indices()
 
         # Slicing is faster on list when batch size is small
-        # if self.batch_size < 16:
-        indices = indices.tolist()
+        if self.batch_size < 16:
+            indices = indices.tolist()
 
         indices_batches = [
             indices[i : i + self.batch_size]
