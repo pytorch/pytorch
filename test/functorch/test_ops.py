@@ -1195,8 +1195,12 @@ class TestOperators(TestCase):
                 "linalg.householder_product",
                 {torch.float32: tol(atol=3e-04, rtol=9e-04)},
             ),
-            # Tighten tolerance to check for regressions of issue #114868
-            tol1("linalg.tensorsolve", {torch.float32: tol(atol=1e-4, rtol=1e-5)}),
+            # The CPU code uses the same algorithm for the batched vs unbatched case, so there should not be any differences.
+            # Use lowest possible tolerance (bounded by the minimum tolerance for float32 later) to check for regressions of issue #114868
+            tol1("linalg.tensorsolve",
+                {torch.float32: tol(atol=0, rtol=0)},
+                device_type='cpu',
+            ),
             tol1(
                 "matrix_exp",
                 {torch.float32: tol(atol=5e-04, rtol=1e-04)},
