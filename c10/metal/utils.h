@@ -164,5 +164,25 @@ cast_to(const U from) {
   return static_cast<T>(from);
 }
 
+// Generalizable math operators (used for both scalar and complex)
+template <typename U, typename V>
+using common_dtype = decltype(U(0) + V(0));
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return x * y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return T(x.x * y.x - x.y * y.y, x.x * y.y + x.y * y.x);
+}
+
 } // namespace metal
 } // namespace c10
