@@ -289,7 +289,6 @@ static void add_sub_lerp_template(const Tensor& self,
     return;
   }
 
-
   BinaryOpBlock add_sub_lerp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     MPSGraphTensor* secondaryTensor = secondaryCastTensor;
