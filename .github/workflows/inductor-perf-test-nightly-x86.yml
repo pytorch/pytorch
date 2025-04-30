@@ -102,7 +102,9 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
-      disable-monitor: true
+      disable-monitor: false
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 3
     secrets: inherit
 
 
@@ -118,5 +120,7 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
-      disable-monitor: true
+      disable-monitor: false
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 3
     secrets: inherit
