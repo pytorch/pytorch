@@ -256,7 +256,7 @@ enum xnn_status xnnp_define_q_tensor(const Tensor& tensor, MemoryFormat format, 
 
 template <typename scalar_t, bool ReLUFused = false>
 Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
-  const string func_name = "xnnp_add()";
+  const std::string_view func_name = "xnnp_add()";
   TORCH_CHECK(qa.ndimension() > 0, func_name, ": Got empty input tensor.");
   TORCH_CHECK(at::native::xnnpack::available(), func_name, ": XNNPACK is not available")
 
