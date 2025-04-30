@@ -175,6 +175,12 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    # Temporarily disable
+    # The reason is that these three tests need to be compiled during testing,
+    # and they rely on the rocm header files, but the relevant header files are missing or not exposed in the test environment
+    "test_cpp_extensions_open_device_registration",
+    "test_openreg",
+    "test_transformers_privateuse1",
 ]
 
 S390X_BLOCKLIST = [
@@ -340,20 +346,22 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
+    num_gpus = torch.cuda.device_count()
     DISTRIBUTED_TESTS_CONFIG["test"] = {"WORLD_SIZE": "1"}
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG["mpi"] = {
             "WORLD_SIZE": "3",
         }
-    if dist.is_nccl_available():
+    if dist.is_nccl_available() and num_gpus > 0:
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": f"{num_gpus}",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": f"{num_gpus if num_gpus > 0 else 3}",
         }
+    del num_gpus
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():

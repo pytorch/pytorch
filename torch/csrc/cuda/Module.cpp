@@ -2169,7 +2169,6 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
-void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
