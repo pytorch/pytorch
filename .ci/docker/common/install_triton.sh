@@ -10,13 +10,8 @@ fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
-get_version() {
-  package_version=$(as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}')
-  if [ -z "${package_version}" ]; then
-    # Get pip version
-    package_version=$(conda_run pip list | grep -w $* | head -n 1 | awk '{print $2}')
-  fi
-  echo "${package_version}"
+get_pip_version() {
+  conda_run pip list | grep -w $* | head -n 1 | awk '{print $2}'
 }
 
 conda_reinstall() {
@@ -44,8 +39,8 @@ fi
 
 if [ -n "${CONDA_CMAKE}" ]; then
   # Keep the current cmake and numpy version here, so we can reinstall them later
-  CMAKE_VERSION=$(get_conda_version cmake)
-  NUMPY_VERSION=$(get_conda_version numpy)
+  CMAKE_VERSION=$(get_pip_version cmake)
+  NUMPY_VERSION=$(get_pip_version numpy)
 fi
 
 if [ -z "${MAX_JOBS}" ]; then
