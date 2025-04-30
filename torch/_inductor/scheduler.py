@@ -4298,7 +4298,6 @@ class Scheduler:
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
-
             # WeakDep is fake dependency on unused buffer. It should not appear
             # in partition_input_names for inputs that are actually read or written.
             partition_input_names = (
