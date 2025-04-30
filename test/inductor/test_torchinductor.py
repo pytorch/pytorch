@@ -10513,7 +10513,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
-    @xfail_if_mps  # ps0 is not defined?
     def test_float_repr_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x):
