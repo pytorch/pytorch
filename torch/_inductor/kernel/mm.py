@@ -1171,7 +1171,6 @@ def mm_autoheuristic(
             "mat2_iscontig", mat2.layout.is_contiguous(), is_categorical=True
         )
         if name == "mm":
-            # for mixed_mm, we only consider fp16
             context_add_using_tf32(context, mat1.layout.dtype)
         return context
 

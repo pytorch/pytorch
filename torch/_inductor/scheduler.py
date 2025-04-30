@@ -1737,6 +1737,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_operation_names():
                 self.name_to_node[name] = other_node
 
+            self.outputs_by_name: dict[str, SchedulerBuffer] = {
+                k: v for snode in self.snodes for k, v in snode.outputs_by_name.items()
+            }
+
         self.use_custom_partition_algo = use_custom_partition_algo
         device = snodes[0].get_device()
         assert device
@@ -2100,6 +2104,7 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
+            self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
 
         self.compute_last_usage()
@@ -4278,6 +4283,100 @@ class Scheduler:
 
         return signatures[::-1]
 
+    def reorder_for_minimizing_partition(
+        self,
+        nodes: list[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder nodes to minimize the number of partitions via a bfs
+        topological sort. This is the optimal reodering such that the
+        number of partitions cannot be reduced further. This may be
+        sub-optimal for other metrics such as peak memory. This does not
+        change relative orders of two cudagraphable nodes, nor the
+        relative order of two non_cudagraphable nodes.
+        """
+        node_to_indegree: dict[BaseSchedulerNode, int] = dict()
+        cudagraphable_nodes: collections.deque[BaseSchedulerNode] = collections.deque()
+        non_cudagraphable_nodes: collections.deque[BaseSchedulerNode] = (
+            collections.deque()
+        )
+
+        def insert_pending_nodes(node: BaseSchedulerNode) -> None:
+            if self.should_partition(node):
+                non_cudagraphable_nodes.append(node)
+            else:
+                cudagraphable_nodes.append(node)
+
+        def update_indegree(node: BaseSchedulerNode) -> None:
+            for succ_node in node.mpi_node.succ_nodes:
+                assert node_to_indegree[succ_node] > 0
+                node_to_indegree[succ_node] -= 1
+                if node_to_indegree[succ_node] == 0:
+                    insert_pending_nodes(succ_node)
+
+        for node in nodes:
+            node_to_indegree[node] = len(node.mpi_node.pred_nodes)
+            if node_to_indegree[node] == 0:
+                insert_pending_nodes(node)
+
+        schedule: list[BaseSchedulerNode] = []
+        num_iters: int = 0
+        while num_iters < len(nodes) and (
+            non_cudagraphable_nodes or cudagraphable_nodes
+        ):
+            while non_cudagraphable_nodes:
+                node = non_cudagraphable_nodes.popleft()
+                schedule.append(node)
+                update_indegree(node)
+
+            while cudagraphable_nodes:
+                node = cudagraphable_nodes.popleft()
+                schedule.append(node)
+                update_indegree(node)
+
+            num_iters += 1
+
+        if num_iters > len(nodes):
+            raise RuntimeError(
+                """
+                Failed to schedule, while loop ran too long when
+                reordering for minimizing the num of partitions
+                """
+            )
+
+        return schedule
+
+    def maybe_reorder_for_minimizing_partition(
+        self,
+        nodes: list[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder nodes to minimize the number of partitions if this only slightly
+        increase peak memory.
+        """
+        from .memory import estimate_peak_memory, prepare_planning_info
+
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+
+        default_peak_memory, name_to_freeable_input_buf = prepare_planning_info(
+            nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+            OrderedSet(V.graph.graph_inputs.keys()),
+            graph_outputs,
+        )
+
+        reordered_nodes = self.reorder_for_minimizing_partition(nodes)
+        reorder_peak_memory, _ = estimate_peak_memory(
+            reordered_nodes, name_to_freeable_input_buf, graph_outputs
+        )
+
+        # 1.1 here means 10% extra peak memory budget which is quite arbitrary
+        if reorder_peak_memory < default_peak_memory * 1.1:
+            return reordered_nodes
+
+        return nodes
+
     def reorder_for_partition_with_simple_dependency(
         self, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
@@ -4560,7 +4659,7 @@ class Scheduler:
                     )
                     return False
             except CompilationError as e:
-                # workaround triton issue: https://github.com/openai/triton/issues/2151
+                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
                 if "Loop-carried variable" in str(e):
                     fusion_log.debug(
                         "ComboKernel benchmark: return True because of loop-carried variable"
@@ -4574,7 +4673,7 @@ class Scheduler:
         try:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
-            # workaround triton issue: https://github.com/openai/triton/issues/2151
+            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
             if "Loop-carried variable" in str(e):
                 fusion_log.debug(
                     "ComboKernel benchmark: return True because of loop-carried variable"
