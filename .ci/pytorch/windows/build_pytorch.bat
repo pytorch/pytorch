@@ -38,6 +38,7 @@ pushd %SRC_DIR%
 
 
 set "ORIG_PATH=%PATH%"
+set CMAKE_PREFIX_PATH="%CD%\Python%PYTHON_VERSION%\;%CD%\Python%PYTHON_VERSION%\Library\"
 set CMAKE_LIBRARY_PATH="%CD%\Python%PYTHON_VERSION%\Library\lib\"
 set CMAKE_INCLUDE_PATH="%CD%\Python%PYTHON_VERSION%\Library\include\"
 
