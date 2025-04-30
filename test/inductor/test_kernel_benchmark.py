@@ -427,6 +427,7 @@ class TestKernelBenchmark(TestCase):
         # 20000 * 5000 * 4 = 200MB for a
         self.check_bandwidth(compiled_module, "0.200")
 
+    @skipIfRocm #This test requires triton version 3.3+
     def test_split_scan(self):
         @torch.compile
         def f(a):
