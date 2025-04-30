@@ -282,11 +282,6 @@ COMMON_HIPCC_FLAGS = [
     '-DHIP_ENABLE_WARP_SYNC_BUILTINS=1'
 ]
 
-_COMMON_SYCL_FLAGS = [
-    '-fsycl',
-    '-fsycl-targets=spir64_gen,spir64',
-]
-
 def _get_sycl_arch_list():
     if 'TORCH_XPU_ARCH_LIST' in os.environ:
         return os.environ.get('TORCH_XPU_ARCH_LIST')
@@ -297,11 +292,19 @@ def _get_sycl_arch_list():
     arch_list = [x for x in arch_list if not x.startswith('dg2')]
     return ','.join(arch_list)
 
+# If arch list returned by _get_sycl_arch_list() is empty, then sycl kernels will be compiled
+# for default spir64 target and avoid device specific compilations entirely. Further, kernels
+# will be JIT compiled at runtime.
+_COMMON_SYCL_FLAGS = [
+    '-fsycl',
+    '-fsycl-targets=spir64_gen,spir64' if _get_sycl_arch_list() != '' else '',
+]
+
 _SYCL_DLINK_FLAGS = [
     *_COMMON_SYCL_FLAGS,
     '-fsycl-link',
     '--offload-compress',
-    f'-Xs "-device {_get_sycl_arch_list()}"',
+    f'-Xs "-device {_get_sycl_arch_list()}"' if _get_sycl_arch_list() != '' else '',
 ]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
@@ -2388,12 +2391,13 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
         ('Blackwell+Tegra', '10.1'),
-        ('Blackwell', '10.0;12.0+PTX'),
+        ('Blackwell', '10.0;10.3;12.0;12.1+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
                         '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
-                        '10.0', '10.0a', '10.1', '10.1a', '12.0', '12.0a']
+                        '10.0', '10.0a', '10.1', '10.1a', '10.3', '10.3a', '12.0',
+                        '12.0a', '12.1', '12.1a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x

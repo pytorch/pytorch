@@ -431,7 +431,7 @@ class ForeachTests(TestCase):
     @requires_cuda
     @scalar_bin_ops
     @unittest.skip(
-        "Triton recursion depth exceeded: https://github.com/openai/triton/issues/1763"
+        "Triton recursion depth exceeded: https://github.com/triton-lang/triton/issues/1763"
     )
     def test_kernel_split_arg_limit_scalar(self, op):
         def fn(a):
