@@ -2020,6 +2020,14 @@ class SubgraphTracer(fx.Tracer):
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 
+        # Map from the name of fx nodes in the current tracer's graph to its
+        # corresponding VariableTracker for TensorVariable.
+        # We update this mapping everytime we create a new TensorVariable.
+        # We also update this mapping when nodes are renamed (the only place
+        # this happens today should be in STORE_FAST).
+        # See Note [Hopifying Context Managers]
+        self.fx_node_name_to_vt: dict[str, VariableTracker] = {}
+
         self._cur_code = None
         self._orig_gm_meta = None
         self._orig_gm_lineno_map = None

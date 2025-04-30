@@ -548,6 +548,29 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args,
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
+
+            # See Note [Hopifying Context Managers]
+            if cm_obj.hopify:
+                # Store what we need in order to be able to reconstruct the
+                # context manager when we call the HOP.
+                cm_obj.cls_fqn = self.value.__module__ + "." + self.value.__qualname__
+
+                def get_val(x):
+                    if isinstance(x, variables.ConstantVariable):
+                        return x.value
+                    elif isinstance(
+                        x, BaseUserFunctionVariable
+                    ) and "apply_ac_policy" in str(self.value):
+                        # Allow passing in a function specifically for AC
+                        return x.get_function()
+                    else:
+                        raise RuntimeError(
+                            f"Unsupported argument type {type(x)} for context manager {cm_obj.cls_fqn}"
+                        )
+
+                cm_obj.arg_values = [get_val(x) for x in args]
+                cm_obj.kwarg_values = {k: get_val(v) for k, v in kwargs.items()}
+
             return cm_obj
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
