@@ -11,7 +11,7 @@ import logging
 import operator
 from collections import defaultdict
 from collections.abc import Generator, Iterable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.fx
@@ -238,20 +238,6 @@ def _create_subgraph(
     node_ind_input_inds = _copy_nodes_and_remap_inputs(subgraph, region)
     _create_subgraph_outputs(subgraph, inds_with_external_users)
     return subgraph, node_ind_input_inds
-
-
-def _args(
-    n: torch.fx.Node,
-    node_to_additional_deps: Optional[dict[Node, OrderedSet[Node]]] = None,
-) -> list[Any]:
-    if node_to_additional_deps is None:
-        node_to_additional_deps = {}
-
-    args: list[Any] = []
-    torch.fx.map_arg((n.args, n.kwargs), args.append)
-    if n in node_to_additional_deps:
-        args.extend(node_to_additional_deps[n])
-    return args
 
 
 def _stable_topological_sort(
