@@ -3,10 +3,12 @@
 import copy
 import os
 import pickle
+import subprocess
 import sys
 import tempfile
 import threading
 import time
+import unittest
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
@@ -34,6 +36,8 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
     load_tests,
     parametrize,
     retry_on_connect_failures,
@@ -1559,6 +1563,11 @@ class DummyWork(dist._Work):
 
 
 class DummyProcessGroup(dist.ProcessGroup):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._aborted = False
+        self._shutdown = False
+
     def getBackendName(self):
         return "Dummy"
 
@@ -1622,6 +1631,12 @@ class DummyProcessGroup(dist.ProcessGroup):
 
         return DummyWork()
 
+    def abort(self) -> None:
+        self._aborted = True
+
+    def shutdown(self) -> None:
+        self._shutdown = True
+
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
@@ -1638,6 +1653,51 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def test_get_backend_name(self):
         dpg = DummyProcessGroup(0, 1)
         self.assertEqual("Dummy", dpg.name())
+
+        # dist.Backend.register_backend(
+        #     "dummy", PythonProcessGroupExtensionTest.create_dummy
+        # )
+
+        # # os.environ["MASTER_ADDR"] = "localhost"
+        # # os.environ["MASTER_PORT"] = "6789"
+        # # dist.init_process_group(
+        # #     "cpu:dummy", rank=0, world_size=1,
+        # # )
+        # dpg = DummyProcessGroup(0, 1)
+        # from torch.distributed.distributed_c10d import _canonicalize_group_rank
+        # self.assertEqual(123, _canonicalize_group_rank(dpg, group_rank=123, return_global=False))
+        # with self.assertRaises(RuntimeError):
+        # _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
+
+    def test_canonicalize_helper(self):
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        dpg = DummyProcessGroup(0, 124)
+        from torch.distributed.distributed_c10d import _canonicalize_group_rank
+
+        # we ensure that a process group with more ranks than the 'default' group can still be used.
+        # e.g. if the dpg had 124 ranks and the world had only 2 ranks.
+        self.assertEqual(
+            123, _canonicalize_group_rank(dpg, group_rank=123, return_global=False)
+        )
+        self.assertEqual(
+            0, _canonicalize_group_rank(dpg, global_rank=0, return_global=True)
+        )
+        with self.assertRaises(ValueError):
+            # TODO(whc) this is actually catching the wrong error:
+            # ValueError: Group <__mp_main__.DummyProcessGroup object at 0x7faa0a844540> is not registered,
+            # please create group with torch.distributed.new_group API
+            # It should be catching a different error where the rank doesn't exist in the global mapping.
+            # But it's still testing the same part of the _canonicalize_group_rank helper so maybe this is fine
+            _canonicalize_group_rank(dpg, group_rank=123, return_global=True)
+
+        dist.destroy_process_group()
 
     def test_backend_class_attr(self):
         dist.Backend.register_backend(
@@ -1794,6 +1854,36 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # intentionally not calling into `destroy_process_group` as not all
         # user applications would explicitly that.
 
+    def test_shutdown(self) -> None:
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        pg = c10d._get_default_group()
+
+        dist.destroy_process_group()
+
+        self.assertTrue(pg._shutdown)
+
+    def test_abort(self) -> None:
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        pg = c10d._get_default_group()
+
+        c10d._abort_process_group()
+
+        self.assertTrue(pg._aborted)
+
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
@@ -1865,6 +1955,36 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             self.assertEqual(pg.name(), str(excepted_backend))
 
             dist.destroy_process_group()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    def test_default_process_group(self):
+        script = """
+# Hide all GPUs
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+import torch
+from torch import distributed as dist
+
+# This should initialize on CPU even though this is a CUDA-enabled build
+dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                # It is ok to have an extra long timeout here as a timeout means the test failed
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail(
+                msg="Example code timed out! See the code sample in the test for details."
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(f"""Subprocess failed with {e.output.decode("utf-8")}""")
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are

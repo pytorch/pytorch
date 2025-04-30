@@ -223,12 +223,16 @@ def max_clock_rate():
             return 1700
         elif "gfx908" in gcn_arch:
             return 1502
+        elif "gfx12" in gcn_arch:
+            return 1700
         elif "gfx11" in gcn_arch:
             return 1700
         elif "gfx103" in gcn_arch:
             return 1967
         elif "gfx101" in gcn_arch:
             return 1144
+        elif "gfx95" in gcn_arch:
+            return 1700  # TODO: placeholder, get actual value
         else:
             return 1100
 
@@ -270,3 +274,7 @@ def record_chromium_event_internal(
     event: dict[str, Any],
 ):
     return None
+
+
+def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
+    return True

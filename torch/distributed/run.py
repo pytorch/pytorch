@@ -289,9 +289,9 @@ Important Notices
 
 ::
 
- >>> # xdoctest: +SKIP("stub")
- >>> import torch.distributed as dist
- >>> dist.init_process_group(backend="gloo|nccl")
+    >>> # xdoctest: +SKIP("stub")
+    >>> import torch.distributed as dist
+    >>> dist.init_process_group(backend="gloo|nccl")
 
 3. In your training program, you can either use regular distributed functions
    or use :func:`torch.nn.parallel.DistributedDataParallel` module. If your
@@ -302,9 +302,9 @@ Important Notices
 ::
 
     local_rank = int(os.environ["LOCAL_RANK"])
-    model = torch.nn.parallel.DistributedDataParallel(model,
-                                                      device_ids=[local_rank],
-                                                      output_device=local_rank)
+    model = torch.nn.parallel.DistributedDataParallel(
+        model, device_ids=[local_rank], output_device=local_rank
+    )
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
 that your code will be operating on. This is generally the local rank of the
@@ -331,17 +331,18 @@ utility
 
 ::
 
-  def main():
-    load_checkpoint(checkpoint_path)
-    initialize()
-    train()
+    def main():
+        load_checkpoint(checkpoint_path)
+        initialize()
+        train()
 
-  def train():
-    for batch in iter(dataset):
-      train_step(batch)
 
-      if should_checkpoint:
-        save_checkpoint(checkpoint_path)
+    def train():
+        for batch in iter(dataset):
+            train_step(batch)
+
+            if should_checkpoint:
+                save_checkpoint(checkpoint_path)
 
 9. (Recommended) On worker errors, this tool will summarize the details of the error
    (e.g. time, rank, host, pid, traceback, etc). On each node, the first error (by timestamp)
@@ -353,17 +354,19 @@ utility
 
 ::
 
-  from torch.distributed.elastic.multiprocessing.errors import record
+    from torch.distributed.elastic.multiprocessing.errors import record
 
-  @record
-  def main():
-      # do train
-      pass
 
-  if __name__ == "__main__":
-      main()
+    @record
+    def main():
+        # do train
+        pass
 
+
+    if __name__ == "__main__":
+        main()
 """  # noqa: E501
+
 import os
 import sys
 import uuid
