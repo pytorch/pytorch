@@ -2089,7 +2089,7 @@ if HAS_CUDA:
                 is_backward=False,
                 is_inference=False,
                 device_index=0,
-                stack_traces=["dummy stack trace1", "dummy stack trace2"]
+                stack_traces=["dummy stack trace1", "dummy stack trace2"],
             )
 
             ref_out = torch.ones((2, 3), device="cuda:0", dtype=torch.float32)
