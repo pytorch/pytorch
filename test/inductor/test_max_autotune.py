@@ -1143,11 +1143,7 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
         b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
-        import torch._inductor.utils as inductor_utils
-
-        possible_splits = range(
-            2, min(K // M, K // N) + 1
-        )
+        possible_splits = range(2, min(K // M, K // N) + 1)
 
         divisors = {split for split in possible_splits if K % split == 0}
 
@@ -1164,13 +1160,15 @@ class TestMaxAutotune(TestCase):
                         divisor_found,
                         f"Could not find a split in {divisors} in {kernel}",
                     )
-    
+
         compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
 
         if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not("decompose_k").run(code[0])
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_0.run"
@@ -1182,7 +1180,9 @@ class TestMaxAutotune(TestCase):
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
         if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not("decompose_k").run(code[0])
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_0.run"
@@ -1199,16 +1199,20 @@ class TestMaxAutotune(TestCase):
         )
         out, code = run_and_get_code(compiled_func, a, b)
         if dynamic:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not("decompose_k").run(code[0])
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(
-                compiled_func(a, b), (a.transpose(0, 1) @ b).relu(), atol=1e-2, rtol=1e-2
+                compiled_func(a, b),
+                (a.transpose(0, 1) @ b).relu(),
+                atol=1e-2,
+                rtol=1e-2,
             )
-
 
 
 @instantiate_parametrized_tests

@@ -34,7 +34,6 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
-    TypeAlias,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -44,6 +43,7 @@ from typing_extensions import (
     dataclass_transform,
     ParamSpec,
     Self,
+    TypeAlias,
     TypeGuard,
 )
 from unittest import mock
@@ -1532,10 +1532,20 @@ k_splits_limit = 5
 default_k_splits = [16, 32, 64, 128, 256]
 
 _IntLike: TypeAlias = Union[int, sympy.Expr]
+
+
 def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
-    return V.graph.sizevars.is_expr_static_and_true(sympy.And(sympy.Ge(k, decompose_k_threshold * m), sympy.Ge(k, decompose_k_threshold * n)))
+    return (
+        V.graph.sizevars.is_expr_static_and_true(
+            sympy.And(
+                sympy.Ge(k, decompose_k_threshold * m),
+                sympy.Ge(k, decompose_k_threshold * n),
+            )
+        )
+        and not V.graph.aot_mode   # TODO: Support AOTI for decomposeK
+    )
 
 
 @functools.lru_cache(None)
@@ -1544,7 +1554,13 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     if isinstance(k, sympy.Expr) and not k.is_number:
         return default_k_splits
 
-    max_k_split = min(k // m, k // n)
+    if (isinstance(m, sympy.Expr) and not m.is_number) or (
+        isinstance(n, sympy.Expr) and not n.is_number
+    ):
+        max_k_split = 256
+    else:
+        max_k_split = min(k // m, k // n)
+
     min_k_split = 2
     # Get all divisors of k, k has to be divisible by kPart
     divisors = sympy.divisors(k)
@@ -1573,7 +1589,7 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         # otherwise, take the smallest values
         else:
             rest_of_splits.append(d)
-        
+
     # If the # of power of 2 divisors are greater than k_splits_limit, return all
     # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
     # should never be a massive amount
