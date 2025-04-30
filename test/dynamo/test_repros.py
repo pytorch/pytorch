@@ -3210,7 +3210,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 2, x.size()
+            assert x[0] == 2, f"Error {x}: {x.size()}"
             return x.cos() + b
 
         torch._dynamo.utils.counters.clear()
