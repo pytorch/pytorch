@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._decomp import decomposition_table
@@ -61,6 +62,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM90OrLater,
+    xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -94,9 +96,6 @@ from torch.utils._pytree import (
     treespec_loads,
 )
 
-
-if not IS_MACOS:
-    from torch.testing._internal.distributed.fake_pg import FakeStore
 
 if HAS_GPU:
     import triton
@@ -2395,7 +2394,7 @@ graph():
         }
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Not all values of dy .* in the specified range are valid because dy was inferred to be a constant",
+            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
@@ -4005,8 +4004,80 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->5, 4->5, 3->4
             bad_args=(torch.randn(5), [torch.randn(5)], {"k": torch.randn(4)}),
             run_time_msg="Expected input.*to be equal to 3, but got 4",
-            compile_time_msg=r"Constraints violated.*\n.*was inferred to be a constant \(3\)",
+            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         )
+
+    def test_additional_inputs_constants(self):
+        @dataclass
+        class D:
+            b: bool
+            i: int
+            f: float
+            t: torch.Tensor
+
+        pytree.register_dataclass(D)
+
+        class M(torch.nn.Module):
+            def forward(self, d: D):
+                return d.i + d.f + d.t
+
+        input1 = (D(True, 3, 3.0, torch.ones(3)),)
+
+        # int and tensor change
+        input2 = (D(True, 4, 3.0, torch.ones(4)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        dynamic_shapes = ai.dynamic_shapes(M(), input1)
+        self.assertEqual(
+            dynamic_shapes, {"d": [None, Dim.DYNAMIC, None, (Dim.DYNAMIC,)]}
+        )
+        torch.export.export(M(), input1, dynamic_shapes=ai)
+
+        # float changes, error
+        input2 = (D(True, 3, 4.0, torch.ones(3)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(3\.0, 3\.0, 4\.0\)"
+        ):
+            ai.dynamic_shapes(M(), input1)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(3\.0, 3\.0, 4\.0\)"
+        ):
+            torch.export.export(M(), input1, dynamic_shapes=ai)
+
+        # bool changes, error
+        input2 = (D(False, 3, 3.0, torch.ones(3)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(True, True, False\)"
+        ):
+            ai.dynamic_shapes(M(), input1)
+        with self.assertRaisesRegex(
+            ValueError, r"they cannot be marked as dynamic: \(True, True, False\)"
+        ):
+            torch.export.export(M(), input1, dynamic_shapes=ai)
+
+        # Differing types
+        input1 = (D(True, 0, 3.0, torch.ones(3)),)
+        input2 = (D(True, False, 3.0, torch.ones(3)),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input1)
+        ai.add(input2)
+        with self.assertRaisesRegex(
+            ValueError,
+            r"differing types, so they cannot be marked as dynamic: \(0, 0, False\)",
+        ):
+            print(ai.dynamic_shapes(M(), input1))
+        with self.assertRaisesRegex(
+            ValueError,
+            r"differing types, so they cannot be marked as dynamic: \(0, 0, False\)",
+        ):
+            torch.export.export(M(), input1, dynamic_shapes=ai)
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
@@ -5448,8 +5519,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "Constraints violated \\(batch\\)!(.*\n)*.*"
-                "batch was inferred to be a constant(.*\n)*.*"
+                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = 10"
             ),
@@ -5615,8 +5685,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "Constraints violated \\(K1\\)!(.*\n)*.*"
-                "K1 was inferred to be a constant(.*\n)*.*"
+                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO(.*\n)*"
                 "Suggested fixes:(.*\n)*.*"
                 "K1 = 3"
             ),
@@ -10164,7 +10233,7 @@ graph():
         inp = (3, torch.randn(4, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             ep = export(
                 M(),
@@ -13029,6 +13098,29 @@ def forward(self, x):
         for node in decomposed_program.graph.nodes:
             self.assertEqual(node.meta["custom"]["my_field"], "dummy")
 
+    def test_run_decompositions_keep_tensor_constant_metadata(self):
+        """Make sure the metadata of tensor constants are kept after run_decompositions."""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.ones(3, 3)
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.b + self.linear(x)
+
+        ep = export(M(), (torch.ones(3, 3),))
+        for node in ep.graph.nodes:
+            node.meta["custom"] = {"my_field": "dummy"}
+
+        for node in ep.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
+        decomp_ep = ep.run_decompositions()
+        for node in decomp_ep.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
     def test_export_linear_preserve_dynamic_shape(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -13527,7 +13619,7 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             ep = export(
                 Specialize(),
@@ -13788,6 +13880,8 @@ class GraphModule(torch.nn.Module):
     @contextmanager
     def distributed_env(self, world_size):
         try:
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
             torch.distributed.init_process_group(
                 backend="fake",
                 world_size=world_size,
@@ -13799,7 +13893,7 @@ class GraphModule(torch.nn.Module):
         finally:
             torch.distributed.destroy_process_group()
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     def test_distributed_all_reduce(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -13817,7 +13911,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(4, 4),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -13833,7 +13927,7 @@ class GraphModule(torch.nn.Module):
                 torch.allclose(a, b) for a, b in zip(ep.module()(*inp), m(*inp))
             )
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather_into_tensor(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -13847,7 +13941,7 @@ class GraphModule(torch.nn.Module):
             inp = (torch.randn(2),)
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_all_to_all_single(self):
         class Foo(torch.nn.Module):
@@ -13865,7 +13959,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(len(nodes), 1)
 
-    @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
+    @xfailIfDistributedNotSupported
     @testing.expectedFailureCppRuntime
     def test_distributed_reduce_scatter_tensor(self):
         class Foo(torch.nn.Module):

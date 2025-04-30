@@ -339,6 +339,29 @@ class AOTInductorTestsTemplate:
         model = model.to(self.device)
         AOTIRunnerUtil.compile(model, example_inputs)
 
+    def test_constant_type_propagation(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+            FileCheck().check_not("torch::aot_inductor::ConstantType::Unknown").run(
+                code
+            )
+
     def test_subclasses(self):
         device_to_init = self.device
 
