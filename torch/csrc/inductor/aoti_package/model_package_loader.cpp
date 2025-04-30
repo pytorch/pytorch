@@ -35,7 +35,7 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
-bool file_exists(std::string& path) {
+bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
@@ -68,7 +68,7 @@ const std::string k_separator = "/";
 namespace torch::inductor {
 
 namespace {
-const nlohmann::json& load_json_file(std::string json_path) {
+const nlohmann::json& load_json_file(const std::string& json_path) {
   if (!file_exists(json_path)) {
     throw std::runtime_error("File not found: " + json_path);
   }
@@ -380,12 +380,14 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     if (filename_len == 0) {
       throw std::runtime_error("Failed to read filename");
     }
-    char* filename = new char[filename_len + 1];
-    if (!mz_zip_reader_get_filename(&zip_archive, i, filename, filename_len)) {
+    // filename_len returned by mz_zip_reader_get_filename includes the null
+    // terminator, so we need to subtract 1 here
+    std::string filename_str(filename_len - 1, '\0');
+    if (!mz_zip_reader_get_filename(
+            &zip_archive, i, filename_str.data(), filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
 
-    std::string filename_str(filename);
     found_filenames += filename_str;
     found_filenames += " ";
 
@@ -428,7 +430,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
       // Extracts file to the temp directory
       mz_zip_reader_extract_file_to_file(
-          &zip_archive, filename, output_path_str.c_str(), 0);
+          &zip_archive, filename_str.c_str(), output_path_str.c_str(), 0);
 
       // Save the file for bookkeeping
       size_t extension_idx = output_path_str.find_last_of('.');
@@ -436,11 +438,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        }
-        if (filename_extension == ".o") {
+        } else if (filename_extension == ".o") {
           consts_filename = output_path_str;
-        }
-        if (filename_extension == ".so") {
+        } else if (filename_extension == ".so") {
           so_filename = output_path_str;
         }
       }
