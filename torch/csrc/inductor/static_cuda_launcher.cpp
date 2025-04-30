@@ -112,7 +112,8 @@ CUfunction loadKernel(
   // we set maximum dynamic shared memory to the difference between
   // the static shared memory and total max shared memory allowed on the device.
   // This prevents us from setting shared memory above the maximum
-  TORCH_CHECK(
+  TORCH_CHECK_WITH(
+      OutOfMemoryError,
       sharedMemBytes < static_cast<uint32_t>(shared_optin),
       "out of resource: ",
       funcName,
