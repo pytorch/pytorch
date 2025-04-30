@@ -76,6 +76,7 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
@@ -3150,7 +3151,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
-    flat_args_kwargs, _ = pytree.tree_flatten((args, kwargs))
+    flat_args_kwargs = _get_flat_args(node, {})
     id_to_initial_version = {
         id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
     }
