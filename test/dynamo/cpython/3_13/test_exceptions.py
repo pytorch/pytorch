@@ -1565,31 +1565,32 @@ class ExceptionTests(__TestCase):
             sys.setrecursionlimit(recursionlimit)
 
 
-    @cpython_only
-    # Python built with Py_TRACE_REFS fail with a fatal error in
-    # _PyRefchain_Trace() on memory allocation error.
-    @unittest.skipIf(support.Py_TRACE_REFS, 'cannot test Py_TRACE_REFS build')
-    @unittest.skipIf(_testcapi is None, "requires _testcapi")
-    def test_recursion_normalizing_with_no_memory(self):
-        # Issue #30697. Test that in the abort that occurs when there is no
-        # memory left and the size of the Python frames stack is greater than
-        # the size of the list of preallocated MemoryError instances, the
-        # Fatal Python error message mentions MemoryError.
-        code = """if 1:
-            import _testcapi
-            class C(): pass
-            def recurse(cnt):
-                cnt -= 1
-                if cnt:
-                    recurse(cnt)
-                else:
-                    _testcapi.set_nomemory(0)
-                    C()
-            recurse(16)
-        """
-        with SuppressCrashReport():
-            rc, out, err = script_helper.assert_python_failure("-c", code)
-            self.assertIn(b'MemoryError', err)
+    if sys.version_info >= (3, 13):
+        @cpython_only
+        # Python built with Py_TRACE_REFS fail with a fatal error in
+        # _PyRefchain_Trace() on memory allocation error.
+        @unittest.skipIf(support.Py_TRACE_REFS, 'cannot test Py_TRACE_REFS build')
+        @unittest.skipIf(_testcapi is None, "requires _testcapi")
+        def test_recursion_normalizing_with_no_memory(self):
+            # Issue #30697. Test that in the abort that occurs when there is no
+            # memory left and the size of the Python frames stack is greater than
+            # the size of the list of preallocated MemoryError instances, the
+            # Fatal Python error message mentions MemoryError.
+            code = """if 1:
+                import _testcapi
+                class C(): pass
+                def recurse(cnt):
+                    cnt -= 1
+                    if cnt:
+                        recurse(cnt)
+                    else:
+                        _testcapi.set_nomemory(0)
+                        C()
+                recurse(16)
+            """
+            with SuppressCrashReport():
+                rc, out, err = script_helper.assert_python_failure("-c", code)
+                self.assertIn(b'MemoryError', err)
 
     @cpython_only
     @unittest.skipIf(_testcapi is None, "requires _testcapi")
@@ -1739,26 +1740,27 @@ class ExceptionTests(__TestCase):
                     self.assertIn("test message", report)
                 self.assertTrue(report.endswith("\n"))
 
-    @cpython_only
-    # Python built with Py_TRACE_REFS fail with a fatal error in
-    # _PyRefchain_Trace() on memory allocation error.
-    @unittest.skipIf(support.Py_TRACE_REFS, 'cannot test Py_TRACE_REFS build')
-    @unittest.skipIf(_testcapi is None, "requires _testcapi")
-    def test_memory_error_in_PyErr_PrintEx(self):
-        code = """if 1:
-            import _testcapi
-            class C(): pass
-            _testcapi.set_nomemory(0, %d)
-            C()
-        """
+    if sys.version_info >= (3, 13):
+        @cpython_only
+        # Python built with Py_TRACE_REFS fail with a fatal error in
+        # _PyRefchain_Trace() on memory allocation error.
+        @unittest.skipIf(support.Py_TRACE_REFS, 'cannot test Py_TRACE_REFS build')
+        @unittest.skipIf(_testcapi is None, "requires _testcapi")
+        def test_memory_error_in_PyErr_PrintEx(self):
+            code = """if 1:
+                import _testcapi
+                class C(): pass
+                _testcapi.set_nomemory(0, %d)
+                C()
+            """
 
-        # Issue #30817: Abort in PyErr_PrintEx() when no memory.
-        # Span a large range of tests as the CPython code always evolves with
-        # changes that add or remove memory allocations.
-        for i in range(1, 20):
-            rc, out, err = script_helper.assert_python_failure("-c", code % i)
-            self.assertIn(rc, (1, 120))
-            self.assertIn(b'MemoryError', err)
+            # Issue #30817: Abort in PyErr_PrintEx() when no memory.
+            # Span a large range of tests as the CPython code always evolves with
+            # changes that add or remove memory allocations.
+            for i in range(1, 20):
+                rc, out, err = script_helper.assert_python_failure("-c", code % i)
+                self.assertIn(rc, (1, 120))
+                self.assertIn(b'MemoryError', err)
 
     def test_yield_in_nested_try_excepts(self):
         #Issue #25612

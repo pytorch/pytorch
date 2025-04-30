@@ -493,139 +493,140 @@ class SysModuleTest(__TestCase):
         self.assertIsNone(sys._getframemodulename(i))
 
     # sys._current_frames() is a CPython-only gimmick.
-    @threading_helper.reap_threads
-    @threading_helper.requires_working_threading()
-    def test_current_frames(self):
-        import threading
-        import traceback
+    if sys.version_info >= (3, 13):
+        @threading_helper.reap_threads
+        @threading_helper.requires_working_threading()
+        def test_current_frames(self):
+            import threading
+            import traceback
 
-        # Spawn a thread that blocks at a known place.  Then the main
-        # thread does sys._current_frames(), and verifies that the frames
-        # returned make sense.
-        entered_g = threading.Event()
-        leave_g = threading.Event()
-        thread_info = []  # the thread's id
+            # Spawn a thread that blocks at a known place.  Then the main
+            # thread does sys._current_frames(), and verifies that the frames
+            # returned make sense.
+            entered_g = threading.Event()
+            leave_g = threading.Event()
+            thread_info = []  # the thread's id
 
-        def f123():
-            g456()
+            def f123():
+                g456()
 
-        def g456():
-            thread_info.append(threading.get_ident())
-            entered_g.set()
-            leave_g.wait()
+            def g456():
+                thread_info.append(threading.get_ident())
+                entered_g.set()
+                leave_g.wait()
 
-        t = threading.Thread(target=f123)
-        t.start()
-        entered_g.wait()
+            t = threading.Thread(target=f123)
+            t.start()
+            entered_g.wait()
 
-        try:
-            # At this point, t has finished its entered_g.set(), although it's
-            # impossible to guess whether it's still on that line or has moved on
-            # to its leave_g.wait().
-            self.assertEqual(len(thread_info), 1)
-            thread_id = thread_info[0]
+            try:
+                # At this point, t has finished its entered_g.set(), although it's
+                # impossible to guess whether it's still on that line or has moved on
+                # to its leave_g.wait().
+                self.assertEqual(len(thread_info), 1)
+                thread_id = thread_info[0]
 
-            d = sys._current_frames()
-            for tid in d:
-                self.assertIsInstance(tid, int)
-                self.assertGreater(tid, 0)
+                d = sys._current_frames()
+                for tid in d:
+                    self.assertIsInstance(tid, int)
+                    self.assertGreater(tid, 0)
 
-            main_id = threading.get_ident()
-            self.assertIn(main_id, d)
-            self.assertIn(thread_id, d)
+                main_id = threading.get_ident()
+                self.assertIn(main_id, d)
+                self.assertIn(thread_id, d)
 
-            # Verify that the captured main-thread frame is _this_ frame.
-            frame = d.pop(main_id)
-            self.assertTrue(frame is sys._getframe())
+                # Verify that the captured main-thread frame is _this_ frame.
+                frame = d.pop(main_id)
+                self.assertTrue(frame is sys._getframe())
 
-            # Verify that the captured thread frame is blocked in g456, called
-            # from f123.  This is a little tricky, since various bits of
-            # threading.py are also in the thread's call stack.
-            frame = d.pop(thread_id)
-            stack = traceback.extract_stack(frame)
-            for i, (filename, lineno, funcname, sourceline) in enumerate(stack):
-                if funcname == "f123":
-                    break
-            else:
-                self.fail("didn't find f123() on thread's call stack")
-
-            self.assertEqual(sourceline, "g456()")
-
-            # And the next record must be for g456().
-            filename, lineno, funcname, sourceline = stack[i+1]
-            self.assertEqual(funcname, "g456")
-            self.assertIn(sourceline, ["leave_g.wait()", "entered_g.set()"])
-        finally:
-            # Reap the spawned thread.
-            leave_g.set()
-            t.join()
-
-    @threading_helper.reap_threads
-    @threading_helper.requires_working_threading()
-    def test_current_exceptions(self):
-        import threading
-        import traceback
-
-        # Spawn a thread that blocks at a known place.  Then the main
-        # thread does sys._current_frames(), and verifies that the frames
-        # returned make sense.
-        g_raised = threading.Event()
-        leave_g = threading.Event()
-        thread_info = []  # the thread's id
-
-        def f123():
-            g456()
-
-        def g456():
-            thread_info.append(threading.get_ident())
-            while True:
-                try:
-                    raise ValueError("oops")
-                except ValueError:
-                    g_raised.set()
-                    if leave_g.wait(timeout=support.LONG_TIMEOUT):
+                # Verify that the captured thread frame is blocked in g456, called
+                # from f123.  This is a little tricky, since various bits of
+                # threading.py are also in the thread's call stack.
+                frame = d.pop(thread_id)
+                stack = traceback.extract_stack(frame)
+                for i, (filename, lineno, funcname, sourceline) in enumerate(stack):
+                    if funcname == "f123":
                         break
+                else:
+                    self.fail("didn't find f123() on thread's call stack")
 
-        t = threading.Thread(target=f123)
-        t.start()
-        g_raised.wait(timeout=support.LONG_TIMEOUT)
+                self.assertEqual(sourceline, "g456()")
 
-        try:
-            self.assertEqual(len(thread_info), 1)
-            thread_id = thread_info[0]
+                # And the next record must be for g456().
+                filename, lineno, funcname, sourceline = stack[i+1]
+                self.assertEqual(funcname, "g456")
+                self.assertIn(sourceline, ["leave_g.wait()", "entered_g.set()"])
+            finally:
+                # Reap the spawned thread.
+                leave_g.set()
+                t.join()
 
-            d = sys._current_exceptions()
-            for tid in d:
-                self.assertIsInstance(tid, int)
-                self.assertGreater(tid, 0)
+        @threading_helper.reap_threads
+        @threading_helper.requires_working_threading()
+        def test_current_exceptions(self):
+            import threading
+            import traceback
 
-            main_id = threading.get_ident()
-            self.assertIn(main_id, d)
-            self.assertIn(thread_id, d)
-            self.assertEqual(None, d.pop(main_id))
+            # Spawn a thread that blocks at a known place.  Then the main
+            # thread does sys._current_frames(), and verifies that the frames
+            # returned make sense.
+            g_raised = threading.Event()
+            leave_g = threading.Event()
+            thread_info = []  # the thread's id
 
-            # Verify that the captured thread frame is blocked in g456, called
-            # from f123.  This is a little tricky, since various bits of
-            # threading.py are also in the thread's call stack.
-            exc_value = d.pop(thread_id)
-            stack = traceback.extract_stack(exc_value.__traceback__.tb_frame)
-            for i, (filename, lineno, funcname, sourceline) in enumerate(stack):
-                if funcname == "f123":
-                    break
-            else:
-                self.fail("didn't find f123() on thread's call stack")
+            def f123():
+                g456()
 
-            self.assertEqual(sourceline, "g456()")
+            def g456():
+                thread_info.append(threading.get_ident())
+                while True:
+                    try:
+                        raise ValueError("oops")
+                    except ValueError:
+                        g_raised.set()
+                        if leave_g.wait(timeout=support.LONG_TIMEOUT):
+                            break
 
-            # And the next record must be for g456().
-            filename, lineno, funcname, sourceline = stack[i+1]
-            self.assertEqual(funcname, "g456")
-            self.assertTrue((sourceline.startswith("if leave_g.wait(") or
-                             sourceline.startswith("g_raised.set()")))
-        finally:
-            # Reap the spawned thread.
-            leave_g.set()
-            t.join()
+            t = threading.Thread(target=f123)
+            t.start()
+            g_raised.wait(timeout=support.LONG_TIMEOUT)
+
+            try:
+                self.assertEqual(len(thread_info), 1)
+                thread_id = thread_info[0]
+
+                d = sys._current_exceptions()
+                for tid in d:
+                    self.assertIsInstance(tid, int)
+                    self.assertGreater(tid, 0)
+
+                main_id = threading.get_ident()
+                self.assertIn(main_id, d)
+                self.assertIn(thread_id, d)
+                self.assertEqual(None, d.pop(main_id))
+
+                # Verify that the captured thread frame is blocked in g456, called
+                # from f123.  This is a little tricky, since various bits of
+                # threading.py are also in the thread's call stack.
+                exc_value = d.pop(thread_id)
+                stack = traceback.extract_stack(exc_value.__traceback__.tb_frame)
+                for i, (filename, lineno, funcname, sourceline) in enumerate(stack):
+                    if funcname == "f123":
+                        break
+                else:
+                    self.fail("didn't find f123() on thread's call stack")
+
+                self.assertEqual(sourceline, "g456()")
+
+                # And the next record must be for g456().
+                filename, lineno, funcname, sourceline = stack[i+1]
+                self.assertEqual(funcname, "g456")
+                self.assertTrue((sourceline.startswith("if leave_g.wait(") or
+                                sourceline.startswith("g_raised.set()")))
+            finally:
+                # Reap the spawned thread.
+                leave_g.set()
+                t.join()
 
     def test_attributes(self):
         self.assertIsInstance(sys.api_version, int)
@@ -736,13 +737,14 @@ class SysModuleTest(__TestCase):
         elif sys.platform == "wasi":
             self.assertEqual(info.name, "pthread-stubs")
 
-    @unittest.skipUnless(support.is_emscripten, "only available on Emscripten")
-    def test_emscripten_info(self):
-        self.assertEqual(len(sys._emscripten_info), 4)
-        self.assertIsInstance(sys._emscripten_info.emscripten_version, tuple)
-        self.assertIsInstance(sys._emscripten_info.runtime, (str, type(None)))
-        self.assertIsInstance(sys._emscripten_info.pthreads, bool)
-        self.assertIsInstance(sys._emscripten_info.shared_memory, bool)
+    if sys.version_info >= (3, 13):
+        @unittest.skipUnless(support.is_emscripten, "only available on Emscripten")
+        def test_emscripten_info(self):
+            self.assertEqual(len(sys._emscripten_info), 4)
+            self.assertIsInstance(sys._emscripten_info.emscripten_version, tuple)
+            self.assertIsInstance(sys._emscripten_info.runtime, (str, type(None)))
+            self.assertIsInstance(sys._emscripten_info.pthreads, bool)
+            self.assertIsInstance(sys._emscripten_info.shared_memory, bool)
 
     def test_43581(self):
         # Can't use sys.stdout, as this is a StringIO object when
@@ -851,87 +853,88 @@ class SysModuleTest(__TestCase):
     def test_clear_type_cache(self):
         sys._clear_type_cache()
 
-    @support.requires_subprocess()
-    def test_ioencoding(self):
-        env = dict(os.environ)
+    if sys.version_info >= (3, 13):
+        @support.requires_subprocess()
+        def test_ioencoding(self):
+            env = dict(os.environ)
 
-        # Test character: cent sign, encoded as 0x4A (ASCII J) in CP424,
-        # not representable in ASCII.
+            # Test character: cent sign, encoded as 0x4A (ASCII J) in CP424,
+            # not representable in ASCII.
 
-        env["PYTHONIOENCODING"] = "cp424"
-        p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                             stdout = subprocess.PIPE, env=env)
-        out = p.communicate()[0].strip()
-        expected = ("\xa2" + os.linesep).encode("cp424")
-        self.assertEqual(out, expected)
+            env["PYTHONIOENCODING"] = "cp424"
+            p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
+                                stdout = subprocess.PIPE, env=env)
+            out = p.communicate()[0].strip()
+            expected = ("\xa2" + os.linesep).encode("cp424")
+            self.assertEqual(out, expected)
 
-        env["PYTHONIOENCODING"] = "ascii:replace"
-        p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                             stdout = subprocess.PIPE, env=env)
-        out = p.communicate()[0].strip()
-        self.assertEqual(out, b'?')
+            env["PYTHONIOENCODING"] = "ascii:replace"
+            p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
+                                stdout = subprocess.PIPE, env=env)
+            out = p.communicate()[0].strip()
+            self.assertEqual(out, b'?')
 
-        env["PYTHONIOENCODING"] = "ascii"
-        p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             env=env)
-        out, err = p.communicate()
-        self.assertEqual(out, b'')
-        self.assertIn(b'UnicodeEncodeError:', err)
-        self.assertIn(rb"'\xa2'", err)
+            env["PYTHONIOENCODING"] = "ascii"
+            p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=env)
+            out, err = p.communicate()
+            self.assertEqual(out, b'')
+            self.assertIn(b'UnicodeEncodeError:', err)
+            self.assertIn(rb"'\xa2'", err)
 
-        env["PYTHONIOENCODING"] = "ascii:"
-        p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             env=env)
-        out, err = p.communicate()
-        self.assertEqual(out, b'')
-        self.assertIn(b'UnicodeEncodeError:', err)
-        self.assertIn(rb"'\xa2'", err)
+            env["PYTHONIOENCODING"] = "ascii:"
+            p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xa2))'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=env)
+            out, err = p.communicate()
+            self.assertEqual(out, b'')
+            self.assertIn(b'UnicodeEncodeError:', err)
+            self.assertIn(rb"'\xa2'", err)
 
-        env["PYTHONIOENCODING"] = ":surrogateescape"
-        p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xdcbd))'],
-                             stdout=subprocess.PIPE, env=env)
-        out = p.communicate()[0].strip()
-        self.assertEqual(out, b'\xbd')
-
-    @unittest.skipUnless(os_helper.FS_NONASCII,
-                         'requires OS support of non-ASCII encodings')
-    @unittest.skipUnless(sys.getfilesystemencoding() == locale.getpreferredencoding(False),
-                         'requires FS encoding to match locale')
-    @support.requires_subprocess()
-    def test_ioencoding_nonascii(self):
-        env = dict(os.environ)
-
-        env["PYTHONIOENCODING"] = ""
-        p = subprocess.Popen([sys.executable, "-c",
-                                'print(%a)' % os_helper.FS_NONASCII],
+            env["PYTHONIOENCODING"] = ":surrogateescape"
+            p = subprocess.Popen([sys.executable, "-c", 'print(chr(0xdcbd))'],
                                 stdout=subprocess.PIPE, env=env)
-        out = p.communicate()[0].strip()
-        self.assertEqual(out, os.fsencode(os_helper.FS_NONASCII))
+            out = p.communicate()[0].strip()
+            self.assertEqual(out, b'\xbd')
 
-    @unittest.skipIf(sys.base_prefix != sys.prefix,
-                     'Test is not venv-compatible')
-    @support.requires_subprocess()
-    def test_executable(self):
-        # sys.executable should be absolute
-        self.assertEqual(os.path.abspath(sys.executable), sys.executable)
+        @unittest.skipUnless(os_helper.FS_NONASCII,
+                            'requires OS support of non-ASCII encodings')
+        @unittest.skipUnless(sys.getfilesystemencoding() == locale.getpreferredencoding(False),
+                            'requires FS encoding to match locale')
+        @support.requires_subprocess()
+        def test_ioencoding_nonascii(self):
+            env = dict(os.environ)
 
-        # Issue #7774: Ensure that sys.executable is an empty string if argv[0]
-        # has been set to a non existent program name and Python is unable to
-        # retrieve the real program name
+            env["PYTHONIOENCODING"] = ""
+            p = subprocess.Popen([sys.executable, "-c",
+                                    'print(%a)' % os_helper.FS_NONASCII],
+                                    stdout=subprocess.PIPE, env=env)
+            out = p.communicate()[0].strip()
+            self.assertEqual(out, os.fsencode(os_helper.FS_NONASCII))
 
-        # For a normal installation, it should work without 'cwd'
-        # argument. For test runs in the build directory, see #7774.
-        python_dir = os.path.dirname(os.path.realpath(sys.executable))
-        p = subprocess.Popen(
-            ["nonexistent", "-c",
-             'import sys; print(sys.executable.encode("ascii", "backslashreplace"))'],
-            executable=sys.executable, stdout=subprocess.PIPE, cwd=python_dir)
-        stdout = p.communicate()[0]
-        executable = stdout.strip().decode("ASCII")
-        p.wait()
-        self.assertIn(executable, ["b''", repr(sys.executable.encode("ascii", "backslashreplace"))])
+        @unittest.skipIf(sys.base_prefix != sys.prefix,
+                        'Test is not venv-compatible')
+        @support.requires_subprocess()
+        def test_executable(self):
+            # sys.executable should be absolute
+            self.assertEqual(os.path.abspath(sys.executable), sys.executable)
+
+            # Issue #7774: Ensure that sys.executable is an empty string if argv[0]
+            # has been set to a non existent program name and Python is unable to
+            # retrieve the real program name
+
+            # For a normal installation, it should work without 'cwd'
+            # argument. For test runs in the build directory, see #7774.
+            python_dir = os.path.dirname(os.path.realpath(sys.executable))
+            p = subprocess.Popen(
+                ["nonexistent", "-c",
+                'import sys; print(sys.executable.encode("ascii", "backslashreplace"))'],
+                executable=sys.executable, stdout=subprocess.PIPE, cwd=python_dir)
+            stdout = p.communicate()[0]
+            executable = stdout.strip().decode("ASCII")
+            p.wait()
+            self.assertIn(executable, ["b''", repr(sys.executable.encode("ascii", "backslashreplace"))])
 
     def check_fsencoding(self, fs_encoding, expected=None):
         self.assertIsNotNone(fs_encoding)
@@ -1014,13 +1017,14 @@ class SysModuleTest(__TestCase):
                          'stdout: surrogateescape\n'
                          'stderr: backslashreplace\n')
 
-    @support.requires_subprocess()
-    def test_c_locale_surrogateescape(self):
-        self.check_locale_surrogateescape('C')
+    if sys.version_info >= (3, 13):
+        @support.requires_subprocess()
+        def test_c_locale_surrogateescape(self):
+            self.check_locale_surrogateescape('C')
 
-    @support.requires_subprocess()
-    def test_posix_locale_surrogateescape(self):
-        self.check_locale_surrogateescape('POSIX')
+        @support.requires_subprocess()
+        def test_posix_locale_surrogateescape(self):
+            self.check_locale_surrogateescape('POSIX')
 
     def test_implementation(self):
         # This test applies to all implementations equally.
@@ -1172,45 +1176,46 @@ class SysModuleTest(__TestCase):
         self.assertIsInstance(level, int)
         self.assertGreater(level, 0)
 
-    @support.requires_subprocess()
-    def test_sys_tracebacklimit(self):
-        code = """if 1:
-            import sys
-            def f1():
-                1 / 0
-            def f2():
-                f1()
-            sys.tracebacklimit = %r
-            f2()
-        """
-        def check(tracebacklimit, expected):
-            p = subprocess.Popen([sys.executable, '-c', code % tracebacklimit],
-                                 stderr=subprocess.PIPE)
-            out = p.communicate()[1]
-            self.assertEqual(out.splitlines(), expected)
+    if sys.version_info >= (3, 13):
+        @support.requires_subprocess()
+        def test_sys_tracebacklimit(self):
+            code = """if 1:
+                import sys
+                def f1():
+                    1 / 0
+                def f2():
+                    f1()
+                sys.tracebacklimit = %r
+                f2()
+            """
+            def check(tracebacklimit, expected):
+                p = subprocess.Popen([sys.executable, '-c', code % tracebacklimit],
+                                    stderr=subprocess.PIPE)
+                out = p.communicate()[1]
+                self.assertEqual(out.splitlines(), expected)
 
-        traceback = [
-            b'Traceback (most recent call last):',
-            b'  File "<string>", line 8, in <module>',
-            b'    f2()',
-            b'    ~~^^',
-            b'  File "<string>", line 6, in f2',
-            b'    f1()',
-            b'    ~~^^',
-            b'  File "<string>", line 4, in f1',
-            b'    1 / 0',
-            b'    ~~^~~',
-            b'ZeroDivisionError: division by zero'
-        ]
-        check(10, traceback)
-        check(3, traceback)
-        check(2, traceback[:1] + traceback[4:])
-        check(1, traceback[:1] + traceback[7:])
-        check(0, [traceback[-1]])
-        check(-1, [traceback[-1]])
-        check(1<<1000, traceback)
-        check(-1<<1000, [traceback[-1]])
-        check(None, traceback)
+            traceback = [
+                b'Traceback (most recent call last):',
+                b'  File "<string>", line 8, in <module>',
+                b'    f2()',
+                b'    ~~^^',
+                b'  File "<string>", line 6, in f2',
+                b'    f1()',
+                b'    ~~^^',
+                b'  File "<string>", line 4, in f1',
+                b'    1 / 0',
+                b'    ~~^~~',
+                b'ZeroDivisionError: division by zero'
+            ]
+            check(10, traceback)
+            check(3, traceback)
+            check(2, traceback[:1] + traceback[4:])
+            check(1, traceback[:1] + traceback[7:])
+            check(0, [traceback[-1]])
+            check(-1, [traceback[-1]])
+            check(1<<1000, traceback)
+            check(-1<<1000, [traceback[-1]])
+            check(None, traceback)
 
     def test_no_duplicates_in_meta_path(self):
         self.assertEqual(len(sys.meta_path), len(set(sys.meta_path)))
@@ -1225,21 +1230,22 @@ class SysModuleTest(__TestCase):
         out = out.decode('ascii', 'replace').rstrip()
         self.assertEqual(out, 'mbcs replace')
 
-    @support.requires_subprocess()
-    def test_orig_argv(self):
-        code = textwrap.dedent('''
-            import sys
-            print(sys.argv)
-            print(sys.orig_argv)
-        ''')
-        args = [sys.executable, '-I', '-X', 'utf8', '-c', code, 'arg']
-        proc = subprocess.run(args, check=True, capture_output=True, text=True)
-        expected = [
-            repr(['-c', 'arg']),  # sys.argv
-            repr(args),  # sys.orig_argv
-        ]
-        self.assertEqual(proc.stdout.rstrip().splitlines(), expected,
-                         proc)
+    if sys.version_info >= (3, 13):
+        @support.requires_subprocess()
+        def test_orig_argv(self):
+            code = textwrap.dedent('''
+                import sys
+                print(sys.argv)
+                print(sys.orig_argv)
+            ''')
+            args = [sys.executable, '-I', '-X', 'utf8', '-c', code, 'arg']
+            proc = subprocess.run(args, check=True, capture_output=True, text=True)
+            expected = [
+                repr(['-c', 'arg']),  # sys.argv
+                repr(args),  # sys.orig_argv
+            ]
+            self.assertEqual(proc.stdout.rstrip().splitlines(), expected,
+                            proc)
 
     def test_module_names(self):
         self.assertIsInstance(sys.stdlib_module_names, frozenset)
