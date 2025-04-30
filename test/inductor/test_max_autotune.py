@@ -45,7 +45,7 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     get_kernel_launch,
@@ -166,7 +166,7 @@ class TestMaxAutotune(TestCase):
     @parametrize("autotune_multi_device", (True, False))
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
         """
-        This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
+        This crash previously due to a triton issue: https://github.com/triton-lang/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
         """
         m, n, k = 2048, 1536, 64
@@ -671,7 +671,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -1269,7 +1269,6 @@ class TestTuningProcessPool(TestCase):
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
         tuning_pool = TuningProcessPool()
-        tuning_pool.initialize()
 
         # First force the tuning process to crash.
         bmreq = _TestBenchmarkRequest(0, crash=True)
@@ -1293,7 +1292,6 @@ class TestTuningProcessPool(TestCase):
     @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_timeout(self):
         tuning_pool = TuningProcessPool()
-        tuning_pool.initialize()
 
         # First force the tuning process to timeout.
         bmreq = _TestBenchmarkRequest(0, sleep=120)
@@ -1332,7 +1330,6 @@ class TestTuningProcessPool(TestCase):
             os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}
         ):
             tuning_pool = TuningProcessPool()
-            tuning_pool.initialize()
 
         choice1 = _TestTritonTemplateCaller(_TestBenchmarkRequest(3.14))
         choice2 = _TestTritonTemplateCaller(_TestBenchmarkRequest(2.718))
@@ -1501,8 +1498,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )
@@ -1537,8 +1532,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )
@@ -1696,32 +1689,21 @@ class TestPrologueFusion(TestCase):
     @skipIfXpu
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)
-    def test_prologue_masked_load(self):
+    @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
+    def test_prologue_masked_load(self, sizes):
+        M, K, N = sizes
+
         def foo(x, y):
-            return x @ y.T
+            return x @ y
 
         x = torch.rand([250, 245], device=GPU_TYPE)
-        y = torch.rand([245, 128], device=GPU_TYPE).T.contiguous()
+        y = torch.rand([245, 128], device=GPU_TYPE)
 
         # we should not attempt prologue fusion if it turns an aligned load
         # into an unaligned load
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
-
-    def test_masked_numeric(self):
-        # correctly detect upcast inside the cat mask, dont fuse
-        def foo(a, b, y):
-            return torch.cat([a, (b * 4)]) @ y.T
-
-        a = torch.rand([220, 245], device=GPU_TYPE, dtype=torch.float16)
-        b = torch.rand([20, 245], device=GPU_TYPE, dtype=torch.float16)
-        y = torch.rand([245, 128], device=GPU_TYPE, dtype=torch.float16).T.contiguous()
-
-        out, code = run_and_get_code(torch.compile(foo), a, b, y)
-
-        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
-        self.assertEqual(out, foo(a, b, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
 
 if __name__ == "__main__":

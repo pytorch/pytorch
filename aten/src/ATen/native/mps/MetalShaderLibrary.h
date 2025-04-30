@@ -29,6 +29,9 @@ struct TensorIteratorBase;
 
 namespace at::native::mps {
 
+// Forward declaration of MPSScalar - for exec_binary_alpha_kernel()
+struct MPSScalar;
+
 namespace detail {
 template <typename T>
 class has_size_type {
@@ -46,9 +49,12 @@ constexpr bool has_size_type_v = has_size_type<T>::value;
 
 } // namespace detail
 
+// Returns `gpuAddress` of respective `id<MTLBuffer>` plus storage offset
+void* get_tensor_gpu_address(const at::TensorBase&);
+
 class MetalKernelFunction {
  public:
-  MetalKernelFunction(MTLComputePipelineState_t cps_);
+  MetalKernelFunction(MTLComputePipelineState_t cps_, MTLFunction_t f_);
   ~MetalKernelFunction();
   MetalKernelFunction(MetalKernelFunction&) = delete;
   // Shader properties
@@ -56,7 +62,7 @@ class MetalKernelFunction {
   uint64_t getThreadExecutionWidth() const;
   uint64_t getStaticThreadGroupMemoryLength() const;
   void runCommandBlock(std::function<void(void)> f);
-  // Methods below should be called from runCommandBlock functionT
+  // Methods below should be called from runCommandBlock function
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
@@ -88,6 +94,7 @@ class MetalKernelFunction {
 
  private:
   MTLComputePipelineState_t cps;
+  MTLFunction_t func;
   MTLComputeCommandEncoder_t encoder = nullptr;
 };
 
@@ -134,6 +141,10 @@ class MetalShaderLibrary {
       const std::string& name,
       std::optional<int64_t> extra = std::nullopt);
   void exec_binary_kernel(TensorIteratorBase& iter, const std::string& name);
+  void exec_binary_alpha_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const MPSScalar& alpha);
 
  protected:
   virtual MTLLibrary_t getLibrary();

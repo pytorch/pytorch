@@ -50,6 +50,30 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   lib.exec_binary_kernel(iter, "complex_mul");
 }
 
+void binary_op_kernel(const std::string func_name,
+                      const Tensor& input,
+                      const Tensor& other,
+                      const Tensor& output,
+                      const std::optional<MPSScalar>& alpha) {
+  auto new_size = at::infer_size(input.sizes(), other.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+
+  auto iter =
+      TensorIteratorConfig().add_output(output).add_input(input).add_input(other).check_all_same_dtype(false).build();
+
+  if (alpha) {
+    lib.exec_binary_alpha_kernel(iter, func_name, *alpha);
+  } else {
+    lib.exec_binary_kernel(iter, func_name);
+  }
+}
+
 } // namespace mps
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
@@ -110,6 +134,18 @@ static void chebyshev_polynomial_w_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "chebyshev_polynomial_w");
 }
 
+static void hermite_polynomial_h_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "hermite_polynomial_h_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "hermite_polynomial_h");
+}
+
+static void hermite_polynomial_he_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "hermite_polynomial_he_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "hermite_polynomial_he");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -128,6 +164,8 @@ REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_mps_kerne
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_mps_kernel)
+REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
+REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 } // namespace at::native
