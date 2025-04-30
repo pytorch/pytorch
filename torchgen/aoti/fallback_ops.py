@@ -108,6 +108,7 @@ inductor_fallback_ops = {
     "aten.gcd.default",
     "aten.geqrf.default",
     "aten.grid_sampler_2d_backward.default",
+    "aten.grid_sampler_3d.default",
     "aten.histc.default",
     "aten.histogram.bin_ct",
     "aten.igamma.default",

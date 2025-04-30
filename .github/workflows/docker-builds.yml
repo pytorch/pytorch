@@ -79,7 +79,7 @@ jobs:
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
-            runner: linux.arm64.2xlarge
+            runner: linux.arm64.m7g.4xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge
             timeout-minutes: 600
@@ -117,7 +117,7 @@ jobs:
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
-      - uses: nick-fields/retry@v3.0.0
+      - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://https://ghcr.io/
         id: push-to-ghcr-io
         if: ${{ github.event_name == 'push' }}
