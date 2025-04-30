@@ -13,7 +13,11 @@ test_gpu_speed_mnist () {
 
   cd examples/mnist
 
-  conda install -c pytorch torchvision
+  python -m venv venv
+  # shellcheck disable=SC1091
+  . venv/bin/activate
+
+  pip install -c pytorch torchvision
 
   # Download data
   python main.py --epochs 0

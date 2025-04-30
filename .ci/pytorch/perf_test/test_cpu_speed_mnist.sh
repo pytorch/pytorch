@@ -13,7 +13,11 @@ test_cpu_speed_mnist () {
 
   cd examples/mnist
 
-  conda install -c pytorch torchvision-cpu
+  python -m venv venv
+  # shellcheck disable=SC1091
+  . venv/bin/activate
+
+  pip install -c pytorch torchvision-cpu
 
   # Download data
   python main.py --epochs 0
