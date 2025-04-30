@@ -3619,27 +3619,26 @@ class TestRandomBatchSampler(TestCase):
     """
     Test RandomBatchSampler is equal to BatchSampler(RandomSampler)
     """
-    def test_random_batch_sampler(self):
+    @parametrize('replacement', [False, True])
+    @parametrize('drop_last', [False, True])
+    def test_random_batch_sampler(self, replacement, drop_last):
         from torch.utils.data import RandomSampler, BatchSampler, RandomBatchSampler
 
         data = range(10)
         batch_size = 3
 
-        for replacement in [False, True]:
-            for drop_last in [False, True]:
+        sampler = RandomSampler(data, replacement, generator=torch.manual_seed(42))
+        batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+        batches1 = list(batch_sampler)
 
-                sampler = RandomSampler(data, replacement, generator=torch.manual_seed(42))
-                batch_sampler = BatchSampler(sampler, batch_size, drop_last)
-                batches1 = list(batch_sampler)
+        random_batch_sampler = RandomBatchSampler(data, replacement, batch_size, drop_last,
+                                                  torch.manual_seed(42))
+        batches2 = list(random_batch_sampler)
 
-                random_batch_sampler = RandomBatchSampler(data, replacement, batch_size, drop_last,
-                                                          torch.manual_seed(42))
-                batches2 = list(random_batch_sampler)
+        self.assertEqual(len(batches1), len(batches2))
 
-                self.assertEqual(len(batches1), len(batches2))
-
-                for i in range(len(batches1)):
-                    self.assertEqual(batches1[i], batches2[i].tolist())
+        for i in range(len(batches1)):
+            self.assertEqual(batches1[i], batches2[i].tolist())
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
