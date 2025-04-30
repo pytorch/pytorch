@@ -173,10 +173,6 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         # HOP is later called in AOTAutograd, it will run the captured
         # graph under the ctx.
         #
-        # TODO: today this doesn't actually work if you rely on __init__!
-        # Updates to the context manager object like setattr are tracked as
-        # side effects but not reflected on the actual object.
-        #
         # How does this work?
         # - On enter:
         #   - Enter into a new subtracer
@@ -230,7 +226,9 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
             source_target = wrap_generic
             self.subtracer_ctx = tx.output.subtracer(source_target, tracer)
             self.subtracer = self.subtracer_ctx.__enter__()
-            return
+            # This means we don't support the `with ctx() as obj:` syntax
+            return variables.ConstantVariable.create(None)
+
         return variables.UserMethodVariable(
             self.cm_obj.__enter__.__func__,
             self,
@@ -269,9 +267,12 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
                 self.fn_name(),
                 gmod,
             )
-            # Store ctx manager object onto the graph module so we can use it
-            # enable it when we call the HOP.
-            gmod.meta["_wrap_generic_context"] = self.cm_obj
+            # Store information to reconstruct the context manager when the HOP
+            # is called.
+            gmod.meta["_wrap_generic_cls_fqn"] = self.cls_fqn
+            gmod.meta["_wrap_generic_arg_values"] = self.arg_values
+            gmod.meta["_wrap_generic_kwarg_values"] = self.kwarg_values
+
             body_node = make_attr(tx, body_name)
             lifted_args = tuple(arg for arg in self.subtracer.lifted_freevars.keys())
             proxy_args = (body_node,) + lifted_args

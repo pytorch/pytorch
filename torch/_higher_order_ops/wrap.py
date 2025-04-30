@@ -97,13 +97,23 @@ class WrapGeneric(HigherOrderOperator):
         *args,
         **kwargs,
     ):
+        import importlib
+
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo  # noqa: F401
         from torch._dynamo import disable
 
-        ctx = gmod.meta["_wrap_generic_context"]
-        assert ctx is not None
+        # Reconstruct the context manager from the fqn and the args/kwargs
+        # I wonder if this still works if the context manager is defined in
+        # some local scope.
+        cls_fqn = gmod.meta["_wrap_generic_cls_fqn"]
+        module_path, attribute = cls_fqn.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        cls = getattr(module, attribute)
+        arg_values = gmod.meta["_wrap_generic_arg_values"]
+        kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
+        ctx = cls(*arg_values, **kwarg_values)
 
         @disable
         def wrapper():
