@@ -46,6 +46,7 @@ def saved_tensors_hooks_to_gm(
     pack_cache_hash=None,
     unpack_cache_hash=None,
     symbolic_tracing=True,
+    inp_fn=None,
 ):
     if symbolic_tracing:
         pack_gm = torch.fx.symbolic_trace(pack_fn)
@@ -53,9 +54,12 @@ def saved_tensors_hooks_to_gm(
     else:
         from functorch import make_fx
 
-        inp = torch.randn(2, 3)
-        torch._dynamo.mark_dynamic(inp, 0)
-        torch._dynamo.mark_dynamic(inp, 1)
+        if inp_fn:
+            inp = inp_fn()
+        else:
+            inp = torch.randn(2, 3)
+            torch._dynamo.mark_dynamic(inp, 0)
+            torch._dynamo.mark_dynamic(inp, 1)
         pack_out = pack_fn(inp)
         pack_gm = make_fx(pack_fn)(inp)
         unpack_gm = make_fx(unpack_fn)(pack_out)
@@ -1124,6 +1128,9 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 1.0})
+    @functorch_config.patch({"activation_memory_budget_runtime_estimator": "testing"})
+    @functorch_config.patch({"saved_tensors_hooks_no_filtering": True})
     def test_saved_tensors_hooks_autograd_cache(self):
         ctx = torch.autograd.graph.saved_tensors_hooks
         device = torch.device("cuda:0")
@@ -1150,9 +1157,13 @@ class AOTAutogradCacheTests(InductorTestCase):
         # Cache bypasses AutogradFunction Ctx usage.
         # Can not save in ctx non floating point dtypes.
         # For non-symbolic tracing all dtypes and devices and burned in the graph.
+
         def fn(x):
             x = x + 1
+            x = x.sin().cos()
+            x = x.relu()
             x = x.exp()
+            x = 2 * x
             return x
 
         backend = "inductor"
@@ -1171,7 +1182,14 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
         with ctx(
-            *saved_tensors_hooks_to_gm(pack_cpu, unpack_cpu, symbolic_tracing=False)
+            *saved_tensors_hooks_to_gm(
+                pack_cpu,
+                unpack_cpu,
+                symbolic_tracing=False,
+                inp_fn=inp_fn,
+                pack_cache_hash="cpu_offload",
+                unpack_cache_hash="cpu_offload",
+            )
         ):
             x = inp_fn()
             y = fn_compiled(x)
@@ -1180,11 +1198,19 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
         with ctx(
-            *saved_tensors_hooks_to_gm(pack_cpu2, unpack_cpu2, symbolic_tracing=False)
+            *saved_tensors_hooks_to_gm(
+                pack_cpu2,
+                unpack_cpu2,
+                symbolic_tracing=False,
+                inp_fn=inp_fn,
+                pack_cache_hash="cpu_offload",
+                unpack_cache_hash="cpu_offload",
+            )
         ):
             x = inp_fn()
             y = fn_compiled(x)
             y.sum().backward()
+
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)

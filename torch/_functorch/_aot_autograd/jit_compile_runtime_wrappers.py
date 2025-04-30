@@ -920,10 +920,9 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_out_n = fw_g.output_node()
     fw_outs = fw_out_n.args[0]  # type: ignore[var-annotated]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
-
     fw_outs_saved_tensors_unchanged = []  # type: ignore[var-annotated]
-    fw_outs_packed_tensors = []
-    fw_outs_packed_syms = []
+    fw_outs_packed_tensors = []  # type: ignore[var-annotated]
+    fw_outs_packed_syms = []  # type: ignore[var-annotated]
 
     # The main use case for saved_tensors_hooks is activation quantization,
     # for memory usage optimization.
@@ -941,9 +940,10 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_outs_whitelist_to_run_hooks = None
 
     if run_hooks_only_on_donated_buffers:
-        symint_outs_saved_for_bw = [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
         # collect_bw_donated_buffer_idxs requires inner_meta to have num_symints_saved_for_bw
-        inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+        inner_meta.num_symints_saved_for_bw = len(
+            [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
+        )
         bw_donated_idxs = collect_bw_donated_buffer_idxs(
             fw_module,
             bw_module,
@@ -956,12 +956,22 @@ def maybe_inline_graph_saved_tensors_hooks(
             fw_outs_saved_for_bw[i] for i in fw_donated_idxs
         ]
 
+    if (
+        fw_outs_whitelist_to_run_hooks is not None
+        and not fw_outs_whitelist_to_run_hooks
+    ):
+        # This means we have empty whitelist,
+        # No donated (intermediate) saved.
+        # Do not do anything in this case
+        return
+
     for saved in fw_outs_saved_for_bw:
         if (
-            fw_outs_whitelist_to_run_hooks
+            fw_outs_whitelist_to_run_hooks is not None
             and saved not in fw_outs_whitelist_to_run_hooks
         ):
-            fw_outs_saved_tensors_unchanged.append(saved)
+            if isinstance(saved.meta["val"], torch.Tensor):
+                fw_outs_saved_tensors_unchanged.append(saved)
             continue
 
         val = saved.meta["val"]
@@ -1024,27 +1034,35 @@ def maybe_inline_graph_saved_tensors_hooks(
             if not isinstance(_n, torch.fx.Node):
                 fw_outs_bw_ins_node_names.append("")
                 continue
-            with fw_g.inserting_before(fw_out_n):
-                new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
+
+            if _n.op == "placeholder":
+                # This means the hook returned input primals unchanged
+                # Do not rename in this case.
+                n = _n
+                new_node_name = _n.name
+                fw_outs_bw_ins_node_names.append(new_node_name)
+            else:
                 # We can not specify desired name in node_copy.
                 # Copying node manually to set specifc name,
                 # to have matching fw_outs, bw_inputs names.
-                n = fw_g.create_node(
-                    _n.op,
-                    _n.target,
-                    _n.args,
-                    _n.kwargs,
-                    name=new_node_name,
-                )
+                new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
+                with fw_g.inserting_before(_n):
+                    n = fw_g.create_node(
+                        _n.op,
+                        _n.target,
+                        _n.args,
+                        _n.kwargs,
+                        name=new_node_name,
+                    )
                 assert n.name == new_node_name
                 fw_outs_bw_ins_node_names.append(new_node_name)
                 n.meta = _n.meta
                 _n.replace_all_uses_with(n)
                 fw_g.erase_node(_n)
-                if isinstance(n.meta["val"], torch.Tensor):
-                    fw_outs_packed_tensors.append(n)
-                elif is_sym_node(n):
-                    fw_outs_packed_syms.append(n)
+            if isinstance(n.meta["val"], torch.Tensor):
+                fw_outs_packed_tensors.append(n)
+            elif is_sym_node(n):
+                fw_outs_packed_syms.append(n)
 
         # Install unpack hook graph as a prologue of backward graph
         # Saved tensors inputs are replaced with packed tensors and packed sym scalars.
@@ -1066,6 +1084,9 @@ def maybe_inline_graph_saved_tensors_hooks(
 
         bw_g_input = find_saved_in_bw_inputs(bw_g_inputs)
         assert bw_g_input
+        original_bw_g_input_users = list(bw_g_input.users.keys())
+        bw_g_input_used_directly = False
+
         # Replace backward graph saved tensor input with copy of pack graph outputs
         # All non-Tensor, non-symscalars outputs are constanted.
 
@@ -1081,17 +1102,25 @@ def maybe_inline_graph_saved_tensors_hooks(
                 # Potentially backward may already have "{saved.name}_hook_{idx}",
                 # In this case fx.Graph will add suffix.
                 new_node_name = fw_outs_bw_ins_node_names[out_idx]
-                # Backward calling convention: ctx_symints,ctx_saved_tensors
-                # Inserting packed sym scalars before first saved tensor input.
-                # Inserting packed tensors before last saved tensor input.
-                # Saved tensor inputs between them will be removed.
-                with bw_g.inserting_before(
-                    bw_g_inputs[0]
-                ) if is_sym else bw_g.inserting_before(bw_g_inputs[num_saved_for_bw]):
-                    new_n = bw_g.placeholder(new_node_name)
-                    assert new_n.name == new_node_name
-                new_n.meta["val"] = val
-                env[unp_in_n] = new_n
+                if bw_g_input.name == new_node_name:
+                    env[unp_in_n] = bw_g_input
+                    bw_g_input_used_directly = True
+                else:
+                    # Backward calling convention: ctx_symints,ctx_saved_tensors
+                    # Inserting packed sym scalars before first saved tensor input.
+                    # Inserting packed tensors before last saved tensor input.
+                    # Saved tensor inputs between them will be removed.
+                    with bw_g.inserting_before(
+                        bw_g_inputs[0]
+                    ) if is_sym else bw_g.inserting_before(
+                        bw_g_inputs[num_saved_for_bw]
+                    ):
+                        new_n = bw_g.placeholder(new_node_name)
+                        if new_n.name != new_node_name:
+                            breakpoint()
+                        assert new_n.name == new_node_name
+                    new_n.meta["val"] = val
+                    env[unp_in_n] = new_n
             else:
                 # Inline values of non-Tensor, non-SymScalars
                 env[unp_in_n] = val
@@ -1115,9 +1144,24 @@ def maybe_inline_graph_saved_tensors_hooks(
         assert len(_leaves) == 1
         unpack_saved_tensor_n = _leaves[0]
 
-        bw_g_input.replace_all_uses_with(unpack_saved_tensor_n)
+        if not bw_g_input_used_directly:
+            bw_g_input.replace_all_uses_with(unpack_saved_tensor_n)
+            bw_g.erase_node(bw_g_input)
+        else:
+            # Keep usages of bw_g_input in inserted unpacked hook graph.
+            # Replace other usages of bw_g_input with unpack_saved_tensor_n.
+            from torch._C import _fx_map_arg
+
+            def maybe_replace_node(n):
+                return unpack_saved_tensor_n if n == bw_g_input else n
+
+            for use_node in original_bw_g_input_users:
+                new_args = _fx_map_arg(use_node.args, maybe_replace_node)
+                new_kwargs = _fx_map_arg(use_node.kwargs, maybe_replace_node)
+                assert isinstance(new_args, tuple)
+                assert isinstance(new_kwargs, dict)
+                use_node._update_args_kwargs(new_args, new_kwargs)
         bw_g.erase_node(bw_unpack_out_n)
-        bw_g.erase_node(bw_g_input)
 
     # Changing forward graph outputs,
     # Inserting packed_tensors and packed_syms on the place of saved tensors.

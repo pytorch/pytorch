@@ -187,8 +187,9 @@ def check_node_safe(node: Node):
     if node.op == "call_function":
         if node.meta and node.meta.get("is_wrapped", False):
             # This is fx.wrap function
+            # By default we BypassAOTAutogradCache for unknown functions,
+            # But if user explicitly specified cache hash - allow to cache it.
             if node.meta.get("user_cache_hash", None):
-                # If user explicitly specified cache hash - allow to cache it.
                 return
         # We support only torch.* functions for now
         # We can probably add an allowlist of safe non-torch implementations as well

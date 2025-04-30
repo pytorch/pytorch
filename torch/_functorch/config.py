@@ -267,7 +267,11 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 guess_tangent_strides_as_outputs = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.
-# If this config is True - saved_tensors_hooks are applied for all saved.
+# "donated" buffers are invisible to the user, they are intermediates of the forward graph.
+# Applying saved tensors hooks for memory optimizations only for intermediates
+# guarantees that original saved tensors could be deallocated.
+# This config enables saved_tensors_hooks are applied for **all** saved tensors,
+# that could include inputs, parameters, outputs.
 saved_tensors_hooks_no_filtering = False
 
 if TYPE_CHECKING:
