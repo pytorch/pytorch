@@ -93,7 +93,7 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # causes inconsistent environment.  Without this, conda will attempt to install the
   # latest numpy version, which fails ASAN tests with the following import error: Numba
   # needs NumPy 1.20 or less.
-  conda_reinstall cmake="${CMAKE_VERSION}"
+  pip_install cmake="${CMAKE_VERSION}"
   # Note that we install numpy with pip as conda might not have the version we want
   pip_install --force-reinstall numpy=="${NUMPY_VERSION}"
 fi
