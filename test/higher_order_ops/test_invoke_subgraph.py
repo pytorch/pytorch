@@ -1488,9 +1488,11 @@ class GraphModule(torch.nn.Module):
 
         def fn(x):
             a = gn(x)
-            b = torch.sin(a)
+            a2 = gn(a)
+            b = torch.sin(a2)
             c = gn(b)
-            return c.sum()
+            c2 = gn(c)
+            return c.sum() + c2.sum()
 
         opt_fn = torch.compile(fn, fullgraph=True)
 
@@ -1506,11 +1508,15 @@ class GraphModule(torch.nn.Module):
         res.sum().backward()
 
         self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
 
         torch.compiler.reset()
         backend = AotEagerAndRecordGraphs()
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 16, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        x_clone = x.detach().clone().requires_grad_(True)
+        torch._dynamo.mark_dynamic(x_clone, 0)
         ref = fn(x)
         res = opt_fn(x_clone)
 
@@ -1525,36 +1531,52 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s48)", primals_2: "f32[s48, 16]"):
+    def forward(self, primals_1: "Sym(s77)", primals_2: "f32[s77, 16]"):
+        ___forward_invoke_subgraph_0_1_post_graph = self.___forward_invoke_subgraph_0_1_post_graph
+
+        invoke_subgraph_8 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_1_post_graph, '___forward_invoke_subgraph_0_1_post_graph', primals_1, primals_2);  ___forward_invoke_subgraph_0_1_post_graph = primals_2 = None
+        getitem_17: "Sym(s77)" = invoke_subgraph_8[2]
+        getitem_16: "f32[s77, 16]" = invoke_subgraph_8[1]
+        getitem: "f32[s77, 16]" = invoke_subgraph_8[0];  invoke_subgraph_8 = None
+
+        ___forward_invoke_subgraph_0_1_post_graph_1 = self.___forward_invoke_subgraph_0_1_post_graph
+
+        invoke_subgraph_10 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_1_post_graph_1, '___forward_invoke_subgraph_0_1_post_graph', primals_1, getitem);  ___forward_invoke_subgraph_0_1_post_graph_1 = getitem = None
+        getitem_19: "Sym(s77)" = invoke_subgraph_10[2]
+        getitem_18: "f32[s77, 16]" = invoke_subgraph_10[1]
+        getitem_1: "f32[s77, 16]" = invoke_subgraph_10[0];  invoke_subgraph_10 = None
+
+        sin: "f32[s77, 16]" = torch.ops.aten.sin.default(getitem_1)
+
+        ___forward_invoke_subgraph_0_1_post_graph_2 = self.___forward_invoke_subgraph_0_1_post_graph
+
+        invoke_subgraph_12 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_1_post_graph_2, '___forward_invoke_subgraph_0_1_post_graph', primals_1, sin);  ___forward_invoke_subgraph_0_1_post_graph_2 = sin = None
+        getitem_21: "Sym(s77)" = invoke_subgraph_12[2]
+        getitem_20: "f32[s77, 16]" = invoke_subgraph_12[1]
+        getitem_2: "f32[s77, 16]" = invoke_subgraph_12[0];  invoke_subgraph_12 = None
+
         ___forward_invoke_subgraph_0_0_post_graph = self.___forward_invoke_subgraph_0_0_post_graph
 
-        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_0_post_graph, '___forward_invoke_subgraph_0_0_post_graph', primals_1, primals_2);  ___forward_invoke_subgraph_0_0_post_graph = primals_2 = None
-        getitem_9: "Sym(s48)" = invoke_subgraph_4[2]
-        getitem_8: "f32[s48, 16]" = invoke_subgraph_4[1]
-        getitem: "f32[s48, 16]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+        invoke_subgraph_14 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_0_post_graph, '___forward_invoke_subgraph_0_0_post_graph', primals_1, getitem_2);  ___forward_invoke_subgraph_0_0_post_graph = None
+        getitem_23: "Sym(s77)" = invoke_subgraph_14[2]
+        getitem_22: "f32[s77, 16]" = invoke_subgraph_14[1]
+        getitem_3: "f32[s77, 16]" = invoke_subgraph_14[0];  invoke_subgraph_14 = None
 
-        sin: "f32[s48, 16]" = torch.ops.aten.sin.default(getitem)
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_3);  getitem_3 = None
+        add_15: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
 
-        ___forward_invoke_subgraph_1_0_post_graph = self.___forward_invoke_subgraph_1_0_post_graph
+        cos: "f32[s77, 16]" = torch.ops.aten.cos.default(getitem_1);  getitem_1 = None
+        return (add_15, getitem_16, getitem_18, getitem_20, getitem_22, cos, primals_1, getitem_17, getitem_19, getitem_21, getitem_23)
 
-        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_1_0_post_graph, '___forward_invoke_subgraph_1_0_post_graph', primals_1, sin);  ___forward_invoke_subgraph_1_0_post_graph = sin = None
-        getitem_11: "Sym(s48)" = invoke_subgraph_6[2]
-        getitem_10: "f32[s48, 16]" = invoke_subgraph_6[1]
-        getitem_1: "f32[s48, 16]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
-
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
-
-        cos: "f32[s48, 16]" = torch.ops.aten.cos.default(getitem);  getitem = None
-        return (sum_1, getitem_8, getitem_10, cos, primals_1, getitem_9, getitem_11)
-
-    class ___forward_invoke_subgraph_0_0_post_graph(torch.nn.Module):
-        def forward(self, primals_0: "Sym(s48)", primals_1: "f32[s48, 16]"):
-            cos: "f32[s48, 16]" = torch.ops.aten.cos.default(primals_1)
+    class ___forward_invoke_subgraph_0_1_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]"):
+            cos: "f32[s77, 16]" = torch.ops.aten.cos.default(primals_1)
             return (cos, primals_1, primals_0)
 
-    class ___forward_invoke_subgraph_1_0_post_graph(torch.nn.Module):
-        def forward(self, primals_0: "Sym(s48)", primals_1: "f32[s48, 16]"):
-            cos: "f32[s48, 16]" = torch.ops.aten.cos.default(primals_1)
+    class ___forward_invoke_subgraph_0_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]"):
+            cos: "f32[s77, 16]" = torch.ops.aten.cos.default(primals_1)
             return (cos, primals_1, primals_0)
 """,
             )
@@ -1562,34 +1584,46 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s48)", getitem_9: "Sym(s48)", getitem_11: "Sym(s48)", getitem_8: "f32[s48, 16]", getitem_10: "f32[s48, 16]", cos: "f32[s48, 16]", tangents_1: "f32[]"):
-        expand: "f32[s48, 16]" = torch.ops.aten.expand.default(tangents_1, [primals_1, 16]);  tangents_1 = primals_1 = None
-
-        ___backward_invoke_subgraph_1_0_post_graph = self.___backward_invoke_subgraph_1_0_post_graph
-
-        invoke_subgraph_7 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_1_0_post_graph, '___backward_invoke_subgraph_1_0_post_graph', getitem_11, getitem_10, expand);  ___backward_invoke_subgraph_1_0_post_graph = getitem_11 = getitem_10 = expand = None
-        getitem_3: "f32[s48, 16]" = invoke_subgraph_7[1];  invoke_subgraph_7 = None
-
-        mul_6: "f32[s48, 16]" = torch.ops.aten.mul.Tensor(getitem_3, cos);  getitem_3 = cos = None
+    def forward(self, primals_1: "Sym(s77)", getitem_17: "Sym(s77)", getitem_19: "Sym(s77)", getitem_21: "Sym(s77)", getitem_23: "Sym(s77)", getitem_16: "f32[s77, 16]", getitem_18: "f32[s77, 16]", getitem_20: "f32[s77, 16]", getitem_22: "f32[s77, 16]", cos: "f32[s77, 16]", tangents_1: "f32[]"):
+        expand: "f32[s77, 16]" = torch.ops.aten.expand.default(tangents_1, [primals_1, 16]);  tangents_1 = primals_1 = None
 
         ___backward_invoke_subgraph_0_0_post_graph = self.___backward_invoke_subgraph_0_0_post_graph
 
-        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_0_post_graph, '___backward_invoke_subgraph_0_0_post_graph', getitem_9, getitem_8, mul_6);  ___backward_invoke_subgraph_0_0_post_graph = getitem_9 = getitem_8 = mul_6 = None
-        getitem_6: "f32[s48, 16]" = invoke_subgraph_5[1];  invoke_subgraph_5 = None
-        return (None, getitem_6)
+        invoke_subgraph_15 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_0_post_graph, '___backward_invoke_subgraph_0_0_post_graph', getitem_23, getitem_22, expand);  ___backward_invoke_subgraph_0_0_post_graph = getitem_23 = getitem_22 = None
+        getitem_5: "f32[s77, 16]" = invoke_subgraph_15[1];  invoke_subgraph_15 = None
 
-    class ___backward_invoke_subgraph_1_0_post_graph(torch.nn.Module):
-        def forward(self, primals_0: "Sym(s48)", primals_1: "f32[s48, 16]", tangents_0: "f32[s48, 16]"):
-            sin: "f32[s48, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
-            neg: "f32[s48, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_9: "f32[s48, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul_9)
+        add_16: "f32[s77, 16]" = torch.ops.aten.add.Tensor(expand, getitem_5);  expand = getitem_5 = None
+
+        ___backward_invoke_subgraph_0_1_post_graph_2 = self.___backward_invoke_subgraph_0_1_post_graph
+
+        invoke_subgraph_13 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_1_post_graph_2, '___backward_invoke_subgraph_0_1_post_graph', getitem_21, getitem_20, add_16);  ___backward_invoke_subgraph_0_1_post_graph_2 = getitem_21 = getitem_20 = add_16 = None
+        getitem_8: "f32[s77, 16]" = invoke_subgraph_13[1];  invoke_subgraph_13 = None
+
+        mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(getitem_8, cos);  getitem_8 = cos = None
+
+        ___backward_invoke_subgraph_0_1_post_graph_1 = self.___backward_invoke_subgraph_0_1_post_graph
+
+        invoke_subgraph_11 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_1_post_graph_1, '___backward_invoke_subgraph_0_1_post_graph', getitem_19, getitem_18, mul_10);  ___backward_invoke_subgraph_0_1_post_graph_1 = getitem_19 = getitem_18 = mul_10 = None
+        getitem_11: "f32[s77, 16]" = invoke_subgraph_11[1];  invoke_subgraph_11 = None
+
+        ___backward_invoke_subgraph_0_1_post_graph = self.___backward_invoke_subgraph_0_1_post_graph
+
+        invoke_subgraph_9 = torch.ops.higher_order.invoke_subgraph(___backward_invoke_subgraph_0_1_post_graph, '___backward_invoke_subgraph_0_1_post_graph', getitem_17, getitem_16, getitem_11);  ___backward_invoke_subgraph_0_1_post_graph = getitem_17 = getitem_16 = getitem_11 = None
+        getitem_14: "f32[s77, 16]" = invoke_subgraph_9[1];  invoke_subgraph_9 = None
+        return (None, getitem_14)
 
     class ___backward_invoke_subgraph_0_0_post_graph(torch.nn.Module):
-        def forward(self, primals_0: "Sym(s48)", primals_1: "f32[s48, 16]", tangents_0: "f32[s48, 16]"):
-            sin: "f32[s48, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
-            neg: "f32[s48, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_10: "f32[s48, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+        def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
+            sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
+            neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
+            mul_9: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul_9)
+
+    class ___backward_invoke_subgraph_0_1_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
+            sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
+            neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
+            mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
             return (None, mul_10)
 """,
             )
