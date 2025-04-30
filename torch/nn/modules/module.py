@@ -944,7 +944,7 @@ class Module:
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = should_use_swap_tensors or (
                 hasattr(param, "__torch_dispatch__")
-                and param.__torch_dispatch__
+                and param.__torch_dispatch__  # type: ignore[misc]
                 is not torch._C._disabled_torch_dispatch_impl
             )
 

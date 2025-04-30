@@ -1489,10 +1489,11 @@ class FakeTensorOperatorInvariants(TestCase):
 
     # PropagateRealTensors installs weakrefs
     @expectedFailurePropagateRealTensors
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
 
         def _check_device(sd, device_type):
-            for k, v in sd.items():
+            for v in sd.values():
                 self.assertEqual(v.device.type, device_type)
 
         with FakeTensorMode():
