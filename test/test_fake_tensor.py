@@ -1487,6 +1487,23 @@ class FakeTensorOperatorInvariants(TestCase):
 
         self.assertEqual(mode.count, 0)
 
+    # PropagateRealTensors installs weakrefs
+    @expectedFailurePropagateRealTensors
+    def test_module_to(self):
+
+        def _check_device(sd, device_type):
+            for k, v in sd.items():
+                self.assertEqual(v.device.type, device_type)
+
+        with FakeTensorMode():
+            m = torch.nn.Linear(2, 2)
+            _check_device(m.state_dict(), 'cpu')
+            m.to('cuda')
+            _check_device(m.state_dict(), 'cuda')
+
+
+
+
 
 make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
