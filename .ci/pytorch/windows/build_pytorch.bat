@@ -38,9 +38,9 @@ pushd %SRC_DIR%
 
 
 set "ORIG_PATH=%PATH%"
-set CMAKE_PREFIX_PATH="%CD%\Python%PYTHON_VERSION%\;%CD%\Python%PYTHON_VERSION%\Library\"
-set CMAKE_LIBRARY_PATH="%CD%\Python%PYTHON_VERSION%\Library\lib\"
-set CMAKE_INCLUDE_PATH="%CD%\Python%PYTHON_VERSION%\Library\include\"
+set CMAKE_PREFIX_PATH="%CD%\Python\;%CD%\Python\Library\"
+set CMAKE_LIBRARY_PATH="%CD%\Python\Library\lib\"
+set CMAKE_INCLUDE_PATH="%CD%\Python\Library\include\"
 
 
 :: create a new conda environment and install packages
@@ -106,7 +106,7 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
     set PYTHON_PREFIX=%%v
 
 
-    set "PYTHON_LIB_PATH=%CD%\Python%PYTHON_VERSION%\Library\lib"
+    set "PYTHON_LIB_PATH=%CD%\Python\Library\lib"
     if not "%ADDITIONAL_PATH%" == "" (
         set "PATH=%ADDITIONAL_PATH%;%CONDA_HOME%\envs\%%v;%CONDA_HOME%\envs\%%v\scripts;%CONDA_HOME%\envs\%%v\Library\bin;%ORIG_PATH%"
     ) else (
