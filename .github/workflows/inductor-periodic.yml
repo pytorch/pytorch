@@ -132,8 +132,9 @@ jobs:
       build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm80
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
-      # disable monitor in smoke perf tests for more investigation
-      disable-monitor: true
+      disable-monitor: false
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 3
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build:

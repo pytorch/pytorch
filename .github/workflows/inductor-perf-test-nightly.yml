@@ -137,8 +137,9 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       timeout-minutes: 1440
-      # disable monitor in perf tests for more investigation
-      disable-monitor: true
+      disable-monitor: false
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 3
     secrets: inherit
 
   linux-focal-cuda12_6-py3_10-gcc9-inductor-test:
@@ -153,5 +154,7 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
-      disable-monitor: true
+      disable-monitor: false
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 3
     secrets: inherit
