@@ -442,7 +442,7 @@ class LoopBodyBlock:
     """
     Captures the body of a Loops subclass into an FX graph.
     In normal cases there will be a 1:1 mapping between LoopBody and
-    LoopBodyBlock, hower in the case of ops.masked() the masked out
+    LoopBodyBlock, however in the case of ops.masked() the masked out
     operations will manifest as an extra LoopBodyBlock.
     """
 

@@ -17,14 +17,14 @@ from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
     raise_observed_exception,
-    unimplemented,
     unimplemented_v2,
     Unsupported,
     UserError,
@@ -809,7 +809,12 @@ class BuiltinVariable(VariableTracker):
                     and isinstance(x.value, str)
                     for x in args
                 ):
-                    unimplemented("assert with non-string message")
+                    unimplemented_v2(
+                        gb_type="assert with non-string message",
+                        context=str(args),
+                        explanation="Dynamo only supports asserts with string messages",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
                 return variables.ExceptionVariable(fn, args, **kwargs)
 
@@ -866,8 +871,11 @@ class BuiltinVariable(VariableTracker):
                                 self_handler,
                                 e,
                             )
-                            unimplemented(
-                                f"invalid handler args {self_handler} {args} {kwargs}"
+                            unimplemented_v2(
+                                gb_type="invalid call to builtin op handler",
+                                context=f"invalid args to {self_handler}: {args} {kwargs}",
+                                explanation=f"Encountered TypeError when trying to handle op {fn.__name__}",
+                                hints=[*graph_break_hints.DIFFICULT],
                             )
                     else:
                         raise
@@ -893,7 +901,13 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
-                        unimplemented(f"constant fold exception: {repr(exc)}")
+                        unimplemented_v2(
+                            gb_type="constant fold exception",
+                            context=f"attempted to run function {fn} with arguments {args}",
+                            explanation="Encountered exception when attempting to constant fold.",
+                            hints=[*graph_break_hints.DYNAMO_BUG],
+                            from_exc=exc,
+                        )
                     return VariableTracker.build(tx, res)
 
             else:
@@ -909,7 +923,13 @@ class BuiltinVariable(VariableTracker):
                                 },
                             )
                         except Exception as exc:
-                            unimplemented(f"constant fold exception: {repr(exc)}")
+                            unimplemented_v2(
+                                gb_type="constant fold exception",
+                                context=f"attempted to run function {fn} with arguments {args} {kwargs}",
+                                explanation="Encountered exception when attempting to constant fold.",
+                                hints=[*graph_break_hints.DYNAMO_BUG],
+                                from_exc=exc,
+                            )
                         return VariableTracker.build(tx, res)
 
             handlers.append(constant_fold_handler)
@@ -1088,7 +1108,12 @@ class BuiltinVariable(VariableTracker):
                 return wrap_fx_proxy(tx, proxy)
 
         except NotImplementedError:
-            unimplemented(f"partial tensor op: {self} {args} {kwargs}")
+            unimplemented_v2(
+                gb_type="unimplemented builtin op on tensor arguments",
+                context=f"partial tensor op: {self} {args} {kwargs}",
+                explanation=f"Dynamo does not know how to trace builtin operator {self.fn} with tensor arguments",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
     call_function_handler_cache: dict[
         tuple[object, ...],
@@ -1252,7 +1277,12 @@ class BuiltinVariable(VariableTracker):
                 # account for __repr__ functions when __str__ is absent
                 str_method = arg.value.__repr__
             else:
-                unimplemented("user defined object has no __str__ or __repr__ method")
+                unimplemented_v2(
+                    gb_type="failed to call str() on user defined object",
+                    context=str(arg),
+                    explanation="User defined object has no __str__ or __repr__ method",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
 
             if type(arg.value).__str__ is object.__str__:
                 # Rely on the object str method
@@ -1262,7 +1292,12 @@ class BuiltinVariable(VariableTracker):
                     # Graph break
                     return
             elif is_wrapper_or_member_descriptor(str_method):
-                unimplemented(f"{type(arg.value)} has a C/C++ based str method")
+                unimplemented_v2(
+                    gb_type="Attempted to a str() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based str method. This is not supported.",
+                    hints=["Write the str method in Python"],
+                )
             else:
                 # Overrides for custom str method
                 # Pass method as function to call tx.inline_user_function_return
@@ -1419,7 +1454,12 @@ class BuiltinVariable(VariableTracker):
 
     def call_index(self, tx: "InstructionTranslator", arg: "VariableTracker"):
         if isinstance(arg, variables.TensorVariable):
-            unimplemented("unsupported index(tensor)")
+            unimplemented_v2(
+                gb_type="unsupported index(Tensor)",
+                context="",
+                explanation="Dynamo does not support tracing builtin index() on a Tensor",
+                hints=[],
+            )
 
         arg = guard_if_dyn(arg)
         constant_value = operator.index(arg)
@@ -1488,7 +1528,7 @@ class BuiltinVariable(VariableTracker):
                         and isinstance(obj, ConstDictVariable)
                         and not istype(obj, SetVariable)
                     ):
-                        tx.output.guard_on_key_order.add(obj.source.name())
+                        tx.output.guard_on_key_order.add(obj.source)
 
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
@@ -1566,7 +1606,12 @@ class BuiltinVariable(VariableTracker):
         if len(args) == 2:
             return args[1]
 
-        unimplemented(f"unsupported args to builtin cast(): {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="bad args to builtin cast()",
+            context=f"got args {args} {kwargs}",
+            explanation="Dynamo expects exactly 2 args to builtin cast().",
+            hints=["Ensure your call to cast() has exactly 2 arguments."],
+        )
 
     def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
@@ -1612,7 +1657,18 @@ class BuiltinVariable(VariableTracker):
                     user_cls,
                     mutation_type=ValueMutationNew(),
                 )
-        unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
+
+        unimplemented_v2(
+            gb_type="failed to call dict.fromkeys()",
+            context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
+            explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
+            "arguments could not be automatically converted to a list, "
+            "or some dict key is not hashable.",
+            hints=[
+                "Manually convert the argument to a list.",
+                "Ensure all keys are hashable.",
+            ],
+        )
 
     def call_set(self, tx: "InstructionTranslator", *args, **kwargs):
         # Can we merge this implementation and call_dict's one?
@@ -1635,10 +1691,15 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(out, SetVariable):
                     return out
                 return BuiltinVariable(set).call_set(tx, out)
-            else:
-                unimplemented(f"set(): {args} {kwargs}")
-        else:
-            unimplemented(f"set(): {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="failed to construct builtin set()",
+            context=f"set(): {args} {kwargs}",
+            explanation="Unable to call builtin set() with provided arguments.",
+            hints=[
+                *graph_break_hints.USER_ERROR,
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call_frozenset(self, tx: "InstructionTranslator", *args, **kwargs):
         assert not kwargs
@@ -1651,8 +1712,15 @@ class BuiltinVariable(VariableTracker):
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
             return FrozensetVariable(items)
-        else:
-            unimplemented(f"frozenset(): {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="failed to construct builtin frozenset()",
+            context=f"frozenset(): {args} {kwargs}",
+            explanation="Unable to call builtin frozenset() with provided arguments.",
+            hints=[
+                *graph_break_hints.USER_ERROR,
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
@@ -1679,8 +1747,11 @@ class BuiltinVariable(VariableTracker):
         try:
             arg_type = arg.python_type()
         except NotImplementedError:
-            unimplemented(
-                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
+            unimplemented_v2(
+                gb_type="builtin isinstance() cannot determine type of argument",
+                context=f"isinstance({arg}, {isinstance_type})",
+                explanation=f"Dynamo doesn't have a rule to determine the type of argument {arg}",
+                hints=[*graph_break_hints.DYNAMO_BUG],
             )
 
         isinstance_type = isinstance_type.as_python_constant()
@@ -1718,8 +1789,12 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
             arg.value, types.MemberDescriptorType
         ):
-            unimplemented(
-                f"isinstance called on UserDefinedClass {arg} {isinstance_type}"
+            unimplemented_v2(
+                gb_type="isinstance() called on user defined object with C extensions",
+                context=f"isinstance({arg}, {isinstance_type})",
+                explanation="User-defined object with C extensions can have torch.Tensor "
+                "attributes; intentionally graph breaking.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
         # handle __instancecheck__ defined in user class
         if (
@@ -1773,8 +1848,14 @@ class BuiltinVariable(VariableTracker):
             left_ty_py = left_ty.as_python_constant()
             right_ty_py = right_ty.as_python_constant()
         except NotImplementedError:
-            unimplemented(
-                f"call_issubclass args not constant left_ty: {left_ty}, right_ty: {right_ty}"
+            unimplemented_v2(
+                gb_type="issubclass() with non-constant arguments",
+                context=f"issubclass({left_ty}, {right_ty})",
+                explanation="issubclass() with non-constant arguments not supported.",
+                hints=[
+                    "Make sure your arguments are types.",
+                    *graph_break_hints.USER_ERROR,
+                ],
             )
 
         # WARNING: This might run arbitrary user code `__subclasscheck__`.
@@ -1819,7 +1900,12 @@ class BuiltinVariable(VariableTracker):
         default=None,
     ):
         if not name_var.is_python_constant():
-            unimplemented("non-const getattr() name")
+            unimplemented_v2(
+                gb_type="getattr() with non-constant name argument",
+                context=f"getattr({obj}, {name_var}, {default})",
+                explanation="getattr() with non-constant name argument is not supported",
+                hints=["Ensure the name argument of getattr() is a string"],
+            )
 
         name = name_var.as_python_constant()
 
@@ -1838,8 +1924,12 @@ class BuiltinVariable(VariableTracker):
                     and obj.is_state_mutated
                     and tx.output.side_effects.has_pending_mutation(obj)
                 ):
-                    unimplemented(
-                        f"pending mutation on nn module, so graph breaking at {name!r} call"
+                    unimplemented_v2(
+                        gb_type="getattr() on nn.Module with pending mutation",
+                        context=f"getattr({obj}, {name}, {default})",
+                        explanation="Intentionally graph breaking on getattr() on a nn.Module "
+                        "with a pending mutation",
+                        hints=[],
                     )
 
         if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
@@ -1907,6 +1997,19 @@ class BuiltinVariable(VariableTracker):
                         "Please report an issue to PyTorch.",
                     ],
                 )
+            if isinstance(obj, TensorVariable):
+                fake_val = obj.proxy.node.meta["example_value"]
+                if (
+                    isinstance(fake_val, torch.Tensor)
+                    and is_sparse_any(fake_val)
+                    and (not tx.export or not config.capture_sparse_compute)
+                ):
+                    unimplemented_v2(
+                        gb_type="Attempted to wrap sparse Tensor",
+                        context="",
+                        explanation="torch.compile does not support sparse Tensors",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
             try:
                 return obj.var_getattr(tx, name)
@@ -1972,9 +2075,13 @@ class BuiltinVariable(VariableTracker):
                 # Some special handling for tensor attributes.
                 if name == "requires_grad":
                     # TODO(voz): Make it work properly
-                    unimplemented(
-                        "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                        "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                    unimplemented_v2(
+                        gb_type="setattr() on Tensor.requires_grad",
+                        context=f"setattr({obj}, {name}, {val})",
+                        explanation="setattr() on Tensor.requires_grad not supported. "
+                        "Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                        "the middle of the graph, which AOTAutograd does not currently know how to handle.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 elif name == "data":
                     # See comments on `test_set_data_on_scoped_tensor` for plans
@@ -2178,10 +2285,27 @@ class BuiltinVariable(VariableTracker):
         elif istype(args[0], variables.FunctoolsPartialVariable):
             return variables.ConstantVariable.create(id(args[0].fake_value))
         else:
-            unimplemented(f"call_id with args {args}")
+            unimplemented_v2(
+                gb_type="id() with unsupported args",
+                context=str(args),
+                explanation=f"Dynamo doesn't know how to trace id() call with args {args}",
+                hints=[
+                    "Supported args are Tensors, and functions/nn.Modules/user-defined objects "
+                    "from outside the compiled region.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     def call_deepcopy(self, tx: "InstructionTranslator", x):
-        unimplemented(f"copy.deepcopy {repr(x)}")
+        unimplemented_v2(
+            gb_type="copy.deepcopy()",
+            context=f"copy.deepcopy({x})",
+            explanation="Dynamo does not support copy.deepcopy()",
+            hints=[
+                "Avoid calling copy.deepcopy()",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def _comparison_with_tensor(self, tx: "InstructionTranslator", left, right):
         from .builder import wrap_fx_proxy_cls
@@ -2202,7 +2326,13 @@ class BuiltinVariable(VariableTracker):
                 return ConstantVariable.create(not is_result)
 
         if op not in supported_tensor_comparison_op_values:
-            unimplemented(f"{op.__name__}({left}, {right})")
+            unimplemented_v2(
+                gb_type="unsupported Tensor comparison op",
+                context=f"{op.__name__}({left}, {right})",
+                explanation=f"Dynamo does not support the comparison op {op.__name__} "
+                f"with Tensor arguments {left}, {right}",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if (
             isinstance(left, TensorVariable)
             and isinstance(right, TensorVariable)
@@ -2213,7 +2343,13 @@ class BuiltinVariable(VariableTracker):
                 torch.broadcast_shapes(left.size, right.size)
             except RuntimeError:
                 # not broadcastable, can't be compared
-                unimplemented(f"{op.__name__}({left}, {right})")
+                unimplemented_v2(
+                    gb_type="failed to broadcast when attempting Tensor comparison op",
+                    context=f"{op.__name__}({left}, {right})",
+                    explanation=f"Dynamo was unable to broad cast the arguments {left}, {right} "
+                    f"when attempting to trace the comparison op {op.__name__}.",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
         tensor_cls = left if isinstance(left, TensorVariable) else right
         proxy = tx.output.create_proxy(
             "call_function", op, (left.as_proxy(), right.as_proxy()), {}
@@ -2230,7 +2366,13 @@ class BuiltinVariable(VariableTracker):
         op = self.fn
 
         if op not in supported_tensor_comparison_op_values:
-            unimplemented(f"{op.__name__}({left}, {right})")
+            unimplemented_v2(
+                gb_type="unsupported SymNode comparison op",
+                context=f"{op.__name__}({left}, {right})",
+                explanation=f"Dynamo does not support the comparison op {op.__name__} "
+                f"with SymNode arguments {left}, {right}",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         # This is seen in inspect signature where we check if the value is a default value
         if isinstance(right, variables.UserDefinedClassVariable):
