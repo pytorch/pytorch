@@ -111,6 +111,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   you can always `uninstall` with `timeout` or in a loop if you're feeling
   lazy.)
 
+<!-- Needs updated instructions -->
   ```bash
   conda uninstall pytorch -y
   yes | pip uninstall torch
@@ -182,6 +183,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
 Or if you would like to re-use an existing conda environment, you can pass in
 the prefix argument (`--prefix`):
+<!-- Do we need updates here? -->
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch -p my-env
@@ -671,6 +673,7 @@ version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used.
 
+<!-- Do we need updates here? -->
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
 separate Python package environments, each of which can be tied to a
@@ -756,7 +759,6 @@ same. Using ccache in a situation like this is a real time-saver.
 Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
-conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
