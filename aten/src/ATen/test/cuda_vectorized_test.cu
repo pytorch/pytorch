@@ -27,7 +27,7 @@ void reset_buffers() {
   }
 }
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && !defined(_WIN32)
 TEST(TestLoops, HasSameArgTypes) {
   // This is a compile-time unit test. If this file compiles without error,
   // then the test passes and during runtime, we just need to return.
@@ -46,17 +46,12 @@ TEST(TestLoops, HasSameArgTypes) {
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
-#if defined(CUDA_VERSION) && CUDA_VERSION < 12080
-  constexpr auto vectorize_limit = 4;
-#else
-  constexpr auto vectorize_limit= 8;
-#endif
 
-  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), vectorize_limit);
-  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), vectorize_limit);
-  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), vectorize_limit);
-  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), vectorize_limit);
-  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), vectorize_limit);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 8);
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 1), 1);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 1), 1);
@@ -70,8 +65,8 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 4), 2);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 4), 1);
 
-  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 8), vectorize_limit);
-  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 8), vectorize_limit);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 8), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 8), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 8), 4);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 8), 2);
   ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr + 8), 1);
