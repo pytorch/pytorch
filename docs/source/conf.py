@@ -44,6 +44,7 @@ import pytorch_sphinx_theme2
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
+
 # -- General configuration ------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
@@ -3708,7 +3709,6 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines (List[str]): the lines of the docstring, see above
 
     References:
-        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
         https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
     """
     import re
@@ -3787,24 +3787,32 @@ htmlhelp_basename = "PyTorchdoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
+latex_engine = "lualatex"
+latex_show_urls = "footnote"
+
 latex_elements = {
-    # The paper size ('letterpaper' or 'a4paper').
-    #
-    # 'papersize': 'letterpaper',
-    # The font size ('10pt', '11pt' or '12pt').
-    #
-    # 'pointsize': '10pt',
-    # Additional stuff for the LaTeX preamble.
-    #
-    # 'preamble': '',
-    # Latex figure (float) alignment
-    #
-    # 'figure_align': 'htbp',
+    "papersize": "letterpaper",
+    "pointsize": "10pt",
+    "tableofcontents": r"\pdfbookmark[0]{Contents}{toc}\tableofcontents",
+    "preamble": r"""
+       \usepackage{tocloft}
+       \setcounter{tocdepth}{3}
+       \setcounter{secnumdepth}{3}
+       % Fix table column widths
+       \renewenvironment{tabulary}{\begin{longtable}{p{0.3\linewidth}p{0.7\linewidth}}}{\end{longtable}}
+
+       % Ensure tables don't overflow
+       \AtBeginEnvironment{tabular}{\sloppy}
+    """,
+    "fncychap": r"\usepackage[Bjornstrup]{fncychap}",
+    "extraclassoptions": "oneside",
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
+
+
 latex_documents = [
     (
         master_doc,
@@ -3814,6 +3822,7 @@ latex_documents = [
         "manual",
     ),
 ]
+latex_use_xindy = False
 
 
 # -- Options for manual page output ---------------------------------------
