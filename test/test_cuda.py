@@ -1131,7 +1131,7 @@ class TestCuda(TestCase):
         torch.cuda.set_device(src_device)
         with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.cuda.current_device(), 1)
-        self.assertEqual(torch.cuda.set_device(), src_device)
+        self.assertEqual(torch.cuda.current_device(), src_device)
 
     def test_stream_context_manager(self):
         prev_stream = torch.cuda.current_stream()
