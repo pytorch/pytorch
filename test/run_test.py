@@ -1590,6 +1590,15 @@ def get_selected_tests(options) -> list[str]:
             ]
         )
 
+    if sys.version_info[:2] != (3, 13):
+        options.exclude.extend(
+            [
+                test
+                for test in selected_tests
+                if test.startswith("dynamo/cpython/3_13/")
+            ]
+        )
+
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == "win32" and not options.ignore_win_blocklist:

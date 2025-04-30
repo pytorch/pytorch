@@ -23,6 +23,7 @@ None values for efficiency and code reuse.
 import collections
 import functools
 import inspect
+import operator
 import types
 from collections.abc import Hashable as py_Hashable
 from typing import Optional, TYPE_CHECKING
@@ -588,10 +589,13 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__or__":
             assert len(args) == 1
+            # TODO(guilherme): self and args[0] should have the same type(?)
             if not isinstance(args[0], ConstDictVariable):
-                raise TypeError(
-                    f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
+                msg = (
+                    f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
+                    f"and '{args[0].python_type().__name__}'"
                 )
+                raise_observed_exception(TypeError, tx, args=[msg])
 
             self.install_dict_keys_match_guard()
             new_dict_vt = self.clone(
@@ -791,7 +795,12 @@ class SetVariable(ConstDictVariable):
             assert not kwargs
             assert not args
             # Choose an item at random and pop it via the Dict.pop method
-            result = self.set_items.pop().vt
+            try:
+                result = self.set_items.pop().vt
+            except KeyError as e:
+                raise_observed_exception(
+                    KeyError, tx, args=list(map(ConstantVariable.create, e.args))
+                )
             super().call_method(tx, name, (result,), kwargs)
             return result
         elif name == "isdisjoint":
@@ -802,10 +811,14 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, args[0]], {})
         elif name == "intersection":
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_intersection
-            ).call_function(tx, [self, args[0]], {})
+            ).call_function(tx, [self, *args], {})
+        elif name == "intersection_update":
+            assert not kwargs
+            return variables.UserFunctionVariable(
+                polyfills.set_intersection_update
+            ).call_function(tx, [self, *args], {})
         elif name == "union":
             assert not kwargs
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
@@ -813,21 +826,38 @@ class SetVariable(ConstDictVariable):
             )
         elif name == "difference":
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_difference
-            ).call_function(tx, [self, args[0]], {})
-        elif name == "update" and len(args) == 1 and self.is_mutable():
+            ).call_function(tx, [self, *args], {})
+        elif name == "difference_update":
             assert not kwargs
-            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfills.set_difference_update
+            ).call_function(tx, [self, *args], {})
+        elif name == "symmetric_difference":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+            assert not kwargs
+            return variables.UserFunctionVariable(
+                polyfills.set_symmetric_difference
+            ).call_function(tx, [self, *args], {})
+        elif name == "symmetric_difference_update":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+            assert not kwargs
+            return variables.UserFunctionVariable(
+                polyfills.set_symmetric_difference_update
+            ).call_function(tx, [self, *args], {})
+        elif name == "update" and self.is_mutable():
+            assert not kwargs
             return variables.UserFunctionVariable(polyfills.set_update).call_function(
-                tx, [self, args[0]], {}
+                tx, [self, *args], {}
             )
         elif name == "remove":
             assert not kwargs
             assert len(args) == 1
             if args[0] not in self:
-                unimplemented("key does not exist")
+                raise_observed_exception(KeyError, tx, args=args)
             return super().call_method(tx, "pop", args, kwargs)
         elif name == "discard":
             assert not kwargs
@@ -836,6 +866,15 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
+        elif name in ("issubset", "issuperset"):
+            op = {
+                "issubset": operator.le,
+                "issuperset": operator.ge,
+            }
+            other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
+            return variables.BuiltinVariable(op.get(name)).call_function(
+                tx, [self, other], {}
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
