@@ -383,9 +383,9 @@ class RandomBatchSampler(RandomSampler, BatchSampler):
     def __iter__(self) -> Iterator[torch.Tensor]:
         indices = self.sample_indices()
 
-        # Slicing is faster on list when batch size is small (See https://github.com/pytorch/pytorch/pull/147706)
-        if self.batch_size < 16:
-            indices = indices.tolist()
+        # Slicing is faster on list when batch size is small
+        # if self.batch_size < 16:
+        indices = indices.tolist()
 
         indices_batches = [
             indices[i : i + self.batch_size]
