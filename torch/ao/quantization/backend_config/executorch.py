@@ -145,6 +145,7 @@ def _get_conv_configs() -> list[BackendPatternConfig]:
     dtype_configs = [
         qnnpack_weighted_op_qint8_symmetric_dtype_config,
         executorch_weighted_op_int8_dtype_config,
+        executorch_default_dynamic_qint8_dtype_config,
     ]
     conv_configs = []
     for convs in [_Conv2dMetadata]:
