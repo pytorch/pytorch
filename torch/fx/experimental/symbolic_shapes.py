@@ -1575,15 +1575,10 @@ def expect_true(
             if frame is None:
                 break
             frame = frame.f_back
-        if message is None:  # try to avoid XLA SymNode incompatibility issues
-            return a.node.expect_true(
-                frame.f_code.co_filename if frame else "",
-                frame.f_lineno if frame else 0,
-            )
         return a.node.expect_true(
             frame.f_code.co_filename if frame else "",
             frame.f_lineno if frame else 0,
-            message,
+            "" if message is None else "",
         )
     assert type(a) is bool, a
     return a

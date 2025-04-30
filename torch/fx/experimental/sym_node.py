@@ -540,8 +540,12 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
-    def expect_true(self, file, line, message=None):
+    def expect_true(self, file, line, message=""):
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        # if c++ pass SymNode pass "" consider message none.
+        if message == "":
+            message = None
 
         if (
             self.has_hint()
