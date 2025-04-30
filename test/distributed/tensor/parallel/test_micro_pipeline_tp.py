@@ -27,16 +27,15 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     run_tests,
-    MI300_ARCH,
     runOnRocmArch,
     TestCase,
-    TEST_WITH_ROCM,
 )
-from torch.testing._internal.common_device_type import ( E4M3_MAX_POS, e4m3_type, E5M2_MAX_POS, e5m2_type )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -374,7 +373,7 @@ class MicroPipelineTPTest(TestCase):
             else:
                 C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
             return reduce_scatter_tensor(C, "avg", scatter_dim, group)
-        
+
         if A_dims == 2:
             A = torch.rand(64, 32, device="cuda").to(e4m3_type)
         elif A_dims == 3:
