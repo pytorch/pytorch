@@ -33,31 +33,57 @@ static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
       _mm512_or_si512(mant_norm, _mm512_slli_epi32(exp_norm, 23)));
 
   __m512i val = val_norm;
-  if (normal_mask != 0xFFFF) {
-    // --- Step 2: Denorm case (exp == 0 & mant ≠ 0) ---
-    __mmask16 mant_nonzero_mask = _mm512_cmpneq_epi32_mask(mant, _mm512_setzero_si512());
-    __mmask16 denorm_mask = _kand_mask16(_knot_mask16(normal_mask), mant_nonzero_mask); // exp == 0 && mant ≠ 0
-
-    // For FP32: value = (mant / 8.0f) * 2^{-6} = mant * 2^{-9}
-    // Create float from int: mant * 2^{-9} = mant << 20 with exponent = 121
-    __m512i val_denorm = _mm512_maskz_mov_epi32(denorm_mask,
-        _mm512_or_si512(_mm512_slli_epi32(mant, 20), _mm512_set1_epi32(121 << 23)));
-
-    val = _mm512_or_si512(val_norm, val_denorm);
+  // exp == 0xF && mant == 0x07
+  __mmask16 nan_mask = _mm512_cmpeq_epi32_mask(exp, _mm512_set1_epi32(0xF)) &
+      _mm512_cmpeq_epi32_mask(mant, _mm512_set1_epi32(0x07));
+  if (nan_mask) {
+    // --- Step 2: Nan case (exp == 0xF && mant == 0x07) ---
+    const __m512i nan_values = _mm512_set1_epi32(0x7FC00000);
+    val = _mm512_mask_mov_epi32(val, nan_mask, nan_values);
   }
-  // --- Final OR with sign (sign bit << 24 to get to bit 31) ---
+
+  // exp == 0 && mant != 0
+  __mmask16 denormal_mask = _mm512_cmpeq_epi32_mask(exp, _mm512_setzero_si512()) &
+      _mm512_cmpneq_epi32_mask(mant, _mm512_setzero_si512());
+  if (denormal_mask) {
+    // --- Step 3: Denorm case (exp == 0 && mant != 0) ---
+    // An alternative solution is as what scalar did in pytorch/c10/util/Float8_e4m3fn.h
+    // To count the num of leading zeros, since here we know the unsigned denorm value has
+    // zero sign and exp which is 5 leading zeros, we need to count the leading zero of mant (3bit)
+    // which may done through table lookup for example:
+    // const uint8_t lz_table[8] = {3, 2, 1, 1, 0, 0, 0, 0};
+    // num_leading_zero = lz_table[mant] + 5;
+    __m512i lg2mant = _mm512_mask_mov_epi32(
+        _mm512_mask_mov_epi32(
+            _mm512_setzero_si512(),
+            _mm512_test_epi32_mask(x, _mm512_set1_epi32(2)),
+            _mm512_set1_epi32(1)),
+        _mm512_test_epi32_mask(x, _mm512_set1_epi32(4)),
+        _mm512_set1_epi32(2));
+
+    __m512i denorm_values = _mm512_or_si512(
+        _mm512_and_si512(
+            _mm512_sllv_epi32(
+                _mm512_and_si512(x, _mm512_set1_epi32(3)), _mm512_sub_epi32(_mm512_set1_epi32(23), lg2mant)),
+            _mm512_set1_epi32(0x7fffff)),
+        _mm512_slli_epi32(_mm512_add_epi32(lg2mant, _mm512_set1_epi32(118)), 23)
+      );
+
+    val = _mm512_mask_mov_epi32(val, denormal_mask, denorm_values);
+  }
+
+  // --- OR with sign (sign bit << 24 to get to bit 31) ---
   val = _mm512_or_si512(val, _mm512_slli_epi32(sign, 24));
 
   o = _mm512_castsi512_ps(val);
-
 }
 
 static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   // cvt 16x32 from fp32 to fp8 e4m3
   const __m512i sign_mask      = _mm512_set1_epi32(0x80000000);
-  const __m512i fp8_max        = _mm512_set1_epi32(1087 << 20);
-  const __m512i small_thresh   = _mm512_set1_epi32(121 << 23);
-  const __m512i denorm_mask    = _mm512_set1_epi32(141 << 23);
+  const __m512i fp8_max        = _mm512_set1_epi32(UINT32_C(1087) << 20);
+  const __m512i denorm_thresh   = _mm512_set1_epi32(UINT32_C(121) << 23);
+  const __m512i denorm_mask    = _mm512_set1_epi32(UINT32_C(141) << 23);
   const __m512i bias_part1     = _mm512_set1_epi32((uint32_t)(7 - 127) << 23);
   const __m512i rounding_bias  = _mm512_set1_epi32(0x7FFFF);
   __m512i f_bits = _mm512_castps_si512(src);
@@ -76,19 +102,19 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   }
 
   // Step 2: Handle small numbers (denormals)
-  // Small numbers (f_bits < small_thresh)
-  __mmask16 small_mask = _mm512_cmplt_epu32_mask(f_bits, small_thresh);
+  // Small numbers (f_bits < denorm_thresh)
+  __mmask16 denorm_thresh_mask = _mm512_cmplt_epu32_mask(f_bits, denorm_thresh);
 
-  if (small_mask) {
+  if (denorm_thresh_mask) {
     __m512 small_input = _mm512_castsi512_ps(f_bits);
     __m512 small_denorm = _mm512_add_ps(small_input, _mm512_castsi512_ps(denorm_mask));
     __m512i small_denorm_bits = _mm512_castps_si512(small_denorm);
     __m512i small_result = _mm512_sub_epi32(small_denorm_bits, denorm_mask);
-    result = _mm512_mask_mov_epi32(result, small_mask, small_result);
+    result = _mm512_mask_mov_epi32(result, denorm_thresh_mask, small_result);
   }
 
   // Step 3: Handle normal numbers
-  __mmask16 normal_mask = ~(overflow_mask | small_mask);
+  __mmask16 normal_mask = ~(overflow_mask | denorm_thresh_mask);
 
   if (normal_mask) {
     // mant_odd = (f_bits >> 20) & 1
