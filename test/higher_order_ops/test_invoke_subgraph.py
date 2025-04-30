@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
 
 
@@ -1407,8 +1407,8 @@ class GraphModule(torch.nn.Module):
             z = gn(x, y)
             return gn(z, y)
 
-        t1 = torch.rand(5, device="cuda")
-        t2 = torch.rand(5, device="cuda")
+        t1 = torch.rand(5, device=GPU_TYPE)
+        t2 = torch.rand(5, device=GPU_TYPE)
 
         ref = fn(t1, t2)
         backend = AotEagerAndRecordGraphs()
