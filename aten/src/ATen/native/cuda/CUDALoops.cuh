@@ -83,6 +83,14 @@ constexpr auto elems_per_thread(){
 }
 #endif
 
+
+//thread work size of 8 regresses the perf of elementwise kernel on cuda
+//this doesn't change ROCm behavior as thread_work_size is already 4 on ROCm
+constexpr int elementwise_thread_work_size() {return 4;}
+constexpr int elementwise_block_work_size() {
+  return elementwise_thread_work_size() * num_threads();
+}
+
 template <int io_sizes>
 constexpr auto io_block_work_size() {
   return num_threads() * elems_per_thread<io_sizes>();
@@ -336,9 +344,10 @@ static inline void launch_unrolled_kernel(
     loader_t l,
     storer_t s) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + block_work_size() - 1) / block_work_size();
+
+  int64_t grid = (N + elementwise_block_work_size() - 1) / elementwise_block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-  unrolled_elementwise_kernel<func_t, array_t, thread_work_size()>
+  unrolled_elementwise_kernel<func_t, array_t, elementwise_thread_work_size()>
       <<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc, l, s);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
