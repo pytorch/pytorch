@@ -108,6 +108,7 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
+                variables.FrozensetVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
                 variables.SkipFunctionVariable,
@@ -142,6 +143,10 @@ class ConstDictVariable(VariableTracker):
             # TODO Temorarily remove to figure out what keys are we breaking on
             # and add proper support for them
             if not is_hashable(vt):
+                # from torch._dynamo.symbolic_convert import InstructionTranslator
+                # tx = InstructionTranslator.current_tx()
+                # msg = ConstantVariable.create("unhashable type")
+                # raise_observed_exception(TypeError, tx, args=[msg])
                 unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
             self.vt = vt
 
@@ -543,9 +548,10 @@ class ConstDictVariable(VariableTracker):
         elif name in ("get", "__getattr__") and args[0] in self:
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
-        elif name == "__contains__":
-            if len(args) != 1:
-                raise_observed_exception(TypeError, tx)
+        elif name == "__contains__" and len(args) == 1:
+            if not arg_hashable:
+                raise_unhashable(args[0])
+
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
             return ConstantVariable.create(contains)
@@ -795,9 +801,8 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, args[0]], {})
         elif name == "union":
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
-                tx, [self, args[0]], {}
+                tx, [self, *args], {}
             )
         elif name == "difference":
             assert not kwargs
@@ -860,7 +865,7 @@ class FrozensetVariable(SetVariable):
         return frozenset
 
     def as_python_constant(self):
-        return {k.vt.as_python_constant() for k in self.set_items}
+        return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
