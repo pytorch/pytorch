@@ -395,15 +395,15 @@ static inline void mtl_setBuffer(encoder_t encoder, ConstMTLBufferTensor b, unsi
   if (C10_UNLIKELY(t.device().type() == kCPU)) {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
-      // [encoder setBytes:b.mtl_buffer_unsafe() length:t.element_size() atIndex:idx];
-      [encoder setBytes:getMTLBufferStorage(t) length:t.element_size() atIndex:idx];
+      [encoder setBytes:b.mtl_buffer_unsafe() length:t.element_size() atIndex:idx];
+      // [encoder setBytes:getMTLBufferStorage(t) length:t.element_size() atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
     }
     return;
   }
-  // [encoder setBuffer:b.mtl_buffer_unsafe() offset:t.storage_offset() * t.element_size() atIndex:idx];
-  [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
+  [encoder setBuffer:b.mtl_buffer_unsafe() offset:t.storage_offset() * t.element_size() atIndex:idx];
+  // [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 
 // Implementation of setBytes for containers vs trivially copiable types must be separate
