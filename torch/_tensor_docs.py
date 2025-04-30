@@ -4163,9 +4163,9 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 .. warning::
 
     :meth:`~Tensor.repeat` behaves differently from
-    `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
+    `numpy.repeat <https://numpy.org/doc/stable/reference/generated/numpy.repeat.html>`_,
     but is more similar to
-    `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+    `numpy.tile <https://numpy.org/doc/stable/reference/generated/numpy.tile.html>`_.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
@@ -5196,6 +5196,13 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
     has the correct :class:`torch.dtype` and :class:`torch.device`, then ``self`` is returned.
     Otherwise, the returned tensor is a copy of ``self`` with the desired
     :class:`torch.dtype` and :class:`torch.device`.
+
+.. note::
+
+    If ``self`` requires gradients (``requires_grad=True``) but the target
+    ``dtype`` specified is an integer type, the returned tensor will implicitly
+    set ``requires_grad=False``. This is because only tensors with
+    floating-point or complex dtypes can require gradients.
 
 Here are the ways to call ``to``:
 

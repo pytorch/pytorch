@@ -199,8 +199,8 @@ def get_cudnn_version(run_lambda):
         cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, cuda_path)
     elif get_platform() == 'darwin':
         # CUDA libraries and drivers can be found in /usr/local/cuda/. See
-        # https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html#install
-        # https://docs.nvidia.com/deeplearning/sdk/cudnn-install/index.html#installmac
+        # https://docs.nvidia.com/cuda/archive/9.0/cuda-installation-guide-mac-os-x/index.html#installation
+        # https://docs.nvidia.com/deeplearning/cudnn/installation/latest/
         # Use CUDNN_LIBRARY when cudnn library is installed elsewhere.
         cudnn_cmd = 'ls /usr/local/cuda/lib/libcudnn*'
     else:
@@ -445,6 +445,9 @@ def get_pip_packages(run_lambda, patterns=None):
     # People generally have pip as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     out = run_and_read_all(run_lambda, [sys.executable, '-mpip', 'list', '--format=freeze'])
+    if out is None:
+        return pip_version, out
+
     filtered_out = '\n'.join(
         line
         for line in out.splitlines()
