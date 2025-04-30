@@ -22,7 +22,7 @@ basic_modules_ListOfLinears_eager,compile_time_instruction_count,999400000,0.015
 
 
 
-basic_modules_ListOfLinears_inductor,compile_time_instruction_count,17990000000,0.015
+basic_modules_ListOfLinears_inductor,compile_time_instruction_count,17650000000,0.015
 
 
 
@@ -46,7 +46,7 @@ sum_floordiv_regression,compile_time_instruction_count,985300000,0.015
 
 
 
-symint_sum,compile_time_instruction_count,3189000000,0.015
+symint_sum,compile_time_instruction_count,3111000000,0.015
 
 
 
