@@ -128,7 +128,8 @@ def _replace_region_with_subgraph(
     node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
 ) -> None:
     sub_args = []
-    for node_ind, usages in enumerate(placeholder_ind_to_usages):
+    for usages in placeholder_ind_to_usages:
+        node_ind, usage_ind = next(iter(usages))
         node = region[node_ind]
         flattened_args_kwargs = _get_flat_args(node, {})
         for user_ind, node_usage_ind in usages:
@@ -139,7 +140,7 @@ def _replace_region_with_subgraph(
                         "NYI: Failed to substitute region %s due to mutation", region
                     )
                     return
-        sub_args.append(flattened_args_kwargs[next(iter(usages))[1]])
+        sub_args.append(flattened_args_kwargs[usage_ind])
 
     # Input/Output aliasing not supported in HOPs today
     # Note: we should use the nodes in the original graph (the region here)
