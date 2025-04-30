@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, T
 
 
 device_type = torch.device(get_devtype())
+device_module = torch.get_device_module(device_type)
 
 
 class TestFullyShardOverlap(FSDPTest):
@@ -224,14 +225,14 @@ class TestFullyShardOverlap(FSDPTest):
         self.assertGreater(baseline_time, test_time)
 
     def _time_fn(self, fn: Callable):
-        start_event = torch.get_device_module(device_type).Event(enable_timing=True)
-        end_event = torch.get_device_module(device_type).Event(enable_timing=True)
+        start_event = device_module.Event(enable_timing=True)
+        end_event = device_module.Event(enable_timing=True)
         dist.barrier()
-        torch.get_device_module(device_type).synchronize()
+        device_module.synchronize()
         start_event.record()
         fn()
         end_event.record()
-        torch.get_device_module(device_type).synchronize()
+        device_module.synchronize()
         elapsed_time = start_event.elapsed_time(end_event)
         return elapsed_time
 
