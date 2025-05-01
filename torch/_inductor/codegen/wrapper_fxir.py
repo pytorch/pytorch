@@ -49,6 +49,8 @@ from .wrapper import (
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
+    SymbolicCallArg,
+    SymbolicCallArgLine,
     WrapperLine,
 )
 
@@ -174,7 +176,7 @@ class FxConverter:
         with V.fake_mode:
             return torch.empty_strided(
                 convert_shape_to_symint(size),
-                stride,
+                convert_shape_to_symint(stride),
                 dtype=dtype,
                 device=device,
             )
@@ -216,7 +218,12 @@ class FxConverter:
         Maps call args back to FX nodes.
         """
         return tuple(
-            self.buffer_to_node[arg] if isinstance(arg, str) else arg for arg in args
+            self.buffer_to_node[arg]
+            if isinstance(arg, str)
+            else arg.inner_expr
+            if isinstance(arg, SymbolicCallArg)
+            else arg
+            for arg in args
         )
 
     def _get_buffer(self, node: ir.IRNode) -> CodegenBuffer:
@@ -334,8 +341,8 @@ class FxConverter:
 
         device = buffer.get_device()
         dtype = buffer.get_dtype()
-        shape = tuple(buffer.get_size())
-        stride = tuple(buffer.get_stride())
+        shape = convert_shape_to_symint(buffer.get_size())
+        stride = convert_shape_to_symint(buffer.get_stride())
 
         node = self.gm.graph.call_function(
             torch.empty_strided,
@@ -594,3 +601,7 @@ class FxConverter:
         tuner = self._import_kernel(kernel_code, line.kernel_name)
         wrapped = wrap_triton(tuner.fn)
         self.kernels[line.kernel_name] = TritonKernel(tuner, wrapped)
+
+    def _generate_symbolic_call_arg(self, line: WrapperLine) -> None:
+        assert isinstance(line, SymbolicCallArgLine)
+        # No need for an FX node, as we will pass the arg to kernels via a SymInt.

@@ -3,9 +3,12 @@
 Test the FX IR backend.
 """
 
+import itertools
 import operator
 import unittest
 from typing import Callable, Optional
+
+import sympy
 
 import torch
 import torch._inductor.codegen.common as common
@@ -319,29 +322,44 @@ class FxirTestCase(InductorTestCase):
         self.assertNotEqual(offset, 0)
         self.assertTrue(same(result - offset, ref))
 
-    def test_dynamic_shapes(self):
-        static_numel = 8
+    def test_dynamic_shapes_and_strides(self):
+        """
+        Test a graph with dynamic shapes and strides.
+        """
+
+        static_dims = (8, 8)
+
+        def get_input():
+            full_size = (16, 8)
+            full = torch.randn(full_size, device=self.device)
+            view = torch.as_strided(full, static_dims, full.stride())
+            return view
+
         func = torch.add
-        args = [torch.randn(static_numel, device=self.device) for _ in range(2)]
+        args = [get_input() for _ in range(2)]
         (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
 
         # Check for a symbolic output shape.
         (empty_strided,) = gm.graph.find_nodes(
             op="call_function", target=torch.empty_strided
         )
-        (symbolic_numel,) = empty_strided.meta["val"].shape
-        self.assertTrue(isinstance(symbolic_numel, torch.SymInt))
+        example_tensor = empty_strided.meta["val"]
+        symbolic_dims = example_tensor.shape
+        self.assertEqual(len(symbolic_dims), len(static_dims))
 
-        # Find the size symbol, and check for a corresponding placeholder defining it.
-        symbol_name = str(symbolic_numel)
-        (placeholder,) = [
-            node
-            for node in gm.graph.find_nodes(op="placeholder")
-            if node.name == symbol_name
-        ]
+        # Check for symbolic output strides.
+        (stride, one) = example_tensor.stride()
+        self.assertEqual(one, sympy.S.One)
 
-        # Check the metadata of the placeholder.
-        self.assertEqual(placeholder.meta["val"], symbolic_numel)
+        # Find the size symbols, and check for a corresponding placeholders defining them.
+        for symbol in itertools.chain(symbolic_dims, [stride]):
+            self.assertTrue(isinstance(symbol, torch.SymInt))
+            (placeholder,) = [
+                node
+                for node in gm.graph.find_nodes(op="placeholder")
+                if node.name == str(symbol)
+            ]
+            self.assertEqual(placeholder.meta["val"], symbol)
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")

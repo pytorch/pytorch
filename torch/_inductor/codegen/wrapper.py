@@ -821,6 +821,9 @@ class SymbolicCallArgLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._generate_symbolic_call_arg_helper(self.arg)
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_symbolic_call_arg
+
 
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
