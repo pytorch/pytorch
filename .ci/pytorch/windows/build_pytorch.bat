@@ -38,7 +38,7 @@ pushd %SRC_DIR%
 
 
 set "ORIG_PATH=%PATH%"
-set CMAKE_PREFIX_PATH="%CD%\Python\Library\;%PATH%"
+
 
 :: create a new conda environment and install packages
 :try
@@ -102,7 +102,7 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
     :: Activate Python Environment
     set PYTHON_PREFIX=%%v
 
-
+    set "CMAKE_PREFIX_PATH=%CD%\Python\Library\;%PATH%"
     set "PYTHON_LIB_PATH=%CD%\Python\Library\bin"
     if not "%ADDITIONAL_PATH%" == "" (
         set "PATH=%ADDITIONAL_PATH%;%CONDA_HOME%\envs\%%v;%CONDA_HOME%\envs\%%v\scripts;%CONDA_HOME%\envs\%%v\Library\bin;%ORIG_PATH%"
