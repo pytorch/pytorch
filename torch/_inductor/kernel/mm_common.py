@@ -57,7 +57,8 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
 
 
 @SymbolicGridFn
-def persistent_grouped_mm_grid(m, n, meta):
+def persistent_grouped_mm_grid(*args):
+    meta = args[-1]
     return (meta["NUM_SMS"], 1, 1)
 
 

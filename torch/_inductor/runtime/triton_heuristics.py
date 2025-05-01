@@ -32,6 +32,7 @@ from typing import (
 import torch
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import triton_set_allocator
 
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction, triton_version_uses_attrs_dict
@@ -999,6 +1000,8 @@ class CachingAutotuner(KernelInterface):
                 **kwargs,
                 **self.configs[0].kwargs,
             )
+
+        triton_set_allocator(self.triton_meta["device"])
 
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:

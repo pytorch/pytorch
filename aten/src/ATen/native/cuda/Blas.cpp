@@ -1533,7 +1533,7 @@ namespace {
           "D, arg ",
           arg_idx);
       TORCH_CHECK(
-          scale.is_contiguous(), "scale_a must be contiguous for arg ", arg_idx);
+          scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
       TORCH_CHECK(
           scale.size(0) == mat.size(dim) * scale_multiplier,
           "scale must have the same length as mat for arg ",
@@ -1546,8 +1546,8 @@ namespace {
           "D for arg ",
           arg_idx);
       TORCH_CHECK(
-          scale.stride(1),
-          "scale_a must be contiguous in the last dimension for arg ",
+          scale.stride(1) == 1,
+          "scale must be contiguous in the last dimension for arg ",
           arg_idx);
       TORCH_CHECK(
           scale.size(0) == mat.size(0),
@@ -1611,6 +1611,7 @@ bool use_fast_accum) {
 
 
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
+  TORCH_CHECK(!scale_result.has_value(), "Scale result not supported yet");
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
   if (offs.has_value()) {
