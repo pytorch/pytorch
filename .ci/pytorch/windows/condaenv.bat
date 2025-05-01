@@ -23,7 +23,7 @@ if "%DESIRED_PYTHON%" == "3.13t" (
     set ADDITIONAL_OPTIONS="Include_freethreaded=1"
 )
 
-start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
+start /wait "" python-amd64.exe  InstallAllUsers=1 PrependPath=1 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
 if errorlevel 1 exit /b 1
 
 :: Create venv and activate it
