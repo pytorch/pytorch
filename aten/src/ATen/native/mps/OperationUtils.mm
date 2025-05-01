@@ -1019,14 +1019,15 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   }
 }
 
-void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
-                                            const std::string& name,
-                                            c10::Scalar other,
-                                            std::optional<c10::Scalar> alpha) {
+void MetalShaderLibrary::exec_binary_scalar_kernel(TensorIteratorBase& iter,
+                                                   const std::string& name,
+                                                   const int64_t scalar_idx,
+                                                   std::optional<c10::Scalar> alpha) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
-  Tensor input = iter.input(0);
+  Scalar other = iter.input(scalar_idx).item();
+  Tensor input = iter.input(1 - scalar_idx);
   Tensor out = iter.output();
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
@@ -1054,16 +1055,17 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           mtl_setBytes(computeEncoder, getMPSScalar(*alpha, iter.common_dtype()), 3);
         }
         if (cast_needed) {
-          std::array<int, 2> size_and_types = {static_cast<int>(c10::elementSize(input.scalar_type())),
-                                               static_cast<int>(input.scalar_type()),};
+          std::array<int, 2> size_and_types = {
+              static_cast<int>(c10::elementSize(input.scalar_type())),
+              static_cast<int>(input.scalar_type()),
+          };
           mtl_setBytes(computeEncoder, size_and_types, alpha ? 4 : 3);
         }
       } else {
         // Please note that shapes and strides of the iterator might be
         // different than that of its operands, for example binary op
         // between 4x4 tensor and scalar will result in 1D 16 element iterator
-        std::array<int, 2> ndim_and_types = {
-            iter.ndim(), static_cast<int>(input.scalar_type())};
+        std::array<int, 2> ndim_and_types = {iter.ndim(), static_cast<int>(input.scalar_type())};
         if (alpha) {
           mtl_setArgs(computeEncoder,
                       out,
@@ -1091,12 +1093,19 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   });
 }
 
-
 void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             const std::string& name,
                                             std::optional<c10::Scalar> alpha) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+
+  if (iter.is_scalar(0)) {
+    exec_binary_scalar_kernel(iter, name, 0, alpha);
+    return;
+  } else if (iter.is_scalar(1)) {
+    exec_binary_scalar_kernel(iter, name, 1, alpha);
+    return;
+  }
 
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
