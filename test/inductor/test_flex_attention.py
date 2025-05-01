@@ -389,6 +389,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
             target_seq_len[b],
         )
 
+
 @large_tensor_test_class("2GB", device="cuda")
 class TestFlexAttention(InductorTestCase):
     # overriden by test wrapper TestFlexAttentionCUDAWithCompiledAutograd

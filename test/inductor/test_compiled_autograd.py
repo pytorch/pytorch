@@ -16,6 +16,7 @@ from copy import deepcopy
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from string import Template
+from typing import Optional
 from unittest import mock
 
 import torch
@@ -4370,7 +4371,9 @@ test_flex_attention = load_test_module("inductor/test_flex_attention")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
-TestFlexAttentionCUDAWithCompiledAutograd = wrap_test_class(test_flex_attention.TestFlexAttentionCUDA)
+TestFlexAttentionCUDAWithCompiledAutograd = wrap_test_class(
+    test_flex_attention.TestFlexAttentionCUDA
+)
 if torch.distributed.is_available() and HAS_CUDA:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
