@@ -4,6 +4,8 @@ set -eux -o pipefail
 source "${BINARY_ENV_FILE:-/c/w/env}"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
+export VC_YEAR=2019
+
 if [[ "$OS" != "windows-arm64" ]]; then
     export CUDA_VERSION="${DESIRED_CUDA/cu/}"
     export USE_SCCACHE=1
