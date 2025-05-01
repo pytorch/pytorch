@@ -158,8 +158,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
                     mock_cache.global_stats.dynamo_pgo, mock_cache.Stats(4, 1, 2)
                 )
 
-    # Test that if the same file is appears in two different paths for two different compilations.
-    # pgo still works.
+    # Test that if the same file appears in two different paths for two different compilations PGO still works.
     def test_different_file_paths_local_pgo(self):
         content = """
 import torch
