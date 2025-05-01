@@ -1401,18 +1401,18 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_cuda_beginAllocateCurrentThreadToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
 #ifdef _MSC_VER
-        auto pid = GetCurrentThreadId();
+        auto tid = GetCurrentThreadId();
 #else
-        auto pid = gettid();
+        auto tid = gettid();
 #endif
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
             device, mempool_id, [=](cudaStream_t) {
 #ifdef _MSC_VER
-              auto current_pid = GetCurrentThreadId();
+              auto current_tid = GetCurrentThreadId();
 #else
-              auto current_pid = gettid();
+              auto current_tid = gettid();
 #endif
-              return current_pid == pid;
+              return current_tid == tid;
             });
       });
 
