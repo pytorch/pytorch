@@ -1,9 +1,13 @@
 # mypy: allow-untyped-defs
+import builtins
 import contextlib
+import functools
 import inspect
 import logging
+import math
 from collections import defaultdict
 from collections.abc import Sequence
+from contextlib import contextmanager
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -98,7 +102,7 @@ def fakify(
         return t
 
     if isinstance(t, _IntWrapper):
-        if t.dim is not None and t.dim.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
+        if t.dynamism is not None and t.dynamism.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
             symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
                 t.val, source, DimDynamic.DYNAMIC
             )
@@ -106,7 +110,7 @@ def fakify(
                 SymIntSymbolicContext(
                     constraint=RelaxedUnspecConstraint(warn_only=False)
                 )
-                if t.dim.type == _DimHintType.DYNAMIC  # type: ignore[union-attr]
+                if t.dynamism.type == _DimHintType.DYNAMIC  # type: ignore[union-attr]
                 else None
             )
             mode.shape_env.tracked_fakes.append(  # type: ignore[union-attr]
@@ -156,6 +160,97 @@ def fakify(
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
+
+
+def _is_unbacked_symint(symbol):
+    if not isinstance(symbol, torch.SymInt):
+        return False
+
+    return symbol.node.shape_env.is_unbacked_symint(symbol.node.expr)
+
+
+def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
+    """
+    This logic is replicated from dynamo/variables/builtin.py
+    """
+    if len(args) == 2 and not kwargs:
+        arg1, arg2 = args
+
+        # Case 1: Both are tensors
+        if isinstance(arg1, torch.Tensor) and isinstance(arg2, torch.Tensor):
+            return tensor_callable(arg1, arg2)
+
+        # Case 2: One tensor, one scalar
+        elif isinstance(arg1, torch.Tensor) or isinstance(arg2, torch.Tensor):
+            if not isinstance(arg1, torch.Tensor):
+                arg1, arg2 = arg2, arg1
+
+            if isinstance(arg2, (int, float)):
+                kwarg = {"min" if tensor_callable is torch.maximum else "max": arg2}
+                return torch.clamp(arg1, **kwarg)  # type: ignore[call-overload]
+            else:
+                return real_callable(arg1, arg2)
+
+        # Case 3: SymInts
+        elif isinstance(arg1, torch.SymInt) or isinstance(arg2, torch.SymInt):
+            return (
+                torch.sym_max(arg1, arg2)
+                if tensor_callable is torch.maximum
+                else torch.sym_min(arg1, arg2)
+            )
+
+        # Fallback
+        else:
+            return real_callable(arg1, arg2)
+
+    # Single iterable argument handling
+    if len(args) == 1 and not kwargs:
+        iterable = args[0]
+
+        if isinstance(iterable, torch.Tensor):
+            return tensor_callable(iterable)
+        try:
+            iterator = iter(iterable)
+        except TypeError:
+            pass
+        else:
+            items = list(iterator)
+            if not items:
+                raise ValueError(f"{real_callable.__name__}() arg is an empty sequence")
+
+            return functools.reduce(
+                lambda a, b: _tensor_min_max(
+                    a, b, real_callable=real_callable, tensor_callable=tensor_callable
+                ),
+                items,
+            )
+
+    # Fallback to original callable
+    return real_callable(*args, **kwargs)
+
+
+@contextmanager
+def _override_builtin_ops():
+    original_max = builtins.max
+    original_min = builtins.min
+    original_pow = math.pow
+
+    builtins.max = functools.partial(
+        _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
+    )
+
+    builtins.min = functools.partial(
+        _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
+    )
+
+    math.pow = lambda x, y: x**y  # type: ignore[operator]
+
+    try:
+        yield
+    finally:
+        builtins.max = original_max
+        builtins.min = original_min
+        math.pow = original_pow
 
 
 def make_fake_inputs(
@@ -379,6 +474,7 @@ def is_int(x: object) -> bool:
 
 def _constrain_user_specified_dimhint_range(
     symint: torch.SymInt,
+    hint: int,
     dim: _DimHint,
     range_constraints,
     shape_env,
@@ -390,6 +486,18 @@ def _constrain_user_specified_dimhint_range(
         if not is_int(symint)
         else ValueRanges(int(symint), int(symint))
     )
+
+    # warn on 0/1 specialization for Dim.AUTO; not an actual error
+    if dim.type == _DimHintType.AUTO and trace_vr.is_singleton() and hint in (0, 1):
+        pathstr = f"inputs{pytree.keystr(keypath)}"
+        if i is not None:
+            pathstr += f".shape[{i}]"
+        msg = (
+            f"dimension {pathstr} 0/1 specialized; Dim.AUTO was specified along "
+            + f"with a sample input with hint = {hint}."
+        )
+        log.warning(msg)
+
     try:
         user_vr = ValueRanges(
             lower=0 if dim.min is None else dim.min,
@@ -402,15 +510,25 @@ def _constrain_user_specified_dimhint_range(
             shape_env.var_to_range[symint.node._expr] &= user_vr
             out_vr = range_constraints[symint.node.expr]
 
-        # check for specializations
+        # check for Dim.DYNAMIC specializations; special case error message on 0/1
         if dim.type == _DimHintType.DYNAMIC and out_vr.is_singleton():
             path = f"inputs{pytree.keystr(keypath)}"
             if i is not None:
                 path += f".shape[{i}]"
-            msg = (
-                f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
-                f"but tracing inferred a static shape of {out_vr.lower} for dimension {path}."
-            )
+            if (
+                trace_vr.is_singleton()
+                and hint in (0, 1)
+                and not torch.fx.experimental._config.backed_size_oblivious
+            ):
+                msg = (
+                    f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                    f"but export 0/1 specialized due to hint of {hint} for dimension {path}."
+                )
+            else:
+                msg = (
+                    f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                    f"but tracing inferred a static shape of {out_vr.lower} for dimension {path}."
+                )
             return msg
 
     except torch.utils._sympy.value_ranges.ValueRangeError:
@@ -483,6 +601,7 @@ def make_constraints(
 
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         keypath = flat_paths[input_index - num_lifted_inputs]
+        flat_arg = flat_args[input_index - num_lifted_inputs]
 
         if isinstance(meta_val, int) or (
             isinstance(meta_val, torch.SymInt) and meta_val.node.expr.is_number
@@ -491,11 +610,13 @@ def make_constraints(
 
         elif isinstance(meta_val, torch.SymInt):
             if shape_spec is not None and isinstance(shape_spec, _DimHint):
+                hint = flat_arg
                 range_constraints[meta_val.node.expr] &= shape_env.bound_sympy(
                     meta_val.node._expr
                 )
                 violation = _constrain_user_specified_dimhint_range(
                     meta_val,
+                    hint,
                     shape_spec,
                     range_constraints,
                     shape_env,
@@ -532,8 +653,9 @@ def make_constraints(
                 # check user-specified min/max range for DimHints;
                 # we might want to do this even if model tracing inferred a static dimension.
                 if isinstance(dim, _DimHint):
+                    hint = flat_arg.shape[i]
                     violation = _constrain_user_specified_dimhint_range(
-                        d, dim, range_constraints, shape_env, keypath, i
+                        d, hint, dim, range_constraints, shape_env, keypath, i
                     )
                     if violation:
                         range_violations.append(violation)

@@ -134,7 +134,7 @@ torch/profiler/ @sraikund16
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @andrewkho @divyanshk
+torch/utils/data/ @divyanshk @ramanishsingh
 
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
@@ -165,9 +165,9 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 
 # Dynamic Shapes
-/torch/fx/experimental/symbolic_shapes.py @bobren @laithsakka
-/torch/fx/experimental/sym_node.py @bobren @laithsakka
-/torch/fx/experimental/recording.py @bobren @laithsakka
+/torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/sym_node.py @bobrenjc93 @laithsakka
+/torch/fx/experimental/recording.py @bobrenjc93 @laithsakka
 
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki

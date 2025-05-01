@@ -49,6 +49,7 @@ from ..utils import (
     get_benchmark_name,
     IndentedBuffer,
     LineContext,
+    set_kernel_post_grad_provenance_tracing,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -454,6 +455,9 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
+        # set provenance tracing kernel mapping for ExternKernel types
+        if config.trace.enabled:
+            set_kernel_post_grad_provenance_tracing(node, kernel_name, is_extern=True)
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
@@ -757,11 +761,6 @@ class MultiOutputLine(WrapperLine):
         )
 
 
-@dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
-
-
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -770,6 +769,8 @@ class PythonWrapperCodegen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
     """
+
+    supports_caching = True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
@@ -1367,11 +1368,7 @@ class PythonWrapperCodegen(CodeGen):
             if config.profile_bandwidth:
                 self.generate_start_graph()
 
-            # We disable planning during training because it presently increases peak memory consumption.
-            if is_inference and config.memory_planning:
-                self.memory_plan()
-            else:
-                self.memory_plan_reuse()
+            self.run_wrapper_ir_passes(is_inference)
 
             if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_reset_kernel_saved_flags()
@@ -1518,6 +1515,13 @@ class PythonWrapperCodegen(CodeGen):
         _total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
+
+    def run_wrapper_ir_passes(self, is_inference: bool):
+        # We disable planning during training because it presently increases peak memory consumption.
+        if is_inference and config.memory_planning:
+            self.memory_plan()
+        else:
+            self.memory_plan_reuse()
 
     def codegen_input_symbol_assignment(
         self,
@@ -1813,8 +1817,9 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
+    @staticmethod
     def _format_kernel_definition(
-        self, kernel_name: str, kernel_body: str, metadata: Optional[str] = None
+        kernel_name: str, kernel_body: str, metadata: Optional[str] = None
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
@@ -1981,7 +1986,7 @@ class PythonWrapperCodegen(CodeGen):
             # TODO(aakhundov): add None args to constants, too. currently, this
             # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
             # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+            # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
                 **dict.fromkeys(equal_to_1_args, 1),

@@ -14,7 +14,6 @@ import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
 
 
@@ -943,8 +942,10 @@ class Module:
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
             # subclasses may have multiple child tensors so we need to use swap_tensors
-            p_should_use_swap_tensors = (
-                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+            p_should_use_swap_tensors = should_use_swap_tensors or (
+                hasattr(param, "__torch_dispatch__")
+                and param.__torch_dispatch__  # type: ignore[misc]
+                is not torch._C._disabled_torch_dispatch_impl
             )
 
             param_grad = param.grad
@@ -1436,10 +1437,14 @@ class Module:
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
-        The hook will be called every time the gradients with respect to a module
-        are computed, i.e. the hook will execute if and only if the gradients with
-        respect to module outputs are computed. The hook should have the following
-        signature::
+        The hook will be called every time the gradients with respect to a module are computed, and its firing rules are as follows:
+
+            1. Ordinarily, the hook fires when the gradients are computed with respect to the module inputs.
+            2. If none of the module inputs require gradients, the hook will fire when the gradients are computed
+               with respect to module outputs.
+            3. If none of the module outputs require gradients, then the hooks will not fire.
+
+        The hook should have the following signature::
 
             hook(module, grad_input, grad_output) -> tuple(Tensor) or None
 
