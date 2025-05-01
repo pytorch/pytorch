@@ -817,9 +817,10 @@ class MultiOutputLine(WrapperLine):
 class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
+    graph: GraphLowering
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._generate_symbolic_call_arg_helper(self.arg)
+        self.wrapper._generate_symbolic_call_arg_helper(self.arg, self.graph)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_symbolic_call_arg
@@ -2186,11 +2187,13 @@ class PythonWrapperCodegen(CodeGen):
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
         arg = SymbolicCallArg(expr, tree.numel)
-        self.writeline(SymbolicCallArgLine(self, arg))
+        self.writeline(SymbolicCallArgLine(self, arg, V.graph))
 
         return arg
 
-    def _generate_symbolic_call_arg_helper(self, arg: SymbolicCallArg) -> None:
+    def _generate_symbolic_call_arg_helper(
+        self, arg: SymbolicCallArg, graph: GraphLowering
+    ) -> None:
         self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
 
     def generate_workspace_allocation(self, ws: WorkspaceArg):
