@@ -99,14 +99,6 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
         cls._exit_stack.close()  # type: ignore[attr-defined]
 
-    def _gen_codegen_fn_patch_code(self, device, bug_type):
-        assert bug_type in ("compile_error", "runtime_error", "accuracy")
-        return f"""\
-{torch._dynamo.config.codegen_config()}
-{torch._inductor.config.codegen_config()}
-torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_TESTING_ONLY = {bug_type!r}
-"""
-
     def _maybe_subprocess_run(self, args, *, isolate, cwd=None):
         if not isolate:
             assert len(args) >= 2, args
