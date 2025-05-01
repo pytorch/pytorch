@@ -259,6 +259,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
+        exprs = OrderedSet()
+
         def codegen_symbol(
             sym_or_exp: Union[sympy.Symbol, sympy.Expr],
             base_name: str,
@@ -270,34 +272,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     return
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
-            elif isinstance(sym_or_exp, sympy.Expr):
-                free_symbol = None
-                for sym in sym_or_exp.free_symbols:
-                    if sym not in bound_vars:
-                        if free_symbol is None:
-                            free_symbol = sym
-                        else:
-                            raise AssertionError(
-                                str(sym_or_exp)
-                                + " contains more than one undefined symbols"
-                            )
-                if free_symbol is None:
-                    return
 
-                from torch.utils._sympy.solve import try_solve
-
-                base_name = name_fn(base_name)
-                # Use a size symbol to solve the free symbol
-                size_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)
-                code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
-                solution = try_solve(sympy.Eq(sym_or_exp, size_symbol), free_symbol)
-                if solution is not None:
-                    code.writeline(f"int64_t {free_symbol} = {cexpr(solution[1])};")
-                    bound_vars.add(free_symbol)
-                else:
-                    raise AssertionError(
-                        str(sympy.Eq(sym_or_exp, size_symbol)) + " is not solvable"
-                    )
+            if isinstance(sym_or_exp, sympy.Expr):
+                # anytime we encounter a sympy expr, write it down for later
+                exprs.add(sym_or_exp)
+                return
 
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:

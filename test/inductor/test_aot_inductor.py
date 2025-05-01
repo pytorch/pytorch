@@ -4435,6 +4435,36 @@ class AOTInductorTestsTemplate:
             ).run(code)
         self.check_model(Model(), example_inputs)
 
+    def test_input_codegen_with_sympy_expr(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, getitem_54, getitem_52, getitem_19, values_2, offsets):
+                bitwise_or = torch.bitwise_or(getitem_54, getitem_52)
+                combined = torch.cat([getitem_19, values_2], dim=0)
+                add = combined + bitwise_or
+
+                sliced = values_2[:-1] + offsets
+                return add, sliced
+
+        model = MyModel()
+        inps = (
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randn((192,), device="cuda"),
+            torch.randn((48,), device="cuda"),
+            torch.randint(0, 100, (47,), device="cuda", dtype=torch.uint8),
+        )
+        spec = {
+            "getitem_54": (Dim.AUTO,),
+            "getitem_52": (Dim.AUTO,),
+            "getitem_19": (Dim.AUTO,),
+            "values_2": (Dim.AUTO,),
+            "offsets": (Dim.AUTO,),
+        }
+
+        result = AOTIRunnerUtil.run(model, inps, dynamic_shapes=spec)
+        actual = model(*inps)
+        self.assertTrue(same(result, actual))
+
     @common_utils.parametrize("mark_unbacked", (True, False))
     def test_unbacked_equals_input_size_runtime_assertion(self, mark_unbacked: bool):
         # This test checks the unbacked symint runtime assertions, for the following cases:
