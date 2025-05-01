@@ -26,15 +26,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
-#if !defined(_MSC_VER)
-#include <sys/types.h>
-#include <unistd.h>
-#include <sys/syscall.h>
-#define gettid() syscall(SYS_gettid)
-#elif defined(_MSC_VER)
-#include <c10/util/win32-headers.h>
-#endif
-
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -1400,18 +1391,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def(
       "_cuda_beginAllocateCurrentThreadToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-#ifdef _MSC_VER
-        auto tid = GetCurrentThreadId();
-#else
-        auto tid = gettid();
-#endif
+        auto tid = std::this_thread::get_id();
+
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
             device, mempool_id, [=](cudaStream_t) {
-#ifdef _MSC_VER
-              auto current_tid = GetCurrentThreadId();
-#else
-              auto current_tid = gettid();
-#endif
+              auto current_tid = std::this_thread::get_id();
               return current_tid == tid;
             });
       });
