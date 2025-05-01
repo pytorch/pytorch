@@ -576,11 +576,7 @@ def disable_functional_mode():
 # - Doing so means that it does not automatically compose with other
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
-def dispatch_functionalize(
-    func,
-    mode: FunctionalTensorMode = FunctionalTensorMode(),
-    return_mutated_inputs=False,
-):
+def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMode()):
     # TODO: pull these from aot autograd
     def to_fun(t):
         if isinstance(t, torch.Tensor):
@@ -603,35 +599,10 @@ def dispatch_functionalize(
         with disable_above, mode:
             func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
             func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+            func_outputs = func(*func_args, **func_kwargs)
+            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
 
-            if return_mutated_inputs:
-                flat_func_args = pytree.tree_leaves((func_args, func_kwargs))
-                before_fake_args = pytree.tree_map_only(
-                    FunctionalTensor, from_fun, flat_func_args
-                )
-                func_outputs = func(*func_args, **func_kwargs)
-                after_fake_args = pytree.tree_map_only(
-                    FunctionalTensor, from_fun, flat_func_args
-                )
-
-                # We detect which inputs get mutated by looking at whether the fake tensor inside
-                # functional tensor are swapped with new fake tensor. If it's a different tensor,
-                # that means the it has been mutated by func.
-                mutated_inputs = []
-                for before_arg, after_arg in zip(before_fake_args, after_fake_args):
-                    if (
-                        isinstance(before_arg, torch.Tensor)
-                        and before_arg is not after_arg
-                    ):
-                        mutated_inputs.append(after_arg)
-                outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
-
-                return (outputs, mutated_inputs)
-
-            else:
-                func_outputs = func(*func_args, **func_kwargs)
-                outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
-                return outputs
+            return outputs
 
     return inner
 
@@ -648,10 +619,8 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def functionalize(self, inner_f: Callable, return_mutated_inputs=False) -> Callable:
-        """
-        return_mutated_inputs = True gives a callable that returns a tuple (output, mutated_input)
-        """
+    def functionalize(self, inner_f: Callable) -> Callable:
+        pass
 
     @abstractmethod
     def redispatch_to_next(self) -> AbstractContextManager:
@@ -695,8 +664,8 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
 
-    def functionalize(self, inner_f: Callable, return_mutated_inputs=False) -> Callable:
-        return dispatch_functionalize(inner_f, self.mode, return_mutated_inputs)
+    def functionalize(self, inner_f: Callable) -> Callable:
+        return dispatch_functionalize(inner_f, self.mode)
 
     def redispatch_to_next(self) -> AbstractContextManager:
         # [NOTE] We don't do anything here because at the time
@@ -739,11 +708,7 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _unwrap_all_tensors_from_functional(args, reapply_views=_reapply_views())
 
-    def functionalize(self, inner_f: Callable, return_mutated_inputs=False) -> Callable:
-        if return_mutated_inputs:
-            raise NotImplementedError(
-                "return_mutated_inputs is not supported by CppFunctionalize yet."
-            )
+    def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(inner_f)
 
     def redispatch_to_next(self) -> AbstractContextManager:
@@ -784,11 +749,7 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             args, reapply_views=self.interpreter.functionalize_add_back_views()
         )
 
-    def functionalize(self, inner_f: Callable, return_mutated_inputs=False) -> Callable:
-        if return_mutated_inputs:
-            raise NotImplementedError(
-                "return_mutated_inputs is not supported by CppFunctionalize yet."
-            )
+    def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(
             inner_f,
             remove=(

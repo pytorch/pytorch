@@ -113,27 +113,23 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             return subgraph(*operands)
 
     # NOTE [Support input mutation of hops]
-    # To support input mutation, there are several constraints imposed by the stack:
-    #   1. hop's subgraph must be functionalized because many inductor passes are applied to subgraph
-    #   recursively and expect the subgraph to be functional. This also implies that we cannot put the
-    #   epilogue graph (i.e. the copy_) into the subgraph.
-    #   2. we must fuse the epilogue graph with functional subgraph to reduce peak memory usage
+    # To support input mutation, hop's subgraph must be functionalized because many inductor passes are
+    #   applied to subgraph recursively and only work on functional graph. However, we could inline an
+    #   epilogue graph (i.e. the copy_) into the subgraph because this is how input mutation
+    #   is implemented in the top-level graph when no hop is presented. All passes must have been and will be
+    #   aware of the epilogue graph.
     #
-    # Since we've supported input mutation for custom op, we want to share the infra we've built
-    # with higher order operators.
-    #
+    # Since we've supported input mutation for custom op with auto_functionalized, we share the infra for hops
     # The plan is:
-    #   1. In hop's Functionalization key, we call do_auto_functionalize_v2 if subgraph mutates input.
+    #   1. In hop's Functionalization key, it calls do_auto_functionalize_v2 if subgraph mutates input
     #   2. In do_auto_functionalize_v2:
     #       a. we functionalize the callables in hop's argument. This is to make the subgraphs functional so we
-    #          could recursively run passes on them. Besides, we make the functionalized callable also return
-    #          mutated_inputs in order to generate the epilogue graph later.
+    #          could recursively run passes on them. Also the epilogue graph is inlined at the end.
     #       b. we call auto_functionalized_v2 and pass in an additional schema in order to properly invoke
     #          the hop with normalized kwargs.
-    #   3. In inductor, we decompose the auto_functionalized hop by calling its dense implementation
-    #      with inline_epilogue=True, which inlines the epilogue into the functionalized callable.
+    #   3. In inductor, we decompose the auto_functionalized hop by callilng into the dense implementation, which
+    #      copies the mutated inputs to the hop if necessary and call the hop.
     # After these steps, the rest of the inductor stack knows how to fuse the copy_ in subgraph with other ops.
-    # Both constraints are satisfied.
     def _call_Functionalize(self, ctx, subgraph, *operands, **kwargs):
         from torch._higher_order_ops.auto_functionalize import do_auto_functionalize_v2
 

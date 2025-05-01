@@ -260,19 +260,20 @@ class GraphModule(torch.nn.Module):
         getitem_1: "f32[3, 3]" = auto_functionalized_v2[1]
         getitem_2: "f32[3, 3]" = auto_functionalized_v2[2]
         getitem_3: "f32[3, 3]" = auto_functionalized_v2[3]
-        getitem_5: "f32[3, 3]" = auto_functionalized_v2[5];  auto_functionalized_v2 = None
-        return (getitem, getitem_1, getitem_2, getitem_3, primals_1, primals_2, getitem_5)
+        getitem_4: "f32[3, 3]" = auto_functionalized_v2[4];  auto_functionalized_v2 = None
+        return (getitem, getitem_1, getitem_2, getitem_3, primals_1, primals_2, getitem_4)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1)
             mm: "f32[3, 3]" = torch.ops.aten.mm.default(add, arg1_1)
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(mm);  mm = None
             cos: "f32[3, 3]" = torch.ops.aten.cos.default(sin);  sin = None
             add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg1_1)
             sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(add, arg1_1)
             mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(add, arg1_1);  arg1_1 = None
-            return (cos, add_1, sub, mm_1, add)
+            copy_: "f32[3, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (cos, add_1, sub, mm_1)
 """,  # noqa: B950
             )
 
@@ -375,14 +376,15 @@ class GraphModule(torch.nn.Module):
         _tree_spec_constant0 = self._tree_spec_constant0
         auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.invoke_quant_test, subgraph = auto_functionalized_subgraph_0, arg1 = primals_2, scheme = 'nf4', _arg0_base_index = 0, _all_bases = [primals_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = _tree_spec_constant0 = None
         getitem: "f32[3, 3]" = auto_functionalized_v2[0]
-        getitem_2: "f32[3, 3]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
-        return (getitem, primals_1, primals_2, getitem_2)
+        getitem_1: "f32[3, 3]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        return (getitem, primals_1, primals_2, getitem_1)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1)
             add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg1_1);  arg1_1 = None
-            return (add_1, add)
+            copy_: "f32[3, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (add_1,)
 """,  # noqa: B950
         )
 
