@@ -41,8 +41,17 @@ struct lerp_alpha_functor {
 
 struct mul_functor {
   template <typename T>
-  inline T operator()(const T a, const T b) {
+  inline enable_if_t<!c10::metal::is_reduced_floating_point_v<T>, T> operator()(
+      const T a,
+      const T b) {
     return static_cast<T>(c10::metal::mul(a, b));
+  }
+  template <typename T>
+  inline enable_if_t<c10::metal::is_reduced_floating_point_v<T>, T> operator()(
+      const T a,
+      const T b) {
+    return static_cast<T>(
+        c10::metal::mul(static_cast<float>(a), static_cast<float>(b)));
   }
 };
 

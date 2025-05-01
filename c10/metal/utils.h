@@ -121,6 +121,16 @@ inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
       ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
 }
+
+template <typename T>
+constexpr constant bool is_reduced_floating_point_v =
+    ::metal::is_same_v<T, half> || ::metal::is_same_v<T, bfloat>;
+
+#else
+template <typename T>
+constexpr constant bool is_reduced_floating_point_v =
+    ::metal::is_same_v<T, half>;
+
 #endif
 
 template <typename T>
