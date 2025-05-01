@@ -696,7 +696,7 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
-                self.tx.output.guard_on_key_order.add(self.source.name())
+                self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
@@ -1337,7 +1337,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Guard on the key order
-            self.tx.output.guard_on_key_order.add(self.source.name())
+            self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
@@ -1727,14 +1727,19 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if not config.specialize_int and type(value) is int:
-            # unspecializing int by default, but still
-            # specialize for the following conditions
-            if is_int_specialization_case(value, self.source):
-                self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                return ConstantVariable.create(value=value, source=self.source)
-            else:
-                return self.wrap_symint(value)
+        if type(value) is int:
+            # allowlist has higher precendence over specialization control.
+            if is_dynamic_source(self.source.name()):
+                return self.wrap_symint(value, True)
+
+            if not config.specialize_int:
+                # unspecializing int by default, but still
+                # specialize for the following conditions
+                if is_int_specialization_case(value, self.source):
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+
+            return self.wrap_symint(value)
         elif not config.specialize_float and type(value) is float:
             return self.wrap_symfloat(value)
         else:
@@ -2072,7 +2077,7 @@ class VariableBuilder:
 
         return numpy_ndarray_variable
 
-    def wrap_symint(self, value):
+    def wrap_symint(self, value, is_forced_allow_list_dynamic=False):
         assert type(value) is int
 
         if self.name in self.tx.output.unspec_variable_map:
@@ -2116,7 +2121,7 @@ class VariableBuilder:
             if isinstance(base_source, ChainedSource):
                 base_source = base_source.get_base()
 
-            if is_dynamic_source(self.source.name()):
+            if is_forced_allow_list_dynamic:
                 log.debug("%s marked dynamic via source whitelist", self.source.name())
                 dynamic_dim = DimDynamic.DYNAMIC
             elif (
