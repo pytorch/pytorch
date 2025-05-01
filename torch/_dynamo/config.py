@@ -551,7 +551,7 @@ fake_tensor_disable_inference_mode = True
 # Compiled Autograd will trace all autograd operations as seen by the Autograd engine.
 # This flag will also lift certain restrictions during the forward trace such as
 # registering backward hooks on tensors contained within the compiled region.
-compiled_autograd = False
+compiled_autograd = True
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
