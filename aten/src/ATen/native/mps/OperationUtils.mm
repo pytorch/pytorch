@@ -1025,9 +1025,24 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
+  // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
+  auto convert_double_scalar = [](Tensor& t) {
+    if (t.dim() != 0) {
+      return;
+    }
+    if (t.scalar_type() == kDouble) {
+      t = t.to(kFloat);
+    } else if (t.scalar_type() == kComplexDouble) {
+      t = t.to(kComplexFloat);
+    }
+  };
+
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
   Tensor out = iter.output();
+
+  convert_double_scalar(input);
+  convert_double_scalar(other);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();

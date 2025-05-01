@@ -56,18 +56,6 @@ void binary_op_kernel(const std::string func_name,
                       const Tensor& other,
                       const Tensor& output,
                       const std::optional<Scalar> alpha) {
-  auto convert_double_scalar = [](const Tensor& t) {
-    if (t.dim() == 0 && t.scalar_type() == kDouble) {
-      return t.to(kFloat);
-    }
-
-    if (t.dim() == 0 && t.scalar_type() == kComplexDouble) {
-      return t.to(kComplexFloat);
-    }
-
-    return t;
-  };
-
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
@@ -77,13 +65,11 @@ void binary_op_kernel(const std::string func_name,
     return;
   }
 
-  auto input_c = convert_double_scalar(input);
-  auto other_c = convert_double_scalar(other);
   auto iter = TensorIteratorConfig()
                   .allow_cpu_scalars(true)
                   .add_output(output)
-                  .add_input(input_c)
-                  .add_input(other_c)
+                  .add_input(input)
+                  .add_input(other)
                   .check_all_same_dtype(false)
                   .build();
 
