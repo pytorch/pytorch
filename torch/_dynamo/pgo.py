@@ -127,7 +127,7 @@ class CodeId:
     # code state it will refer to the first seen file path.
     file_hash: str
 
-    # Ensure if two CodeIds are the same, then they have the same hash by execluding filename.
+    # execlude file name.
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, CodeId):
             return False
@@ -137,6 +137,7 @@ class CodeId:
             and self.name == other.name
         )
 
+    # Ensure if two CodeIds are the same, then they have the same hash by execluding filename.
     def __hash__(self) -> int:
         return hash((self.file_hash, self.name, self.firstlineno))
 
