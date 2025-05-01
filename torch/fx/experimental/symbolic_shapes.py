@@ -1575,6 +1575,31 @@ def expect_true(
             if frame is None:
                 break
             frame = frame.f_back
+        file = (frame.f_code.co_filename if frame else "",)
+        line = frame.f_lineno if frame else 0
+
+        # c++ symnode does not supprot receiving a lambda, so we do not call a.node.expect_true on the symnode.
+        if isinstance(a.node, torch._C._SymNode):
+            if getattr(a.node, "shape_env", None):
+                # we not defer runtime asserts on symnodes with out
+                return a.node.guard_bool(file, line)
+
+            # we do not want to defer to symnode, since symnode does not support lambda message.
+            # we could just store the string message but anyway we have to do this check here.
+            if (
+                a.node.has_hint()
+                and not free_unbacked_symbols(a.node.expr)
+                and not a.node.shape_env.prefer_deferred_runtime_asserts_over_guards
+            ):
+                return a.node.shape_env.defer_runtime_assert(
+                    a.node.expr,
+                    msg=f"{file}:{line}",
+                    info=message,
+                    fx_node=a.node.fx_node,
+                )
+            else:
+                return a.node.guard_bool(file, line)
+
         return a.node.expect_true(
             frame.f_code.co_filename if frame else "",
             frame.f_lineno if frame else 0,
