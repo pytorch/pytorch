@@ -3033,7 +3033,7 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([100]), torch.tensor([1]))
 
-    @skipIfTorchDynamo("mark_unbacked is not tracable")
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_deferred_with_unbacked_input(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")

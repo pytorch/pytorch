@@ -1774,7 +1774,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         shape_env = V.graph.sizevars.shape_env
 
-        # An input can an unbacked symint i.e.: when mark_unabcked is ued symbol
+        # An input can an unbacked symint i.e.: when mark_unabcked is used.
         # in that case add it to new_unbacked_defs.
         if (
             n.op == "placeholder"
@@ -1794,7 +1794,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return "***\n".join(r)
 
-        # We do not skip unbacked symints that are input for backward see the note bellow.
+        # We do not skip unbacked symints that are input for backward see the note below.
         if V.graph.is_backward and n.op == "placeholder":
             return result
 
