@@ -6,7 +6,9 @@ import logging
 import re
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Any, Optional, Union
+
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -393,11 +395,15 @@ int main(int argc, char** argv) {
 """  # noqa: B950
 
 
+@clear_on_fresh_inductor_cache
 class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     """
     CUTLASS GEMM Template, which is used to generate CUTLASS GEMM kernels
     including those which allow flexible fusions with epilogues.
     """
+
+    ops_cache: dict[str, list[Any]] = {}
+    cache_clear = staticmethod(ops_cache.clear)
 
     def __init__(
         self,
@@ -422,6 +428,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         assert len(input_nodes) == 2 or len(input_nodes) == 3
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
+        )
+
+        self.cache_key = "__".join(
+            [str(node.layout) for node in self.input_nodes]
+            + [str(self.layout)]
+            + [str(self.input_reorder)]
         )
 
     @staticmethod
@@ -904,6 +916,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
+        if self.cache_key in self.ops_cache:
+            log.debug("Using cached ops for %s", self.cache_key)
+            return self.ops_cache[self.cache_key]
+
         # if changed, need to also change CUTLASS_OPERATION_KIND
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
@@ -924,7 +940,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        ret_res = sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        if len(self.ops_cache) < 50:
+            self.ops_cache[self.cache_key] = ret_res
+        else:
+            log.debug("Not caching ops since ops_cache has reached size 50.")
+        return ret_res
 
     def gemm_mode(self) -> str:
         """
