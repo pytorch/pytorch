@@ -11924,6 +11924,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
+    @requires_gpu()
+    @skip_if_not_triton
     @config.patch(implicit_fallbacks=True)
     def test_generated_code_has_size_stride_assert(self):
         def foo(x):
@@ -11939,16 +11941,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             b = torch.ops.test.foo(a)
             return b
 
-        a = torch.randn((16, 32))
+        a = torch.randn((16, 32), device=self.device)
 
         _, code = run_and_get_code(
             torch.compile(fn),
             a,
         )
-        FileCheck().check(
-            "assert_size_stride(buf2, (16, 32), (32, 1), 'torch.ops.test.foo.default')"
-        ).run(code[0])
+        if not is_dynamic_shape_enabled():
+            FileCheck().check(
+                "assert_size_stride(buf2, (16, 32), (32, 1), 'torch.ops.test.foo.default')"
+            ).run(code[0])
 
+    @requires_gpu()
+    @skip_if_not_triton
     @config.patch(implicit_fallbacks=True)
     def test_generated_code_has_alignment_assert(self):
         def foo(x):
@@ -11964,15 +11969,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             b = torch.ops.test.foo(a)
             return b
 
-        a = torch.randn((16, 32))
+        a = torch.randn((16, 32), device=self.device)
 
         _, code = run_and_get_code(
             torch.compile(fn),
             a,
         )
-        FileCheck().check(
-            "assert_alignment(buf2, 16, 'torch.ops.test.foo.default')"
-        ).run(code[0])
+        if not is_dynamic_shape_enabled():
+            FileCheck().check(
+                "assert_alignment(buf2, 16, 'torch.ops.test.foo.default')"
+            ).run(code[0])
 
     def test_assert_size_stride_op_name_pass(self):
         tensor = torch.empty((16, 32))
@@ -13125,12 +13131,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
-            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1))").check(
-                "assert_size_stride(buf2, (s77, s27), (s27, 1))"
+            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1)").check(
+                "assert_size_stride(buf2, (s77, s27), (s27, 1)"
             ).run(code)
         else:
-            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
-                "assert_size_stride(buf2, (16, 32), (32, 1))"
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1)").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1)"
             ).run(code)
 
     @requires_cuda

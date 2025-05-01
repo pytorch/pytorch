@@ -5823,6 +5823,7 @@ class ExternKernel(InputsKernel):
             target = self.fx_node.target
             op_namespace = getattr(target, "__module__", "unknown_namespace")
             op_namespace = op_namespace.replace("._ops.", ".ops.")
+            op_namespace = op_namespace.rsplit(".", 1)[0]
             op_name = f"{op_namespace}.{target}"
         else:
             op_name = "unknown_op"
