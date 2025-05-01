@@ -97,6 +97,7 @@ from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, metrics
+from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
@@ -212,7 +213,7 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_input_indices
+    return context.fw_metadata.static_input_indices
 
 
 def record_original_output_strides(gm: GraphModule) -> None:
@@ -777,6 +778,17 @@ def _compile_fx_inner(
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
 
+    # Check if the registered backend(s) support caching.
+    init_backend_registration()
+    backends_support_caching = all(
+        backend.supports_caching
+        for backend in (
+            get_wrapper_codegen_for_device(device.type, config.cpp_wrapper)
+            for device in get_all_devices(gm)
+        )
+        if backend is not None
+    )
+
     with (
         _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
     ):
@@ -784,10 +796,20 @@ def _compile_fx_inner(
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
+            and backends_support_caching
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
         set_feature_use("fx_cache", use_cache)
+
+        log.debug(
+            "FX cache status: use_cache=%s, local=%s, remote=%s, aot_mode=%s, force_disable_caches=%s",
+            use_cache,
+            local,
+            remote,
+            aot_mode,
+            config.force_disable_caches,
+        )
 
         # TODO: This is a hack purely to get some info to extract_tensor_metadata_for_cache_key,
         # figure out how to not have to modify example inputs
@@ -816,8 +838,10 @@ def _compile_fx_inner(
             # Attempt a cache lookup
             if key_info is not None:
                 key, debug_lines = key_info
+                log.debug("FX cache key generated: %s", key)
                 if remote:
                     remote_cache = FxGraphCache.get_remote_cache()
+                    log.debug("Using remote FX cache")
                 mb_compiled_graph, cache_info = FxGraphCache.load_with_key(
                     key,
                     debug_lines,
@@ -827,12 +851,20 @@ def _compile_fx_inner(
                     is_backward=graph_kwargs.get("is_backward", False),
                     constants=constants,
                 )
+            else:
+                log.debug("Failed to generate FX cache key")
 
         # CACHE BYPASS: Compile the graph, don't save it to the cache
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
         if cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
+            log.debug(
+                "FX cache bypass reason: %s",
+                cache_info.get("cache_bypass_reason", "unknown")
+                if cache_info is not None
+                else "FX cache disabled or key generation failed",
+            )
             mb_compiled_graph = fx_codegen_and_compile(
                 gm, example_inputs, inputs_to_check, **graph_kwargs
             )
@@ -841,6 +873,7 @@ def _compile_fx_inner(
         elif cache_info["cache_state"] == "miss":
             assert mb_compiled_graph is None
             assert key_info is not None
+            log.debug("FX cache miss, compiling and saving to cache")
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
@@ -867,6 +900,7 @@ def _compile_fx_inner(
             if triton_bundler_meta is not None:
                 cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = mb_compiled_graph._time_taken_ns
+            log.debug("Saving compiled graph to FX cache with key: %s", cache_key)
             FxGraphCache._save_graph(
                 cache_key,
                 mb_compiled_graph,
@@ -882,6 +916,7 @@ def _compile_fx_inner(
             assert mb_compiled_graph is not None
             assert key_info is not None
             (cache_key, debug_lines) = key_info
+            log.debug("FX cache hit with key: %s", cache_key)
             mb_compiled_graph._fx_graph_cache_key = cache_key
             mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
 
@@ -1745,7 +1780,6 @@ def fw_compiler_freezing(
     )
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
-    num_fixed = len(preserved_arg_indices) - num_example_inputs
 
     fake_mode = detect_fake_mode(aot_example_inputs)
 
@@ -1756,7 +1790,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = list(range(num_fixed))
+    static_input_idxs = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -1788,7 +1822,7 @@ def fw_compiler_freezing(
                 tracing_context.params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_input_indices
+            static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
@@ -1839,13 +1873,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
-    """
-    Returns a cuda device context manager if there is a single device in the graph
-    """
-    if not torch.cuda.is_available():
-        return contextlib.nullcontext()
-
+def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     input_devices: OrderedSet[torch.device] = OrderedSet(
         node.meta["val"].device
@@ -1858,8 +1886,18 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
         for arg in output_node(gm).args[0]  # type: ignore[union-attr]
         if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
     )
+    return input_devices | out_devices
+
+
+def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
+    """
+    Returns a cuda device context manager if there is a single device in the graph
+    """
+    if not torch.cuda.is_available():
+        return contextlib.nullcontext()
+
     cuda_devices: OrderedSet[torch.device] = OrderedSet(
-        device for device in (input_devices | out_devices) if device.type == "cuda"
+        device for device in get_all_devices(gm) if device.type == "cuda"
     )
 
     return (
@@ -1900,6 +1938,7 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                ignore_shape_env=ignore_shape_env,
             )
 
     # TODO: This probably shouldn't be a recursive call
@@ -1955,12 +1994,14 @@ def compile_fx(
                     fake_args,
                     inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
                     decompositions=decompositions,
+                    ignore_shape_env=ignore_shape_env,
                 )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
         decompositions=decompositions,
+        ignore_shape_env=ignore_shape_env,
     )
 
     if not graph_returns_tuple(model_):
