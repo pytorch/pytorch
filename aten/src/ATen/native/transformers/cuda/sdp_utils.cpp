@@ -465,9 +465,15 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       return false;
     }
   }
-  if (s_q == 1 || s_k == 1) {
+  if (s_k == 1) {
     if (debug) {
-      TORCH_WARN_ONCE("cudnn SDPA does not support sequence length 1.");
+      TORCH_WARN_ONCE("cudnn SDPA does not support key/value sequence length 1.");
+    }
+    return false;
+  }
+  if (s_q == 1 && params.dropout != 0.0) {
+    if (debug) {
+      TORCH_WARN_ONCE("cudnn SDPA does not support query sequence length 1 with dropout.");
     }
     return false;
   }
