@@ -3335,7 +3335,6 @@ def gather(x, dim, index, sparse_grad=False):
         # Empty index case. Return an empty array with the same shape
         return new_empty(x, index.get_size())
 
-    assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
@@ -6904,8 +6903,8 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
-def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
-    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))
 
 
