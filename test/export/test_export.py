@@ -4360,6 +4360,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_unbacked_pad(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs, pad):
+                u0, u1, u2 = xs.tolist()
+                x = torch.ones(u0, u1, u2)
+                pl0, pr0, pl1, pr1 = pad.tolist()
+                return torch.nn.functional.pad(x, (pl0, pr0, pl1, pr1))
+
+        x = torch.tensor([64, 64, 64])
+        pad = torch.tensor([8, -8, 4, 0])
+        m = Foo()
+        ep = export(m, (x, pad))
+        self.assertEqual(ep.module()(x, pad).shape, m(x, pad).shape)
+
+        # don't guard on negative/positive pad values
+        pad2 = torch.tensor([-5, 9, 0, 8])
+        self.assertEqual(ep.module()(x, pad2).shape, m(x, pad2).shape)
+
     def test_suggested_fixes_for_data_dependent_errors_basic(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False
