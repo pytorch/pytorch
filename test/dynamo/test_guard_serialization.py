@@ -37,6 +37,170 @@ class GlobalModule(torch.nn.Module):
         return x + 1
 
 
+class SubclassWithMeta(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, extra, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
+        shape = outer_size
+        kwargs = {}
+        kwargs["strides"] = outer_stride
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(self, a, extra, outer_size=None, outer_stride=None):
+        self.a = a
+        self.extra = extra
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(SubclassWithMeta, lambda x: x.a, args)
+        kwargs_a = pytree.tree_map_only(SubclassWithMeta, lambda x: x.a, kwargs)
+        out_a = func(*args_a, **kwargs_a)
+        if isinstance(out_a, torch.Tensor):
+            assert isinstance(args[0], SubclassWithMeta)
+            return SubclassWithMeta(out_a, extra=args[0].extra)
+        return out_a
+
+    def __tensor_flatten__(self):
+        # store extra in meta
+        return ["a"], {"extra": self.extra}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert isinstance(meta, dict)
+        a = inner_tensors["a"]
+        # pull out extra from meta
+        extra = meta["extra"]
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+        return SubclassWithMeta(a, extra, outer_size, outer_stride)
+
+
+class SubclassWithCustomMetadataGuard(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, extra, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
+        shape = outer_size
+        kwargs = {}
+        kwargs["strides"] = outer_stride
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(self, a, extra, outer_size=None, outer_stride=None):
+        self.a = a
+        self.extra = extra
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(
+            SubclassWithCustomMetadataGuard, lambda x: x.a, args
+        )
+        kwargs_a = pytree.tree_map_only(
+            SubclassWithCustomMetadataGuard, lambda x: x.a, kwargs
+        )
+        out_a = func(*args_a, **kwargs_a)
+        if isinstance(out_a, torch.Tensor):
+            assert isinstance(args[0], SubclassWithCustomMetadataGuard)
+            return SubclassWithCustomMetadataGuard(out_a, extra=args[0].extra)
+        return out_a
+
+    @classmethod
+    def __metadata_guard__(cls, meta1, meta2):
+        # define custom metadata guard logic
+        # TODO: find a nice way to test logic that is not equivalent to the default behavior
+        return meta1["extra"] == meta2["extra"]
+
+    def __tensor_flatten__(self):
+        # store extra in meta
+        return ["a"], {"extra": self.extra}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert isinstance(meta, dict)
+        a = inner_tensors["a"]
+        # pull out extra from meta
+        extra = meta["extra"]
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+        return SubclassWithCustomMetadataGuard(a, extra, outer_size, outer_stride)
+
+
+class SubclassWithSubclassInnerTensors(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, extra, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
+        shape = outer_size
+        kwargs = {}
+        kwargs["strides"] = outer_stride
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(self, a, extra, outer_size=None, outer_stride=None):
+        self.a = a
+        self.inner_sub = SubclassWithMeta(a + 1, extra=extra)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(
+            SubclassWithSubclassInnerTensors, lambda x: x.a, args
+        )
+        kwargs_a = pytree.tree_map_only(
+            SubclassWithSubclassInnerTensors, lambda x: x.a, kwargs
+        )
+        out_a = func(*args_a, **kwargs_a)
+        if isinstance(out_a, torch.Tensor):
+            assert isinstance(args[0], SubclassWithSubclassInnerTensors)
+            return SubclassWithSubclassInnerTensors(
+                out_a, extra=args[0].inner_sub.extra
+            )
+        return out_a
+
+    def __tensor_flatten__(self):
+        return ["a", "inner_sub"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert meta is None
+        a = inner_tensors["a"]
+        extra = inner_tensors["inner_sub"].extra
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+        return SubclassWithSubclassInnerTensors(a, extra, outer_size, outer_stride)
+
+
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
     def _tracefunc(self, frame, event, arg):
         if event != "call":
@@ -218,6 +382,78 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
+
+    def test_tensor_subclass_metadata_match(self):
+        class LocalSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a, outer_size=None, outer_stride=None):
+                if outer_size is None:
+                    outer_size = a.size()
+                if outer_stride is None:
+                    outer_stride = a.stride()
+
+                shape = outer_size
+                kwargs = {}
+                kwargs["strides"] = outer_stride
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = a.device
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+            def __init__(self, a, outer_size=None, outer_stride=None):
+                self.a = a
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args_a = pytree.tree_map_only(LocalSubclass, lambda x: x.a, args)
+                kwargs_a = pytree.tree_map_only(LocalSubclass, lambda x: x.a, kwargs)
+                out_a = func(*args_a, **kwargs_a)
+                if isinstance(out_a, torch.Tensor):
+                    return LocalSubclass(out_a)
+                return out_a
+
+            def __tensor_flatten__(self):
+                return ["a"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                assert meta is None
+                a = inner_tensors["a"]
+                if type(a) is torch.Tensor:
+                    assert outer_size is not None
+                    assert outer_stride is not None
+                return LocalSubclass(a, outer_size, outer_stride)
+
+        def fn(x):
+            return x * 2
+
+        local_sub = LocalSubclass(torch.randn(3))
+        with self.assertRaisesRegex(
+            RuntimeError, "Please define the class at global scope"
+        ):
+            self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, local_sub)
+
+        # use TwoTensor as an example of a subclass with None for extra metadata
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3))
+        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, tt)
+
+        # example subclass with extra metadata
+        sub = SubclassWithMeta(torch.randn(3), extra=5)
+        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub)
+
+        # example subclass with custom metadata guard logic
+        sub2 = SubclassWithCustomMetadataGuard(torch.randn(3), extra=7)
+        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub2)
+
+        # example subclass with subclass inner tensor
+        sub3 = SubclassWithSubclassInnerTensors(torch.randn(3), extra=6)
+        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub3)
 
     def test_dict_version(self):
         def fn(x):
