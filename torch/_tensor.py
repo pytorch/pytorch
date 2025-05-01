@@ -1262,7 +1262,7 @@ class Tensor(torch._C.TensorBase):
         """Array view description for cuda tensors.
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
