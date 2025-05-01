@@ -38,10 +38,7 @@ pushd %SRC_DIR%
 
 
 set "ORIG_PATH=%PATH%"
-set CMAKE_PREFIX_PATH="%CD%\Python\;%CD%\Python\Library\"
-set CMAKE_LIBRARY_PATH="%CD%\Python\Library\lib\"
-set CMAKE_INCLUDE_PATH="%CD%\Python\Library\include\"
-
+set CMAKE_PREFIX_PATH="%CD%\Python\Library\;%PATH%"
 
 :: create a new conda environment and install packages
 :try
