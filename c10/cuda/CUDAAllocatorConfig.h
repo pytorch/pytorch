@@ -99,7 +99,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
  private:
   CUDAAllocatorConfig();
 
-  static void lexArgs(const char* env, std::vector<std::string>& config);
+  static void lexArgs(const std::string& env, std::vector<std::string>& config);
   static void consumeToken(
       const std::vector<std::string>& config,
       size_t i,
