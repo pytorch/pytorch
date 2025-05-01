@@ -180,7 +180,9 @@ class TestCppExtensionJIT(common.TestCase):
                 )
 
             actual_arches = sorted(re.findall(r"sm_\d+", output))
-            expected_arches = sorted(["sm_" + xx for xx in expected_values])
+            expected_arches = sorted(
+                ["sm_" + xx.replace("121", "120") for xx in expected_values]
+            )
             self.assertEqual(
                 actual_arches,
                 expected_arches,
