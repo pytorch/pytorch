@@ -255,9 +255,9 @@ def aoti_load_package(path: FileLike, run_single_threaded: bool = False, device_
             thread synchronization logic. This is useful to avoid conflicts with
             CUDAGraphs.
         device_index (int): The index of the device to which the PT2 package is
-            to be loaded. By default, `device_index`=-1 is used, which corresponds
-            to the device "cuda" when using CUDA. Passing device_index 1 would
-            load the package to "cuda:1", for example.
+            to be loaded. By default, `device_index=-1` is used, which corresponds
+            to the device `cuda` when using CUDA. Passing `device_index=1` would
+            load the package to `cuda:1`, for example.
     """
     from torch._inductor.package import load_package
 
