@@ -130,8 +130,8 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git submodule deinit -f .
       git clean -xdf
       python setup.py clean
-      git submodule update --init --recursive # very important to sync the submodules
-      python setup.py develop                 # then try running the command again
+      git submodule update --init --recursive
+      python setup.py develop
       ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
