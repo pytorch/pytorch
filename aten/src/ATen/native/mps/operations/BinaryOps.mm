@@ -118,7 +118,7 @@ static void binaryOpTensor(const Tensor& self,
   }
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other, output_});
+    std::string key = op_name + getTensorsStringKey({self, other, output_});
     auto cachedGraph = LookUpOrCreateCachedGraph<BinaryOpCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->primaryTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(inputDataType), getMPSShape(self));
@@ -200,7 +200,7 @@ static void div_mode_template(const Tensor& self,
                               const Tensor& other,
                               std::optional<std::string_view> rounding_mode,
                               const Tensor& output,
-                              const string op_name) {
+                              const std::string& op_name) {
   if (rounding_mode.has_value() && *rounding_mode == "trunc") {
     TORCH_CHECK(self.scalar_type() != ScalarType::Half, "MPS: does not support trunc_divide op with float16 input");
   }
@@ -257,22 +257,30 @@ static void add_sub_lerp_template(const Tensor& self,
                                   const Scalar& alpha,
                                   const Tensor& output,
                                   std::string op_name) {
-  if (alpha.toDouble() == 0.0) {
+  if (!alpha.isComplex() && alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
       output.copy_(self);
     }
     return;
   }
 
-  const bool alpha_has_value = alpha.toDouble() != 1.0;
-  if (alpha_has_value) {
-    auto commonDtype = at::result_type(self, other);
-    at::native::alpha_check(commonDtype, alpha);
-  }
-
+  const bool alpha_has_value = alpha.isComplex() || alpha.toDouble() != 1.0;
   if (!alpha_has_value && op_name == "lerp") {
     if (!self.is_alias_of(other)) { // if inplace, no-op
       output.copy_(other);
+    }
+    return;
+  }
+
+  auto self_complex = c10::isComplexType(self.scalar_type());
+  auto other_complex = c10::isComplexType(other.scalar_type());
+  auto commonDtype = at::result_type(self, other);
+  if (self.is_mps() && other.is_mps() && (output.scalar_type() == commonDtype) && (self_complex == other_complex)) {
+    if (alpha_has_value) {
+      at::native::alpha_check(commonDtype, alpha);
+      mps::binary_op_kernel(op_name + "_alpha", self, other, output, alpha);
+    } else {
+      mps::binary_op_kernel(op_name, self, other, output);
     }
     return;
   }
