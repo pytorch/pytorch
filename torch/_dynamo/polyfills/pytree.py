@@ -321,8 +321,10 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     _LEAF_SPEC = PyTreeSpec((), None, None, (), None)
 
-    def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec]:
-        return isinstance(obj, PyTreeSpec)
+    def _is_pytreespec_instance(
+        obj: Any, /
+    ) -> TypeIs[PyTreeSpec | python_pytree.PyTreeSpec]:
+        return isinstance(obj, (PyTreeSpec, python_pytree.PyTreeSpec))
 
     @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_flatten,
