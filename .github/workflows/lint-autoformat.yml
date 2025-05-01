@@ -19,14 +19,13 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: "3.10"
       - name: Run lintrunner (nonretryable)
         continue-on-error: true
         # we can't run all files here because only changes around where the diff are shown in the PR UI
         run: |
+          set -ex
+          python3 -m venv /tmp/venv
+          source /tmp/venv/bin/activate
           export ADDITIONAL_LINTRUNNER_ARGS="format"
           bash .github/scripts/lintrunner.sh
       - name: Check for changes
@@ -37,7 +36,7 @@ jobs:
       - name: Suggest changes
         if: steps.git-check.outputs.changes == 'true'
         continue-on-error: true
-        uses: parkerbxyz/suggest-changes@v1
+        uses: parkerbxyz/suggest-changes@a2ec1653b0c4cc8287d682f0066dba4a173cc7f3 # v1.0.8
         with:
           comment: "Please commit the suggested changes from pytorch's linter."
 

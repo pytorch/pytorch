@@ -19,7 +19,6 @@ from torch.torch_version import TorchVersion
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
 from ..lowering import (
     add_layout_constraint,
@@ -98,6 +97,8 @@ mm_template = TritonTemplate(
     group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -128,10 +129,11 @@ mm_template = TritonTemplate(
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
 
-        if USE_FAST_ACCUM:
-            acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        else:
-            acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% if USE_FAST_ACCUM %}
+        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% else %}
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% endif %}
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -171,6 +173,8 @@ mm_template = TritonTemplate(
     group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -201,9 +205,10 @@ mm_template = TritonTemplate(
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
         {% if USE_FAST_ACCUM %}
-            acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
-            acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        {% endif %}
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -317,6 +322,7 @@ persistent_tma_mm_template = TritonTemplate(
             # inductor generates a suffix
             {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12)}}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+
 """,
 )
 
@@ -861,24 +867,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
 
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        # Filter out a known cause of CUDA illegal memory access errors
-        # broadcasting on the last dim of the bias term seems not to be working
-        # in the linear GEMM epilogue used by addmm.
-        if (
-            PythonWrapperCodegen.statically_known_int_or_none(
-                inp_expanded.layout.stride[-1]
-            )
-            != 0
-        ):
-            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
-                choices,
-                layout,
-                [mat1, mat2, inp_expanded],
-                alpha=alpha,
-                beta=beta,
-                input_reorder=[2, 0, 1],
-            )
+    if is_nonzero and use_cutlass_template(layout, m, n, k):
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            [mat1, mat2, inp_expanded],
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
+        )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
@@ -1164,7 +1161,6 @@ def mm_autoheuristic(
             "mat2_iscontig", mat2.layout.is_contiguous(), is_categorical=True
         )
         if name == "mm":
-            # for mixed_mm, we only consider fp16
             context_add_using_tf32(context, mat1.layout.dtype)
         return context
 
