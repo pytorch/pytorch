@@ -315,7 +315,7 @@ Promotion of RCs to stable is done with this script:
 Users of that script should take care to update the versions necessary for the specific packages you are attempting to promote.
 
 Promotion should occur in two steps:
-* Promote S3 artifacts (wheels, libtorch) and Conda packages
+* Promote S3 artifacts (wheels, libtorch)
 * Promote S3 wheels to PyPI
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
