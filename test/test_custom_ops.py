@@ -3849,7 +3849,7 @@ Please use `add.register_fake` to add an fake impl.""",
             # If multiple tags are provided, then we use the most constrained tag.
             ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
         ]
-        from torch._inductor.lowering import get_layout_constraint_tag
+        from torch._library.utils import get_layout_constraint_tag
 
         for tags, expected in tests:
             with torch.library._scoped_library("mylib", "FRAGMENT") as m:
