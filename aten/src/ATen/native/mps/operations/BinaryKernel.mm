@@ -64,8 +64,13 @@ void binary_op_kernel(const std::string func_name,
     return;
   }
 
-  auto iter =
-      TensorIteratorConfig().add_output(output).add_input(input).add_input(other).check_all_same_dtype(false).build();
+  auto iter = TensorIteratorConfig()
+                  .allow_cpu_scalars(true)
+                  .add_output(output)
+                  .add_input(input)
+                  .add_input(other)
+                  .check_all_same_dtype(false)
+                  .build();
 
   lib.exec_binary_kernel(iter, func_name, alpha);
 }
