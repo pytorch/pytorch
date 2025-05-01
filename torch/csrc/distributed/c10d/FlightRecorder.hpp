@@ -121,7 +121,7 @@ struct FlightRecorder {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
-    c10d::Event *start_, *end_;
+    c10::Event *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -194,11 +194,11 @@ struct FlightRecorder {
 
   void update_state(Entry& r);
 
-  virtual std::vector<Entry> dump_entries();
+  std::vector<Entry> dump_entries();
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
-  std::optional<Entry> getEntry(std::optional<size_t> id);
+  std::optional<Entry> getEntry(const std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -210,7 +210,9 @@ struct FlightRecorder {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true);
+  void retire_id(
+      const std::optional<size_t> id,
+      const bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
@@ -254,13 +256,24 @@ float getDurationFromEvent(
 using Event = at::cuda::CUDAEvent;
 
 struct FlightRecorderNCCL : public FlightRecorder {
-  struct EntryNCCL : public Entry {
+  static FlightRecorderNCCL* get() {
+    // intentionally leak on exit
+    // because this will hold python state that may get destructed
+    static FlightRecorderNCCL* instance = new FlightRecorderNCCL();
+    return instance;
+  }
+  FlightRecorderNCCL() {
+    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
+    enabled_ = max_entries_ > 0;
+  }
+  struct CudaEntry : public FlightRecorder::Entry {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
     Event *start_, *end_;
   };
-  std::vector<EntryNCCL> entries_;
+  std::vector<CudaEntry> entries_;
 
   std::optional<size_t> record(
       size_t pg_id,
@@ -293,11 +306,11 @@ struct FlightRecorderNCCL : public FlightRecorder {
       bool includeStackTraces,
       bool onlyActive);
 
-  void FlightRecorder::update_state(Entry& r);
-  std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries();
-  void FlightRecorder::retire_id(
-      std::optional<size_t> id,
-      bool compute_duration);
+  void update_state(CudaEntry& r);
+  std::vector<FlightRecorderNCCL::CudaEntry> dump_entries();
+  void retire_id(
+      const std::optional<size_t> id,
+      const bool compute_duration);
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
       bool onlyActive);
@@ -305,7 +318,5 @@ struct FlightRecorderNCCL : public FlightRecorder {
 
 /* Helper used by work::getDuration() and nccl flight recorder */
 float getDurationFromEvent(Event& ncclStartEvent, Event& ncclEndEvent);
-
-#else // USE_C10D_NCCL
-
+#endif // USE_C10D_NCCL
 } // namespace c10d
