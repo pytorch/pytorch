@@ -552,7 +552,7 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None):
+def mark_dynamic(t, index, *, min=None, max=None, backend_specializations=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -587,14 +587,16 @@ def mark_dynamic(t, index, *, min=None, max=None):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+            t._backend_specializations = {}
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
+        t._backend_specializations[index] = backend_specializations
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i, min=min, max=max)
+        mark_dynamic(t, i, min=min, max=max, backend_specializations=backend_specializations)
 
 
 @forbid_in_graph
