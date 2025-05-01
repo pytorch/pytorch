@@ -815,7 +815,8 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 }
 
 template <typename scalar_t>
-void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
+void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& _index, const Tensor& self) {
+  Tensor index = _index.to(ScalarType::Long);
   const int64_t* index_data = index.const_data_ptr<int64_t>();
   scalar_t* result_data = result.data_ptr<scalar_t>();
   const scalar_t* self_data = self.const_data_ptr<scalar_t>();
