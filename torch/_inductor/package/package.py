@@ -290,7 +290,7 @@ def load_package(
     model_name: str = "model",
     run_single_threaded: bool = False,
     num_runners: int = 1,
-    device_index: int = -1
+    device_index: int = -1,
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()

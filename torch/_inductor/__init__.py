@@ -235,7 +235,9 @@ def _aoti_compile_and_package_inner(
     return package_path
 
 
-def aoti_load_package(path: FileLike, run_single_threaded: bool = False, device_index: int = -1) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(
+    path: FileLike, run_single_threaded: bool = False, device_index: int = -1
+) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
@@ -261,7 +263,9 @@ def aoti_load_package(path: FileLike, run_single_threaded: bool = False, device_
     """
     from torch._inductor.package import load_package
 
-    return load_package(path, run_single_threaded=run_single_threaded, device_index=device_index)
+    return load_package(
+        path, run_single_threaded=run_single_threaded, device_index=device_index
+    )
 
 
 def aot_compile(

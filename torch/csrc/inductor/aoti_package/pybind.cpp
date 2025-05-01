@@ -6,10 +6,10 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 
+#include <c10/core/Device.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/utils/pybind.h>
-#include <c10/core/Device.h>
 
 namespace torch::inductor {
 

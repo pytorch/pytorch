@@ -2126,7 +2126,10 @@ class AOTInductorTestsTemplate:
                 return x + torch.nn.functional.linear(y, self.weight)
 
         weight = torch.randn(10, 10, device=self.device)
-        inputs = (torch.randn(10, 10, device=self.device), torch.randn(10, 10, device=self.device))
+        inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
         model = Model(weight).to(device=self.device)
         result_ref = model(*inputs)
 
