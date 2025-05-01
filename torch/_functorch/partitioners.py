@@ -1953,7 +1953,6 @@ def _broadcast_rank0_decision(joint_graph, saved_values):
         and has_same_nodes(joint_graph)
     ):
         with no_dispatch(), unset_fake_temporarily():
-            objects = [saved_values]
             objects = [[x.name for x in saved_values]]
             # TODO: maybe use a different process group for this
             torch.distributed.broadcast_object_list(objects, src=0)
