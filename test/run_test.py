@@ -340,22 +340,20 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
-    num_gpus = torch.cuda.device_count()
     DISTRIBUTED_TESTS_CONFIG["test"] = {"WORLD_SIZE": "1"}
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG["mpi"] = {
             "WORLD_SIZE": "3",
         }
-    if dist.is_nccl_available() and num_gpus > 0:
+    if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": f"{num_gpus}",
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
-            "WORLD_SIZE": f"{num_gpus if num_gpus > 0 else 3}",
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
         }
-    del num_gpus
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
