@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # flake8: noqa: B950
 
+import contextlib
 import functools
 import random
 import string
@@ -391,6 +392,10 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
 
 @large_tensor_test_class("2GB", device="cuda")
 class TestFlexAttention(InductorTestCase):
+    # overriden by test wrapper TestFlexAttentionCUDAWithCompiledAutograd
+    def _maybe_compiled_autograd_ctx(self):
+        return contextlib.nullcontext()
+
     def setUp(self):
         super().setUp()
         skipCPUIf(
@@ -559,7 +564,8 @@ class TestFlexAttention(InductorTestCase):
 
             golden_out.backward(backward_grad.to(torch.float64))
             ref_out.backward(backward_grad)
-            compiled_out.backward(backward_grad)
+            with self._maybe_compiled_autograd_ctx():
+                compiled_out.backward(backward_grad)
 
             self._check_out_and_grad(
                 golden_out,
@@ -839,7 +845,8 @@ class TestFlexAttention(InductorTestCase):
 
             golden_out.backward(backward_grad.to(torch.float64))
             ref_out.backward(backward_grad)
-            compiled_out.backward(backward_grad)
+            with self._maybe_compiled_autograd_ctx():
+                compiled_out.backward(backward_grad)
 
             self._check_out_and_grad(
                 golden_out,

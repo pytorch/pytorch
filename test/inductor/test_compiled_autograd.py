@@ -16,6 +16,7 @@ from copy import deepcopy
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from string import Template
+from typing import Optional
 from unittest import mock
 
 import torch
@@ -4142,7 +4143,7 @@ def make_wrapped(fn, ctxs):
     return wrapped
 
 
-def wrap_test_class(orig_cls):
+def wrap_test_class(orig_cls, method_name: Optional[str]):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
         fn = dct[name]
@@ -4150,13 +4151,16 @@ def wrap_test_class(orig_cls):
             continue
         elif known_failures_re.match(name) or name in known_failing_tests:
             dct[name] = unittest.expectedFailure
-        elif name.startswith("test_"):
+        elif name.startswith("test_") and not method_name:
             fullgraph = name not in known_graph_breaks_tests
             ctxs = [
                 compiled_autograd._enable(make_compiler_fn(fullgraph=fullgraph)),
                 test_contexts.get(name, contextlib.nullcontext()),
             ]
             dct[name] = make_wrapped(fn, ctxs)
+
+    if method_name:
+        dct[method_name] = lambda self: compiled_autograd._enable(compiler_fn)
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
@@ -4363,9 +4367,13 @@ if IS_S390X:
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
+test_flex_attention = load_test_module("inductor/test_flex_attention")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+TestFlexAttentionCUDAWithCompiledAutograd = wrap_test_class(
+    test_flex_attention.TestFlexAttentionCUDA
+)
 if torch.distributed.is_available() and HAS_CUDA:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
