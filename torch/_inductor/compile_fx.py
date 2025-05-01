@@ -212,7 +212,7 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_input_indices
+    return context.fw_metadata.static_input_indices
 
 
 def record_original_output_strides(gm: GraphModule) -> None:
@@ -1744,7 +1744,6 @@ def fw_compiler_freezing(
     )
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
-    num_fixed = len(preserved_arg_indices) - num_example_inputs
 
     fake_mode = detect_fake_mode(aot_example_inputs)
 
@@ -1755,7 +1754,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = list(range(num_fixed))
+    static_input_idxs = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -1787,7 +1786,7 @@ def fw_compiler_freezing(
                 tracing_context.params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_input_indices
+            static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
     with (
         mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
@@ -1903,6 +1902,7 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                ignore_shape_env=ignore_shape_env,
             )
 
     # TODO: This probably shouldn't be a recursive call
@@ -1958,12 +1958,14 @@ def compile_fx(
                     fake_args,
                     inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
                     decompositions=decompositions,
+                    ignore_shape_env=ignore_shape_env,
                 )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
         decompositions=decompositions,
+        ignore_shape_env=ignore_shape_env,
     )
 
     if not graph_returns_tuple(model_):

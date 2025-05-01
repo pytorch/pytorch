@@ -115,26 +115,31 @@ template <typename T>
 inline T val_at_offs(constant void* ptr, long offs, ScalarType type) {
   switch (type) {
     case ScalarType::Bool:
-      return val_at_offs<bool>(ptr, offs);
+      return cast_to<T>(val_at_offs<bool>(ptr, offs));
     case ScalarType::Byte:
-      return val_at_offs<uchar>(ptr, offs);
+      return cast_to<T>(val_at_offs<uchar>(ptr, offs));
     case ScalarType::Char:
-      return val_at_offs<char>(ptr, offs);
+      return cast_to<T>(val_at_offs<char>(ptr, offs));
     case ScalarType::Short:
-      return val_at_offs<short>(ptr, offs);
+      return cast_to<T>(val_at_offs<short>(ptr, offs));
     case ScalarType::Int:
-      return val_at_offs<int>(ptr, offs);
+      return cast_to<T>(val_at_offs<int>(ptr, offs));
     case ScalarType::Long:
-      return val_at_offs<long>(ptr, offs);
+      return cast_to<T>(val_at_offs<long>(ptr, offs));
     // Floats
     case ScalarType::Float:
-      return static_cast<T>(val_at_offs<float>(ptr, offs));
+      return cast_to<T>(val_at_offs<float>(ptr, offs));
     case ScalarType::Half:
-      return static_cast<T>(val_at_offs<half>(ptr, offs));
+      return cast_to<T>(val_at_offs<half>(ptr, offs));
 #if __METAL_VERSION__ >= 310
     case ScalarType::BFloat16:
       return cast_to<T>(val_at_offs<bfloat>(ptr, offs));
 #endif
+      // Complex
+    case ScalarType::ComplexHalf:
+      return cast_to<T>(val_at_offs<half2>(ptr, offs));
+    case ScalarType::ComplexFloat:
+      return cast_to<T>(val_at_offs<float2>(ptr, offs));
   }
 }
 
