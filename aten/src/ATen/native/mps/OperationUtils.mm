@@ -1027,6 +1027,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
 
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
+  if (other.device() != input.device()) {
+     other = other.to(input.device());    //This ensures that in torch.copysign(t_mps, -2.0), the scalar is moved to MPS 
+  }
   Tensor out = iter.output();
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
