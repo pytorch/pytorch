@@ -88,15 +88,13 @@ class C10_CUDA_API CUDAAllocatorConfig {
         env = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
       }
 #endif
-      if (env.has_value()) {
-        inst->parseArgs(env.value().c_str());
-      }
+      inst->parseArgs(env);
       return inst;
     })();
     return *s_instance;
   }
 
-  void parseArgs(const char* env);
+  void parseArgs(const std::optional<std::string>& env);
 
  private:
   CUDAAllocatorConfig();

@@ -289,7 +289,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
 #endif // USE_ROCM
 }
 
-void CUDAAllocatorConfig::parseArgs(const char* env) {
+void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   // If empty, set the default values
   m_max_split_size = std::numeric_limits<size_t>::max();
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -297,7 +297,7 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 
-  if (env == nullptr) {
+  if (!env.has_value()) {
     return;
   }
   {
