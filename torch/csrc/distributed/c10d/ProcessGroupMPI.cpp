@@ -1068,7 +1068,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::_reduce_scatter_base(
             mpi_op,
             pgComm_));
         if (opts.reduceOp == ReduceOp::AVG) {
-          dstdata.div_(size_); // divide by world size
+          dstdata.div_(size_);
         }
       };
 
