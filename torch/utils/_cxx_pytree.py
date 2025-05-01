@@ -53,7 +53,7 @@ if not python_pytree._cxx_pytree_dynamo_traceable:
 
 
 import optree
-from optree import PyTreeSpec as PyTreeSpec  # direct import for type annotations
+from optree import PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
