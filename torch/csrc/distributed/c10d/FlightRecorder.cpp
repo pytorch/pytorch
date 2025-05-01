@@ -21,23 +21,14 @@
 
 namespace c10d {
 
-template <typename T, typename EntryT, typename EventType>
+template <typename T, typename EntryT, typename EventType, typename F>
 std::optional<size_t> recordImpl(
     T& obj,
-    EntryT&& te,
+    F entry_func,
     size_t pg_id,
-    const std::tuple<std::string, std::string>& pg_name,
-    size_t collective_seq_id,
-    size_t p2p_seq_id,
-    size_t op_id,
-    std::string profiling_name,
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs,
-    EventType* start,
-    EventType* end,
-    std::chrono::milliseconds timeout_ms,
-    std::shared_ptr<ProcessGroupStatus> pg_status,
-    bool isP2P) {
+    std::shared_ptr<ProcessGroupStatus> pg_status) {
   if (!obj.enabled_) {
     return std::nullopt;
   }
@@ -48,6 +39,8 @@ std::optional<size_t> recordImpl(
   auto traceback =
       torch::CapturedTraceback::gather(true, true, obj.capture_cpp_stack_);
   std::lock_guard<std::mutex> guard(obj.mutex_);
+
+  auto te = entry_func(traceback);
 
   for (const auto& input : inputs) {
     c10::IntArrayRef sizes = input.sizes();
@@ -629,48 +622,37 @@ std::optional<size_t> FlightRecorder::record(
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
-      auto traceback =
-      torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
-      auto te = Entry{
-        id_,
-        pg_id,
-        pg_name,
-        collective_seq_id,
-        p2p_seq_id,
-        op_id,
-        std::move(profiling_name),
-        std::move(traceback),
-        start,
-        end,
-        c10::getTime(),
-        timeout_ms.count(),
-        isP2P,
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
-        {},
-        {},
-        {},
-        {},
-        {},
-        false};
-    
   return recordImpl<FlightRecorder, FlightRecorder::Entry, c10::Event>(
       *this,
-      std::move(te),
+      [&](std::shared_ptr<torch::CapturedTraceback> traceback) {
+        return Entry{
+            id_,
+            pg_id,
+            pg_name,
+            collective_seq_id,
+            p2p_seq_id,
+            op_id,
+            std::move(profiling_name),
+            std::move(traceback),
+            start,
+            end,
+            c10::getTime(),
+            timeout_ms.count(),
+            isP2P,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            {},
+            {},
+            {},
+            {},
+            {},
+            false};
+      },
       pg_id,
-      pg_name,
-      collective_seq_id,
-      p2p_seq_id,
-      op_id,
-      std::move(profiling_name),
       inputs,
       outputs,
-      start,
-      end,
-      timeout_ms,
-      std::move(pg_status),
-      isP2P);
+      std::move(pg_status));
 }
 
 void FlightRecorder::record_pg_ranks(
@@ -693,9 +675,7 @@ void FlightRecorder::record_accelerator_version(
 }
 
 float getDurationFromEvent(c10::Event& startEvent, c10::Event& endEvent) {
-  TORCH_CHECK(
-      false,
-      "getDuration not supported by c10::Event.")
+  TORCH_CHECK(false, "getDuration not supported by c10::Event.")
 }
 
 void FlightRecorder::update_state(Entry& r) {
@@ -709,14 +689,14 @@ std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
 // Returns the entry with the given id, if it exists. Otherwise, returns
 // std::nullopt.
 std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
-    const std::optional<size_t> id) {
+    std::optional<size_t> id) {
   return getEntryImpl<FlightRecorder::Entry>(
       entries_, enabled_, mutex_, max_entries_, id);
 }
 
 void FlightRecorder::retire_id(
-    const std::optional<size_t> id,
-    const bool compute_duration) {
+    std::optional<size_t> id,
+    bool compute_duration) {
   retire_id_impl<FlightRecorder::Entry, c10::Event>(
       enabled_, entries_, max_entries_, mutex_, id, compute_duration);
 }
@@ -786,7 +766,8 @@ const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
 std::string FlightRecorder::dump_json(
     bool includeCollectives,
     bool onlyActive) {
-  return (get_dump_json<FlightRecorder>(*this, includeCollectives, onlyActive)).dump();
+  return (get_dump_json<FlightRecorder>(*this, includeCollectives, onlyActive))
+      .dump();
 }
 
 std::string FlightRecorder::dump(
@@ -823,50 +804,39 @@ std::optional<size_t> FlightRecorderNCCL::record(
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
-      auto traceback =
-      torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
-      auto te = CudaEntry{
-        id_,
-        pg_id,
-        pg_name,
-        collective_seq_id,
-        p2p_seq_id,
-        op_id,
-        std::move(profiling_name),
-        std::move(traceback),
-        nullptr,
-        nullptr,
-        c10::getTime(),
-        timeout_ms.count(),
-        isP2P,
-        std::nullopt,
-        std::nullopt,
-        std::nullopt,
-        {},
-        {},
-        {},
-        {},
-        {},
-        false,
-        start,
-        end};
-
-      return recordImpl<FlightRecorderNCCL, FlightRecorderNCCL::CudaEntry, Event>(
-        *this,
-        std::move(te),
-        pg_id,
-        pg_name,
-        collective_seq_id,
-        p2p_seq_id,
-        op_id,
-        std::move(profiling_name),
-        inputs,
-        outputs,
-        start,
-        end,
-        timeout_ms,
-        std::move(pg_status),
-        isP2P);
+  return recordImpl<FlightRecorderNCCL, FlightRecorderNCCL::CudaEntry, Event>(
+      *this,
+      [&](std::shared_ptr<torch::CapturedTraceback> traceback) {
+        return CudaEntry{
+            id_,
+            pg_id,
+            pg_name,
+            collective_seq_id,
+            p2p_seq_id,
+            op_id,
+            std::move(profiling_name),
+            std::move(traceback),
+            nullptr,
+            nullptr,
+            c10::getTime(),
+            timeout_ms.count(),
+            isP2P,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            {},
+            {},
+            {},
+            {},
+            {},
+            false,
+            start,
+            end};
+      },
+      pg_id,
+      inputs,
+      outputs,
+      std::move(pg_status));
 }
 
 std::string FlightRecorderNCCL::dump_json(
@@ -918,7 +888,8 @@ void FlightRecorderNCCL::update_state(CudaEntry& r) {
 }
 
 std::vector<FlightRecorderNCCL::CudaEntry> FlightRecorderNCCL::dump_entries() {
-  return dump_entries_impl<FlightRecorderNCCL::CudaEntry>(entries_, next_, mutex_);
+  return dump_entries_impl<FlightRecorderNCCL::CudaEntry>(
+      entries_, next_, mutex_);
 }
 
 const c10::List<c10::IValue> FlightRecorderNCCL::getCollectiveTrace(
@@ -927,14 +898,15 @@ const c10::List<c10::IValue> FlightRecorderNCCL::getCollectiveTrace(
   // Entries are returned in the order they were recorded
   auto result = dump_entries();
   return getCollectiveTraceImpl<FlightRecorderNCCL::CudaEntry>(
-    result, includeStacktraces, onlyActive);
+      result, includeStacktraces, onlyActive);
 }
 
 void FlightRecorderNCCL::retire_id(
-    const std::optional<size_t> id,
-    const bool compute_duration) {
+    std::optional<size_t> id,
+    bool compute_duration) {
   retire_id_impl<FlightRecorderNCCL::CudaEntry, Event>(
       enabled_, entries_, max_entries_, mutex_, id, compute_duration);
 }
 #endif // USE_C10D_NCCL
+
 } // namespace c10d
