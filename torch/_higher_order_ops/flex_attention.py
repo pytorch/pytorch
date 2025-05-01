@@ -503,7 +503,7 @@ def create_fw_bw_graph(
         keep_inference_input_mutations=False,
     )
 
-    with suspend_functionalization(), disable_functional_mode():
+    with suspend_functionalization(), disable_functional_mode(), torch._dynamo.compiled_autograd._disable():
         with disable_proxy_modes_tracing():
 
             def _from_fun(
