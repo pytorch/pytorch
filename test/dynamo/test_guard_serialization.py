@@ -441,7 +441,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         from torch.testing._internal.two_tensor import TwoTensor
 
         tt = TwoTensor(torch.randn(3), torch.randn(3))
-        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, tt)
+        ref, loaded = self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, tt)
+        self._test_check_fn(ref, loaded, {"x": tt}, True)
+        other_tt = TwoTensor(torch.randn(3), torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": other_tt}, True)
 
         # example subclass with extra metadata
         extra_meta = {
@@ -449,15 +452,50 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             "bar": "hello",
         }
         sub = SubclassWithMeta(torch.randn(3), extra=extra_meta)
-        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub)
+        ref, loaded = self._test_serialization(
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub
+        )
+        self._test_check_fn(ref, loaded, {"x": sub}, True)
+        other_sub_same_meta = SubclassWithMeta(torch.randn(3), extra=dict(extra_meta))
+        self._test_check_fn(ref, loaded, {"x": other_sub_same_meta}, True)
+        diff_meta = dict(extra_meta)
+        diff_meta["foo"] = 6
+        other_sub_diff_meta = SubclassWithMeta(torch.randn(3), extra=diff_meta)
+        self._test_check_fn(ref, loaded, {"x": other_sub_diff_meta}, False)
 
         # example subclass with custom metadata guard logic
         sub2 = SubclassWithCustomMetadataGuard(torch.randn(3), extra=extra_meta)
-        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub2)
+        ref, loaded = self._test_serialization(
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub2
+        )
+        self._test_check_fn(ref, loaded, {"x": sub2}, True)
+        other_sub2_same_meta = SubclassWithCustomMetadataGuard(
+            torch.randn(3), extra=dict(extra_meta)
+        )
+        self._test_check_fn(ref, loaded, {"x": other_sub2_same_meta}, True)
+        diff_meta = dict(extra_meta)
+        diff_meta["foo"] = 7
+        other_sub2_diff_meta = SubclassWithCustomMetadataGuard(
+            torch.randn(3), extra=diff_meta
+        )
+        self._test_check_fn(ref, loaded, {"x": other_sub2_diff_meta}, False)
 
         # example subclass with subclass inner tensor
         sub3 = SubclassWithSubclassInnerTensors(torch.randn(3), extra=extra_meta)
-        self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub3)
+        ref, loaded = self._test_serialization(
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub3
+        )
+        self._test_check_fn(ref, loaded, {"x": sub3}, True)
+        other_sub3_same_meta = SubclassWithSubclassInnerTensors(
+            torch.randn(3), extra=dict(extra_meta)
+        )
+        self._test_check_fn(ref, loaded, {"x": other_sub3_same_meta}, True)
+        diff_meta = dict(extra_meta)
+        diff_meta["foo"] = 8
+        other_sub3_diff_meta = SubclassWithSubclassInnerTensors(
+            torch.randn(3), extra=diff_meta
+        )
+        self._test_check_fn(ref, loaded, {"x": other_sub3_diff_meta}, False)
 
     def test_dict_version(self):
         def fn(x):
