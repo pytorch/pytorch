@@ -31,7 +31,6 @@ from torch._guards import (
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
-from torch.monitor import _WaitCounter
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -258,7 +257,7 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
-    if not hasattr(compiled_fn, "_boxed_call"):
+    if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
 
     # Note [Inputs needed in runtime epilogue after list clearing]
@@ -1442,13 +1441,23 @@ def merge_view_inputs(
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
         args_to_functionalization = base_args + other_args
-        arg_to_old_idx_map = {
-            make_hashable(arg): i for (i, arg) in enumerate(fwd_inputs)
-        }
+
+        # Map each argument into its old index.
+        # There may be some repeated arguments, so we collect their indices in a list.
+        arg_to_old_idx_map = collections.defaultdict(list)
+        for i, arg in enumerate(fwd_inputs):
+            arg_to_old_idx_map[make_hashable(arg)].append(i)
+        # Reverse the list of each argument, so that we can easily pop them one-after-the-other in order.
+        for hashable_arg in arg_to_old_idx_map:
+            arg_to_old_idx_map[hashable_arg] = list(
+                reversed(arg_to_old_idx_map[hashable_arg])
+            )
+
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
-            old_idx = arg_to_old_idx_map[make_hashable(other_arg)]
+            old_idx = arg_to_old_idx_map[make_hashable(other_arg)].pop()
             inner_calling_convention_meta[old_idx] = new_idx
+
         # post process into a list
         post_processed_calling_convention_meta: list[
             Union[int, tuple[int, torch.Tensor]]
@@ -2226,9 +2235,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                         log_waitcounter=True,
                         waitcounter_name_override="entire_backward_compile",
-                    ), _WaitCounter(
-                        "pytorch.wait_counter.dynamo_compile"
-                    ).guard():
+                    ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
