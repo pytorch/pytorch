@@ -654,9 +654,9 @@ class MetaProxy(Proxy):
                 meta_proxy = arg
                 break
 
-        assert (
-            meta_proxy is not None
-        ), "No MetaProxy found in arguments, but one is expected."
+        assert meta_proxy is not None, (
+            "No MetaProxy found in arguments, but one is expected."
+        )
 
         proxy = super().__torch_function__(orig_method, types, args, kwargs)
         with meta_proxy.fake_mode:
@@ -739,14 +739,14 @@ for method in magic_methods:
             return tracer.create_proxy("call_function", target, args, kwargs)
 
         impl.__name__ = method
-        as_magic = f'__{method.strip("_")}__'
+        as_magic = f"__{method.strip('_')}__"
         setattr(Proxy, as_magic, impl)
 
     _scope(method)
 
 
 def _define_reflectable(orig_method_name):
-    method_name = f'__r{orig_method_name.strip("_")}__'
+    method_name = f"__r{orig_method_name.strip('_')}__"
 
     def impl(self, rhs):
         target = getattr(operator, orig_method_name)
