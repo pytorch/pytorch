@@ -15,6 +15,7 @@ from torch._dynamo.utils import same
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._inductor import config
 from torch._inductor.codegen.common import register_backend_for_device
+from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
@@ -371,6 +372,24 @@ class FxirTestCase(InductorTestCase):
 
         with self.assertRaisesRegex(BackendCompilerFailed, "Subgraph"):
             self._compile_and_check(foo, [cond, x])
+
+    def test_cpp_raises(self):
+        """
+        Test the C++ CPU backend. C++ kernels are not yet supported, so for now check
+        that we get the expected exception.
+        """
+
+        def foo(x, y):
+            return x + y * 5
+
+        device = torch.device("cpu")
+        args = [torch.randn(5, device=device) for _ in range(2)]
+
+        cpp_backend = common.DeviceCodegen(CppScheduling, WrapperFxCodegen, None)
+        with unittest.mock.patch.dict(
+            common.device_codegens, {device.type: cpp_backend}
+        ), self.assertRaisesRegex(BackendCompilerFailed, "Triton"):
+            self._compile_and_check(foo, args)
 
 
 if __name__ == "__main__":

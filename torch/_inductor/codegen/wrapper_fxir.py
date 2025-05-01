@@ -154,7 +154,14 @@ class FxConverter:
         mod = PyCodeCache.load(module_code)
         kernel = getattr(mod, kernel_name)
 
-        assert isinstance(kernel, CachingAutotuner)
+        if not isinstance(kernel, CachingAutotuner):
+            raise NotImplementedError(
+                textwrap.dedent(f"""
+                Unsupported type for kernel {kernel_name}: {type(kernel)}.
+                FX conversion only supports Triton kernels.
+            """)
+            )
+
         return kernel
 
     def _fake_tensor(
