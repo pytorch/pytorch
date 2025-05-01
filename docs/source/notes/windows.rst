@@ -24,9 +24,10 @@ MKL and MAGMA. Here are the steps to build with them.
     REM 2.5.3 (CUDA 10.1 10.2 11.0) x (Debug Release)
     REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
     REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
-    set CUDA_PREFIX=cuda102
-    set CONFIG=release
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
+    set "CUDA_PREFIX=cuda102"
+    set "CONFIG=release"
+    set "HOST=https://s3.amazonaws.com/ossci-windows"
+    curl -k "%HOST%/magma_2.5.4_%CUDA_PREFIX%_%CONFIG%.7z" -o magma.7z
     7z x -aoa magma.7z -omagma
 
     REM Setting essential environment variables
