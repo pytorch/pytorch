@@ -111,6 +111,7 @@ class CPythonTestCase(TestCase):
     _stack: contextlib.ExitStack
     dynamo_strict_nopython = True
 
+    # Restore original unittest methods to simplify tracing CPython test cases.
     assertEqual = unittest.TestCase.assertEqual  # type: ignore[assignment]
     assertNotEqual = unittest.TestCase.assertNotEqual  # type: ignore[assignment]
     assertTrue = unittest.TestCase.assertTrue
@@ -147,6 +148,8 @@ class CPythonTestCase(TestCase):
     failureException = unittest.TestCase.failureException
 
     def compile_fn(self, fn, backend, nopython):
+        # We want to compile only the test function, excluding any setup code
+        # from unittest
         method = getattr(self, self._testMethodName)
         method = torch._dynamo.optimize(backend, nopython=nopython)(method)
         setattr(self, self._testMethodName, method)
