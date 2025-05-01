@@ -1022,10 +1022,12 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             const std::string& name,
                                             std::optional<c10::Scalar> alpha) {
-  TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
+  // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
+  // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
+  // double as common dtype (because Python floating point are always 64-bit values)
+  TORCH_CHECK(iter.output().scalar_type() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
-  // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   auto convert_double_scalar = [](Tensor& t) {
     if (t.dim() != 0) {
       return;
