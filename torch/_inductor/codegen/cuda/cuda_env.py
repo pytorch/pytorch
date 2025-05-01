@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 
 import torch
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import config
 
@@ -10,6 +11,7 @@ from ... import config
 log = logging.getLogger(__name__)
 
 
+@clear_on_fresh_inductor_cache
 @functools.lru_cache(1)
 def get_cuda_arch() -> Optional[str]:
     try:
@@ -24,6 +26,7 @@ def get_cuda_arch() -> Optional[str]:
         return None
 
 
+@clear_on_fresh_inductor_cache
 @functools.lru_cache(1)
 def get_cuda_version() -> Optional[str]:
     try:
