@@ -378,10 +378,13 @@ class MultiKernelCall:
             return inner
 
         # benchmarking the sub kernels together improves accuracy and
-        # decreases overhead (since GPU warmups are now shared)
+        # decreases overhead (since GPU warmups are now shared). ranking
+        # here has shown minimal accuracy loss, the actual value of the
+        # ranking key does not matter in this case
         return benchmarker.benchmark_many_gpu(
             [wrap_fn(kernel) for kernel in self.kernels],
             rep=40,
+            ranking_key="benchmark_sub_kernels",
         )
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
