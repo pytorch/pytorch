@@ -219,6 +219,7 @@ if torch.backends.mps.is_available():
             "isclose",
             "isnan",
             "ldexp",
+            "lerp",
             "linalg.multi_dot",
             "linalg.pinv",
             "linspace",
