@@ -10,6 +10,7 @@ from ... import config
 log = logging.getLogger(__name__)
 
 
+@functools.lru_cache(1)
 def get_cuda_arch() -> Optional[str]:
     try:
         cuda_arch = config.cuda.arch
@@ -23,6 +24,7 @@ def get_cuda_arch() -> Optional[str]:
         return None
 
 
+@functools.lru_cache(1)
 def get_cuda_version() -> Optional[str]:
     try:
         cuda_version = config.cuda.version
