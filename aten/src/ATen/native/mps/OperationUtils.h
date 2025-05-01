@@ -108,7 +108,8 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
-  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().mutable_data());
+  // return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().mutable_data());
+  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
 
 // This class wraps a tensor with an API that can obtain the underlying
@@ -378,7 +379,8 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
   if (C10_UNLIKELY(t.device().type() == kCPU)) {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
-      [encoder setBytes:t.storage().mutable_data() length:t.element_size() atIndex:idx];
+      // [encoder setBytes:t.storage().mutable_data() length:t.element_size() atIndex:idx];
+      [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
     }
