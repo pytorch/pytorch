@@ -27,11 +27,9 @@ static int parseOptLimit(const std::string& opt_limit) {
 }
 
 static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
-    const char* option) {
+    const std::string& option) {
   std::stringstream in_ss;
-  if (option) {
-    in_ss << option;
-  }
+  in_ss << option;
   std::unordered_map<std::string, int64_t> passes_to_opt_limits;
   std::string line;
   while (std::getline(in_ss, line, ':')) {
@@ -56,7 +54,7 @@ bool opt_limit(const char* pass_name) {
   }
 
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
-      parseJITOptLimitOption(opt_limit);
+      parseJITOptLimitOption(opt_limit.value());
   std::string pass = std::filesystem::path(pass_name).stem().string();
 
   auto opt_limit_it = passes_to_opt_limits.find(pass);
