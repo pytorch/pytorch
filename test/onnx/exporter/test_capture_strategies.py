@@ -13,6 +13,7 @@ class ExportStrategiesTest(common_utils.TestCase):
     @common_utils.parametrize(
         "strategy_cls",
         [
+            _capture_strategies.TorchExportStrictStrategy,
             _capture_strategies.TorchExportNonStrictStrategy,
             _capture_strategies.TorchExportDraftExportStrategy,
         ],

@@ -148,6 +148,52 @@ class CaptureStrategy(abc.ABC):
         return
 
 
+class TorchExportStrictStrategy(CaptureStrategy):
+    def _capture(
+        self, model, args, kwargs, dynamic_shapes
+    ) -> torch.export.ExportedProgram:
+        with _patch_dynamo_unsupported_functions():
+            try:
+                return torch.export.export(
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=True,
+                )
+            except torch._dynamo.exc.UserError as exc:
+                # Refine the dynamic shapes based on the suggested fixes.
+                try:
+                    new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                        exc.msg, dynamic_shapes
+                    )
+                except Exception:
+                    # If the dynamic shapes cannot be refined, re-raise the exception.
+                    raise exc from None
+                return torch.export.export(
+                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=True
+                )
+
+    def _enter(self, model) -> None:
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`..."
+        )
+
+    def _success(self, model) -> None:
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ✅"
+        )
+
+    def _failure(self, model, e) -> None:
+        del e  # Unused
+        model_repr = _take_first_line(repr(model))
+        self._verbose_print(
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ❌"
+        )
+
+
 class TorchExportNonStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
@@ -224,5 +270,6 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
 
 CAPTURE_STRATEGIES = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
+    TorchExportStrictStrategy,
     TorchExportDraftExportStrategy,
 )

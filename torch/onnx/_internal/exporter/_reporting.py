@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass
 class ExportStatus:
+    # Whether torch.export.export(..., strict=True) succeeds
+    torch_export_strict: bool | None = None
     # Whether torch.export.export(..., strict=False) succeeds
     torch_export_non_strict: bool | None = None
     # Whether torch.export._draft_export.draft_export() succeeds
@@ -44,6 +46,7 @@ def _format_export_status(status: ExportStatus) -> str:
     return (
         f"```\n"
         f"{_status_emoji(status.torch_export_non_strict)} Obtain model graph with `torch.export.export(..., strict=False)`\n"
+        f"{_status_emoji(status.torch_export_strict)} Obtain model graph with `torch.export.export(..., strict=True)`\n"
         f"{_status_emoji(status.torch_export_draft_export)} Obtain model graph with `torch.export._draft_export.draft_export`\n"
         f"{_status_emoji(status.decomposition)} Decompose operators for ONNX compatibility\n"
         f"{_status_emoji(status.onnx_translation)} Translate the graph into ONNX\n"
@@ -74,7 +77,11 @@ def _format_exported_program(exported_program: torch.export.ExportedProgram) -> 
 
 def construct_report_file_name(timestamp: str, status: ExportStatus) -> str:
     # Status could be None. So we need to check for False explicitly.
-    if not (status.torch_export_non_strict or status.torch_export_draft_export):
+    if not (
+        status.torch_export_non_strict
+        or status.torch_export_strict
+        or status.torch_export_draft_export
+    ):
         # All strategies failed
         postfix = "pt_export"
     elif status.decomposition is False:
@@ -88,7 +95,8 @@ def construct_report_file_name(timestamp: str, status: ExportStatus) -> str:
     elif status.output_accuracy is False:
         postfix = "accuracy"
     elif (
-        status.torch_export_non_strict is False
+        status.torch_export_strict is False
+        or status.torch_export_non_strict is False
         or status.torch_export_draft_export is False
     ):
         # Some strategies failed

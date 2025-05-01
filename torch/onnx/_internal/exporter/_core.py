@@ -1245,6 +1245,7 @@ def export(
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used.
         program = model
+        # torch.export.export has strict default to False
         export_status.torch_export_non_strict = True
     else:
         # Convert an nn.Module to an ExportedProgram
@@ -1263,6 +1264,8 @@ def export(
             # Record the status
             if strategy_class is _capture_strategies.TorchExportNonStrictStrategy:
                 export_status.torch_export_non_strict = result.success
+            elif strategy_class is _capture_strategies.TorchExportStrictStrategy:
+                export_status.torch_export_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
                 export_status.torch_export_draft_export = result.success
 
