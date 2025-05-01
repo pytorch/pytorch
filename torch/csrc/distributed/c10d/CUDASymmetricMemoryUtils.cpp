@@ -186,13 +186,6 @@ std::string IpcChannel::get_socket_name(int pid) {
   return oss.str();
 }
 
-void store_barrier(
-    const c10::intrusive_ptr<c10d::Store>& store,
-    int rank,
-    int world_size) {
-  store_all_gather(store, rank, world_size, 0);
-}
-
 void map_block(
     void** ptr,
     c10d::symmetric_memory::HandleType handle,
