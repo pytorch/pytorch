@@ -1060,11 +1060,8 @@ class ForeachTests(TestCase):
             [y.clone().detach().requires_grad_(False) for y in ref_inps[1]],
         )
 
-        # TODO: "Buffer mutation detected during lowering of aten.add_.Tensor. "
-        # After decomposing auto_functionalized, we're getting
-        # a subgraph with potential input mutations. It's safe to
-        # mutate the input because we're guaranteed mutated inputs
-        # will gets copied if they're used downstream.
+        # TODO: after decomposing auto_functionalized, we're getting
+        # a functional subgraph with an inlined epilogue.
         with self.assertRaisesRegex(
             torch._inductor.exc.InductorError,
             "Buffer mutation detected during lowering of aten.copy_.default",
