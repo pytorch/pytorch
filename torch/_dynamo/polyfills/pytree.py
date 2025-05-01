@@ -324,8 +324,8 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     def _is_pytreespec_instance(
         obj: Any, /
-    ) -> TypeIs[PyTreeSpec | python_pytree.PyTreeSpec]:
-        return isinstance(obj, (PyTreeSpec, python_pytree.PyTreeSpec))
+    ) -> TypeIs[PyTreeSpec | python_pytree.TreeSpec]:
+        return isinstance(obj, (PyTreeSpec, python_pytree.TreeSpec))
 
     @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_flatten,
