@@ -1496,8 +1496,11 @@ class OutputGraph(OutputGraphGuardsState):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+            compiled_fns = []
             with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm)
+                for specialization in backend_specializations
+                    modified_gm = specialize(gm, specialization)
+                    compiled_fns.append(self.call_user_compiler(modified_gm))
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
