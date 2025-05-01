@@ -1312,7 +1312,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.kernel_numel_expr.add((arg.inner, V.graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
-            self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
+            self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
