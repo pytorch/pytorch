@@ -87,6 +87,7 @@ from torch.utils.weak import TensorWeakRef
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator, Sequence
 
+    from torch._guards import CompileId
     from torch._inductor.utils import InputType
     from torch.types import _bool
 
@@ -392,6 +393,28 @@ def cudagraphify_impl(
     return deferred_cudagraphify
 
 
+@contextlib.contextmanager
+def dynamo_timed_cudagraph(
+    name: str,
+    compile_id: Optional[CompileId],
+    mode: Optional[CompilationMode],
+) -> Generator[Any, None, None]:
+    """
+    Makes usages of dynamo_timed in this file less verbose. NOTE: This CM sums
+    all durations into a single column in the dynamo_compile table. Use only if
+    you consider the timed region to be part of the runtime overhead associated
+    with the compiler.
+    """
+    with dynamo_timed(
+        name,
+        log_pt2_compile_event=True,
+        compile_id=compile_id,
+        is_backward=mode == CompilationMode.BACKWARD,
+        dynamo_compile_column_us="runtime_cudagraphify_time_us",
+    ):
+        yield
+
+
 def cudagraphify(
     model: ModelType,
     inputs: list[InputType],
@@ -404,14 +427,17 @@ def cudagraphify(
     constants: tuple[torch.Tensor, ...] = (),
     placeholders: tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: tuple[int, ...] = (),
+    compile_id: Optional[CompileId] = None,
 ) -> tuple[ModelType, OutputType]:
-    manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
     mode = (
         CompilationMode.BACKWARD
         if is_backward
         else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
     )
+
+    with dynamo_timed_cudagraph("cudagraphify.get_container", compile_id, mode):
+        manager = get_container(device_index).get_tree_manager()
 
     return manager.add_function(
         model,
@@ -422,6 +448,7 @@ def cudagraphify(
         constants,
         placeholders,
         mutated_input_idxs,
+        compile_id,
     )
 
 
@@ -771,6 +798,8 @@ class CUDAGraphNode:
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
+        mode: Optional[CompilationMode],
+        compile_id: Optional[CompileId],
     ) -> None:
         assert isinstance(inputs, (list, tuple))
 
@@ -980,9 +1009,10 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        self.recording_outputs: Optional[OutputType] = self._record(
-            wrapped_function.model, recording_inputs
-        )
+        with dynamo_timed_cudagraph("CUDAGraphNode.record", compile_id, mode):
+            self.recording_outputs: Optional[OutputType] = self._record(
+                wrapped_function.model, recording_inputs
+            )
         self.outputs_metadata: OutputList[Union[dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -1761,6 +1791,7 @@ def check_memory_pool(
     # at this point we are past the fast-path. we have seen rare cases where a dead tensor is dead,
     # but hasn't been gc'd yet, and gives false positive for allocated_not_in_live_storages
     gc.collect()
+    torch.cuda.synchronize()
 
     segments = get_cudagraph_segments(pool_id)
 
@@ -1924,6 +1955,7 @@ class CUDAGraphTreeManager:
         self.debug_checkpointing_counter = 0
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
+        self.id_to_compile_id: dict[FunctionID, Optional[CompileId]] = {}
 
         # Note: [Backward Generation Handling]
         # We generally perform a sequence of forward executions followed by backward executions.
@@ -1953,6 +1985,7 @@ class CUDAGraphTreeManager:
     def run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
         self.mode = self.id_to_mode[function_id]
+        self.compile_id = self.id_to_compile_id[function_id]
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
@@ -2057,13 +2090,7 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            with dynamo_timed(
-                "CUDAGraphTreeManager.run_eager",
-                log_pt2_compile_event=True,
-            ):
-                out = self.run_eager(new_inputs, function_id)
-
-            return out
+            return self.run_eager(new_inputs, function_id)
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2129,13 +2156,7 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        with dynamo_timed(
-            "CUDAGraphTreeManager.record_function",
-            log_pt2_compile_event=True,
-        ):
-            out = self.record_function(new_inputs, function_id)
-
-        return out
+        return self.record_function(new_inputs, function_id)
 
     def shutdown(self) -> None:
         """
@@ -2178,6 +2199,8 @@ class CUDAGraphTreeManager:
             self.device_index,
             self.ids_to_stack_traces[function_id],
             self.stream,
+            self.mode,
+            self.compile_id,
         )
         if self.current_node is None:
             self.roots[function_id].append(node)
@@ -2243,6 +2266,7 @@ class CUDAGraphTreeManager:
         constants: tuple[torch.Tensor, ...],
         placeholders: tuple[PlaceholderInfo, ...],
         mutated_input_idxs: tuple[int, ...],
+        compile_id: Optional[CompileId],
     ) -> tuple[
         ModelType,
         OutputType,
@@ -2258,6 +2282,7 @@ class CUDAGraphTreeManager:
             mutated_input_idxs,
         )
         self.id_to_mode[id] = mode
+        self.id_to_compile_id[id] = compile_id
         fn = functools.partial(self.run, function_id=id)
 
         # container needs to set clean up when fn dies

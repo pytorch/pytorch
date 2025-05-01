@@ -109,9 +109,9 @@ def _get_dedup_subgraphs(matches: dict[str, _MatchResult]) -> dict[str, list[Nod
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
-    matches_items_reversed: list[tuple[str, _MatchResult]] = []
-    for name, cur_match in matches.items():
-        matches_items_reversed.insert(0, (name, cur_match))
+    matches_items_reversed: list[tuple[str, _MatchResult]] = list(
+        reversed(matches.items())
+    )
 
     # Note: the order is important.  `matches` currently provides the matches
     # in reverse order.  We would like to process the matches in non-reverse

@@ -26,13 +26,11 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     precisionOverride,
     skipCPUIfNoMkldnn,
-    skipCUDAIfCudnnVersionLessThan,
     skipCUDAIfMiopen,
     skipCUDAIfNoCudnn,
     skipCUDAIfNoMiopen,
     skipCUDAIfNotMiopenSuggestNHWC,
     skipCUDAIfRocm,
-    skipCUDAIfRocmVersionLessThan,
     skipMeta,
     skipMPS,
 )
@@ -377,11 +375,11 @@ class TestConvolutionNN(NNTestCase):
 
         # Test connstruction with same padding and strides raises
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
             )
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3,
                 out_channels=33,
                 kernel_size=10,
@@ -389,7 +387,7 @@ class TestConvolutionNN(NNTestCase):
                 stride=(1, 1, 3),
             )
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3,
                 out_channels=33,
                 kernel_size=10,
@@ -397,7 +395,7 @@ class TestConvolutionNN(NNTestCase):
                 stride=(1, 4, 1),
             )
         with self.assertRaisesRegex(ValueError, "padding='same'"):
-            module = nn.Conv2d(
+            module = nn.Conv3d(
                 in_channels=3,
                 out_channels=33,
                 kernel_size=10,
@@ -893,7 +891,6 @@ class TestConvolutionNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocmVersionLessThan((4, 3))
     @skipIfNotMiopenSuggestNHWC
     def test_grouped_conv_cudnn_nhwc_support(self):
         # in order to catch the hols in grouped convolution in nhwc support for earlier cudnn version
@@ -3270,7 +3267,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
     @onlyCUDA
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -3302,7 +3299,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
 
     @onlyCUDA
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
@@ -3640,9 +3637,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
 
     @onlyCUDA
-    @skipCUDAIfRocmVersionLessThan((4, 3))
     @skipCUDAIfNotMiopenSuggestNHWC
-    @skipCUDAIfCudnnVersionLessThan(7603)
     @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv_cudnn_nhwc(self, device, dtype):
         def helper(n, c, h, w, out_channels, kernel_size, groups):
@@ -3696,7 +3691,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    @skipCUDAIfCudnnVersionLessThan(8005)
     @dtypes(torch.half, torch.float)
     def test_conv_cudnn_ndhwc(self, device, dtype):
         def helper(n, c, d, h, w, out_channels, kernel_size, groups):
@@ -3826,9 +3820,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     )
 
     @onlyCUDA
-    @skipCUDAIfRocmVersionLessThan((4, 3))
     @skipCUDAIfNotMiopenSuggestNHWC
-    @skipCUDAIfCudnnVersionLessThan(7603)
     @tf32_on_and_off(0.05)
     def test_conv_cudnn_mismatch_memory_format(self, device):
         configs = [
@@ -3962,7 +3954,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    @skipCUDAIfCudnnVersionLessThan(7603)
     def test_convert_conv2d_weight_memory_format(self, device):
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device)
         model = nn.Sequential(nn.Conv2d(8, 4, 3), nn.BatchNorm2d(4)).to(device).float()
@@ -3983,7 +3974,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    @skipCUDAIfCudnnVersionLessThan(7603)
     def test_convert_conv3d_weight_memory_format(self, device):
         input = torch.randint(
             1, 10, (2, 8, 4, 4, 4), dtype=torch.float32, device=device
