@@ -1215,6 +1215,17 @@ def compute_unbacked_bindings(
     return symbol_to_path
 
 
+def _log_suppressed_dde(a: SymBool, assumed_value: bool) -> None:
+    sloc, extra = a.node.shape_env._get_stack_summary(True)
+    log.info(
+        "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
+        a,
+        assumed_value,
+        sloc,
+        extra,
+    )
+
+
 # The following two functions are common utilities used while defining unbacked semantics
 # of various framework code. Those would be used in situations you prefer to guard and know
 # the result of the expression over not guarding, but in case you hit a data dependent error
@@ -1243,6 +1254,7 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
         try:
             return guard_bool(a)
         except GuardOnDataDependentSymNode:
+            _log_suppressed_dde(a, default)
             return default
 
 
@@ -5175,8 +5187,9 @@ class ShapeEnv:
                         source, constraint
                     )
                     msg = (
-                        f"Not all values of {var_with_range} are valid because "
-                        f"{self._debug_name(source)} was inferred to be a constant ({val})."
+                        f"You marked {self._debug_name(source)} as dynamic but your code "
+                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
+                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg
