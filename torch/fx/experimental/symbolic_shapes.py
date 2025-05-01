@@ -1575,7 +1575,7 @@ def expect_true(
             if frame is None:
                 break
             frame = frame.f_back
-        file = (frame.f_code.co_filename if frame else "",)
+        file = frame.f_code.co_filename if frame else ""
         line = frame.f_lineno if frame else 0
 
         # c++ symnode does not supprot receiving a lambda, so we do not call a.node.expect_true on the symnode.
