@@ -63,7 +63,7 @@ static c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 }
 
 template <typename Func>
-inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
+inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   if (key[0] != '\0') {
     return torch::dispatch(
         c10::parseDispatchKey(key), std::forward<Func>(raw_f));
@@ -771,7 +771,8 @@ void initDispatchBindings(PyObject* module) {
             return self.add(k);
           })
       .def("has", &c10::DispatchKeySet::has)
-      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
+      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); })
+      .def_static("from_raw_repr", &c10::DispatchKeySet::from_raw_repr);
 
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);

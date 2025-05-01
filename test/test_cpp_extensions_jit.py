@@ -180,7 +180,9 @@ class TestCppExtensionJIT(common.TestCase):
                 )
 
             actual_arches = sorted(re.findall(r"sm_\d+", output))
-            expected_arches = sorted(["sm_" + xx for xx in expected_values])
+            expected_arches = sorted(
+                ["sm_" + xx.replace("121", "120") for xx in expected_values]
+            )
             self.assertEqual(
                 actual_arches,
                 expected_arches,
@@ -1123,6 +1125,45 @@ class TestCppExtensionJIT(common.TestCase):
         if check_compiler_is_gcc(compiler):
             self.assertEqual(pch_exist, True)
             self.assertEqual(signature_exist, True)
+
+    def test_aoti_torch_call_dispatcher(self):
+        source = """
+        #include <torch/csrc/inductor/aoti_runtime/utils.h>
+        #include <torch/csrc/inductor/aoti_torch/utils.h>
+        #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+        #include <torch/csrc/stable/library.h>
+
+        using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
+
+        at::Tensor my_abs(at::Tensor x) {
+        StableIValue stack[1];
+        RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
+        stack[0] = from(raii.release());
+        aoti_torch_call_dispatcher("aten::abs", "", stack);
+        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        return *reinterpret_cast<at::Tensor*>(res.release());
+        }
+
+        at::Tensor my_floor(at::Tensor x) {
+        StableIValue stack[1];
+        RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
+        stack[0] = from(raii.release());
+        aoti_torch_call_dispatcher("aten::floor", "", stack);
+        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        return *reinterpret_cast<at::Tensor*>(res.release());
+        }
+        """
+        module = torch.utils.cpp_extension.load_inline(
+            name="inline_extension_using_shim_dispatcher",
+            cpp_sources=[source],
+            functions=["my_abs", "my_floor"],
+        )
+
+        t = torch.rand(2, 3) - 1.0
+        floor_t = module.my_floor(t)
+        abs_t = module.my_abs(t)
+        self.assertEqual(abs_t, torch.abs(t))
+        self.assertEqual(floor_t, torch.floor(t))
 
 
 if __name__ == "__main__":
