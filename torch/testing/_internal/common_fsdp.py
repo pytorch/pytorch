@@ -1283,10 +1283,10 @@ class FSDPTest(MultiProcessTestCase):
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
-                assert (
-                    loss.dtype == torch.float32
-                ), "loss data type should be float32, as the original \
+                assert loss.dtype == torch.float32, (
+                    "loss data type should be float32, as the original \
                     parameter data type is float32."
+                )
             else:
                 if use_pure_fp16:
                     self.assertEqual(loss.dtype, torch.float16)
@@ -1352,9 +1352,9 @@ class FSDPTest(MultiProcessTestCase):
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
-        assert (
-            fsdp_init_mode != FSDPInitMode.NO_FSDP
-        ), "Expects an FSDP init mode that wraps with FSDP"
+        assert fsdp_init_mode != FSDPInitMode.NO_FSDP, (
+            "Expects an FSDP init mode that wraps with FSDP"
+        )
         if init_kwargs is None:
             init_kwargs = {}
         lr = 1e-2
