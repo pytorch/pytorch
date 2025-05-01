@@ -72,7 +72,13 @@ void binary_op_kernel(const std::string func_name,
                   .allow_cpu_scalars(true)
                   .build();
 
-  lib.exec_binary_kernel(iter, func_name, alpha);
+  if (iter.is_cpu_scalar(1)) {
+    lib.exec_binary_scalar_kernel(iter, func_name, 0, alpha);
+  } else if (iter.is_cpu_scalar(2)) {
+    lib.exec_binary_scalar_kernel(iter, func_name, 1, alpha);
+  } else {
+    lib.exec_binary_kernel(iter, func_name, alpha);
+  }
 }
 
 } // namespace mps

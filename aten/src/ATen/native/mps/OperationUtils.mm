@@ -1023,6 +1023,9 @@ void MetalShaderLibrary::exec_binary_scalar_kernel(TensorIteratorBase& iter,
                                                    const std::string& name,
                                                    const int64_t scalar_idx,
                                                    std::optional<c10::Scalar> alpha) {
+  TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
+  TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+
   Scalar other = iter.input(scalar_idx).item();
   Tensor input = iter.input(1 - scalar_idx);
   Tensor out = iter.output();
@@ -1095,14 +1098,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             std::optional<c10::Scalar> alpha) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
-
-  if (iter.is_cpu_scalar(1)) {
-    exec_binary_scalar_kernel(iter, name, 0, alpha);
-    return;
-  } else if (iter.is_cpu_scalar(2)) {
-    exec_binary_scalar_kernel(iter, name, 1, alpha);
-    return;
-  }
 
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
