@@ -341,6 +341,9 @@ reorder_for_compute_comm_overlap_passes: list[
     "raise_comms",
 ]
 
+# Maximum number of positions to advance a given collective, unlimited by default
+reorder_prefetch_limit: Optional[int] = None
+
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
@@ -1004,6 +1007,12 @@ class cpp:
     # computing resource. We set this default to False to avoid regressions. User and
     # enable this feature by their need.
     enable_concat_linear = False
+
+    # Whether to use decomposed tanh for cpu device
+    # Disable by default due to https://github.com/pytorch/pytorch/issues/148241
+    use_decompose_tanh = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_DECOMPOSE_TANH", "0") == "1"
+    )
 
 
 # config specific to codegen/triton.py
