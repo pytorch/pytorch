@@ -195,7 +195,7 @@ def run(cnt):
         self.assertTrue("hash(390fe689)" in state)
         self.assertTrue("/example.py:4:func:" in state)
         self.assertTrue(" L['x']: tensor size=[?] stride=[1]" in state)
-        # We should coompile this only once due to PGO.
+        # We should compile this only once due to PGO.
         cnts.clear()
         write_load_and_run(path2)
         self.assertEqual(cnts.frame_count, 1)
