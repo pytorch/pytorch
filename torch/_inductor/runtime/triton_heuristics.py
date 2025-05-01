@@ -73,6 +73,7 @@ from .triton_compat import (
     GPUTarget,
     HAS_WARP_SPEC,
     KernelInterface,
+    knobs,
     OutOfResources,
     PTXASError,
     triton,
@@ -478,7 +479,7 @@ class CachingAutotuner(KernelInterface):
                 try:
                     launchers.append(result.make_launcher())
 
-                except (OutOfResources, PTXASError) as e:
+                except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
                     exc = e
         if len(launchers) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
@@ -1274,7 +1275,10 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
-        self.kernel.load_kernel(self.compile_meta.get("device", 0))
+        device = self.compile_meta.get("device", 0)
+        if device is None:
+            device = 0
+        self.kernel.load_kernel(device)
         scope = {
             "runner": self.kernel.run,
         }
@@ -1420,11 +1424,18 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
+        if knobs is None:
+            launch_enter = binary.__class__.launch_enter_hook
+            launch_exit = binary.__class__.launch_exit_hook
+        else:
+            launch_enter = knobs.runtime.launch_enter_hook
+            launch_exit = knobs.runtime.launch_exit_hook
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.__class__.launch_enter_hook,
-            "launch_exit_hook": binary.__class__.launch_exit_hook,
+            "launch_enter_hook": launch_enter,
+            "launch_exit_hook": launch_exit,
             "metadata": (
                 binary.packed_metadata
                 if hasattr(binary, "packed_metadata")
@@ -1469,7 +1480,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 "metadata",
                 *call_args,
             ]
-        else:  # args after CompiledKernel.launch_metadata: https://github.com/openai/triton/pull/3492
+        else:  # args after CompiledKernel.launch_metadata: https://github.com/triton-lang/triton/pull/3492
             # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
             # `bin.launch_metadata` is relatively expensive, and returns None unless a
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
