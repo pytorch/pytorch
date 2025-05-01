@@ -29,6 +29,8 @@
 #if !defined(_MSC_VER)
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/syscall.h>
+#define gettid() syscall(SYS_gettid)
 #elif defined(_MSC_VER)
 #include <c10/util/win32-headers.h>
 #endif
