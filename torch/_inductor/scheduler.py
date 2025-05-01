@@ -36,6 +36,7 @@ from torch.utils._triton import has_triton
 from . import comms, config, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
+from .codegen.subgraph import SubgraphChoiceCaller
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
@@ -2851,8 +2852,10 @@ class Scheduler:
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
             ):
-                if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+    
+                if not isinstance(choice, SubgraphChoiceCaller):
                     continue
+
 
                 # For prologue fusion we check if the underlying template of the choice
                 # supports all allowed prologue inputs. If not, we skip this choice in
@@ -2872,9 +2875,31 @@ class Scheduler:
                 triton_choices += 1
                 if triton_choices > config.max_epilogue_benchmarked_choices:
                     break
+                
 
-                with multi_node.swap_as_triton_caller(choice):
-                    future_choices.append((choice, *compile_kernel(node_list_fused)))
+                # TRYING TO HACK DecomposeK + Relu
+                ### node1 is decomposeK, which is aten::bmm + sum + .to()
+                ### last two (sum + .to()) are fused
+                #
+                ### node2 is relu + le
+                ### by default fused
+                #
+                ### I try to unwrap both and replace the MultiTemplate buffer of decomposeK
+                ### and try to just fuse the reduction + pointwise ops
+                subgraph_choice = node1.node.get_min_choice()[0]
+                graph_lowering = subgraph_choice.graph_lowering
+
+                for buffer in graph_lowering.buffers:
+                    V.graph.name_to_buffer[buffer.name] = buffer
+                    self.name_to_buf[buffer.name] = buffer
+
+                subgraph_nodes = graph_lowering.scheduler.nodes
+                
+                # First is decompose_k, second is fused sum + .to()
+                fusable_subgraph_nodes =  subgraph_nodes[1].get_nodes()
+                node_list_fused = [*fusable_subgraph_nodes, *node_list_fused[1:]]
+                # with multi_node.swap_as_triton_caller(choice):
+                future_choices.append((choice, *compile_kernel(node_list_fused)))
 
             if len(future_choices) == 0:
                 return False

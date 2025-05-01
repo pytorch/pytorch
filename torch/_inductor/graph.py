@@ -898,8 +898,11 @@ class GraphLowering(torch.fx.Interpreter):
         op.operation_name = name
         return name
 
-    def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
-        name = self.qualify_name(f"buf{len(self.buffers)}")
+    def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False, qualify_name: bool = True) -> str:
+        if qualify_name:
+            name = self.qualify_name(f"buf{len(self.buffers)}")
+        else:
+            name = buffer.name
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         device = buffer.get_device()
