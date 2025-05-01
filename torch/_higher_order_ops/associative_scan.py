@@ -80,9 +80,9 @@ class AssociativeScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(
-            additional_inputs, (tuple, list)
-        ), "additional_inputs must be a tuple."
+        assert isinstance(additional_inputs, (tuple, list)), (
+            "additional_inputs must be a tuple."
+        )
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
 
@@ -129,6 +129,7 @@ def associative_scan(
 
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
+
 
         cumsum = associative_scan(add, x, dim)
 
@@ -368,9 +369,9 @@ def trace_associative_scan(
             outputs = node.args[0]
 
     assert outputs is not None
-    assert len(outputs) == len(
-        xs
-    ), f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    assert len(outputs) == len(xs), (
+        f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    )
 
     xs_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
         first_slice_copy(x) for x in xs

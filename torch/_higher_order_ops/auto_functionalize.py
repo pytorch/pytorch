@@ -463,7 +463,8 @@ def do_auto_functionalize(
         )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
+            op,
+            **unwrapped_kwargs,  # type: ignore[arg-type]
         )
 
     # List of the name of args that get mutated (according to the schema)
@@ -604,7 +605,8 @@ def do_auto_functionalize_v2(
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
+            op,
+            **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped),  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, tuple[Any]] = (

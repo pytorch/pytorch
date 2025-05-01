@@ -496,9 +496,9 @@ class FakeTensorConverter:
         pytype: Optional[type[torch.Tensor]] = None,
         dispatch_keys: Optional[torch.DispatchKeySet] = None,
     ) -> FakeTensor:
-        assert (
-            t.device.type == "meta"
-        ), f"tensor's device must be `meta`, got {t.device.type} instead"
+        assert t.device.type == "meta", (
+            f"tensor's device must be `meta`, got {t.device.type} instead"
+        )
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
@@ -1523,7 +1523,10 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.dynamic_output_shape in func.tags:
             if func is aten.index.Tensor:
                 _, new_kwargs = normalize_function(  # type: ignore[misc]
-                    func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                    func,
+                    args=args,
+                    kwargs=kwargs,
+                    normalize_to_only_use_kwargs=True,  # type: ignore[arg-type]
                 )
                 for index in new_kwargs["indices"]:
                     # index calls nonzero for bool or int8 tensors, and
@@ -1871,7 +1874,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if isinstance(func, torch._ops.OpOverload) and func.is_view:
             # For view ops, the storage should be the same as the tensor input.
-            view_arg = args[cast(int, entry.view_idx)]
+            view_arg = args[cast("int", entry.view_idx)]
             assert isinstance(view_arg, FakeTensor)
             storage = view_arg.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
@@ -2057,9 +2060,7 @@ class FakeTensorMode(TorchDispatchMode):
                 try:
                     _check_fake_real_vals(s_fake, s_real)
                 except MetadataMismatchError as exc:
-                    if (
-                        torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                    ):
+                    if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
                         dtrace_structured(
                             "mismatched_fake_kernel",
                             metadata_fn=lambda: {
@@ -2232,9 +2233,9 @@ class FakeTensorMode(TorchDispatchMode):
             and not flat_arg_fake_tensors
             and not device_conversion_skip_const_prop
         ):
-            assert all(
-                t.constant is not None for t in flat_arg_fake_tensors
-            ), f"{func} should not have fake inputs without constants"
+            assert all(t.constant is not None for t in flat_arg_fake_tensors), (
+                f"{func} should not have fake inputs without constants"
+            )
             const_flat_args = [
                 a.constant if self.is_our_fake(a) else a for a in flat_args
             ]
@@ -2459,9 +2460,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
-                if (
-                    not torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                ):
+                if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
                     self._maybe_infer_fake_kernel_from_pytree_out(
                         func,
                         (args, kwargs),
@@ -2763,7 +2762,7 @@ class FakeTensorMode(TorchDispatchMode):
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
-                return cast(T, e)
+                return cast("T", e)
             elif converter is not None:
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
@@ -2845,7 +2844,10 @@ class FakeTensorMode(TorchDispatchMode):
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
             _, new_kwargs = normalize_function(  # type: ignore[misc]
-                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                func,
+                args=args,  # type: ignore[arg-type]
+                kwargs=kwargs,  # type: ignore[arg-type]
+                normalize_to_only_use_kwargs=True,
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"
@@ -2869,9 +2871,9 @@ class FakeTensorMode(TorchDispatchMode):
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
-            assert (
-                symbolic_context is None
-            ), "cannot set both static_shapes and symbolic_context"
+            assert symbolic_context is None, (
+                "cannot set both static_shapes and symbolic_context"
+            )
             shape_env = None
         return self.fake_tensor_converter.from_real_tensor(
             self,
@@ -2974,8 +2976,8 @@ class FakeCopyMode(TorchFunctionMode):
             )
         elif func == Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
-            tensor = cast(Tensor, args[0])
-            memo = cast(dict[int, FakeTensor], args[1])
+            tensor = cast("Tensor", args[0])
+            memo = cast("dict[int, FakeTensor]", args[1])
 
             if id(tensor) in memo:
                 return memo[id(tensor)]
@@ -3028,13 +3030,13 @@ def _check_for_subclass_arg(x: object) -> bool:
 _DISPATCH_META_HANDLERS = {
     torch.ops.prim.device.default: _device_handler,
     torch.ops.aten.size.default: lambda args: tuple(
-        int(s) for s in cast(Tensor, args[0]).size()
+        int(s) for s in cast("Tensor", args[0]).size()
     ),
     torch.ops.aten.stride.default: lambda args: tuple(
-        int(s) for s in cast(Tensor, args[0]).stride()
+        int(s) for s in cast("Tensor", args[0]).stride()
     ),
     torch.ops.aten.storage_offset.default: lambda args: int(
-        cast(Tensor, args[0]).storage_offset()
+        cast("Tensor", args[0]).storage_offset()
     ),
 }
 

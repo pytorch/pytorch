@@ -37,10 +37,13 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         def __init__(self):
             return super().__init__("invoke_quant")
 
+
     invoke_quant = InvokeQuant()
+
 
     def g(x):
         return x.sin().cos()
+
 
     @torch.compile(backend="aot_eager")
     def f(x):
@@ -103,7 +106,10 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
         out = self(subgraph, *operands, **kwargs)
         return track_tensor_tree(
-            out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
+            out,
+            out_proxy,
+            constant=None,
+            tracer=proxy_mode.tracer,  # type: ignore[arg-type]
         )
 
     def _call_FakeTensorMode(self, mode, subgraph, *operands, **kwargs):
@@ -127,9 +133,9 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
         subgraph, *operands = args
 
-        assert isinstance(
-            subgraph, torch.fx.GraphModule
-        ), f"NYI non GraphModule subgraph got {subgraph}"
+        assert isinstance(subgraph, torch.fx.GraphModule), (
+            f"NYI non GraphModule subgraph got {subgraph}"
+        )
 
         fake_args = [
             ph.meta["example_value"]
@@ -199,7 +205,11 @@ class BaseHOPFunction(torch.autograd.Function):
         kwargs = ctx.kwargs
 
         # TODO: Something special needs to happen with min cut partitioner
-        with suspend_functionalization(), disable_functional_mode(), torch.enable_grad():
+        with (
+            suspend_functionalization(),
+            disable_functional_mode(),
+            torch.enable_grad(),
+        ):
             with disable_proxy_modes_tracing():
                 from .invoke_subgraph import create_fw_bw_graph
                 from .utils import _from_fun

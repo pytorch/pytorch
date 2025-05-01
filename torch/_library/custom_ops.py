@@ -28,8 +28,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Callable[[Callable[..., object]], "CustomOpDef"]:
-    ...
+) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
 @overload
@@ -41,8 +40,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> "CustomOpDef":
-    ...
+) -> "CustomOpDef": ...
 
 
 @exposed_in("torch.library")
@@ -448,10 +446,10 @@ class CustomOpDef:
             >>>
             >>> @nonzero.register_fake
             >>> def _(x):
-            >>>     # Number of nonzero-elements is data-dependent.
-            >>>     # Since we cannot peek at the data in an abstract impl,
-            >>>     # we use the ctx object to construct a new symint that
-            >>>     # represents the data-dependent size.
+            >>> # Number of nonzero-elements is data-dependent.
+            >>> # Since we cannot peek at the data in an abstract impl,
+            >>> # we use the ctx object to construct a new symint that
+            >>> # represents the data-dependent size.
             >>>     ctx = torch.library.get_ctx()
             >>>     nnz = ctx.new_dynamic_size()
             >>>     shape = [nnz, x.dim()]
@@ -561,7 +559,7 @@ class CustomOpDef:
             >>>
             >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_sin(x)
-            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+            >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, x.cos())
             >>>
             >>> # Example with a keyword-only arg
@@ -581,7 +579,7 @@ class CustomOpDef:
             >>>
             >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_mul(x, val=3.14)
-            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+            >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
         """
@@ -919,7 +917,7 @@ def get_library_allowing_overwrite(
 
 
 def _maybe_get_opdef(
-    op: Union[CustomOpDef, _ops.OpOverload, str]
+    op: Union[CustomOpDef, _ops.OpOverload, str],
 ) -> Optional[CustomOpDef]:
     if isinstance(op, CustomOpDef):
         return op

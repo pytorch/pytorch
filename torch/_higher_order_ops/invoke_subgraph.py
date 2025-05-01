@@ -70,13 +70,13 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
-        assert identifier is None or isinstance(
-            identifier, str
-        ), "identifier must be a None or a string"
+        assert identifier is None or isinstance(identifier, str), (
+            "identifier must be a None or a string"
+        )
 
-        assert isinstance(
-            operands, (list, tuple)
-        ), f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
+        assert isinstance(operands, (list, tuple)), (
+            f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
+        )
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
         ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
@@ -101,7 +101,11 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+        with (
+            _set_compilation_env(),
+            torch._dynamo.utils.disable_cache_limit(),
+            _temp_remove_pre_dispatch_torch_function_mode(),
+        ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
                     backend = make_eager_backend_with_torch_function_mode(metadata_mode)
