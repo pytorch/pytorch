@@ -10,6 +10,7 @@ from typing import Callable, Optional
 import torch
 import torch._inductor.codegen.common as common
 import torch.utils._pytree as pytree
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.utils import same
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._inductor import config
@@ -354,6 +355,22 @@ class FxirTestCase(InductorTestCase):
         with open(output_filename) as f:
             output_code = f.read()
         self.assertIn("triton_kernel_wrapper_mutation", output_code)
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_subgraph_raises(self):
+        """
+        Test a model with subgraphs. This is not yet supported, so check that we get the
+        expected exception.
+        """
+
+        def foo(cond, x):
+            return torch.cond(cond, torch.cos, torch.sin, [x])
+
+        cond = torch.tensor([True], device=self.device)
+        x = torch.ones([2, 3], device=self.device)
+
+        with self.assertRaisesRegex(BackendCompilerFailed, "Subgraph"):
+            self._compile_and_check(foo, [cond, x])
 
 
 if __name__ == "__main__":

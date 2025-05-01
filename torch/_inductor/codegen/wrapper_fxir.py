@@ -118,6 +118,11 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         parent_wrapper: Optional[PythonWrapperCodegen],
         partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ) -> "WrapperFxCodegen":
+        if is_subgraph:
+            raise NotImplementedError(
+                "Subgraphs are not yet supported by FX conversion"
+            )
+
         # For derived backends, this could be a subclass.
         return cls()
 
