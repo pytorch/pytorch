@@ -1245,7 +1245,7 @@ def export(
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used.
         program = model
-        export_status.torch_export = True
+        export_status.torch_export_non_strict = True
     else:
         # Convert an nn.Module to an ExportedProgram
         # Try everything 🐰 (all paths for getting an ExportedProgram)
