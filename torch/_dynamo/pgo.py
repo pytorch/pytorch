@@ -12,14 +12,15 @@ and help Dynamo make better specialization decisions.
 from __future__ import annotations
 
 import base64
-import binascii
 import copy
 import dataclasses
 import enum
+import functools
 import logging
 import os
 import pickle
 import re
+import zlib
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
@@ -104,9 +105,16 @@ LOCK_TIMEOUT = 10
 # across attempts.  No need to have one mechanism to do everything.
 
 
-class CodeId:
-    _hash_cache: dict[str, str] = {}
+@functools.cache
+def _hash_containing_file(filepath: str) -> str:
+    with open(filepath, "rb") as file:
+        content = file.read()
+        crc32_value = zlib.crc32(content)
+        hash = format(crc32_value & 0xFFFFFFFF, "08x")
+        return hash
 
+
+class CodeId:
     def __init__(self, code: types.CodeType) -> None:
         self.filename: str = code.co_filename
         self.firstlineno: int = code.co_firstlineno
@@ -117,30 +125,20 @@ class CodeId:
         #
         # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
         # code state it will refer to the first seen file path.
-        self.file_hash = self._hash_containing_file()
+        self.file_hash = _hash_containing_file(self.filename)
 
     # Ensure if two CodeIds are the same, then they have the same hash by execluding filename.
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, CodeId):
             return False
         return (
-            self._hash_containing_file() == other._hash_containing_file()
+            self.file_hash == other.file_hash
             and self.firstlineno == other.firstlineno
             and self.name == other.name
         )
 
     def __hash__(self) -> int:
         return hash((self.file_hash, self.name, self.firstlineno))
-
-    def _hash_containing_file(self) -> str:
-        if self.filename not in CodeId._hash_cache:
-            with open(self.filename, "rb") as file:
-                content = file.read()
-                crc32_value = binascii.crc32(content)
-                hash = format(crc32_value & 0xFFFFFFFF, "08x")
-                CodeId._hash_cache[self.filename] = hash
-
-        return CodeId._hash_cache[self.filename]
 
     def __str__(self) -> str:
         return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
