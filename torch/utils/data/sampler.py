@@ -121,6 +121,11 @@ class SequentialSampler(Sampler[int]):
         return len(self.data_source)
 
 
+def init_generator():
+    seed = int(torch.empty((), dtype=torch.int64).random_())
+    return torch.Generator().manual_seed(seed)
+
+
 class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
 
@@ -167,7 +172,7 @@ class RandomSampler(Sampler[int]):
 
     def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
-        generator = self.init_generator()
+        generator = self.generator if self.generator is not None else init_generator()
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
@@ -186,14 +191,6 @@ class RandomSampler(Sampler[int]):
             yield from torch.randperm(n, generator=generator).tolist()[
                 : self.num_samples % n
             ]
-
-    def init_generator(self):
-        if self.generator is None:
-            seed = int(torch.empty((), dtype=torch.int64).random_())
-            generator = torch.Generator().manual_seed(seed)
-        else:
-            generator = self.generator
-        return generator
 
     def __len__(self) -> int:
         return self.num_samples
@@ -351,7 +348,7 @@ class BatchSampler(Sampler[list[int]]):
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
 
-class RandomBatchSampler(RandomSampler, BatchSampler):
+class RandomBatchSampler(Sampler):
     def __init__(
         self,
         data_source: Sized,
@@ -360,8 +357,15 @@ class RandomBatchSampler(RandomSampler, BatchSampler):
         replacement: bool = False,
         generator=None,
     ) -> None:
-        RandomSampler.__init__(self, data_source, replacement, None, generator)
-        BatchSampler.__init__(self, [], batch_size, drop_last)
+        # Validate parameters using init of RandomSampler and BatchSampler
+        RandomSampler(data_source, replacement, None, generator)
+        BatchSampler([], batch_size, drop_last)
+
+        self.data_source = data_source
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.replacement = replacement
+        self.generator = generator
 
         self.n_batches = len(self.data_source) // self.batch_size
         last_size = len(self.data_source) % self.batch_size
@@ -371,7 +375,7 @@ class RandomBatchSampler(RandomSampler, BatchSampler):
 
     def sample_indices(self) -> torch.Tensor:
         n = len(self.data_source)
-        generator = self.init_generator()
+        generator = self.generator if self.generator is not None else init_generator()
 
         if self.replacement:
             indices = torch.randint(high=n, size=(n,), dtype=torch.int64, generator=generator)
@@ -380,12 +384,12 @@ class RandomBatchSampler(RandomSampler, BatchSampler):
 
         return indices
 
-    def __iter__(self) -> Iterator[torch.Tensor]:
+    def __iter__(self) -> Iterator:
         indices = self.sample_indices()
 
         # Slicing is faster on list when batch size is small
         if self.batch_size < 16:
-            indices = indices.tolist()
+            indices = indices.tolist()  # type: ignore
 
         indices_batches = [
             indices[i : i + self.batch_size]
