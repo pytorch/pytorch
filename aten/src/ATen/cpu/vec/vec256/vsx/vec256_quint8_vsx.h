@@ -155,21 +155,27 @@ struct Vectorized<c10::quint8> {
     vfloat32 vecf1_3 = vec_float(veci7);
     vfloat32 scale_vec0 = scale.vec0();
     vfloat32 scale_vec1 = scale.vec1();
-    vfloat32 scale_zp_premul0 = scale_zp_premul.vec0();
-    vfloat32 scale_zp_premul1 = scale_zp_premul.vec1();
-    return {
-        Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_0, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_0, scale_zp_premul1)},
-        Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_1, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_1, scale_zp_premul1)},
-        Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_2, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_2, scale_zp_premul1)},
-        Vectorized<float>{
-            vec_madd(scale_vec0, vecf0_3, scale_zp_premul0),
-            vec_madd(scale_vec1, vecf1_3, scale_zp_premul1)}};
+
+    vfloat32 zero_point_vec0 = zero_point.vec0();
+    vfloat32 zero_point_vec1 = zero_point.vec1();
+
+    vfloat32 vec_substract_src_zp0_0 =  vec_sub(vecf0_0, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_0 =  vec_sub(vecf1_0, zero_point_vec1);
+    Vectorized<float> vf0_zp = {vec_mul(scale_vec0, vec_substract_src_zp0_0), vec_mul(scale_vec1, vec_substract_src_zp1_0)};
+
+    vfloat32 vec_substract_src_zp0_1 =  vec_sub(vecf0_1, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_1 =  vec_sub(vecf1_1, zero_point_vec1);
+    Vectorized<float> vf1_zp = {vec_mul(scale_vec0, vec_substract_src_zp0_1), vec_mul(scale_vec1, vec_substract_src_zp1_1)};
+
+    vfloat32 vec_substract_src_zp0_2 = vec_sub(vecf0_2, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_2 =  vec_sub(vecf1_2, zero_point_vec1);
+    Vectorized<float> vf2_zp = {vec_mul(scale_vec0, vec_substract_src_zp0_2), vec_mul(scale_vec1, vec_substract_src_zp1_2)};
+
+    vfloat32 vec_substract_src_zp0_3 = vec_sub(vecf0_3, zero_point_vec0);
+    vfloat32 vec_substract_src_zp1_3 =  vec_sub(vecf1_3, zero_point_vec1);
+    Vectorized<float> vf3_zp = {vec_mul(scale_vec0, vec_substract_src_zp0_3), vec_mul(scale_vec1, vec_substract_src_zp1_3)};
+
+    return {vf0_zp, vf1_zp, vf2_zp, vf3_zp};
   }
 
   float_vec_return_type C10_ALWAYS_INLINE dequantize(
@@ -214,21 +220,22 @@ struct Vectorized<c10::quint8> {
     vfloat32 vecf1_3 = vec_float(veci7);
     vfloat32 scale_vec0 = scale.vec0();
     vfloat32 scale_vec1 = scale.vec1();
+
     vfloat32 zero_point0 = zero_point.vec0();
     vfloat32 zero_point1 = zero_point.vec1();
     return {
-        Vectorized<float>{
-            (vecf0_0 - zero_point0) * scale_vec0,
-            (vecf1_0 - zero_point1) * scale_vec1},
-        Vectorized<float>{
-            (vecf0_1 - zero_point0) * scale_vec0,
-            (vecf1_1 - zero_point1) * scale_vec1},
-        Vectorized<float>{
-            (vecf0_2 - zero_point0) * scale_vec0,
-            (vecf1_2 - zero_point1) * scale_vec1},
-        Vectorized<float>{
-            (vecf0_3 - zero_point0) * scale_vec0,
-            (vecf1_3 - zero_point1) * scale_vec1}};
+    Vectorized<float>{
+        (vecf0_0 - zero_point0) * scale_vec0,
+        (vecf1_0 - zero_point1) * scale_vec1},
+    Vectorized<float>{
+        (vecf0_1 - zero_point0) * scale_vec0,
+        (vecf1_1 - zero_point1) * scale_vec1},
+    Vectorized<float>{
+        (vecf0_2 - zero_point0) * scale_vec0,
+        (vecf1_2 - zero_point1) * scale_vec1},
+    Vectorized<float>{
+        (vecf0_3 - zero_point0) * scale_vec0,
+        (vecf1_3 - zero_point1) * scale_vec1}};
   }
 
   static Vectorized<c10::quint8> quantize(
