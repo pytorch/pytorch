@@ -192,6 +192,26 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
+    def test_empty_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                return torch.matmul(x, self.w) + self.b
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+            # We should have 1 input, 1 output, 2 constants for the model.
+            check_str = "AOTInductorModelBase(1, 1, 2"
+            FileCheck().check_count(check_str, 1).run(code)
+
     def test_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -3008,8 +3028,8 @@ class AOTInductorTestsTemplate:
         if dynamic:
             dim0_xy = Dim("s0", min=2, max=1024)
             dynamic_shapes = {
-                "x": {0: dim0_xy, 1: None},
-                "y": {0: dim0_xy, 1: None},
+                "x": {0: dim0_xy},
+                "y": {0: dim0_xy},
             }
         example_inputs = (
             torch.randn(2, device=self.device),
