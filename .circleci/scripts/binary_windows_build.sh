@@ -4,14 +4,12 @@ set -eux -o pipefail
 source "${BINARY_ENV_FILE:-/c/w/env}"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
-export VC_YEAR=2019
-
 if [[ "$OS" != "windows-arm64" ]]; then
     export CUDA_VERSION="${DESIRED_CUDA/cu/}"
     export USE_SCCACHE=1
     export SCCACHE_BUCKET=ossci-compiler-cache
     export SCCACHE_IGNORE_SERVER_IO_ERROR=1
-    export VC_YEAR=2022
+    export VC_YEAR=2019
 fi
 
 if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
