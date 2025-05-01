@@ -1582,7 +1582,7 @@ class PythonWrapperCodegen(CodeGen):
         for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
-        def _verify_input_symbol(
+        def _verify_input_symbol_assignment(
             value: ir.TensorBox,
             bound_vars: OrderedSet[sympy.Symbol],
         ):
@@ -1590,12 +1590,12 @@ class PythonWrapperCodegen(CodeGen):
                 if not isinstance(expr, Expr) or isinstance(expr, sympy.Symbol):
                     continue
 
-                missing_symbols = [
+                undefined_symbols = [
                     sym for sym in expr.free_symbols if sym not in bound_vars
                 ]
-                if len(missing_symbols) > 0:
+                if len(undefined_symbols) > 0:
                     raise AssertionError(
-                        f"For {expr}, expected {missing_symbols} to have been codegen-ed."
+                        f"For {expr}, expected {undefined_symbols} to have been codegen-ed."
                     )
 
         # For inputs with size/strides which contain sympy expressions, we can
@@ -1604,7 +1604,7 @@ class PythonWrapperCodegen(CodeGen):
         for _, value in inputs:
             if not isinstance(value, ir.TensorBox):
                 continue
-            _verify_input_symbol(value, bound_vars)
+            _verify_input_symbol_assignment(value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
