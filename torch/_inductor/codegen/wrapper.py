@@ -813,6 +813,15 @@ class MultiOutputLine(WrapperLine):
         return converter._generate_multi_output
 
 
+@dataclasses.dataclass
+class SymbolicCallArgLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    arg: SymbolicCallArg
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._generate_symbolic_call_arg_helper(self.arg)
+
+
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -2165,7 +2174,7 @@ class PythonWrapperCodegen(CodeGen):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
             expr += f"_{suffix}"
-        self.writeline(f"{expr} = {pexpr(tree.numel)}")
+
         # We can get symbolic expressions here, like s0*64
         # It is fine to have them here, but we need to handle them correctly as their own type
         # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
@@ -2173,7 +2182,13 @@ class PythonWrapperCodegen(CodeGen):
         # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
-        return SymbolicCallArg(expr, tree.numel)
+        arg = SymbolicCallArg(expr, tree.numel)
+        self.writeline(SymbolicCallArgLine(self, arg))
+
+        return arg
+
+    def _generate_symbolic_call_arg_helper(self, arg: SymbolicCallArg) -> None:
+        self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
 
     def generate_workspace_allocation(self, ws: WorkspaceArg):
         name = ws.get_name()
