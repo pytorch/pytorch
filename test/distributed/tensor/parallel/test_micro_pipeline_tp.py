@@ -403,7 +403,7 @@ class MicroPipelineTPTest(TestCase):
 
     @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @parametrize("scatter_dim", [2])
+    @parametrize("scatter_dim", [0, 1, 2])
     @fresh_inductor_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
@@ -434,11 +434,11 @@ class MicroPipelineTPTest(TestCase):
             C = C.view(*orig_shape[:-1], C.shape[-1])
             return reduce_scatter_tensor(C, "sum", scatter_dim, group)
 
-        A = torch.rand(1, 16, 32, device="cuda").to(e4m3_type)
+        A = torch.rand(2, 16, 32, device="cuda").to(e4m3_type)
         B = torch.rand(64, 32, device="cuda").to(e4m3_type).T
 
         # A_scale = rowwise scales
-        A_scale = torch.full((1, 16, 1), 0.1, device="cuda")
+        A_scale = torch.full((2, 16, 1), 0.1, device="cuda")
 
         # B_scale = rowwise scales transposed for A @ B^T
         B_scale = torch.full((1, 64), 0.1, device="cuda")
