@@ -13,6 +13,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.autograd import grad
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.numbers import int_oo
@@ -2539,7 +2540,14 @@ def flex_attention_backward(*args, **kwargs):
     grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
 
     # # see NOTE:[TritonTemplates with multiple outputs]
-    grad_query = empty_like(query)
+    query_size = [Bq, Hq, seq_len_q, qk_head_dim]
+    grad_query_strides = infer_dense_strides(query_size, query.get_stride())
+    grad_query = empty_strided(
+        query_size,
+        stride=[sympy.sympify(s) for s in grad_query_strides],
+        dtype=query.get_dtype(),
+        device=query.get_device(),
+    )
 
     # Construct output layout with stride order matching value
     value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
