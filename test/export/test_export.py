@@ -775,6 +775,21 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
 
+    def test_unbacked_bincount(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.ones(u0, dtype=torch.int64)
+                y = torch.bincount(x, minlength=u1)
+                return y
+
+        m = Foo()
+        x = torch.tensor([20, 10])
+        ep = export(m, (x,))
+        self.assertTrue(torch.allclose(ep.module()(x), m(x)))
+        y = torch.tensor([5, 10])
+        self.assertTrue(torch.allclose(ep.module()(y), m(y)))
+
     @requires_gpu
     def test_export_custom_triton_kernel(self):
         @triton.jit
