@@ -31,6 +31,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         super().__init__(name, input_nodes, layout, description)
         self.gm = gm
         self.example_inputs = example_inputs
+        self.graph_lowering = None
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -66,6 +67,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func = mod.call
 
                 bm_func([*args])
+        
+        if self.graph_lowering is None:
+            self.graph_lowering = bm_graph_lowering
 
         return benchmarker.benchmark_gpu(lambda: bm_func([*args]))
 
