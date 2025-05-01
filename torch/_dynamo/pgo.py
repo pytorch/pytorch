@@ -12,6 +12,7 @@ and help Dynamo make better specialization decisions.
 from __future__ import annotations
 
 import base64
+import binascii
 import copy
 import dataclasses
 import enum
@@ -103,15 +104,46 @@ LOCK_TIMEOUT = 10
 # across attempts.  No need to have one mechanism to do everything.
 
 
-@dataclasses.dataclass(frozen=True)
 class CodeId:
-    filename: str
-    firstlineno: int
-    name: str
+    _hash_cache: dict[str, str] = {}
 
-    @staticmethod
-    def make(code: types.CodeType) -> CodeId:
-        return CodeId(code.co_filename, code.co_firstlineno, code.co_name)
+    def __init__(self, code: types.CodeType) -> None:
+        self.filename: str = code.co_filename
+        self.firstlineno: int = code.co_firstlineno
+        self.name: str = code.co_name
+        # When a job restart, the code can be copied to a different path than the previous attempt. In that case
+        # self.filename will have a different value,  we do not want to consider those differences. Instead we
+        # hash the content of the file and use it as an identifier of the file.
+        #
+        # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
+        # code state it will refer to the first seen file path.
+        self.file_hash = self._hash_containing_file()
+
+    # Ensure if two CodeIds are the same, then they have the same hash by execluding filename.
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CodeId):
+            return False
+        return (
+            self._hash_containing_file() == other._hash_containing_file()
+            and self.firstlineno == other.firstlineno
+            and self.name == other.name
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.file_hash, self.name, self.firstlineno))
+
+    def _hash_containing_file(self) -> str:
+        if self.filename not in CodeId._hash_cache:
+            with open(self.filename, "rb") as file:
+                content = file.read()
+                crc32_value = binascii.crc32(content)
+                hash = format(crc32_value & 0xFFFFFFFF, "08x")
+                CodeId._hash_cache[self.filename] = hash
+
+        return CodeId._hash_cache[self.filename]
+
+    def __str__(self) -> str:
+        return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
 
 
 @dataclasses.dataclass
@@ -322,8 +354,9 @@ def update_automatic_dynamic(
     *,
     is_unspecialized_nn_module: bool = False,
 ) -> FrameStateSizeEntry:
-    code_id = CodeId.make(tx.f_code)
+    code_id = CodeId(tx.f_code)
     frame_state = get_code_state()[code_id]
+    print
     is_update = name in frame_state.automatic_dynamic
     mut_entry = frame_state.automatic_dynamic[name]
     old_entry = copy.copy(mut_entry)
@@ -557,7 +590,7 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
 
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return "\n".join(
-        f"{k.filename}:{k.firstlineno}:{k.name}:\n"
+        f"{str(k)}:\n"
         + "\n".join(
             f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
         )
