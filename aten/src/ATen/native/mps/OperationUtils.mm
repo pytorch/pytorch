@@ -1023,7 +1023,6 @@ void MetalShaderLibrary::exec_binary_scalar_kernel(TensorIteratorBase& iter,
                                                    const std::string& name,
                                                    const int64_t scalar_idx,
                                                    std::optional<c10::Scalar> alpha) {
-
   Scalar other = iter.input(scalar_idx).item();
   Tensor input = iter.input(1 - scalar_idx);
   Tensor out = iter.output();
