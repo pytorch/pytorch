@@ -23,6 +23,7 @@ from ..virtualized import V
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
+    is_batch_stride_largest,
     mm_args,
     mm_config_kwargs,
     mm_options,
@@ -74,6 +75,8 @@ bmm_template = TritonTemplate(
     group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -192,8 +195,9 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    static_shape, is_nonzero = _is_static_problem(layout)
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+    _, is_nonzero = _is_static_problem(layout)
+    batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
+    if batch_stride_largest and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
