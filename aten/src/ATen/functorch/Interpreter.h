@@ -271,7 +271,7 @@ struct Interpreter {
         } else if constexpr (std::is_same_v<V, FunctionalizeInterpreterMeta>) {
           json_j["meta"] = {{"Functionalize", arg}};
         } else {
-          static_assert(false, "unknown variant case");
+          static_assert(false && sizeof(InterpreterMeta), "unknown variant case");
         }
     }, json_t.meta_);
   }
