@@ -106,7 +106,7 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
     set PYTHON_PREFIX=%%v
 
 
-    set "PYTHON_LIB_PATH=%CD%\Python\Library\lib"
+    set "PYTHON_LIB_PATH=%CD%\Python\Library\bin"
     if not "%ADDITIONAL_PATH%" == "" (
         set "PATH=%ADDITIONAL_PATH%;%CONDA_HOME%\envs\%%v;%CONDA_HOME%\envs\%%v\scripts;%CONDA_HOME%\envs\%%v\Library\bin;%ORIG_PATH%"
     ) else (
