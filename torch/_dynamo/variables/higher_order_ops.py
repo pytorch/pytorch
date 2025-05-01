@@ -1927,10 +1927,8 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.supports_input_mutation = True
-        self.supports_aliasing = True
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -3105,10 +3103,8 @@ def maybe_positional_arg_names(func):
 
 
 class BaseHOPVariable(WrapHigherOrderVariable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.supports_input_mutation = False
-        self.supports_aliasing = False
+    supports_input_mutation = False
+    supports_aliasing = False
 
     def python_type(self):
         return type(self.value)
@@ -3144,10 +3140,8 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.supports_input_mutation = False
-        self.supports_aliasing = False
+    supports_input_mutation = False
+    supports_aliasing = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
