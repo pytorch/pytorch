@@ -13,10 +13,13 @@
 
 namespace c10d::nvshmem_extension {
 
-const std::string store_comm_prefix = "nvshmem_extension";
+using c10d::symmetric_memory::StoreExchange;
+static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
 #define THREADS_PER_BLOCK 512
 
+// Bootstrap based on user's setting for NCCL
+// Long term, this may be a bit unclean; short term, it improves UX
 void maybe_initialize_env_vars() {
   auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
   auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
@@ -56,7 +59,7 @@ void initialize_nvshmem_with_store(
 
   // Using an existing store_all_gather due to laziness.
   // TODO(yifu): should use broadcast
-  auto unique_ids = c10d::symmetric_memory::store_all_gather(store, rank, world_size, unique_id);
+  auto unique_ids = storeExchange.all_gather(store, rank, world_size, unique_id);
 
   nvshmemx_init_attr_t attr;
   nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);

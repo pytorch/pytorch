@@ -15,6 +15,8 @@ namespace symmetric_memory {
 
 /* Start of CUDASymmetricMemory implementation */
 
+static StoreExchange storeExchange = StoreExchange("NVSHMEMSymmetricMemory");
+
 struct NVSHMEMAllocation {
   void* ptr;
   size_t buffer_size;
@@ -29,7 +31,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   NVSHMEMSymmetricMemory(
       std::shared_ptr<NVSHMEMAllocation> allocation,
       const std::string& group_name)
-      : allocation_(std::move(allocation)),
+      : allocation_(allocation),
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name) {
@@ -41,7 +43,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     rank_ = group_info.rank;
     world_size_ = group_info.world_size;
     rank_to_global_rank_ =
-        store_all_gather(store, rank_, world_size_, global_rank);
+        storeExchange.all_gather(store, rank_, world_size_, global_rank);
     LOG(INFO) << "[rank " << rank_ << "]"
               << "rank_to_global_rank: " << rank_to_global_rank_;
 
