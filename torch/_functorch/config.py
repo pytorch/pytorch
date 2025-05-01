@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import Optional, TYPE_CHECKING
+from typing import Literal, Optional, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -161,6 +161,18 @@ memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR"
 # Generally, this will probably result in some memory improvement, but at the
 # cost of some performance
 aggressive_recomputation = False
+
+# NOTE: [The default layout constraint for custom operators]
+# This must be the name of one of the layout constraint tags
+# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
+# If the custom op does not have a layout constraint tag already
+# then we assume the following applies.
+# The backend should respect the layout constraint (e.g. Inductor does);
+# this config is in torch._functorch.config because it changes how
+# tracing works.
+custom_op_default_layout_constraint: Literal[
+    "needs_fixed_stride_order", "flexible_layout"
+] = "needs_fixed_stride_order"
 
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
