@@ -7553,7 +7553,8 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
 
         # add suggested torch.check()s based on `src_map` to the error message
         # replacing unbacked symints in the unresolved condition in the error
-        _suggest_torch_checks(e, src_map)
+        if isinstance(e.cond, sympy.logic.boolalg.Boolean):
+            _suggest_torch_checks(e, src_map)
 
 
 @contextmanager
