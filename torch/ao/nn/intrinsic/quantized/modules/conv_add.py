@@ -19,6 +19,7 @@ class ConvAdd2d(nnq.Conv2d):
         Same as torch.ao.nn.quantized.Conv2d
 
     """
+
     _FLOAT_MODULE = torch.ao.nn.intrinsic.ConvAdd2d  # type: ignore[assignment]
 
     def __init__(
@@ -87,6 +88,7 @@ class ConvAddReLU2d(nnq.Conv2d):
         Same as torch.ao.nn.quantized.Conv2d
 
     """
+
     _FLOAT_MODULE = torch.ao.nn.intrinsic.ConvAddReLU2d  # type: ignore[assignment]
 
     def __init__(
