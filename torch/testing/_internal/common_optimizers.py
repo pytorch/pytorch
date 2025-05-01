@@ -546,7 +546,7 @@ def optim_inputs_func_adam(device, dtype=None):
             params=None,
             kwargs={
                 "lr": torch.tensor(0.001),
-                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
                 "amsgrad": False,
                 "capturable": True,
                 "fused": True,
