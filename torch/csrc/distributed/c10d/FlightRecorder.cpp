@@ -209,7 +209,7 @@ void retire_id_impl(
 
 template <typename EntryT>
 const c10::List<c10::IValue> getCollectiveTraceImpl(
-    std::vector<FlightRecorder::Entry>& result,
+    std::vector<EntryT>& result,
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
@@ -698,14 +698,14 @@ std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
 // Returns the entry with the given id, if it exists. Otherwise, returns
 // std::nullopt.
 std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
-    const std::optional<size_t> id) {
+    std::optional<size_t> id) {
   return getEntryImpl<FlightRecorder::Entry>(
       entries_, enabled_, mutex_, max_entries_, id);
 }
 
 void FlightRecorder::retire_id(
-    const std::optional<size_t> id,
-    const bool compute_duration) {
+    std::optional<size_t> id,
+    bool compute_duration) {
   retire_id_impl<FlightRecorder::Entry, Event>(
       enabled_, entries_, max_entries_, mutex_, id, compute_duration);
 }
