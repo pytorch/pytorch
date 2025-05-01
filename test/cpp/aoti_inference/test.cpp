@@ -160,18 +160,22 @@ void test_aoti_package_loader_multi_gpu(
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
 
-  // For all available CUDA devices: Load PT2 package on this device, run inference, and validate results
-  auto input_tensors = data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  // For all available CUDA devices: Load PT2 package on this device, run
+  // inference, and validate results
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
   for (int i = 0; i < torch::cuda::device_count(); i++) {
     auto options = torch::TensorOptions().device(torch::kCUDA, i);
-    torch::inductor::AOTIModelPackageLoader runner(pt2_package_path, "model", false, 1, i);
+    torch::inductor::AOTIModelPackageLoader runner(
+        pt2_package_path, "model", false, 1, i);
     std::vector<torch::Tensor> input_tensors_on_device;
-    for (auto input_tensor: input_tensors) {
+    for (auto input_tensor : input_tensors) {
       input_tensors_on_device.push_back(input_tensor.clone().to(options));
     }
     // Run loaded PT2 package on device
     auto actual_output_tensors = runner.run(input_tensors_on_device);
-    ASSERT_TRUE(torch::allclose(ref_output_tensors[0].cpu(), actual_output_tensors[0].cpu()));
+    ASSERT_TRUE(torch::allclose(
+        ref_output_tensors[0].cpu(), actual_output_tensors[0].cpu()));
   }
 }
 
