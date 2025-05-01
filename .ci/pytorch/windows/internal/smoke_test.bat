@@ -47,29 +47,30 @@ if "%PYTHON_INSTALLER_URL%" == "" (
 )
 
 set ADDITIONAL_OPTIONS=""
+set PYTHON_EXEC="python"
 if "%DESIRED_PYTHON%" == "3.13t" (
     set ADDITIONAL_OPTIONS="Include_freethreaded=1"
+    set PYTHON_EXEC="python3.13t"
 )
 
 del python-amd64.exe
 curl --retry 3 -kL "%PYTHON_INSTALLER_URL%" --output python-amd64.exe
 if errorlevel 1 exit /b 1
 
-:: Install Python
+:: According to https://docs.python.org/3/using/windows.html, setting PrependPath to 1 will prepend
+:: the installed Python to PATH system-wide. Even calling set PATH=%ORIG_PATH% later on won't make
+:: a change. As the builder directory will be removed after the smoke test, all subsequent non-binary
+:: jobs will fail to find any Python executable there
 start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
 if errorlevel 1 exit /b 1
 
-:: Create venv and activate it
-py -%DESIRED_PYTHON% -mvenv py%DESIRED_PYTHON%
-py%DESIRED_PYTHON%\Scripts\activate.bat
-
 set "PATH=%CD%\Python%PYTHON_VERSION%\Scripts;%CD%\Python;%PATH%"
-if "%DESIRED_PYTHON%" == "3.13t" python -m pip install --pre numpy==2.2.1 protobuf
-if "%DESIRED_PYTHON%" == "3.13"  python -m pip install --pre numpy==2.1.2 protobuf
-if "%DESIRED_PYTHON%" == "3.12"  python -m pip install --pre numpy==2.0.2 protobuf
-if "%DESIRED_PYTHON%" == "3.11"  python -m pip install --pre numpy==2.0.2 protobuf
-if "%DESIRED_PYTHON%" == "3.10"  python -m pip install --pre numpy==2.0.2 protobuf
-if "%DESIRED_PYTHON%" == "3.9"   python -m pip install --pre numpy==2.0.2 protobuf networkx
+if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install --pre numpy==2.2.1 protobuf
+if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install --pre numpy==2.1.2 protobuf
+if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
+if "%DESIRED_PYTHON%" == "3.11" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
+if "%DESIRED_PYTHON%" == "3.10" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
+if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf networkx
 
 if errorlevel 1 exit /b 1
 
@@ -82,17 +83,17 @@ if "%PYTORCH_BUILD_VERSION:dev=%" NEQ "%PYTORCH_BUILD_VERSION%" (
 set "EXTRA_INDEX= "
 if "%CUDA_VERSION%" == "xpu" set "EXTRA_INDEX=--index-url https://download.pytorch.org/whl/%CHANNEL%/xpu"
 
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do python -m pip install "%%i" %EXTRA_INDEX%
+for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do %PYTHON_EXEC% -m pip install "%%i" %EXTRA_INDEX%
 if errorlevel 1 exit /b 1
 
 goto smoke_test
 
 :smoke_test
-python -c "import torch"
+%PYTHON_EXEC% -c "import torch"
 if ERRORLEVEL 1 exit /b 1
 
 echo Checking that MKL is available
-python -c "import torch; exit(0 if torch.backends.mkl.is_available() else 1)"
+%PYTHON_EXEC% -c "import torch; exit(0 if torch.backends.mkl.is_available() else 1)"
 if ERRORLEVEL 1 exit /b 1
 
 if "%NVIDIA_GPU_EXISTS%" == "0" (
@@ -101,24 +102,24 @@ if "%NVIDIA_GPU_EXISTS%" == "0" (
 )
 
 echo Checking that CUDA archs are setup correctly
-python -c "import torch; torch.randn([3,5]).cuda()"
+%PYTHON_EXEC% -c "import torch; torch.randn([3,5]).cuda()"
 if ERRORLEVEL 1 exit /b 1
 
 echo Checking that magma is available
-python -c "import torch; torch.rand(1).cuda(); exit(0 if torch.cuda.has_magma else 1)"
+%PYTHON_EXEC% -c "import torch; torch.rand(1).cuda(); exit(0 if torch.cuda.has_magma else 1)"
 if ERRORLEVEL 1 exit /b 1
 
 echo Checking that CuDNN is available
-python -c "import torch; exit(0 if torch.backends.cudnn.is_available() else 1)"
+%PYTHON_EXEC% -c "import torch; exit(0 if torch.backends.cudnn.is_available() else 1)"
 if ERRORLEVEL 1 exit /b 1
 
 echo Checking that basic RNN works
-python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke.py
+%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke.py
 
 if ERRORLEVEL 1 exit /b 1
 
 echo Checking that basic CNN works
-python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke.py
+%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke.py
 if ERRORLEVEL 1 exit /b 1
 
 goto end
