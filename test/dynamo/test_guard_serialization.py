@@ -314,6 +314,18 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         finally:
             op.__name__ = prev
 
+    def test_dual_level(self):
+        def fn(x):
+            with torch.autograd.forward_ad.dual_level():
+                return x + 1
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("DUAL_LEVEL", fn, x)
+
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with torch.autograd.forward_ad.dual_level():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

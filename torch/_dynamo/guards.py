@@ -1575,7 +1575,7 @@ class GuardBuilder(GuardBuilderBase):
     def DUAL_LEVEL(self, guard: Guard):
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
-        dual_level = torch.autograd.forward_ad._current_level
+        dual_level = self.check_fn_manager.output_graph.dual_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, [code])
         # TODO(anijain2305) - Consider this moving this guard to C++
