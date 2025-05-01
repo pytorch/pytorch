@@ -843,6 +843,7 @@ def _record_memory_history_legacy(
     trace_alloc_record_context=False,
     device: Union[Device, int] = None,
     record_context_cpp=False,
+    clear_history=False,
 ):
     _C._cuda_record_memory_history_legacy(
         enabled,
@@ -850,6 +851,7 @@ def _record_memory_history_legacy(
         trace_alloc_max_entries,
         trace_alloc_record_context,
         record_context_cpp,
+        clear_history,
     )
 
 
@@ -904,8 +906,9 @@ def _record_memory_history_impl(
     stacks: str = "all",
     max_entries: int = sys.maxsize,
     device: Union[Device, int] = None,
+    clear_history: bool = False,
 ):
-    _C._cuda_record_memory_history(enabled, context, stacks, max_entries)
+    _C._cuda_record_memory_history(enabled, context, stacks, max_entries, clear_history)
 
 
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
@@ -1126,11 +1129,18 @@ class MemPool(_MemPool):
             define how memory gets allocated in the pool. If :attr:`allocator`
             is ``None`` (default), memory allocation follows the default/
             current configuration of the CUDACachingAllocator.
+        use_on_oom(bool): a bool that indicates if this pool can be used
+            as a last resort if a memory allocation outside of the pool fails due
+            to Out Of Memory. This is False by default.
 
     """
 
-    def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None):
-        super().__init__(allocator, True)
+    def __init__(
+        self,
+        allocator: Optional[_cuda_CUDAAllocator] = None,
+        use_on_oom: bool = False,
+    ):
+        super().__init__(allocator, True, use_on_oom)
 
     @property
     def id(self) -> tuple[int, int]:

@@ -7,8 +7,8 @@ from collections.abc import Iterable, Iterator
 from typing import Any, Optional
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
-from torch._utils_internal import upload_graph
+from torch._dynamo.utils import counters
+from torch._logging import trace_structured
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
 
@@ -1355,7 +1355,27 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 )
                 log_to_scuba = True
     if log_to_scuba:
-        optimus_scuba_log[rule.__class__.__name__] = upload_graph(graph)
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        # Force graph to re-compile otherwise the output python code may be broken
+        gm = graph._owning_module
+        if isinstance(gm, _LazyGraphModule):
+            _LazyGraphModule.recompile()
+        else:
+            assert isinstance(gm, torch.fx.GraphModule)
+            gm.recompile()
+        graph_str = gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": f"optimus_{str(rule.__class__.__name__)}",
+                "encoding": "string",
+            },
+            payload_fn=lambda: graph_str,
+        )
 
 
 def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):

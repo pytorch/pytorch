@@ -1,6 +1,6 @@
 import enum
 import types
-from typing import Literal, overload
+from typing import overload
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
@@ -23,10 +23,10 @@ class _CacheEntry:
 class _ExtraState:
     def invalidate(self, cache_entry: _CacheEntry, guard_manager: object) -> None: ...
 
-class _FrameAction(enum.Enum):
-    DEFAULT: Literal[0]
-    SKIP: Literal[1]
-    RUN_ONLY: Literal[2]
+class _FrameAction(enum.IntEnum):
+    DEFAULT = 0
+    SKIP = 1
+    RUN_ONLY = 2
 
 class _FrameExecStrategy:
     cur_action: _FrameAction

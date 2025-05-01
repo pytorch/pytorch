@@ -300,6 +300,103 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             got = opt_fn(model, states, x)
             self.assertEqual(expected, got)
 
+    def test_graph_break_in_wrapped_user_function(self):
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            assert torch.compiler.is_compiling()
+            assert not torch.is_grad_enabled()
+            return x + 2
+
+        @torch.compile(backend="eager")
+        def gn(x):
+            x = torch.no_grad()(fn)(x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
+    def test_graph_break_in_wrapped_user_method(self):
+        class Foo:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+            def fn(self, x):
+                x = x + self.a
+                torch._dynamo.graph_break()
+                assert torch.compiler.is_compiling()
+                assert not torch.is_grad_enabled()
+                return x + self.b
+
+        obj = Foo()
+
+        @torch.compile(backend="eager")
+        def gn(x):
+            obj.fn = torch.no_grad()(obj.fn)
+            x = obj.fn(x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
+    def test_graph_break_in_wrapped_nested_function(self):
+        @torch.compile(backend="eager")
+        def gn(x):
+            a = 1
+            b = 2
+
+            @torch.no_grad()
+            def fn(x):
+                x = x + a
+                torch._dynamo.graph_break()
+                assert torch.compiler.is_compiling()
+                assert not torch.is_grad_enabled()
+                return x + b
+
+            x = fn(x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
+    def test_graph_break_in_wrapped_skipped_function(self):
+        from torch._dynamo import trace_rules
+        from torch._dynamo.testing import _skipped_function_for_test_reconstruct
+        from torch._dynamo.variables import SkipFunctionVariable
+
+        self.assertIs(
+            trace_rules.lookup(_skipped_function_for_test_reconstruct),
+            SkipFunctionVariable,
+        )
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            assert torch.compiler.is_compiling()
+            assert not torch.is_grad_enabled()
+            return x + 2
+
+        @torch.compile(backend="eager")
+        def gn(x):
+            x = torch.no_grad()(_skipped_function_for_test_reconstruct)(fn, x)
+            # reconstruction failure would cause a skipped frame
+            assert torch.compiler.is_compiling()
+            assert torch.is_grad_enabled()
+            return x
+
+        inp = torch.randn(3)
+        self.assertEqual(gn(inp), inp + 3)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
