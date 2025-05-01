@@ -728,15 +728,19 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # Replace your privateuse1 backend name with 'privateuse1'
     if is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+
+        def func_replace(x: str):
+            return x.replace(privateuse1_backend_name, "privateuse1")
+
         except_for = (
-            ["privateuse1" if x == privateuse1_backend_name else x for x in except_for]
-            if except_for is not None
-            else None
+            ([func_replace(x) for x in except_for] if except_for is not None else None)
+            if not isinstance(except_for, str)
+            else func_replace(except_for)
         )
         only_for = (
-            ["privateuse1" if x == privateuse1_backend_name else x for x in only_for]
-            if only_for is not None
-            else None
+            ([func_replace(x) for x in only_for] if only_for is not None else None)
+            if not isinstance(only_for, str)
+            else func_replace(only_for)
         )
 
     if except_for:
