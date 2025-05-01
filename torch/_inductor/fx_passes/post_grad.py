@@ -1130,7 +1130,7 @@ def decompose_auto_functionalized(graph):
     for node in graph.nodes:
         if node.op == "get_attr" and len(node.users) == 0:
             _to_remove.append(node)
-            if isinstance(
+            if hasattr(graph.owning_module, node.target) and isinstance(
                 getattr(graph.owning_module, node.target), torch.fx.GraphModule
             ):
                 delattr(graph.owning_module, node.target)
