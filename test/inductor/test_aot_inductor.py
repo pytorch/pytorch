@@ -4436,6 +4436,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     def test_input_codegen_with_sympy_expr(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
         class MyModel(torch.nn.Module):
             def forward(self, getitem_54, getitem_52, getitem_19, values_2, offsets):
                 bitwise_or = torch.bitwise_or(getitem_54, getitem_52)
