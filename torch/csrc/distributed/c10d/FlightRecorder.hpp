@@ -94,8 +94,10 @@ struct FlightRecorder {
     return instance;
   }
   FlightRecorder() {
-    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
-    capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
+    max_entries_ = getCvarInt(
+        {"TORCH_TRACE_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    capture_cpp_stack_ = getCvarBool(
+        {"TORCH_TRACE_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
   struct Entry {

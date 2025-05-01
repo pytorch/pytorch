@@ -19,6 +19,7 @@
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
@@ -81,7 +82,12 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
-
+    virtual std::chrono::milliseconds getTimeout() const = 0;
+    virtual const std::vector<at::Tensor>& getInputTensors() = 0;
+    virtual const std::vector<at::Tensor>& getOutputTensors() = 0;
+    inline std::string getProfilerTitle() const {
+      return profilingTitle_;
+    }
     inline at::ThreadLocalState getTLS() const {
       return tls_;
     }
@@ -100,6 +106,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> future_;
     std::function<void()> recordFunctionBeforeCallback_;
     const uint64_t seq_;
+    std::string profilingTitle_;
     at::ThreadLocalState tls_;
   };
 
@@ -438,6 +445,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
   uint64_t seq_{0};
+  size_t local_id_;
+  std::shared_ptr<ProcessGroupStatus> pgStatus_ =
+      std::make_shared<ProcessGroupStatus>();
 };
 
 } // namespace c10d
