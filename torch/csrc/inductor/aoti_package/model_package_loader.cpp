@@ -35,7 +35,7 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
-bool file_exists(std::string& path) {
+bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
@@ -68,7 +68,7 @@ const std::string k_separator = "/";
 namespace torch::inductor {
 
 namespace {
-const nlohmann::json& load_json_file(std::string json_path) {
+const nlohmann::json& load_json_file(const std::string& json_path) {
   if (!file_exists(json_path)) {
     throw std::runtime_error("File not found: " + json_path);
   }
@@ -380,12 +380,14 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     if (filename_len == 0) {
       throw std::runtime_error("Failed to read filename");
     }
-    char* filename = new char[filename_len + 1];
-    if (!mz_zip_reader_get_filename(&zip_archive, i, filename, filename_len)) {
+    // filename_len returned by mz_zip_reader_get_filename includes the null
+    // terminator, so we need to subtract 1 here
+    std::string filename_str(filename_len - 1, '\0');
+    if (!mz_zip_reader_get_filename(
+            &zip_archive, i, filename_str.data(), filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
 
-    std::string filename_str(filename);
     found_filenames += filename_str;
     found_filenames += " ";
 
@@ -428,7 +430,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
       // Extracts file to the temp directory
       mz_zip_reader_extract_file_to_file(
-          &zip_archive, filename, output_path_str.c_str(), 0);
+          &zip_archive, filename_str.c_str(), output_path_str.c_str(), 0);
 
       // Save the file for bookkeeping
       size_t extension_idx = output_path_str.find_last_of('.');
@@ -436,11 +438,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        }
-        if (filename_extension == ".o") {
+        } else if (filename_extension == ".o") {
           consts_filename = output_path_str;
-        }
-        if (filename_extension == ".so") {
+        } else if (filename_extension == ".so") {
           so_filename = output_path_str;
         }
       }
@@ -523,10 +523,11 @@ std::vector<std::string> AOTIModelPackageLoader::get_call_spec() {
 void AOTIModelPackageLoader::load_constants(
     std::unordered_map<std::string, at::Tensor>& constants_map,
     bool use_inactive,
-    bool check_full_update) {
+    bool check_full_update,
+    bool user_managed) {
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
-  std::unordered_map<std::string, at::string> fqn_to_constant_name;
+  std::unordered_map<std::string, std::string> fqn_to_constant_name;
   for (const auto& it : constant_name_to_fqn) {
     fqn_to_constant_name.emplace(it.second, it.first);
   }
@@ -541,7 +542,7 @@ void AOTIModelPackageLoader::load_constants(
   }
 
   return runner_->update_constant_buffer(
-      updated_constants_map, use_inactive, check_full_update);
+      updated_constants_map, use_inactive, check_full_update, user_managed);
 }
 
 std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
@@ -558,9 +559,10 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
 void AOTIModelPackageLoader::update_constant_buffer(
     std::unordered_map<std::string, at::Tensor>& tensor_map,
     bool use_inactive,
-    bool validate_full_updates) {
+    bool validate_full_updates,
+    bool user_managed) {
   runner_->update_constant_buffer(
-      tensor_map, use_inactive, validate_full_updates);
+      tensor_map, use_inactive, validate_full_updates, user_managed);
 }
 } // namespace torch::inductor
 #endif
