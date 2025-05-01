@@ -13,7 +13,6 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
-from torch.autograd import grad
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.numbers import int_oo
