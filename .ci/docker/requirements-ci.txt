@@ -120,7 +120,7 @@ numba==0.61.2 ; python_version >= "3.10"
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
-#Pinned versions: 1.26.2
+#Pinned versions: 1.26.2, unless on 3.9 or 3.13
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -130,8 +130,8 @@ numba==0.61.2 ; python_version >= "3.10"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==1.22.4; python_version == "3.9"
+numpy==1.26.2; python_version >= "3.10" and python_version < "3.13"
 numpy==2.1.2; python_version >= "3.13"
 
 pandas==2.0.3; python_version < "3.13"
