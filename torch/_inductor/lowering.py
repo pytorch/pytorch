@@ -178,17 +178,27 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
     return handle_layout_constraint_tag(tag)
 
 
-def get_layout_constraint_tag(fn):
+tags_by_priority = [
+    torch._C.Tag.needs_exact_strides,
+    torch._C.Tag.needs_fixed_stride_order,
+    torch._C.Tag.flexible_layout,
+]
+
+
+def get_layout_constraint_tag(fn, *, with_default=True):
     tags_by_priority = [
+        torch._C.Tag.needs_exact_strides,
         torch._C.Tag.needs_fixed_stride_order,
         torch._C.Tag.flexible_layout,
     ]
     for tag in tags_by_priority:
         if tag in fn.tags:
             return tag
-    if torch._library.utils.is_builtin(fn):
-        return torch._C.Tag.flexible_layout
-    return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    if with_default:
+        if torch._library.utils.is_builtin(fn):
+            return torch._C.Tag.flexible_layout
+        return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    return None
 
 
 def assert_nyi(cond, msg):
