@@ -269,8 +269,10 @@ def _private_register_pytree_node(
         )
 
 
-def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
-    return isinstance(obj, TreeSpec)
+def _is_pytreespec_instance(
+    obj: Any, /
+) -> TypeIs[Union[PyTreeSpec, python_pytree.PyTreeSpec]]:
+    return isinstance(obj, (PyTreeSpec, python_pytree.PyTreeSpec))
 
 
 def tree_is_leaf(
@@ -378,7 +380,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
             f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
+    return treespec.unflatten(leaves)
 
 
 def tree_iter(
