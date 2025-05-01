@@ -388,6 +388,8 @@ c10::Dict<c10::IValue, c10::IValue> get_dump(
   return result;
 }
 
+// TODO: To also make dump via HTTP generic.
+#ifdef USE_C10D_NCCL
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
@@ -480,6 +482,7 @@ control_plane::RegisterHandler jsonDumpHandler{
               processedParams[onlyActiveStr]),
           "application/json");
     }};
+#endif // USE_C10D_NCCL
 
 bool recursive_mkdir(const std::string& dir) {
   // Check if current dir exists
@@ -624,7 +627,7 @@ std::optional<size_t> FlightRecorder::record(
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
-  return recordImpl<FlightRecorder, FlightRecorder::Entry, c10::Event>(
+  return recordImpl<FlightRecorder, FlightRecorder::Entry>(
       *this,
       [&](std::shared_ptr<torch::CapturedTraceback> traceback) {
         return Entry{
@@ -806,7 +809,7 @@ std::optional<size_t> FlightRecorderNCCL::record(
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
-  return recordImpl<FlightRecorderNCCL, FlightRecorderNCCL::CudaEntry, Event>(
+  return recordImpl<FlightRecorderNCCL, FlightRecorderNCCL::CudaEntry>(
       *this,
       [&](std::shared_ptr<torch::CapturedTraceback> traceback) {
         return CudaEntry{

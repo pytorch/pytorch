@@ -496,6 +496,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backoff.cpp",
     "torch/csrc/distributed/c10d/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
+    "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",

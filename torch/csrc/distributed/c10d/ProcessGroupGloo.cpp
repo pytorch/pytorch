@@ -1,14 +1,14 @@
 #include <c10/util/Exception.h>
 #include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #ifdef USE_C10D_GLOO
 
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <chrono>
 #include <exception>
 
@@ -908,7 +908,7 @@ void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
       nullptr, // We ignore cuda event entry for now.
       nullptr,
       work->getTimeout(),
-      pgStatus_, // TODO
+      pgStatus_,
       false);
 
   // Notify after releasing the lock so that the waiter
