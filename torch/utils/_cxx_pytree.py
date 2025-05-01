@@ -268,8 +268,8 @@ def _private_register_pytree_node(
 
 def _is_pytreespec_instance(
     obj: Any, /
-) -> TypeIs[Union[PyTreeSpec, python_pytree.PyTreeSpec]]:
-    return isinstance(obj, (PyTreeSpec, python_pytree.PyTreeSpec))
+) -> TypeIs[Union[TreeSpec, python_pytree.TreeSpec]]:
+    return isinstance(obj, (TreeSpec, python_pytree.TreeSpec))
 
 
 def tree_is_leaf(
