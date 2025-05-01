@@ -553,7 +553,7 @@ def optim_inputs_func_adam(device, dtype=None):
                 "capturable": True,
                 "fused": True,
             },
-            desc="Tensor lr, Tensor betas, with fused",
+            desc="non-scalar betas with fused",
         ),
     ]
     mps_supported_configs = [
