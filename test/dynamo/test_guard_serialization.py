@@ -127,9 +127,10 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
 
     @classmethod
     def __metadata_guard__(cls, meta1, meta2):
-        # define custom metadata guard logic
-        # TODO: find a nice way to test logic that is not equivalent to the default behavior
-        return meta1["extra"] == meta2["extra"]
+        # Define custom metadata guard logic that only looks at "bar" to determine
+        # metadata equivalence. This is more purposefully more lax than the default
+        # guard behavior.
+        return meta1["extra"]["bar"] == meta2["extra"]["bar"]
 
     def __tensor_flatten__(self):
         # store extra in meta
@@ -147,7 +148,7 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
         return SubclassWithCustomMetadataGuard(a, extra, outer_size, outer_stride)
 
 
-class SubclassWithSubclassInnerTensors(torch.Tensor):
+class SubclassWithSubclassInnerTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, a, extra, outer_size=None, outer_stride=None):
         if outer_size is None:
@@ -174,17 +175,15 @@ class SubclassWithSubclassInnerTensors(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         args_a = pytree.tree_map_only(
-            SubclassWithSubclassInnerTensors, lambda x: x.a, args
+            SubclassWithSubclassInnerTensor, lambda x: x.a, args
         )
         kwargs_a = pytree.tree_map_only(
-            SubclassWithSubclassInnerTensors, lambda x: x.a, kwargs
+            SubclassWithSubclassInnerTensor, lambda x: x.a, kwargs
         )
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithSubclassInnerTensors)
-            return SubclassWithSubclassInnerTensors(
-                out_a, extra=args[0].inner_sub.extra
-            )
+            assert isinstance(args[0], SubclassWithSubclassInnerTensor)
+            return SubclassWithSubclassInnerTensor(out_a, extra=args[0].inner_sub.extra)
         return out_a
 
     def __tensor_flatten__(self):
@@ -198,7 +197,7 @@ class SubclassWithSubclassInnerTensors(torch.Tensor):
         if type(a) is torch.Tensor:
             assert outer_size is not None
             assert outer_stride is not None
-        return SubclassWithSubclassInnerTensors(a, extra, outer_size, outer_stride)
+        return SubclassWithSubclassInnerTensor(a, extra, outer_size, outer_stride)
 
 
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
@@ -431,22 +430,35 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         def fn(x):
             return x * 2
 
+        # === example subclass defined locally (error) ===
         local_sub = LocalSubclass(torch.randn(3))
         with self.assertRaisesRegex(
             RuntimeError, "Please define the class at global scope"
         ):
             self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, local_sub)
 
-        # use TwoTensor as an example of a subclass with None for extra metadata
+        # === example subclass with None extra metadata ===
         from torch.testing._internal.two_tensor import TwoTensor
 
         tt = TwoTensor(torch.randn(3), torch.randn(3))
         ref, loaded = self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, tt)
         self._test_check_fn(ref, loaded, {"x": tt}, True)
-        other_tt = TwoTensor(torch.randn(3), torch.randn(3))
-        self._test_check_fn(ref, loaded, {"x": other_tt}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.ones_like(tt)}, True)
 
-        # example subclass with extra metadata
+        # used below for convenience; returned func accepts some metadata and whether the
+        # guard is expected to pass for the given subclass type
+        def _get_meta_test_check_fn(ref, loaded, subclass_type):
+            def _f(meta, expected, ref=ref, loaded=loaded, subclass_type=subclass_type):
+                self._test_check_fn(
+                    ref,
+                    loaded,
+                    {"x": subclass_type(torch.randn(3), extra=meta)},
+                    expected,
+                )
+
+            return _f
+
+        # === example subclass with extra metadata ===
         extra_meta = {
             "foo": 5,
             "bar": "hello",
@@ -456,46 +468,42 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub
         )
         self._test_check_fn(ref, loaded, {"x": sub}, True)
-        other_sub_same_meta = SubclassWithMeta(torch.randn(3), extra=dict(extra_meta))
-        self._test_check_fn(ref, loaded, {"x": other_sub_same_meta}, True)
-        diff_meta = dict(extra_meta)
-        diff_meta["foo"] = 6
-        other_sub_diff_meta = SubclassWithMeta(torch.randn(3), extra=diff_meta)
-        self._test_check_fn(ref, loaded, {"x": other_sub_diff_meta}, False)
+        check_with_meta = _get_meta_test_check_fn(ref, loaded, SubclassWithMeta)
+        check_with_meta(dict(extra_meta), True)
+        # different "foo"
+        check_with_meta({"foo": 6, "bar": "hello"}, False)
+        # different "bar"
+        check_with_meta({"foo": 5, "bar": "world"}, False)
 
-        # example subclass with custom metadata guard logic
-        sub2 = SubclassWithCustomMetadataGuard(torch.randn(3), extra=extra_meta)
+        # === example subclass with custom metadata guard logic ===
+        sub = SubclassWithCustomMetadataGuard(torch.randn(3), extra=extra_meta)
         ref, loaded = self._test_serialization(
-            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub2
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub
         )
-        self._test_check_fn(ref, loaded, {"x": sub2}, True)
-        other_sub2_same_meta = SubclassWithCustomMetadataGuard(
-            torch.randn(3), extra=dict(extra_meta)
+        self._test_check_fn(ref, loaded, {"x": sub}, True)
+        check_with_meta = _get_meta_test_check_fn(
+            ref, loaded, SubclassWithCustomMetadataGuard
         )
-        self._test_check_fn(ref, loaded, {"x": other_sub2_same_meta}, True)
-        diff_meta = dict(extra_meta)
-        diff_meta["foo"] = 7
-        other_sub2_diff_meta = SubclassWithCustomMetadataGuard(
-            torch.randn(3), extra=diff_meta
-        )
-        self._test_check_fn(ref, loaded, {"x": other_sub2_diff_meta}, False)
+        check_with_meta(dict(extra_meta), True)
+        # different "foo"; custom logic says this is okay
+        check_with_meta({"foo": 6, "bar": "hello"}, True)
+        # different "bar"
+        check_with_meta({"foo": 5, "bar": "world"}, False)
 
-        # example subclass with subclass inner tensor
-        sub3 = SubclassWithSubclassInnerTensors(torch.randn(3), extra=extra_meta)
+        # === example subclass with subclass inner tensor ===
+        sub = SubclassWithSubclassInnerTensor(torch.randn(3), extra=extra_meta)
         ref, loaded = self._test_serialization(
-            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub3
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub
         )
-        self._test_check_fn(ref, loaded, {"x": sub3}, True)
-        other_sub3_same_meta = SubclassWithSubclassInnerTensors(
-            torch.randn(3), extra=dict(extra_meta)
+        self._test_check_fn(ref, loaded, {"x": sub}, True)
+        check_with_meta = _get_meta_test_check_fn(
+            ref, loaded, SubclassWithSubclassInnerTensor
         )
-        self._test_check_fn(ref, loaded, {"x": other_sub3_same_meta}, True)
-        diff_meta = dict(extra_meta)
-        diff_meta["foo"] = 8
-        other_sub3_diff_meta = SubclassWithSubclassInnerTensors(
-            torch.randn(3), extra=diff_meta
-        )
-        self._test_check_fn(ref, loaded, {"x": other_sub3_diff_meta}, False)
+        check_with_meta(dict(extra_meta), True)
+        # different "foo"
+        check_with_meta({"foo": 6, "bar": "hello"}, False)
+        # different "bar"
+        check_with_meta({"foo": 5, "bar": "world"}, False)
 
     def test_dict_version(self):
         def fn(x):
