@@ -12496,6 +12496,17 @@ def forward(self, x, y):
             0,
         )
 
+    def test_unbacked_kth_value(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                k = min(n, 128)
+                return x.kthvalue(k, dim=0, keepdim=True).values
+
+        inps = (torch.arange(64), torch.tensor([32]))
+        ep = export(Foo(), inps)
+        self.assertEqual(ep.module()(*inps).item(), 31)
+
     def test_constant_output_dup(self):
         class M(torch.nn.Module):
             def __init__(self):
