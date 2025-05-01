@@ -358,9 +358,9 @@ def size_based_auto_wrap_policy(
         min_num_params (int): Customizable policy input that controls the size
             threshold over which a module is ready to be wrapped. This is in
             units of numel.
-        force_leaf_modules (Set[Type[nn.Module]]): Set of module types to keep
+        force_leaf_modules (Optional[set[type[nn.Module]]]): Set of module types to keep
             as leaves, i.e. their children will never be wrapped.
-        exclude_wrap_modules (Set[Type[nn.Module]]): Set of module types to be
+        exclude_wrap_modules (Optional[set[type[nn.Module]]]): Set of module types to be
             excluded in wrapping.
 
     Returns:
@@ -497,9 +497,9 @@ def _recursive_wrap(
         module (nn.Module): Module to recursively wrap.
         auto_wrap_policy (Callable): A callable representing a policy that
             determines which modules to recursively wrap with ``wrapper_cls``.
-        ignored_modules (Set[torch.nn.Module]): Modules to ignore when
+        ignored_modules (set[torch.nn.Module]): Modules to ignore when
             wrapping.
-        ignored_params (Set[torch.nn.Parameter]): Parameters to ignore when
+        ignored_params (set[torch.nn.Parameter]): Parameters to ignore when
             wrapping; these should be the parameters contained in the modules
             in ``ignored_modules``.
     Returns:

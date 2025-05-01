@@ -4,7 +4,7 @@ from typing import Optional, Union
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, ParamsT
+from .optimizer import _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["LBFGS"]
@@ -312,7 +312,7 @@ class LBFGS(Optimizer):
         closure = torch.enable_grad()(closure)
 
         group = self.param_groups[0]
-        lr = group["lr"]
+        lr = _to_scalar(group["lr"])
         max_iter = group["max_iter"]
         max_eval = group["max_eval"]
         tolerance_grad = group["tolerance_grad"]

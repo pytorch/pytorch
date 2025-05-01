@@ -63,6 +63,8 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
+from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -71,6 +73,10 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
 )
 from torch.fx import GraphModule
+from torch.fx.experimental._dynamism import (
+    clone_and_convert_to_meta,
+    track_dynamism_across_examples,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -83,10 +89,15 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
-from .exc import CondOpArgsMismatchError, ShortenTraceback, UserError, UserErrorType
+from .exc import (
+    CondOpArgsMismatchError,
+    ShortenTraceback,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .types import FrameAction, FrameExecStrategy
 from .utils import common_constant_types, compile_times
 
 
@@ -152,20 +163,34 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
 
 _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
+_EXAMPLE_INPUTS: Optional[dict[str, list[Any]]] = None
+
+
+def get_example_inputs(key) -> list[Any]:
+    global _EXAMPLE_INPUTS
+    if _EXAMPLE_INPUTS is None:
+        _EXAMPLE_INPUTS = {}
+
+    if key not in _EXAMPLE_INPUTS:
+        _EXAMPLE_INPUTS[key] = []
+
+    return _EXAMPLE_INPUTS[key]
+
 
 def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
-            hooks = Hooks()
-            callback = convert_frame.catch_errors_wrapper(
-                convert_frame.convert_frame(  # type: ignore[arg-type]
-                    get_compiler_fn(_stance.backend),
-                    hooks,
-                ),
-                hooks,
-            )
+            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
+        return callback
+    elif _stance.stance == "eager_then_compile":
+        if callback not in (False, None):
+            return _create_delayed_compile_callback(callback, _stance.stance)
+        return callback
+    elif _stance.stance == "aot_eager_then_compile":
+        if callback not in (False, None):
+            return _create_delayed_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -188,6 +213,51 @@ def _callback_from_stance(callback):
         return fail_callback
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+
+
+def _create_wrapped_callback(compiler_fn):
+    hooks = Hooks()
+    return convert_frame.catch_errors_wrapper(
+        convert_frame.convert_frame(  # type: ignore[arg-type]
+            compiler_fn,
+            hooks,
+        ),
+        hooks,
+    )
+
+
+def _get_or_add_example_inputs(frame):
+    key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+    example_inputs = get_example_inputs(key)
+
+    if len(example_inputs) < 2:
+        example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+
+    return example_inputs
+
+
+def _create_delayed_compile_callback(callback, stance):
+    def callback_fn(*args, **kwargs):
+        frame = args[0]
+        example_inputs = _get_or_add_example_inputs(frame)
+
+        if len(example_inputs) == 1:
+            if stance == "eager_then_compile":
+                return ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.DEFAULT, FrameAction.DEFAULT
+                    )
+                )
+            elif stance == "aot_eager_then_compile":
+                aot_eager_fn = get_compiler_fn("aot_eager")
+                return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
+
+        dynamism = track_dynamism_across_examples(example_inputs)
+        code_context.get_context(frame.f_code)["dynamism"] = dynamism
+        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+        return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
+
+    return callback_fn
 
 
 def _is_skip_guard_eval_unsafe_stance():
@@ -254,9 +324,12 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif isinstance(self._orig_mod.forward, types.MethodType) and (
-            trace_rules.check(self._orig_mod.forward)
-            or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+        elif config.wrap_top_frame or (
+            isinstance(self._orig_mod.forward, types.MethodType)
+            and (
+                trace_rules.check(self._orig_mod.forward)
+                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
+            )
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -364,7 +437,9 @@ def innermost_fn(fn):
     unaltered_fn = fn
     while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
         unaltered_fn = unaltered_fn._torchdynamo_orig_callable
-        assert callable(unaltered_fn)
+        assert callable(unaltered_fn), (
+            f"A callable function is expected, but {type(unaltered_fn)} is provided."
+        )
     return unaltered_fn
 
 
@@ -519,13 +594,15 @@ class _TorchDynamoContext:
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn)
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
 
         try:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if (
+        if config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -584,6 +661,15 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
+                except Unsupported as e:
+                    if config.verbose:
+                        raise
+                    # strip internal tracebacks from causes
+                    cur_exn: BaseException = e
+                    while cur_exn.__cause__ is not None:
+                        cur_exn.__cause__.with_traceback(None)
+                        cur_exn = cur_exn.__cause__
+                    raise e.with_traceback(None) from e.__cause__
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -684,12 +770,15 @@ class OptimizeContext(_TorchDynamoContext):
         )
 
         if config.compiled_autograd:
+            _dynamic = self._dynamic
+            if _dynamic is None:
+                _dynamic = not torch._dynamo.config.assume_static_by_default
 
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=self._dynamic
+                    compiler_fn, dynamic=_dynamic
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -721,8 +810,9 @@ class RunOnlyContext(_TorchDynamoContext):
 
 
 class DisableContext(_TorchDynamoContext):
-    def __init__(self) -> None:
+    def __init__(self, msg: Optional[str] = None) -> None:
         super().__init__(callback=None)
+        self.msg = msg
 
     def __call__(self, fn):
         # Earlier this code was in the base class _TorchDynamoContext. But we
@@ -751,7 +841,9 @@ class DisableContext(_TorchDynamoContext):
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn)
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
@@ -770,6 +862,7 @@ class DisableContext(_TorchDynamoContext):
                 _maybe_set_eval_frame(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+        _fn._torchdynamo_disable_msg = self.msg  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -816,16 +909,23 @@ def get_compiler_fn(compiler_fn):
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
-        assert callable(fn)
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
         return fn
 
 
 def check_if_dynamo_supported():
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
-    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
+        3,
+        13,
+        3,
+    ):
         raise RuntimeError(
-            "torch.compile is not supported on Python built with GIL disabled"
+            "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
+            "Please use Python 3.13.3+."
         )
 
 
@@ -878,6 +978,7 @@ def _optimize(
     nopython=False,
     guard_export_fn=None,
     guard_fail_fn=None,
+    guard_filter_fn=None,
     disable=False,
     dynamic=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
@@ -913,7 +1014,11 @@ def _optimize(
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
     # compiler, however, this feels onerous for callback and hooks, and it feels better to give our users an
     # easier to understand UX at the cost of a little more plumbing on our end.
-    hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
+    hooks = Hooks(
+        guard_export_fn=guard_export_fn,
+        guard_fail_fn=guard_fail_fn,
+        guard_filter_fn=guard_filter_fn,
+    )
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if (
         disable
@@ -922,11 +1027,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    backend = get_compiler_fn(backend)
-
-    # Find if backend has any extra context manager
-    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
-
     if nopython:
         return optimize_assert(
             backend,
@@ -934,6 +1034,12 @@ def _optimize(
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
         )
+
+    backend = get_compiler_fn(backend)
+
+    # Find if backend has any extra context manager
+    backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
+
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
@@ -1580,15 +1686,18 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with config.patch(
-            specialize_int=True,
-            specialize_float=specialize_float,
-            assume_static_by_default=assume_static_by_default,
-            automatic_dynamic_shapes=False,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        with (
+            config.patch(
+                specialize_int=True,
+                specialize_float=specialize_float,
+                assume_static_by_default=assume_static_by_default,
+                automatic_dynamic_shapes=False,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+                prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            ),
+            _compiling_state_context(),
         ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
@@ -1775,7 +1884,7 @@ def export(
 def optimize_assert(
     backend,
     *,
-    hooks=Hooks(None, None),
+    hooks=Hooks(None, None, None),
     export=False,
     export_constraints=None,
     dynamic=None,
@@ -1810,11 +1919,20 @@ class TorchPatcher:
         # with torch.deploy internally.
         from .decorators import disable
 
-        torch.jit.trace = disable(torch.jit.trace)
-        torch.jit.trace_module = disable(torch.jit.trace_module)
-        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+        torch.jit.trace = disable(
+            torch.jit.trace, reason="tracing into TorchScript not fully supported"
+        )
+        torch.jit.trace_module = disable(
+            torch.jit.trace_module,
+            reason="tracing into TorchScript not fully supported",
+        )
+        torch.jit._get_trace_graph = disable(
+            torch.jit._get_trace_graph,
+            reason="tracing into TorchScript not fully supported",
+        )
         torch.fx._symbolic_trace.Tracer.trace = disable(
-            torch.fx._symbolic_trace.Tracer.trace
+            torch.fx._symbolic_trace.Tracer.trace,
+            reason="tracing into FX not fully supported",
         )
         torch.distributions.Distribution.set_default_validate_args(False)
 
@@ -1856,7 +1974,12 @@ class TorchPatcher:
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
-                    opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                    opt_mod,
+                    fused_fn_name,
+                    disable(
+                        getattr(opt_mod, fused_fn_name),
+                        reason="don't trace into fused optimizer",
+                    ),
                 )
 
         optimizer_classes = [
@@ -1873,10 +1996,14 @@ class TorchPatcher:
 
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
-                opt.step = disable(opt.step)
+                opt.step = disable(
+                    opt.step, reason=f"optimizer {opt} step not supported"
+                )
 
             if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
+                opt._init_group = disable(
+                    opt._init_group, reason=f"optimizer {opt} _init_group not supported"
+                )
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

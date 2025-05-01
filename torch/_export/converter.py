@@ -85,7 +85,7 @@ def _create_jit_graph(
                 raise RuntimeError("'forward' method must be a script method") from e
             _C._jit_pass_onnx_function_substitution(graph)
             freezed_module = _C._freeze_module(
-                typing.cast(_C.ScriptModule, model._c), preserveParameters=True
+                typing.cast("_C.ScriptModule", model._c), preserveParameters=True
             )
             module, params = _C._jit_onnx_list_model_parameters(freezed_module)
             method_graph = module._get_method("forward").graph
@@ -1510,7 +1510,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     ):
         dynamic_shapes = _tree_map_with_path(
             lambda path, x: (
-                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None  # type: ignore[attr-defined]
+                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None
             ),
             self.sample_args,
         )
@@ -1545,6 +1545,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
                     f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
                 )
                 spec.kind = InputKind.CONSTANT_TENSOR
+                spec.persistent = None
         ep.verifier().check(ep)
 
         return ep
