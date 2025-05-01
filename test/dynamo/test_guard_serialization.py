@@ -444,15 +444,19 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, tt)
 
         # example subclass with extra metadata
-        sub = SubclassWithMeta(torch.randn(3), extra=5)
+        extra_meta = {
+            "foo": 5,
+            "bar": "hello",
+        }
+        sub = SubclassWithMeta(torch.randn(3), extra=extra_meta)
         self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub)
 
         # example subclass with custom metadata guard logic
-        sub2 = SubclassWithCustomMetadataGuard(torch.randn(3), extra=7)
+        sub2 = SubclassWithCustomMetadataGuard(torch.randn(3), extra=extra_meta)
         self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub2)
 
         # example subclass with subclass inner tensor
-        sub3 = SubclassWithSubclassInnerTensors(torch.randn(3), extra=6)
+        sub3 = SubclassWithSubclassInnerTensors(torch.randn(3), extra=extra_meta)
         self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, sub3)
 
     def test_dict_version(self):
