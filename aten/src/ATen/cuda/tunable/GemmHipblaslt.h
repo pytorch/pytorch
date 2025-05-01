@@ -382,7 +382,7 @@ static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
 }
 
 static size_t GetHipblasltWorkspaceSize() {
-  static const char * env = getenv("HIPBLASLT_WORKSPACE_SIZE");
+  static const auto env = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
@@ -391,7 +391,7 @@ static size_t GetHipblasltWorkspaceSize() {
   size_t workspace_size = 76*1024;
   if (env) {
     try {
-      workspace_size = std::stoi(env);
+      workspace_size = std::stoi(env.value());
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " KiB.");
@@ -513,9 +513,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
 #ifdef HIPBLASLT_VEC_EXT
         if (GetUseRowwiseFromParams<CT>(params)) {
-          // swapped
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
         }
         else
 #endif
