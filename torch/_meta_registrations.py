@@ -1853,6 +1853,10 @@ def meta_reflection_pad1d(input, padding):
 @register_meta(aten.replication_pad1d)
 @out_wrapper()
 def meta_replication_pad1d(input, padding):
+    torch._check(
+        input.dtype != torch.bool,
+        lambda: f""""replication_pad1d" not implemented for '{input.dtype.__str__()}'""",
+    )
     return _pad1d_common(input, padding, is_reflection=False)
 
 
@@ -1960,6 +1964,10 @@ def meta_reflection_pad2d(input, padding):
 @register_meta(aten.replication_pad2d)
 @out_wrapper()
 def meta_replication_pad2d(input, padding):
+    torch._check(
+        input.dtype != torch.bool,
+        lambda: f""""replication_pad2d" not implemented for '{input.dtype.__str__()}'""",
+    )
     return _pad2d_common(input, padding, is_reflection=False)
 
 
@@ -2073,6 +2081,10 @@ def meta_reflection_pad3d(input, padding):
 @register_meta(aten.replication_pad3d)
 @out_wrapper()
 def meta_replication_pad3d(input, padding):
+    torch._check(
+        input.dtype != torch.bool,
+        lambda: f""""replication_pad3d" not implemented for '{input.dtype.__str__()}'""",
+    )
     return _pad3d_common(input, padding, is_reflection=False)
 
 
@@ -6902,6 +6914,8 @@ def meta_histc(input, bins=100, min=0, max=0):
             input.is_floating_point(),
             lambda: f"\"histogram_cpu\" not implemented for '{input.dtype}'",
         )
+    if device_hint(input) == "cuda" and input.is_floating_point():
+        utils.alert_not_deterministic("_histc_cuda with floating point input")
     torch._check(
         isinstance(bins, IntLike),
         lambda: f"{fn_name}: argument 'bins' must be int, not {type(bins)}",
@@ -7239,6 +7253,59 @@ def sigmoid(self: Tensor) -> Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     return torch.empty_like(self, dtype=result_dtype)
+
+
+@register_meta(aten._grouped_mm)
+@out_wrapper()
+def grouped_mm(
+    mat1: Tensor,
+    mat2: Tensor,
+    offs: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    torch._check(mat1.dim() == 2 or mat1.dim() == 3, lambda: "mat1 must be 2d or 3d")
+    torch._check(mat2.dim() == 2 or mat2.dim() == 3, lambda: "mat2 must be 2d or 3d")
+    torch._check(
+        (offs is not None) == (mat1.dim() == 2 or mat2.dim() == 2),
+        lambda: "Have to provide offsets if there is a 2d matrix, or no offset if both matrices are 3d",
+    )
+
+    if offs is not None:
+        torch._check(offs.dim() == 1, lambda: "offsets must be 1d")
+
+    out_dtype = out_dtype or mat1.dtype
+    torch._check(bias is None, lambda: "bias not supported yet")
+
+    def _compute_grouped_gemm_output_size(mat1, mat2, offs):
+        mat1_is_2d = mat1.dim() == 2
+        mat2_is_2d = mat2.dim() == 2
+
+        if mat1_is_2d:
+            if mat2_is_2d:
+                return offs.size(0), mat1.size(0), mat2.size(1)
+            else:
+                torch._check(
+                    offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
+                )
+                return mat1.size(0), mat2.size(-1)
+        else:
+            if mat2_is_2d:
+                torch._check(
+                    offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
+                )
+                return mat1.size(1), mat2.size(1)
+            else:
+                # regular bmm
+                torch._check(
+                    mat1.size(0) == mat2.size(0), "batched dimension has to match"
+                )
+                return mat1.size(0), mat1.size(1), mat2.size(-1)
+
+    out_size = _compute_grouped_gemm_output_size(mat1, mat2, offs)
+    out = mat1.new_empty(out_size, dtype=out_dtype)
+
+    return out
 
 
 @register_meta(aten._softmax)
