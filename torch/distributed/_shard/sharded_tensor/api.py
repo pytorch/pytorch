@@ -787,6 +787,67 @@ class ShardedTensor(ShardedTensorBase):
         return sharded_tensor
 
     @classmethod
+    def _init_from_local_shards_and_reset_offsets(
+        cls,
+        local_shards: list[Shard],
+        *global_size,
+        process_group=None,
+        init_rrefs=False,
+    ):
+        # STEP 1: Validate the Shardmetadatas locally
+        process_group = cls._normalize_pg(process_group)
+        current_rank = dist.get_rank()  # intentional to get global rank
+        world_size = dist.get_world_size(process_group)
+
+        local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
+        global_tensor_size = _flatten_tensor_size(global_size)
+
+        if len(local_shards) > 0:
+            local_sharded_tensor_metadata = build_metadata_from_local_shards(
+                local_shards, global_tensor_size, current_rank, process_group
+            )
+
+        # STEP 2. Validate metadata across ranks, and build a global sharded tensor
+        # metadata by gathering local ShardedTensorMetadata
+        gathered_metadatas: list[Optional[ShardedTensorMetadata]] = []
+        if world_size > 1:
+            gathered_metadatas = [None for _ in range(world_size)]
+
+            dist.all_gather_object(
+                gathered_metadatas, local_sharded_tensor_metadata, group=process_group
+            )
+        else:
+            gathered_metadatas = [local_sharded_tensor_metadata]
+
+        global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas, True)
+        local_shards[0].metadata.shard_offsets = global_sharded_tensor_metadata.shards_metadata[current_rank].shard_offsets
+        tensor_properties = global_sharded_tensor_metadata.tensor_properties
+
+        # STEP 3: Validation done, create the actual ShardedTensor and populate fields
+        # prepare initialization
+        spec = shard_spec._infer_sharding_spec_from_shards_metadata(
+            global_sharded_tensor_metadata.shards_metadata
+        )
+        sharded_tensor = cls.__new__(
+            cls,
+            spec,
+            global_sharded_tensor_metadata.size,
+            dtype=tensor_properties.dtype,
+            layout=tensor_properties.layout,
+            pin_memory=tensor_properties.pin_memory,
+            requires_grad=tensor_properties.requires_grad,
+        )
+        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
+
+        # attach local_shards to the ShardedTensor created
+        sharded_tensor._local_shards = local_shards
+
+        # run post initialization, i.e. map registration, rpc initialization
+        sharded_tensor._post_init()
+        return sharded_tensor
+
+
+    @classmethod
     @deprecated(DEPRECATE_MSG, category=FutureWarning)
     def _init_from_local_tensor(
         cls,
