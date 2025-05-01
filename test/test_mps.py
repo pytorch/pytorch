@@ -12087,16 +12087,18 @@ class TestCOWInputs(TestCase):
                 # lazy clone arg_raw here before the comparison to prevent it
                 # from materializing and messing up subsequent checks.
                 arg_lazy_cloned = torch._lazy_clone(arg_raw)
+                was_not_mutated = torch.allclose(
+                    arg_lazy_cloned, arg_copy, rtol=0, atol=0, equal_nan=True
+                )
                 print('------------------------------')
+                print(f'was_not_mutated: {was_not_mutated}')
                 print('original value:')
                 print(arg_copy)
                 print('value after op:')
                 print(arg_lazy_cloned)
                 print('------------------------------')
                 self.assertTrue(
-                    torch.allclose(
-                        arg_lazy_cloned, arg_copy, rtol=0, atol=0, equal_nan=True
-                    ),
+                    was_not_mutated,
                     msg=(
                         f"{arg_name} COW input data was mutated."
                     ),
