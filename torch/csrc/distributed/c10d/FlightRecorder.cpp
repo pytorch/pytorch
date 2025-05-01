@@ -3,11 +3,7 @@
 
 #include <cuda_runtime.h>
 #include <nlohmann/json.hpp>
-#ifndef _WIN32
-#include <sys/stat.h>
-#else
-#include <direct.h>
-#endif
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <vector>
@@ -113,45 +109,6 @@ control_plane::RegisterHandler jsonDumpHandler{
           "application/json");
     }};
 
-bool recursive_mkdir(const std::string& dir) {
-  // Check if current dir exists
-  const char* p_dir = dir.c_str();
-  const bool dir_exists = (access(p_dir, F_OK) == 0);
-  if (dir_exists) {
-    return true;
-  }
-
-  // Find folder separator and check if we are at the top
-  auto pos = dir.find_last_of("/\\");
-  if (pos == std::string::npos) {
-    return false;
-  }
-
-  // Try to create parent directory
-  if (!(recursive_mkdir(dir.substr(0, pos)))) {
-    return false;
-  }
-
-  // Try to create current directory
-#ifdef _WIN32
-  int ret = _mkdir(dir.c_str());
-#else
-  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
-#endif
-  // Success
-  if (ret == 0) {
-    return true;
-  }
-
-  // Try to create complete path again
-#ifdef _WIN32
-  ret = _mkdir(dir.c_str());
-#else
-  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
-#endif
-  return ret == 0;
-}
-
 void DebugInfoWriter::write(const std::string& trace) {
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
@@ -186,10 +143,10 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     // Attempt to write to running user's HOME directory cache folder - if it
     // exists.
     auto homeDir = getCvarString({"HOME"}, "/tmp");
-    std::string cacheDirPath = homeDir + "/.cache/torch";
+    auto cacheDirPath = std::filesystem::path(homeDir + "/.cache/torch");
     // Create the .cache directory if it doesn't exist
-    recursive_mkdir(cacheDirPath);
-    std::string defaultLocation = cacheDirPath + "/" + "nccl_trace_rank_";
+    std::filesystem::create_directories(cacheDirPath);
+    auto defaultLocation = cacheDirPath / "nccl_trace_rank_";
 
     std::string fileNamePrefix = getCvarString(
         {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, defaultLocation.c_str());
@@ -322,6 +279,15 @@ void FlightRecorder::record_pg_ranks(
   }
   std::lock_guard<std::mutex> guard(mutex_);
   pg_name_to_ranks_[pg_name] = std::move(ranks);
+}
+
+void FlightRecorder::record_accelerator_version(
+    const std::string nccl_version) {
+  if (!enabled_) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(mutex_);
+  nccl_version_ = std::move(nccl_version);
 }
 
 void FlightRecorder::update_state(Entry& r) {
@@ -591,6 +557,7 @@ std::string FlightRecorder::dump_json(
   using json = nlohmann::json;
   json result;
   result[version_key_str] = version_val_str;
+  result[nccl_version_key_str] = nccl_version_;
   result[pg_config_key_str] = getPgConfigJson();
   result[pg_status_key_str] = getPgStatusJson();
 
@@ -685,6 +652,7 @@ std::string FlightRecorder::dump(
   // common values
   result.insert(version_key, version_val);
   result.insert(pg_config_key, getPgConfig());
+  result.insert(nccl_version_key_str, nccl_version_);
   result.insert(pg_status_key, getPgStatus());
 
   // collective trace
