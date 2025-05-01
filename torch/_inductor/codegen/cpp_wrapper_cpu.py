@@ -1318,6 +1318,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> None:
         if (arg.inner, graph) not in self.kernel_numel_expr:
             # declare expr once in each graph (scope)
+            self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
             self.writeline(f"{cexpr(arg.inner_expr)};")
