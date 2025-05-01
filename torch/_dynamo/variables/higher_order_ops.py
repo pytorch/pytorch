@@ -2712,7 +2712,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.fwd_graph = fwd_graph
         self.bwd_graph = bwd_graph
         self.parent_source = parent_source
-        self.proxy = None
 
     def call_function(
         self,
