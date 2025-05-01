@@ -25,7 +25,8 @@ namespace symmetric_memory {
 
 /* Start of CUDASymmetricMemory implementation */
 
-const std::string store_comm_prefix = "CUDASymmetricMemory";
+// A set of exchange methods with prefix "CUDASymmetricMemory"
+static StoreExchange storeExchange = StoreExchange("CUDASymmetricMemory");
 
 AllocationRef::AllocationRef(
     void* ptr,
@@ -551,7 +552,7 @@ static void init_multicast_for_block(
       mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0));
 
   map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
-  store_barrier(store, rank, world_size);
+  storeExchange.barrier(store, rank, world_size);
 #endif
 }
 
@@ -612,7 +613,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       .buffer_size = block->buffer_size,
       .signal_pad_offset = block->signal_pad_offset,
       .has_multicast_support = device_has_multicast_support(block->device_idx)};
-  auto reqs = store_all_gather(store, rank, world_size, local_req);
+  auto reqs = storeExchange.all_gather(store, rank, world_size, local_req);
   validate_rendezvous_requests(reqs, world_size);
 
   std::vector<int> pids(world_size);
@@ -642,7 +643,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     signal_pads[r] = (void*)((uintptr_t)buffers[r] + block->signal_pad_offset);
     close(imported_fds[r]);
   }
-  store_barrier(store, rank, world_size);
+  storeExchange.barrier(store, rank, world_size);
   close(block_fd);
 
   HandleType mc_handle{};
