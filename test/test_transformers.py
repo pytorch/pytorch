@@ -82,7 +82,7 @@ default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e
 
 isSM8XDevice = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 7), (8, 9)]
 isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0)
-isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (12, 0)
+isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(12, 0), (12, 1)]
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
@@ -2479,7 +2479,8 @@ class TestSDPACudaOnly(NNTestCase):
         # Sample call to SDPA - GQ
         query = torch.rand(batch, 32, seq_len_q, D, device='cuda', dtype=torch.bfloat16)
         key = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
-        value = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
+        # cuDNN supports h_k != h_v
+        value = torch.rand(batch, 4, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
         with sdpa_kernel([SDPBackend.MATH]):
             output_math = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
 
@@ -3647,7 +3648,7 @@ class TestSDPACudaOnly(NNTestCase):
                 *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors={
                     'out': 3.0,
-                    'grad_query': 100.0,
+                    'grad_query': 110.0,
                     'grad_key': 8.0,
                     'grad_value': 3.0,
                 }

@@ -872,12 +872,20 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         mod = ToyModel()
         mod.register_forward_pre_hook(lambda mod, input: input[0] + 1)
 
+        # Case 1: torch.compile(mod)
         cnts = torch._dynamo.testing.CompileCounter()
         compiled_mod = torch.compile(mod, backend=cnts)
 
         x = torch.rand(18, 18)
         ref = mod(x)
         res = compiled_mod(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Case 2: mod.compile()
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod.compile(backend=cnts)
+        res = mod(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
