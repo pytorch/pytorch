@@ -422,18 +422,18 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             return DictItemsVariable(self)
         elif name == "keys":
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             assert not (args or kwargs)
             return DictValuesVariable(self)
         elif name == "copy":

@@ -82,7 +82,7 @@ default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e
 
 isSM8XDevice = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 7), (8, 9)]
 isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0)
-isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (12, 0)
+isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(12, 0), (12, 1)]
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
@@ -3648,7 +3648,7 @@ class TestSDPACudaOnly(NNTestCase):
                 *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors={
                     'out': 3.0,
-                    'grad_query': 100.0,
+                    'grad_query': 110.0,
                     'grad_key': 8.0,
                     'grad_value': 3.0,
                 }

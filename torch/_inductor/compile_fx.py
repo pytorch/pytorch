@@ -212,7 +212,7 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     if not context or not context.fw_metadata:
         return fixed
 
-    return fixed + context.fw_metadata.static_input_indices
+    return context.fw_metadata.static_input_indices
 
 
 def record_original_output_strides(gm: GraphModule) -> None:
@@ -454,7 +454,9 @@ def _recursive_pre_grad_passes(
         return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
-def _recursive_joint_graph_passes(gm: GraphModule) -> None:
+def _recursive_joint_graph_passes(
+    gm: GraphModule, skip_invoke_subgraph: bool = False
+) -> None:
     with dynamo_timed(
         "_recursive_joint_graph_passes",
         log_pt2_compile_event=True,
@@ -466,9 +468,9 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
         # AOTAutograd has access to partition_fn, which internally calls the
         # `_recursive_joint_graph_passes` for the subgraph. So, skip recursing
         # skip_invoke_subgraph.
-        for subgraph_name in _get_subgraph_names(gm, skip_invoke_subgraph=True):
+        for subgraph_name in _get_subgraph_names(gm, skip_invoke_subgraph):
             subgraph = getattr(gm, subgraph_name)
-            _recursive_joint_graph_passes(subgraph)
+            _recursive_joint_graph_passes(subgraph, skip_invoke_subgraph)
         joint_graph_passes(gm)
 
 
@@ -1285,7 +1287,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-                    recursively_apply_fns = None
+                    compiled_fn_runner = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1344,8 +1346,8 @@ class _InProcessFxCompile(FxCompile):
                         else:
                             compiled_module = graph.compile_to_module()
                             compiled_fn = compiled_module.call
-                            recursively_apply_fns = getattr(
-                                compiled_module, "recursively_apply_fns", None
+                            compiled_fn_runner = getattr(
+                                compiled_module, "runner", None
                             )
 
                     num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
@@ -1421,7 +1423,7 @@ class _InProcessFxCompile(FxCompile):
                         inputs_to_check,
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
-                        recursively_apply_fns,
+                        compiled_fn_runner,
                     )
 
 
@@ -1743,7 +1745,6 @@ def fw_compiler_freezing(
     )
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
-    num_fixed = len(preserved_arg_indices) - num_example_inputs
 
     fake_mode = detect_fake_mode(aot_example_inputs)
 
@@ -1754,7 +1755,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = list(range(num_fixed))
+    static_input_idxs = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -1786,7 +1787,7 @@ def fw_compiler_freezing(
                 tracing_context.params_flat[i] = None
 
         if tracing_context.fw_metadata:
-            static_input_idxs += tracing_context.fw_metadata.static_input_indices
+            static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
     with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
         optimized_function = inner_compile(
@@ -1898,6 +1899,7 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                ignore_shape_env=ignore_shape_env,
             )
 
     # TODO: This probably shouldn't be a recursive call
@@ -1953,12 +1955,14 @@ def compile_fx(
                     fake_args,
                     inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
                     decompositions=decompositions,
+                    ignore_shape_env=ignore_shape_env,
                 )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
         decompositions=decompositions,
+        ignore_shape_env=ignore_shape_env,
     )
 
     if not graph_returns_tuple(model_):
@@ -2153,7 +2157,10 @@ def compile_fx(
         ) -> tuple[GraphModule, GraphModule]:
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
-                _recursive_joint_graph_passes(gm)
+                # We can skip the invoke_subgraph because the
+                # entire_partition_fn is called recursively for invoke_subgraph
+                # in partitioning.
+                _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
 
             static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
                 "static_lifetime_input_indices", None
