@@ -877,55 +877,50 @@ class FakeTensor(Tensor):
     ) -> tuple[torch.device, bool]:
         # Returns: (common_device, has_scalar_only_inputs)
 
+        # cpu - zero-dim tensors can be called in cuda kernels,
+        # so overwrite the common_device if it the only existing
+        # device comes from a cpu zero-dim tensor
         common_device = None
         has_scalar_only_inputs = False
+        is_cpu_zero_dim = None
+
         # list of ops which can have args(tensor/tensorList) in mixed device
         mixed_device_fns = ordered_set(
             aten._foreach_copy.default,
-            # this is a inplace fill, so the other side's device doesn't matter.
-            aten.fill_.Tensor,
-            aten.fill.Tensor,
-            aten.masked_fill.Tensor,
-            aten.masked_fill.Scalar,
-            # where's data source might have different device types.
-            aten.where.self,
-            # a zero dim cpu tensor is often used as a scalar in these arithmetic operation
-            aten.mul.Tensor,
-            aten.div.Tensor,
-            aten.add.Tensor,
-            aten.sub.Tensor,
-            aten.mul_.Tensor,
-            aten.div_.Tensor,
-            aten.add_.Tensor,
-            aten.sub_.Tensor,
-            aten.pow.Tensor_Tensor,
-            # a iteration version of arithmetic operation
-            aten._foreach_mul.List,
-            aten._foreach_div.List,
-            aten._foreach_pow.List,
-            # scalar tensor could be used as inputs
-            aten.fmax.default,
-            aten.fmin.default,
-            aten.lt.Tensor,
-            aten.gt.Tensor,
-            # zero dim cpu tensor is passed as some parameter in these backward methods.
-            aten._scaled_dot_product_efficient_attention_backward.default,
-            aten._efficient_attention_backward.default,
         )
 
         def check_cpu_device(device: torch.device) -> bool:
             return device.type == "cpu"
 
+        def cpu_zero_dim(t: Tensor) -> bool:
+            return check_cpu_device(t.device) and t.dim() == 0
+
         def merge_devices(t: object) -> None:
             nonlocal common_device
+            nonlocal is_cpu_zero_dim
             if not isinstance(t, FakeTensor):
                 return
 
             if common_device is None:
                 common_device = t.device
+                is_cpu_zero_dim = cpu_zero_dim(t)
                 return
 
+            t_is_cpu_zero_dim = cpu_zero_dim(t)
             if t.device == common_device:
+                if is_cpu_zero_dim:
+                    is_cpu_zero_dim = t_is_cpu_zero_dim
+                return
+
+            # mismatching devices !
+            # if current tensor is cpu 0 dim, defer to existing device
+            if t_is_cpu_zero_dim:
+                return
+
+            # current device is from cpu 0 dim tensor, overwrite
+            if is_cpu_zero_dim:
+                common_device = t.device
+                is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
             # if still device mismatches we will check ops which can work
@@ -936,7 +931,7 @@ class FakeTensor(Tensor):
                 if any(map(check_cpu_device, (common_device, t.device))):
                     return
 
-            # mismatching devices of tensors, throw
+            # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
             raise RuntimeError(
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
