@@ -24,21 +24,21 @@ from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
-    Context as Context,
-    DumpableContext as DumpableContext,
-    FlattenFunc as FlattenFunc,
-    FlattenWithKeysFunc as FlattenWithKeysFunc,
-    FromDumpableContextFunc as FromDumpableContextFunc,
-    is_namedtuple as is_namedtuple,
-    is_namedtuple_class as is_namedtuple_class,
-    is_namedtuple_instance as is_namedtuple_instance,
-    is_structseq as is_structseq,
-    is_structseq_class as is_structseq_class,
-    is_structseq_instance as is_structseq_instance,
-    KeyPath as KeyPath,
-    PyTree as PyTree,
-    ToDumpableContextFunc as ToDumpableContextFunc,
-    UnflattenFunc as UnflattenFunc,
+    Context,
+    DumpableContext,
+    FlattenFunc,
+    FlattenWithKeysFunc,
+    FromDumpableContextFunc,
+    is_namedtuple,
+    is_namedtuple_class,
+    is_namedtuple_instance,
+    is_structseq,
+    is_structseq_class,
+    is_structseq_instance,
+    KeyPath,
+    PyTree,
+    ToDumpableContextFunc,
+    UnflattenFunc,
 )
 
 
@@ -53,10 +53,7 @@ if not python_pytree._cxx_pytree_dynamo_traceable:
 
 
 import optree
-from optree import (  # noqa: F401  # direct import for type annotations
-    PyTreeSpec as PyTreeSpec,
-    PyTreeSpec as TreeSpec,
-)
+from optree import PyTreeSpec as PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
@@ -117,7 +114,7 @@ S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
 
-
+TreeSpec: TypeAlias = PyTreeSpec
 OpTreeUnflattenFunc: TypeAlias = Callable[[Context, Iterable[Any]], PyTree]
 
 
@@ -290,9 +287,9 @@ def tree_is_leaf(
     False
     >>> tree_is_leaf((1, 2, 3), is_leaf=lambda x: isinstance(x, tuple))
     True
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': 3})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": 3})
     False
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': None})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": None})
     False
 
     Args:
