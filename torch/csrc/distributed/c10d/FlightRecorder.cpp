@@ -21,7 +21,7 @@
 
 namespace c10d {
 
-template <typename T, typename EntryT, typename EventType, typename F>
+template <typename T, typename EntryT, typename F>
 std::optional<size_t> recordImpl(
     T& obj,
     F entry_func,
