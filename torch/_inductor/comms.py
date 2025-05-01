@@ -165,7 +165,7 @@ class ReorderInfo:
 
     @property
     def improvement(self):
-        assert self.initial_exposed >= self.final_exposed > 0
+        assert self.initial_exposed >= self.final_exposed >= 0
         return self.initial_exposed - self.final_exposed
 
 
