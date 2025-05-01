@@ -206,7 +206,7 @@ struct FlightRecorder {
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
-  std::optional<Entry> getEntry(std::optional<size_t> id);
+  std::optional<Entry> getEntry(const std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -218,7 +218,9 @@ struct FlightRecorder {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true);
+  void retire_id(
+      const std::optional<size_t> id,
+      const bool compute_duration = true);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
