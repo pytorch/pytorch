@@ -3122,12 +3122,11 @@ def get_guard_fail_reason_helper(
         # very important for symbolic shape guards which are currently
         # installed as a lambda guard and can encompass a long list of code_parts.
 
-        if len(verbose_code_parts) == 1:
-            if "Duplicate tensor found" in verbose_code_parts[0]:
-                no_tensor_aliasing_check_failed = True
-            else:
-                reasons = verbose_code_parts
-                verbose_code_parts = []
+        if any("Duplicate tensor found" in part for part in verbose_code_parts):
+            no_tensor_aliasing_check_failed = True
+        else:
+            reasons = verbose_code_parts
+            verbose_code_parts = []
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(
