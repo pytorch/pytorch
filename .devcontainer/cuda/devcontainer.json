@@ -3,7 +3,7 @@
 {
   "name": "PyTorch - CUDA",
   "build": {
-    "context": "../..",
+    "context": "./",
     "dockerfile": "../Dockerfile",
     "args": {
       "USERNAME": "vscode",
@@ -13,6 +13,10 @@
     }
   },
   "runArgs": ["--gpus", "all"],
+  // Mount the full repo only after the container starts
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/pytorch,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace/pytorch",
+
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   // "forwardPorts": [],
 
@@ -32,6 +36,7 @@
     // This is needed for lintrunner
     "ghcr.io/devcontainers/features/rust:1": {}
   }
+
   // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
   // "remoteUser": "root"
 }
