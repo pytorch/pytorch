@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 
 from . import _functional as F
-from .optimizer import _maximize_doc, _params_doc, Optimizer, ParamsT
+from .optimizer import _maximize_doc, _params_doc, _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["SparseAdam"]
@@ -117,7 +117,7 @@ class SparseAdam(Optimizer):
                 eps=group["eps"],
                 beta1=beta1,
                 beta2=beta2,
-                lr=group["lr"],
+                lr=_to_scalar(group["lr"]),
                 maximize=maximize,
             )
 

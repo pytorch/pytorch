@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
-from glob import glob
 from pathlib import Path
 
 from .setup_helpers.cmake import CMake, USE_NINJA
@@ -67,15 +66,6 @@ def _create_build_env() -> dict[str, str]:
     # you should NEVER add something to this list. It is bad practice to
     # have cmake read the environment
     my_env = os.environ.copy()
-    if (
-        "CUDA_HOME" in my_env
-    ):  # Keep CUDA_HOME. This env variable is still used in other part.
-        my_env["CUDA_BIN_PATH"] = my_env["CUDA_HOME"]
-    elif IS_WINDOWS:  # we should eventually make this as part of FindCUDA.
-        cuda_win = glob("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*")
-        if len(cuda_win) > 0:
-            my_env["CUDA_BIN_PATH"] = cuda_win[0]
-
     if IS_WINDOWS and USE_NINJA:
         # When using Ninja under Windows, the gcc toolchain will be chosen as
         # default. But it should be set to MSVC as the user's first choice.
@@ -119,7 +109,8 @@ def build_pytorch(
     cmake: CMake,
 ) -> None:
     my_env = _create_build_env()
-    checkout_nccl()
+    if os.getenv("USE_SYSTEM_NCCL", "0") == "0":
+        checkout_nccl()
     build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
         version, cmake_python_library, build_python, build_test, my_env, rerun_cmake

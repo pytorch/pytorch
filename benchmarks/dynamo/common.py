@@ -49,18 +49,10 @@ from torch._logging.scribe import open_source_signpost
 
 
 try:
-    from torch._dynamo.utils import (
-        clone_inputs,
-        graph_break_reasons,
-        maybe_enable_compiled_autograd,
-    )
+    from torch._dynamo.utils import clone_inputs, graph_break_reasons
     from torch._inductor.utils import fresh_inductor_cache
 except ImportError:
-    from _dynamo.utils import (
-        clone_inputs,
-        graph_break_reasons,
-        maybe_enable_compiled_autograd,
-    )
+    from _dynamo.utils import clone_inputs, graph_break_reasons
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -89,6 +81,7 @@ log = logging.getLogger(__name__)
 
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
 
 # Suppress torch.profiler spam
 os.environ["KINETO_LOG_LEVEL"] = "5"
@@ -916,14 +909,7 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
             # inputs will incur high penalty then the next one.
             maybe_mark_step(args)
 
-            with (
-                maybe_mark_profile(p=p, mark=mark),
-                maybe_enable_compiled_autograd(
-                    args.compiled_autograd,
-                    fullgraph=args.nopython,
-                    dynamic=args.dynamic_shapes,
-                ),
-            ):
+            with maybe_mark_profile(p=p, mark=mark):
                 timings[rep], actual_output = timed(
                     model,
                     model_iter_fn,
@@ -1064,7 +1050,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
+            frozen_model_iter_fn = export_aot_inductor(
+                model, example_inputs, args.inductor_compile_mode
+            )
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1093,14 +1081,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            with (
-                maybe_mark_profile(p=p, mark="actual"),
-                maybe_enable_compiled_autograd(
-                    args.compiled_autograd,
-                    fullgraph=args.nopython,
-                    dynamic=args.dynamic_shapes,
-                ),
-            ):
+            with maybe_mark_profile(p=p, mark="actual"):
                 timings[rep, 1], actual_output = timed(
                     model,
                     frozen_model_iter_fn,
@@ -1405,10 +1386,10 @@ class AOTInductorModelCache:
     cache = {}
 
     @classmethod
-    def load(cls, model, example_inputs):
+    def load(cls, model, example_inputs, mode):
         import torch._inductor
         import torch.export._trace
-        from torch.export.dynamic_shapes import _tree_map_with_path
+        from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
         key = weakref.ref(model)
         if key not in cls.cache:
@@ -1417,6 +1398,8 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
+                # This will cause memory stats to be overshadowed by this eager run.
+                # To fix that, memory stats will be reset later.
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
             if pytree.is_namedtuple_instance(example_outputs):
@@ -1428,11 +1411,22 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            combined_args = tuple(example_args) + tuple(example_kwargs.values())
+            combined_args = _combine_args(model, example_args, example_kwargs)
             dynamic_shapes = _tree_map_with_path(
                 _produce_dynamic_shapes_for_export, combined_args
             )
 
+            # delete example_outputs and reset memory stats here
+            del example_outputs
+            if current_device == "cuda":
+                torch.cuda.reset_peak_memory_stats()
+                empty_gpu_cache(current_device)
+            elif current_device == "hpu":
+                torch.hpu.reset_peak_memory_stats()
+
+            inductor_configs = {}
+            if mode == "max-autotune":
+                inductor_configs["max_autotune"] = True
             ep = torch.export.export(
                 model,
                 example_args,
@@ -1441,7 +1435,9 @@ class AOTInductorModelCache:
                 strict=False,
             )
             with torch.no_grad():
-                package_path = torch._inductor.aoti_compile_and_package(ep)  # type: ignore[arg-type]
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep, inductor_configs=inductor_configs
+                )  # type: ignore[arg-type]
 
             cls.cache[key] = torch._inductor.aoti_load_package(package_path)
 
@@ -1449,13 +1445,13 @@ class AOTInductorModelCache:
 
 
 def export(model, example_inputs):
-    from torch.export.dynamic_shapes import _tree_map_with_path
+    from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
     example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
     example_outputs = model(*example_args, **example_kwargs)
     _register_dataclass_output_as_pytree(example_outputs)
 
-    combined_args = tuple(example_args) + tuple(example_kwargs.values())
+    combined_args = _combine_args(model, example_args, example_kwargs)
     dynamic_shapes = _tree_map_with_path(
         _produce_dynamic_shapes_for_export, combined_args
     )
@@ -1471,8 +1467,8 @@ def export(model, example_inputs):
     return opt_export
 
 
-def export_aot_inductor(model, example_inputs):
-    optimized = AOTInductorModelCache.load(model, example_inputs)
+def export_aot_inductor(model, example_inputs, mode):
+    optimized = AOTInductorModelCache.load(model, example_inputs, mode)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -2234,14 +2230,9 @@ class BenchmarkRunner:
                         new_result = optimized_model_iter_fn(model_copy, example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                    with maybe_enable_compiled_autograd(
-                        self.args.compiled_autograd,
-                        fullgraph=self.args.nopython,
-                        dynamic=self.args.dynamic_shapes,
-                    ):
-                        new_result = self.run_n_iterations(
-                            model_copy, example_inputs, optimized_model_iter_fn
-                        )
+                    new_result = self.run_n_iterations(
+                        model_copy, example_inputs, optimized_model_iter_fn
+                    )
             except Exception as e:
                 log.exception("")
                 print(
@@ -2463,15 +2454,8 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with (
-                maybe_enable_compiled_autograd(
-                    self.args.compiled_autograd,
-                    fullgraph=self.args.nopython,
-                    dynamic=self.args.dynamic_shapes,
-                ),
-                maybe_snapshot_memory(
-                    self.args.snapshot_memory, f"compiled_{self.args.only}"
-                ),
+            with maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2489,12 +2473,7 @@ class BenchmarkRunner:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    with maybe_enable_compiled_autograd(
-                        self.args.compiled_autograd,
-                        fullgraph=self.args.nopython,
-                        dynamic=self.args.dynamic_shapes,
-                    ):
-                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+                    warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
                     filter(
@@ -2623,15 +2602,8 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with (
-                maybe_enable_compiled_autograd(
-                    self.args.compiled_autograd,
-                    fullgraph=self.args.nopython,
-                    dynamic=self.args.dynamic_shapes,
-                ),
-                maybe_snapshot_memory(
-                    self.args.snapshot_memory, f"compiled_{self.args.only}"
-                ),
+            with maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2649,12 +2621,7 @@ class BenchmarkRunner:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    with maybe_enable_compiled_autograd(
-                        self.args.compiled_autograd,
-                        fullgraph=self.args.nopython,
-                        dynamic=self.args.dynamic_shapes,
-                    ):
-                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+                    warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
                     filter(
@@ -3532,6 +3499,8 @@ def run(runner, args, original_dir=None):
     if args.dynamic_shapes:
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
+    if args.compiled_autograd:
+        torch._dynamo.config.compiled_autograd = True
     if args.propagate_real_tensors:
         # TODO: Separate flag for data dependent
         torch._dynamo.config.capture_scalar_outputs = True
@@ -3591,20 +3560,24 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
+        if args.devices == ["xpu"]:
+            torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
-            "RobertaForQuestionAnswering",
-            "nvidia_deeprecommender",
-            "volo_d1_224",
-        }:
-            # These seem unhappy with numerics of larger cuBLASLt workspace
-            # sizes following #145130 (due to enabling split-k?)
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        # TODO(eqy): revisit when cuBLASLt workspace size is bumped
+        # if args.only is not None and args.only in {
+        #     "DebertaForQuestionAnswering",
+        #     "RobertaForQuestionAnswering",
+        #     "nvidia_deeprecommender",
+        #     "volo_d1_224",
+        # }:
+        #     # These seem unhappy with numerics of larger cuBLASLt workspace
+        #     # sizes following #145130 (due to enabling split-k?)
+        #     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
 
         torch.backends.mkldnn.deterministic = True
 
@@ -3786,7 +3759,9 @@ def run(runner, args, original_dir=None):
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
             assert not args.training, "AOTInductor only supports inference"
-            optimize_ctx = functools.partial(export_aot_inductor)
+            optimize_ctx = functools.partial(
+                export_aot_inductor, mode=args.inductor_compile_mode
+            )
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)

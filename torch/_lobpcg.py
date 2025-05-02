@@ -498,7 +498,7 @@ def lobpcg(
       [DuerschEtal2018] Jed A. Duersch, Meiyue Shao, Chao Yang, Ming
       Gu. (2018) A Robust and Efficient Implementation of LOBPCG.
       SIAM J. Sci. Comput., 40(5), C655-C676. (22 pages)
-      https://epubs.siam.org/doi/abs/10.1137/17M1129830
+      https://arxiv.org/abs/1704.07458
 
     """
 
