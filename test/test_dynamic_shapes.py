@@ -15,6 +15,7 @@ import torch.fx
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
+from torch._dynamo.testing import CompileCounter
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
@@ -3032,6 +3033,23 @@ class TestGuardsExpressions(TestCase):
         func(torch.tensor([5]), torch.tensor([5]))
         with self.assertRaises(RuntimeError):
             func(torch.tensor([100]), torch.tensor([1]))
+
+    def test_unbind_not_dynamic(self):
+        cnt = CompileCounter()
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(y):
+            return y.unbind(dim=2), y * 10
+
+        func(torch.ones(5, 6, 7, 8))
+        self.assertEqual(cnt.frame_count, 1)
+        # it can be dynamic in all dimentions except dim=2
+        func(torch.ones(4, 9, 7, 10))
+        self.assertEqual(cnt.frame_count, 1)
+
+        func(torch.ones(5, 6, 8, 8))
+        func(torch.ones(5, 6, 9, 8))
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":
