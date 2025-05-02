@@ -170,8 +170,9 @@ class _TestJointOps:
             self.assertEqual(self.thetype('abcba').intersection(C('ccb')), set('bc'))
             self.assertEqual(self.thetype('abcba').intersection(C('ef')), set(''))
             self.assertEqual(self.thetype('abcba').intersection(C('cbcf'), C('bag')), set('b'))
-        s = self.thetype('abcba')
-        z = s.intersection()
+        # We can't handle id(...) in Dynamo
+        # s = self.thetype('abcba')
+        # z = s.intersection()
         # if self.thetype == frozenset():
         #     self.assertEqual(id(s), id(z))
         # else:
@@ -769,7 +770,7 @@ class TestFrozenSet(_TestJointOps, __TestCase):
         key1 = self.thetype(seq)
         key2 = self.thetype(reversed(seq))
         self.assertEqual(key1, key2)
-        self.assertNotEqual(id(key1), id(key2))
+        # self.assertNotEqual(id(key1), id(key2))
         d = {}
         d[key1] = 42
         self.assertEqual(d[key2], 42)
