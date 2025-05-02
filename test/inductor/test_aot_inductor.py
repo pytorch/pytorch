@@ -4456,10 +4456,13 @@ class AOTInductorTestsTemplate:
             torch.randn((48,), device="cuda"),
             torch.randint(0, 100, (47,), device="cuda", dtype=torch.uint8),
         )
+
+        dim = torch.export.Dim("dimensionality")
+        derived_dim = 2 * dim
         spec = {
             "getitem_54": (Dim.AUTO,),
             "getitem_52": (Dim.AUTO,),
-            "getitem_19": (Dim.AUTO,),
+            "getitem_19": (derived_dim,),
             "values_2": (Dim.AUTO,),
             "offsets": (Dim.AUTO,),
         }
