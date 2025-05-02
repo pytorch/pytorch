@@ -75,7 +75,8 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
 
   // Prepare data to send
-  // Data being sent is "fd", the value of fd will be sent as auxiliary data (control message)
+  // Data being sent is "fd", the value of fd will be sent as auxiliary data
+  // (control message)
   struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
 
   // Prepare control message data buffer and zero it out
@@ -131,11 +132,12 @@ int IpcChannel::recv_fd() {
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
 
-  // Define socket address to receive on: family AF_UNIX means unix domain socket
+  // Define socket address to receive on: family AF_UNIX means unix domain
+  // socket
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
-  //Prepare message header
+  // Prepare message header
   struct msghdr msg = {
       .msg_name = (void*)&addr,
       .msg_namelen = sizeof(struct sockaddr_un),
@@ -236,12 +238,18 @@ void map_block(
 #elif defined(USE_ROCM)
   C10_HIP_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
   C10_HIP_CHECK(hipMemMap(*ptr, size, 0, reinterpret_cast<hipMemGenericAllocationHandle_t>(handle), 0ULL));
+  C10_HIP_CHECK(hipMemMap(
+      *ptr,
+      size,
+      0,
+      reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
+      0ULL));
 
   hipMemAccessDesc desc;
   desc.location.type = hipMemLocationTypeDevice;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   desc.location.id = static_cast<int>(device_idx);
-  desc.flags =  hipMemAccessFlagsProtReadWrite;
+  desc.flags = hipMemAccessFlagsProtReadWrite;
   C10_HIP_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
 #else
   TORCH_CHECK(
