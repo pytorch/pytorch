@@ -261,6 +261,12 @@ Module ScriptModuleDeserializer::deserialize(
       extra_files[kv.first] =
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
+    else {
+      TORCH_CHECK(
+          false,
+          "Failed to load extra_file ",
+          key);
+    }
   }
   if (reader_->hasRecord("model.json") && code_prefix_ == "code/") {
     TORCH_CHECK(false, "Legacy model format is not supported on mobile.");
