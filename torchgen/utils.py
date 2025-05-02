@@ -152,7 +152,7 @@ class FileManager:
         env = env_callable()
         if isinstance(env, dict):
             if "generated_comment" not in env:
-                generator_default = REPO_ROOT / "torchgen" / "gen.py"
+                generator_default = TORCHGEN_ROOT / "gen.py"
                 try:
                     generator = Path(
                         sys.modules["__main__"].__file__ or generator_default
@@ -319,7 +319,7 @@ class FileManager:
         that varies across builds. So, just use the path relative to this file,
         which will point to the codegen source but will be stable.
         """
-        return self.template_dir.relative_to(TORCHGEN_ROOT).as_posix()
+        return os.path.relpath(self.template_dir, os.path.dirname(__file__))
 
 
 # Helper function to generate file manager

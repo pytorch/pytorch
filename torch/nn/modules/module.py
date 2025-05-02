@@ -14,6 +14,7 @@ import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
 
 
@@ -942,10 +943,8 @@ class Module:
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
             # subclasses may have multiple child tensors so we need to use swap_tensors
-            p_should_use_swap_tensors = should_use_swap_tensors or (
-                hasattr(param, "__torch_dispatch__")
-                and param.__torch_dispatch__  # type: ignore[misc]
-                is not torch._C._disabled_torch_dispatch_impl
+            p_should_use_swap_tensors = (
+                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
             )
 
             param_grad = param.grad
