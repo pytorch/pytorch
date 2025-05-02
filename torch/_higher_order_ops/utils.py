@@ -762,16 +762,6 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
     ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
-    if any(
-        len(el) > 0
-        for el in [
-            mutated_inputs,
-            inp_inp_alias_map,
-            inp_out_alias_map,
-            out_out_alias_map,
-        ]
-    ):
-        print("Failed!")
     return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
 
 

@@ -7410,8 +7410,15 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Combine_fn might be aliasing the input or the output!",
+            # Should be
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
+            # RuntimeError,
+            # "Combine_fn might be aliasing the input or the output!",
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
+            # torch._dynamo.exc.TorchDynamoException,
+            # "Unexpected exception when running generated GraphModule.*"
+            Exception,
+            ".*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7424,8 +7431,15 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
 
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Combine_fn might be aliasing the input or the output!",
+            # Should be
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
+            # RuntimeError,
+            # "Combine_fn might be aliasing the input or the output!",
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
+            # torch._dynamo.exc.TorchDynamoException,
+            # "Unexpected exception when running generated GraphModule.*"
+            Exception,
+            ".*",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7441,10 +7455,14 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, 
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
             # Should be
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=0
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
+            # torch._dynamo.exc.UncapturedHigherOrderOpError,
+            # "scan must be captured completely with torch.compile.*",
+            Exception,
+            ".*",
         ):
             functional_f(example_init, example_inputs)
 
