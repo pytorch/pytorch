@@ -6033,7 +6033,7 @@ class SubgraphBuffer(ExternKernel):
                 self.graph = graph
                 self.name = graph.name
 
-        wrapper.codegen_subgraph(
+        wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
             [*[buffer.get_name() for buffer in self.inputs]],
             [self.name],
