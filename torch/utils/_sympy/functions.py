@@ -291,6 +291,11 @@ class FloorDiv(sympy.Function):
 
         return None
 
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
+        return f"floor({base}/{divisor})"
+
 
 class ModularIndexing(sympy.Function):
     """
@@ -337,9 +342,9 @@ class ModularIndexing(sympy.Function):
                         and isinstance(term.args[0], sympy.Integer)
                         and term.args[0] < 0
                     ):
-                        # workaround for https://github.com/openai/triton/issues/619,
+                        # workaround for https://github.com/triton-lang/triton/issues/619,
                         # if there are negative terms, // produces wrong result
-                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # TODO if https://github.com/triton-lang/triton/issues/619 is fixed
                         # this optimization would become valid
                         all_positive = False
                         break
@@ -530,17 +535,22 @@ class CeilToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
 
+    def _ccode(self, printer):
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"ceil({number})"
+
 
 class FloorToInt(sympy.Function):
     is_integer = True
 
     @classmethod
     def eval(cls, number):
-        # assert number.is_integer is not True, number
         if number in (sympy.oo, int_oo):
             return int_oo
         if number in (-sympy.oo, int_oo):
             return -int_oo
+        if isinstance(number, sympy.Integer):
+            return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
 
@@ -578,7 +588,7 @@ class RShift(sympy.Function):
     def eval(cls, base, shift):
         if shift < 0:
             raise ValueError("negative shift count")
-        return base // 2**shift
+        return FloorDiv(base, 2**shift)
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
@@ -1121,6 +1131,11 @@ class IntTrueDiv(sympy.Function):
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
 
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        return f"((int){base}/(int){divisor})"
+
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
 # Because we do not have the ability to guard on the stride permutation
@@ -1284,6 +1299,10 @@ class Identity(sympy.Function):
 
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
+
+    def _eval_expand_identity(self, **hints):
+        # Removes the identity op.
+        return self.args[0]
 
 
 def make_opaque_unary_fn(name):

@@ -48,6 +48,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
     {"std::string_view", ParameterType::STRING},
+    {"::std::string_view", ParameterType::STRING},
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},

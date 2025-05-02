@@ -1,21 +1,20 @@
 # mypy: allow-untyped-defs
-"""Dispatcher for AtenLib functions from onnx-script."""
+"""Dispatcher for AtenLib functions from onnx-script.
+
+This is a deprecated module to be removed.
+"""
 
 from __future__ import annotations
 
 import logging
 import operator
 import types
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._ops
 import torch.fx
-from torch.onnx._internal.fx import (
-    diagnostics,
-    registration,
-    type_utils as fx_type_utils,
-)
+from torch.onnx._internal.fx import registration, type_utils as fx_type_utils
 
 
 if TYPE_CHECKING:
@@ -26,34 +25,10 @@ if TYPE_CHECKING:
         graph_building as onnxscript_graph_building,
     )
 
-    from torch.onnx import OnnxRegistry
+    from torch.onnx._internal._exporter_legacy import OnnxRegistry
 
 
-def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
-    fn: Callable,
-    self,
-    node: torch.fx.Node,
-    default_and_custom_functions: list[registration.ONNXFunction],
-    *args,
-    **kwargs,
-) -> str:
-    """Format the diagnostic message for the nearest match warning."""
-    all_function_overload_names = ""
-    for symbolic_func in default_and_custom_functions:
-        overload_func = symbolic_func.onnx_function
-        all_function_overload_names += f"ONNX Node: {overload_func.name}[opset={overload_func.opset};is_custom={symbolic_func.is_custom}]. \n"  # noqa: B950
-    return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
-
-
-def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(
-    fn: Callable,
-    self,
-    node: torch.fx.Node,
-    *args,
-    **kwargs,
-) -> str:
-    """Format the diagnostic message for the nearest match warning."""
-    return f"Searching operator overload: '{node.target}' in onnx registry...\n"
+logger = logging.getLogger(__name__)
 
 
 class OnnxFunctionDispatcher:
@@ -84,16 +59,13 @@ class OnnxFunctionDispatcher:
     def __init__(
         self,
         onnx_registry: OnnxRegistry,
-        diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Initialize the ONNX Function dispatcher.
 
         Args:
             onnx_registry: The ONNX registry.
-            diagnostic_context: The diagnostic context to use for reporting errors.
         """
         self.onnx_registry = onnx_registry
-        self.diagnostic_context = diagnostic_context
 
     def dispatch(
         self,
@@ -102,14 +74,13 @@ class OnnxFunctionDispatcher:
             fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
         onnx_kwargs: dict[str, fx_type_utils.Argument],
-        diagnostic_context: diagnostics.DiagnosticContext,
     ) -> onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
         Args:
             node: The TorchFX node to dispatch the function for.
             onnx_args: The arguments of the ONNX function.
             onnx_kwargs: The keyword arguments of the ONNX function.
-            diagnostic_context: The diagnostic context to use for reporting errors.
+
         Returns:
             Either an `onnxscript.OnnxFunction` or `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm.
         Raises:
@@ -117,9 +88,7 @@ class OnnxFunctionDispatcher:
         """
         # If there are no overloaded functions available for the given FX node, raise an
         # unsupported error
-        default_and_custom_functions = self.get_function_overloads(
-            node, diagnostic_context
-        )
+        default_and_custom_functions = self.get_function_overloads(node)
 
         # If there are overloaded functions available, we will find one that perfect or
         # nearest matches the given arguments and keyword arguments
@@ -128,14 +97,12 @@ class OnnxFunctionDispatcher:
             default_and_custom_functions,
             onnx_args,
             onnx_kwargs,
-            diagnostic_context,
         )
 
     def _filter_or_keep_complex(
         self,
         node,
         default_and_custom_functions: list[registration.ONNXFunction],
-        diagnostic_context: diagnostics.DiagnosticContext,
     ) -> list[registration.ONNXFunction]:
         """Filter the complex functions if the input has complex dtype."""
 
@@ -146,51 +113,32 @@ class OnnxFunctionDispatcher:
             ]
             # If we can't find the complex function group, raise error.
             if not default_and_custom_functions:
-                op_full_name = self._get_aten_name(
-                    node, diagnostic_context
-                ).qualified_name()
-                diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-                    diagnostics.rules.no_symbolic_function_for_call_function,
-                    diagnostics.levels.ERROR,
+                op_full_name = self._get_aten_name(node).qualified_name()
+                raise RuntimeError(
                     f"Cannot find any COMPLEX symbolic function for {op_full_name}, "
                     f"which should be registered under {node.target}.",
-                    unsupported_fx_node=node,
                 )
-                diagnostic_context.log(diagnostic)
-                raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
         else:
             default_and_custom_functions = [
                 func for func in default_and_custom_functions if not func.is_complex
             ]
             # If we can't find the complex function group, raise error.
             if not default_and_custom_functions:
-                op_full_name = self._get_aten_name(
-                    node, diagnostic_context
-                ).qualified_name()
-                diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-                    diagnostics.rules.no_symbolic_function_for_call_function,
-                    diagnostics.levels.ERROR,
+                op_full_name = self._get_aten_name(node).qualified_name()
+                raise RuntimeError(
                     f"Can ONLY find COMPLEX symbolic function for {op_full_name}, "
                     f"which should be registered under {node.target}.",
-                    unsupported_fx_node=node,
                 )
-                diagnostic_context.log(diagnostic)
-                raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
         return default_and_custom_functions
 
-    @diagnostics.diagnose_call(
-        diagnostics.rules.find_opschema_matched_symbolic_function,
-        diagnostic_message_formatter=_find_opschema_matched_symbolic_function_disagnostic_message_formatter,
-    )
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
-        node: torch.fx.Node,  # this is used in diagnostic_message_formatter
+        node: torch.fx.Node,
         default_and_custom_functions: list[registration.ONNXFunction],
         onnx_args: Sequence[
             fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
         onnx_kwargs: dict[str, fx_type_utils.Argument],
-        diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments.
 
@@ -199,7 +147,6 @@ class OnnxFunctionDispatcher:
                 custom ones appearing after the default ones.
             onnx_args: Arguments organized in PyTorch inputs way.
             onnx_kwargs: Keyword arguments organized in PyTorch inputs way.
-            diagnostic_context: The diagnostic context to use for reporting errors.
 
             Returns:
                 Either an `onnxscript.OnnxFunction` or `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm.
@@ -207,7 +154,6 @@ class OnnxFunctionDispatcher:
                 RuntimeError: If there are no overloaded functions available for the given FX node.
         """
         overload_match_ranking: dict[registration.ONNXFunction, int | None] = {}
-        diagnostic = diagnostic_context.inflight_diagnostic()
 
         # Iterate the overloaded functions in reverse order to prioritize the custom ones
         # over the default ones, and find the perfect match.
@@ -215,9 +161,7 @@ class OnnxFunctionDispatcher:
             function_opschema = _OnnxSchemaChecker(symbolic_function.onnx_function)
 
             # NOTE: 1. If the perfect match is found, return the function
-            if function_opschema.perfect_match_inputs(
-                diagnostic, onnx_args, onnx_kwargs
-            ):
+            if function_opschema.perfect_match_inputs(onnx_args, onnx_kwargs):
                 return symbolic_function.onnx_function
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[symbolic_function] = function_opschema.match_score
@@ -230,25 +174,12 @@ class OnnxFunctionDispatcher:
         if not overload_match_ranking:
             # If there are no overloaded functions available for the given FX node, raise an
             # unsupported error
-            op_full_name = self._get_aten_name(
-                node, diagnostic_context
-            ).qualified_name()
-            diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-                diagnostics.rules.no_symbolic_function_for_call_function,
-                diagnostics.levels.ERROR,
+            op_full_name = self._get_aten_name(node).qualified_name()
+            raise RuntimeError(
                 f"Cannot find any perfect/nearest match of symbolic function for {op_full_name},"
                 f"which should be registered under {node.target}.",
-                unsupported_fx_node=node,
             )
-            diagnostic_context.log(diagnostic)
-            raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
-        diagnostic.warning(
-            "### Exact match is not found!\n"
-            "Cannot find a perfect match of symbolic overload, "
-            "a nearest match is found. Please check the ONNX output carefully. \n",
-        )
-        diagnostic.level = diagnostics.levels.WARNING
         # NOTE: 3. Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first. If there are multiple custom ones, we will choose the one
         # that is added lastly in the list.
@@ -263,14 +194,11 @@ class OnnxFunctionDispatcher:
         )
         return symbolic_function_list[0].onnx_function
 
-    def _get_aten_name(
-        self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
-    ) -> registration.OpName:
+    def _get_aten_name(self, node: torch.fx.Node) -> registration.OpName:
         """Get the OpName from the target.
 
         Args:
             node: The TorchFX node to get the aten name for.
-            diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
             The internal op name within dataclass: registration.OpName.
@@ -283,14 +211,9 @@ class OnnxFunctionDispatcher:
             # aten::sym_size is the only OverloadPacket that we support.
             # schema: aten::sym_size(Tensor self, int dim) -> Tensor
             if node.target != torch.ops.aten.sym_size:
-                diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-                    diagnostics.rules.no_symbolic_function_for_call_function,
-                    diagnostics.levels.ERROR,
+                raise RuntimeError(
                     f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!",
-                    unsupported_fx_node=node,
                 )
-                diagnostic_context.log(diagnostic)
-                raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
             # overloadpacket for some reasons.
             # https://github.com/pytorch/pytorch/issues/97201
@@ -304,53 +227,33 @@ class OnnxFunctionDispatcher:
                     isinstance(node_arg, torch.fx.Node)
                     and not fx_type_utils.is_torch_symbolic_type(node_arg.meta["val"])
                 ):
-                    diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-                        diagnostics.rules.no_symbolic_function_for_call_function,
-                        diagnostics.levels.ERROR,
+                    raise RuntimeError(
                         f"Unsupported node arg: {node_arg} (type {type(node_arg)}) with builtin function: {node.target},"
                         " only int/float/SymInt/SymFloat is supported with built-in ops!",
-                        unsupported_fx_node=node,
                     )
-                    diagnostic_context.log(diagnostic)
-                    raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             return registration.OpName.from_builtin_function(node.target)
 
         if isinstance(node.target, torch._ops.OpOverload):
             return registration.OpName.from_op_overload(op_overload=node.target)
 
         # Unexpected target, raise error.
-        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-            diagnostics.rules.no_symbolic_function_for_call_function,
-            diagnostics.levels.ERROR,
-            f"Unknown call_function target: {node.target}",
-            unsupported_fx_node=node,
-        )
-        diagnostic_context.log(diagnostic)
-        raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+        raise RuntimeError(f"Unknown call_function target: {node.target}")
 
-    @diagnostics.diagnose_call(
-        diagnostics.rules.find_operator_overloads_in_onnx_registry,
-        diagnostic_message_formatter=_find_operator_overloads_in_onnx_registry_disagnostic_message_formatter,
-    )
     def get_function_overloads(
         self,
         node: torch.fx.Node,
-        diagnostic_context: diagnostics.DiagnosticContext,
     ) -> list[registration.ONNXFunction]:
         """Get the function overloads from the registry.
 
         Args:
             node: The node to get the function overloads for.
-            diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
             The list contains ONNXFunctions, starting with the default ones and
             followed by any custom ones.
         """
 
-        internal_opname: registration.OpName = self._get_aten_name(
-            node=node, diagnostic_context=diagnostic_context
-        )
+        internal_opname: registration.OpName = self._get_aten_name(node=node)
 
         # If the ATen/Custom operators are not registered, the group will be None.
         # And non-registered ATen/Custom operators will trigger error in the next step.
@@ -371,31 +274,17 @@ class OnnxFunctionDispatcher:
             )
             if function_group is not None:
                 op_full_name = internal_opname.qualified_name()
-                diagnostic = diagnostic_context.inflight_diagnostic()
-                diagnostic.warning(
-                    "### The operator overload is not found in onnx registry!\n"
-                    "Cannot find the operator overload in onnx registry, but "
-                    "the default overload is found. Please check the ONNX output carefully. \n",
-                )
-                diagnostic.level = diagnostics.levels.WARNING
 
         if function_group is not None:
             # NOTE: If the input has complex dtype, we will only dispatch to the complex functions.
-            function_group = self._filter_or_keep_complex(
-                node, function_group, diagnostic_context
-            )
+            function_group = self._filter_or_keep_complex(node, function_group)
             return function_group  # type: ignore[return-value]
 
         op_full_name = internal_opname.qualified_name()
-        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-            diagnostics.rules.no_symbolic_function_for_call_function,
-            diagnostics.levels.ERROR,
+        raise RuntimeError(
             f"Cannot find symbolic function for {op_full_name}, "
             f"which should be registered under {node.target}.",
-            unsupported_fx_node=node,
         )
-        diagnostic_context.log(diagnostic)
-        raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
 
 class _OnnxSchemaChecker:
@@ -530,7 +419,6 @@ class _OnnxSchemaChecker:
 
     def perfect_match_inputs(
         self,
-        diagnostic: diagnostics.Diagnostic,
         args: Sequence[
             fx_type_utils.TensorLike | str | int | float | bool | list | complex | None
         ],
@@ -550,7 +438,6 @@ class _OnnxSchemaChecker:
         nearest matching.
 
         Args:
-            diagnostic: The diagnostic to use for logging detailed info.
             args: The input arguments organized in PyTorch inputs way.
             kwargs: The input keyword arguments organized in PyTorch inputs way.
 
@@ -569,96 +456,65 @@ class _OnnxSchemaChecker:
             kwargs,
             fill_defaults=True,  # fill defaults for optional arguments to match
         )
-        with diagnostic.log_section(logging.INFO, "Checking perfect match..."):
-            diagnostic.info(
-                "%s",
-                diagnostics.LazyString(diagnostics.format_argument, self.onnxfunction),
+        # NOTE: 1. Check if the input number and attribute names match the
+        # OpSchema. If it's not, we know the function is not eligible to be a perfect
+        # match, nor a nearest match.
+        # We use is_perfect_match to postpone the return value to the end
+        # of the function, as we want to log all the mismatch info.
+        is_perfect_match = True
+        if len(function_inputs) != len(self.op_schema.inputs):
+            logger.info(
+                "Actual %d vs expected %d",
+                len(function_inputs),
+                len(self.op_schema.inputs),
             )
-            # NOTE: 1. Check if the input number and attribute names match the
-            # OpSchema. If it's not, we know the function is not eligible to be a perfect
-            # match, nor a nearest match.
-            # We use is_perfect_match to postpone the return value to the end
-            # of the function, as we want to log all the mismatch info.
-            is_perfect_match = True
-            if len(function_inputs) != len(self.op_schema.inputs):
-                with diagnostic.log_section(
-                    logging.INFO, "Failed: input number mismatch!"
-                ):
-                    diagnostic.info(
-                        "Actual %d vs expected %d",
-                        len(function_inputs),
-                        len(self.op_schema.inputs),
-                    )
-                diagnostic.info("The function is not a nearest match candidate.")
-                is_perfect_match = False
+            logger.info("The function is not a nearest match candidate.")
+            is_perfect_match = False
 
-            if set(function_attributes) != set(self.attributes):
-                with diagnostic.log_section(
-                    logging.INFO, "Failed: attribute mismatch!"
-                ):
-                    diagnostic.info(
-                        "%s",
-                        diagnostics.LazyString(
-                            lambda: f"Actual {set(function_attributes)} vs expected {set(self.attributes)}",
-                        ),
-                    )
-                diagnostic.info("The function is not a nearest match candidate.")
-                is_perfect_match = False
+        if set(function_attributes) != set(self.attributes):
+            logger.info("The function is not a nearest match candidate.")
+            is_perfect_match = False
 
-            # If it's already not a perfect match, we can return False directly. Further
-            # checking is only for the functions that are eligible for nearest match.
-            if not is_perfect_match:
-                return False
+        # If it's already not a perfect match, we can return False directly. Further
+        # checking is only for the functions that are eligible for nearest match.
+        if not is_perfect_match:
+            return False
 
-            # NOTE: 2. The dtypes of inputs and attributes should be in the
-            # type constraints of the OpSchema. If they are not, we know the function is not
-            # eligible to be a perfect match, but can be a nearest match candidate.
-            for schema_input, torch_input in zip(
-                self.op_schema.inputs, function_inputs
+        # NOTE: 2. The dtypes of inputs and attributes should be in the
+        # type constraints of the OpSchema. If they are not, we know the function is not
+        # eligible to be a perfect match, but can be a nearest match candidate.
+        for schema_input, torch_input in zip(self.op_schema.inputs, function_inputs):
+            torch_input_compatible_types = _find_onnx_data_type(torch_input)
+            allowed_types = self.type_constraints[schema_input.type_str]
+            if not allowed_types.intersection(torch_input_compatible_types) and not any(
+                fx_type_utils.is_optional_onnx_dtype_str(onnx_type_str)
+                for onnx_type_str in allowed_types
             ):
-                torch_input_compatible_types = _find_onnx_data_type(torch_input)
-                allowed_types = self.type_constraints[schema_input.type_str]
-                if not allowed_types.intersection(
-                    torch_input_compatible_types
-                ) and not any(
-                    fx_type_utils.is_optional_onnx_dtype_str(onnx_type_str)
-                    for onnx_type_str in allowed_types
-                ):
-                    # If torch_input_compatible_types isn't in allowed_types
-                    # of this input defined in the OpSchema, we know the function
-                    # and the input are not compatible
-                    with diagnostic.log_section(
-                        logging.INFO,
-                        "Failed: input type mismatch for input '%s'!",
-                        schema_input.name,
-                    ):
-                        diagnostic.info(
-                            "Actual %s vs\nExpected %s",
-                            torch_input_compatible_types,
-                            allowed_types,
-                        )
-                    is_perfect_match = False
+                # If torch_input_compatible_types isn't in allowed_types
+                # of this input defined in the OpSchema, we know the function
+                # and the input are not compatible
+                logger.info(
+                    "Actual %s vs\nExpected %s",
+                    torch_input_compatible_types,
+                    allowed_types,
+                )
+                is_perfect_match = False
 
-            for attribute_name, attribute in function_attributes.items():
-                if not self._match_onnx_attribute_type(attribute_name, attribute):
-                    # If the attribute type of the OpSchema and the attribute type don't match,
-                    # we know the function and the input are not compatible
-                    with diagnostic.log_section(
-                        logging.INFO,
-                        "Failed: attribute '%s' type mismatch!",
-                        attribute_name,
-                    ):
-                        diagnostic.info(
-                            "Actual %s vs\nExpected %s",
-                            type(attribute),
-                            self.attributes[attribute_name].type,
-                        )
-                    is_perfect_match = False
+        for attribute_name, attribute in function_attributes.items():
+            if not self._match_onnx_attribute_type(attribute_name, attribute):
+                # If the attribute type of the OpSchema and the attribute type don't match,
+                # we know the function and the input are not compatible
+                logger.info(
+                    "Actual %s vs\nExpected %s",
+                    type(attribute),
+                    self.attributes[attribute_name].type,
+                )
+                is_perfect_match = False
 
-            # NOTE: This is still a candidate for nearest match, as it only mismatches attributes on dtype.
-            self._record_matching_score(function_inputs, function_attributes)
-            diagnostic.info("match score: %d", self.match_score)
-            return is_perfect_match
+        # NOTE: This is still a candidate for nearest match, as it only mismatches attributes on dtype.
+        self._record_matching_score(function_inputs, function_attributes)
+        logger.info("match score: %d", self.match_score)
+        return is_perfect_match
 
     def _match_onnx_attribute_type(
         self,
@@ -701,8 +557,7 @@ class _OnnxSchemaChecker:
             score += 1 if one input/attribute type is in the type constraints.
 
         Limitations:
-            None/NoeType/[] could result in zero matches, and the same score of overloads,
-            which will be recorded in SARIF.
+            None/NoeType/[] could result in zero matches, and the same score of overloads.
 
         Args:
             inputs: The input arguments.

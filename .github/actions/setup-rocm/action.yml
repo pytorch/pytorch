@@ -99,8 +99,14 @@ runs:
         # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
         # Add render group for container creation.
         render_gid=`cat /etc/group | grep render | cut -d: -f3`
+        # Ensure GPU isolation if pod is part of kubernetes setup with DEVICE_FLAG.
+        if [ -f "/etc/podinfo/gha-render-devices" ]; then
+          DEVICE_FLAG=$(cat /etc/podinfo/gha-render-devices)
+        else
+          DEVICE_FLAG="--device /dev/dri"
+        fi
         # The --group-add daemon and --group-add bin are needed in the Ubuntu 24.04 and Almalinux OSs respectively.
         # This is due to the device files (/dev/kfd & /dev/dri) being owned by video group on bare metal.
         # This video group ID maps to subgid 1 inside the docker image due to the /etc/subgid entries.
         # The group name corresponding to group ID 1 can change depending on the OS, so both are necessary.
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device /dev/dri --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd $DEVICE_FLAG --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"

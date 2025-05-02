@@ -201,8 +201,7 @@ ContextConv2D create(
 
 
   xnn_operator_t convolution_op{};
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  xnn_status create_status;
+  xnn_status create_status{};
   std::array<int64_t, 4> weight_sizes{};
 
   if (transposed) {
@@ -323,8 +322,7 @@ Tensor run(
       padded_input_nhwc.opt_names());
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  xnn_status setup_status;
+  xnn_status setup_status{};
 
   /*
    * Input Pointer Caching:

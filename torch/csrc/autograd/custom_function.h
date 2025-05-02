@@ -284,17 +284,7 @@ struct CppNode : public Node {
   void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
   void save_variables_to_ctx();
 
-  void compiled_args(CompiledNodeArgs& args) override {
-    static_assert(
-        std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
-    if (!T::is_traceable) {
-      throw std::runtime_error(
-          std::string(
-              "Attempting to trace a potentially unsafe C++ autograd function: ") +
-          name() +
-          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
-    }
-
+  void compiled_args(CompiledNodeArgs& args) const override {
     // although neither of the 2 methods below have uniqueness guarantees
     // it is unlikely for them to collide at the same time
     args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
@@ -368,12 +358,15 @@ struct CppNode : public Node {
         schema.emplace_back(ivalue.type());
       }
     }
+    static_assert(
+        std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
     auto fn_name = pyinterface->bind_function(
         saved.get_py_compiler(),
         std::string(typeid(T).name()),
         CppNode_apply_functional_ivalue<T>,
         schema,
-        /*is_custom_function*/ true);
+        /*is_custom_function*/ true,
+        /*is_traceable*/ T::is_traceable);
 
     auto results = pyinterface->call_function(
         saved.get_py_compiler(),

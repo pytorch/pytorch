@@ -3,16 +3,17 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import threading
 import typing
 import warnings
 import weakref
 from abc import abstractmethod
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
     ClassVar,
-    ContextManager,
     Generic,
     NewType,
     Optional,
@@ -45,6 +46,8 @@ from torch.utils.weak import WeakIdKeyDictionary
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -92,6 +95,23 @@ def assert_eq(a: _T, b: _T) -> None:
     assert a == b, f"{a} != {b}"
 
 
+tls = threading.local()
+# Turns off inference mode for fake tensor propagation. This is turned to True
+# only for `torch.compile`. Also look at
+# _dynamo.config.fake_tensor_disable_inference_mode
+tls.disable_inference_mode = False
+
+
+@contextmanager
+def disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    prior = getattr(tls, "disable_inference_mode", False)
+    tls.disable_inference_mode = True
+    try:
+        yield
+    finally:
+        tls.disable_inference_mode = prior
+
+
 def assert_metadata_eq(
     assert_eq: Callable[[object, object], None],
     m1: Union[MetaTensorDesc, torch.Tensor],
@@ -116,7 +136,10 @@ def assert_metadata_eq(
         # MetaTensorDesc doesn't store grad_fn; inferred from leaf
         # assert_eq(m1.grad_fn is None, m2.grad_fn is None)
         assert_eq(m1.is_sparse, m2.is_sparse)
-        assert_eq(m1.is_inference, m2.is_inference())
+        if not getattr(tls, "disable_inference_mode", False):
+            assert_eq(m1.is_inference, m2.is_inference())
+        else:
+            assert_eq(m1.is_inference, False)
         assert_eq(m1.is_conj, m2.is_conj())
         assert_eq(m1.is_neg, m2.is_neg())
         assert_eq(m1.grad is not None, safe_grad(m2) is not None)
@@ -354,10 +377,11 @@ class MetaTensorDescriber:
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
+        is_inference_mode_disabled = getattr(tls, "disable_inference_mode", False)
         r: MetaTensorDesc = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
-            is_inference=t.is_inference(),
+            is_inference=False if is_inference_mode_disabled else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
             # NB: ndim should be OK too but there is a disaster at
@@ -541,11 +565,27 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
+# A callback where the device is either optional or required.
+# All of these satisfy this protocol:
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str])
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
+#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
+class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
+    def __call__(
+        self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
+    ) -> _TensorT_cov:
+        ...
+
+
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
     device: Union[torch.device, str]
 
 
-class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
+# A callback where the device may not be provided (is optional).
+# All of these satisfy this protocol:
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
+#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
+class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
     def __call__(
         self,
         arg: Callable[[], torch.Tensor],
@@ -832,11 +872,13 @@ class MetaConverter(Generic[_TensorT]):
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv],
-        callback: _MetaTensorCallback[_TensorT],
+        callback_: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
     ) -> _TensorT:
-        callback = functools.partial(callback, device=t.device)
+        callback: _MetaTensorCallbackOptDevice = functools.partial(
+            callback_, device=t.device
+        )
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -981,7 +1023,7 @@ class MetaConverter(Generic[_TensorT]):
                 symbolic_context: Optional[
                     torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ],
-                callback: _MetaTensorCallback[_TensorT],
+                callback: _MetaTensorCallbackOptDevice[_TensorT],
                 source: torch._guards.Source,
             ) -> _TensorT:
                 # We are hitting plain meta_desc tensor so actually
@@ -1216,7 +1258,7 @@ class MetaConverter(Generic[_TensorT]):
                 shape_env: Optional[
                     torch.fx.experimental.symbolic_shapes.ShapeEnv
                 ] = shape_env,
-                callback: _MetaTensorCallback[_TensorT] = callback,
+                callback: _MetaTensorCallbackOptDevice[_TensorT] = callback,
             ) -> torch.Tensor:
                 # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                 if visited_t is None:
@@ -1723,7 +1765,9 @@ class MetaConverter(Generic[_TensorT]):
                         # subclasses.  Relevant test is
                         # DynamicShapesFunctionTests::test_add_dynamic_shapes in
                         # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr: ContextManager[None] = contextlib.nullcontext()
+                        maybe_fake_mgr: AbstractContextManager[
+                            None
+                        ] = contextlib.nullcontext()
                         from torch._subclasses.fake_tensor import (
                             in_kernel_invocation_manager,
                             maybe_get_fake_mode,
@@ -1769,7 +1813,9 @@ class MetaConverter(Generic[_TensorT]):
             # Thanks to storage resizing, it's possible to end up with a tensor
             # that advertises a real size, but has a storage that actually has zero bytes.
             # Need to reflect this in the generated FakeTensor.
-            if t.storage is not None and t.storage.size == 0:
+            from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+            if t.storage is not None and guard_size_oblivious(t.storage.size == 0):
                 r.untyped_storage().resize_(0)
 
             if t.is_parameter:

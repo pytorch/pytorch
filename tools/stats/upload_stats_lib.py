@@ -9,7 +9,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, cast, Optional
 
 import boto3  # type: ignore[import]
 import requests
@@ -21,6 +21,9 @@ PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 @lru_cache
 def get_s3_resource() -> Any:
     return boto3.resource("s3")
+
+
+GHA_ARTIFACTS_BUCKET = "gha-artifacts"
 
 
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
@@ -84,16 +87,22 @@ def _download_artifact(
 
 
 def download_s3_artifacts(
-    prefix: str, workflow_run_id: int, workflow_run_attempt: int
+    prefix: str,
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    job_id: Optional[int] = None,
 ) -> list[Path]:
-    bucket = get_s3_resource().Bucket("gha-artifacts")
+    bucket = get_s3_resource().Bucket(GHA_ARTIFACTS_BUCKET)
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/{prefix}"
     )
-
     found_one = False
     paths = []
     for obj in objs:
+        object_name = Path(obj.key).name
+        # target an artifact for a specific job_id if provided, otherwise skip the download.
+        if job_id is not None and str(job_id) not in object_name:
+            continue
         found_one = True
         p = Path(Path(obj.key).name)
         print(f"Downloading {p}")
@@ -142,7 +151,7 @@ def upload_to_s3(
     key: str,
     docs: list[dict[str, Any]],
 ) -> None:
-    print(f"Writing {len(docs)} documents to S3")
+    print(f"Writing {len(docs)} documents to S3 {bucket_name}/{key}")
     body = io.StringIO()
     for doc in docs:
         json.dump(doc, body)
@@ -156,7 +165,7 @@ def upload_to_s3(
         ContentEncoding="gzip",
         ContentType="application/json",
     )
-    print("Done!")
+    print(f"Done! Finish writing document to S3 {bucket_name}/{key} ")
 
 
 def read_from_s3(
@@ -236,15 +245,24 @@ def unzip(p: Path) -> None:
         zip.extractall(unzipped_dir)
 
 
-def is_rerun_disabled_tests(tests: dict[str, dict[str, int]]) -> bool:
+def is_rerun_disabled_tests(
+    report: Path,
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    tests: dict[str, dict[str, int]],
+) -> bool:
     """
     Check if the test report is coming from rerun_disabled_tests workflow where
     each test is run multiple times
     """
-    return all(
+    if all(
         t.get("num_green", 0) + t.get("num_red", 0) > MAX_RETRY_IN_NON_DISABLED_MODE
         for t in tests.values()
-    )
+    ):
+        return True
+    job_id = get_job_id(report)
+    job_name = get_job_name(job_id, workflow_run_id, workflow_run_attempt)
+    return job_name is not None and "rerun_disabled_tests" in job_name
 
 
 def get_job_id(report: Path) -> int | None:
@@ -256,4 +274,47 @@ def get_job_id(report: Path) -> int | None:
     try:
         return int(report.parts[0].rpartition("_")[2])
     except ValueError:
+        return None
+
+
+@lru_cache
+def get_job_name(
+    id: int | None, workflow_id: int | None, workflow_run_attempt: int | None
+) -> str | None:
+    if id is None:
+        return None
+    try:
+        if workflow_id is None:
+            response = requests.get(
+                f"{PYTORCH_REPO}/actions/jobs/{id}",
+                headers=_get_request_headers(),
+            )
+            if response.status_code != 200:
+                return None
+            return cast(str, response.json()["name"])
+        else:
+
+            @lru_cache
+            def _get_jobs(workflow_id: int) -> dict[int, str]:
+                jobs: dict[int, str] = {}
+                # Paginate
+                page = 1
+                while True:
+                    response = requests.get(
+                        f"{PYTORCH_REPO}/actions/runs/{workflow_id}/attempts/{workflow_run_attempt}/jobs",
+                        headers=_get_request_headers(),
+                        params={"page": page, "per_page": 100},
+                    )
+                    if response.status_code != 200:
+                        return jobs
+                    for job in response.json()["jobs"]:
+                        jobs[job["id"]] = job["name"]
+                    if "next" not in response.links:
+                        break
+                    page += 1
+                return jobs
+
+            jobs = _get_jobs(workflow_id)
+            return jobs[id]
+    except Exception:
         return None
