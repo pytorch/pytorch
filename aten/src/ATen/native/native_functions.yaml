@@ -9774,8 +9774,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lerp_Scalar
-    MPS: lerp_Scalar_mps
+    CPU, CUDA, MPS: lerp_Scalar
   tags: pointwise
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
