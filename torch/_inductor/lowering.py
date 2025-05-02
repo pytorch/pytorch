@@ -2346,12 +2346,16 @@ def searchsorted(
             )
 
     device = self.get_device()
-    return Pointwise.create(
+    result = Pointwise.create(
         device=device,
         dtype=index_dtype,
         inner_fn=inner_fn,
         ranges=self.shape,
     )
+    # see [NOTE: inductor bucketize realize]
+    result.realize()
+
+    return result
 
 
 @register_lowering(
@@ -2396,12 +2400,23 @@ def bucketize(
 
         return indices
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=device,
         dtype=index_dtype,
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
+
+    # [NOTE: inductor bucketize realize]
+    # bucketize_binary_search is relatively expensive, so we don't want to re-compute
+    # it unnecessarily. If we run bucketize() and then broadcast the result, we don't
+    # want this to be fused into a large number of duplicate bucketize() computations
+    # for each of the elements in the result.
+    #
+    # If no broadcasting occurs, fusions can still occur in scheduler.py
+    result.realize()
+
+    return result
 
 
 def require_dense(_, *args, **kwargs):
