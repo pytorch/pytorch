@@ -27,6 +27,7 @@ from torch._prims_common import (
     IntLike,
     make_contiguous_strides_for,
     Number,
+    suggest_memory_format,
     TensorLike,
 )
 from torch._prims_common.wrappers import (
@@ -1853,6 +1854,10 @@ def meta_reflection_pad1d(input, padding):
 @register_meta(aten.replication_pad1d)
 @out_wrapper()
 def meta_replication_pad1d(input, padding):
+    torch._check(
+        input.dtype != torch.bool,
+        lambda: f""""replication_pad1d" not implemented for '{input.dtype.__str__()}'""",
+    )
     return _pad1d_common(input, padding, is_reflection=False)
 
 
@@ -1960,6 +1965,10 @@ def meta_reflection_pad2d(input, padding):
 @register_meta(aten.replication_pad2d)
 @out_wrapper()
 def meta_replication_pad2d(input, padding):
+    torch._check(
+        input.dtype != torch.bool,
+        lambda: f""""replication_pad2d" not implemented for '{input.dtype.__str__()}'""",
+    )
     return _pad2d_common(input, padding, is_reflection=False)
 
 
@@ -2073,6 +2082,10 @@ def meta_reflection_pad3d(input, padding):
 @register_meta(aten.replication_pad3d)
 @out_wrapper()
 def meta_replication_pad3d(input, padding):
+    torch._check(
+        input.dtype != torch.bool,
+        lambda: f""""replication_pad3d" not implemented for '{input.dtype.__str__()}'""",
+    )
     return _pad3d_common(input, padding, is_reflection=False)
 
 
@@ -2508,7 +2521,8 @@ if torch._C._has_mkldnn:
     )
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
-    def meta_qconv2d_pointwise(
+    @register_meta(torch.ops.onednn.qconv_pointwise.default)
+    def meta_qconv_pointwise(
         x,
         x_scale,
         x_zp,
@@ -2539,7 +2553,9 @@ if torch._C._has_mkldnn:
         )
         assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
         out = x.new_empty(shape_out, dtype=output_dtype)
-        out = out.to(memory_format=torch.channels_last)
+        assert len(shape_out) in [3, 4], "only conv1d/2d are supported"
+        format = torch.channels_last if len(shape_out) == 4 else torch.contiguous_format
+        out = out.to(memory_format=format)
         return out
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)
@@ -5404,8 +5420,8 @@ def meta_gather(self, dim, index, sparse_grad=False):
     is_index_empty = guard_size_oblivious(index.numel() == 0)
     if not is_index_empty:
         torch._check(
-            index.dtype == torch.long,
-            lambda: f"gather(): Expected dtype int64 for index, but got {index.dtype}",
+            index.dtype == torch.long or index.dtype == torch.int,
+            lambda: f"gather(): Expected dtype int32/int64 for index, but got {index.dtype}",
         )
         gather_shape_check(self, wrapped_dim, index)
     return self.new_empty(index.shape)
@@ -5444,8 +5460,8 @@ def scatter_gather_dtype_check(method_name, self, index, src_opt=None):
 
     if guard_size_oblivious(index.numel() != 0):
         torch._check(
-            index.dtype == torch.long,
-            lambda: f"{method_name}(): Expected dtype int64 for index",
+            index.dtype == torch.long or index.dtype == torch.int,
+            lambda: f"{method_name}(): Expected dtype int32/int64 for index",
         )
 
     if src_opt is not None:
@@ -6754,10 +6770,12 @@ def meta__segment_reduce_backward(
 @register_meta([aten.kthvalue.default, aten.kthvalue.values])
 @out_wrapper("values", "indices")
 def kthvalue_meta(self, k, dim=-1, keepdim=False):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     dimSize = self.size(dim) if self.dim() > 0 else 1
     torch._check(
-        k >= 1 and k <= dimSize,
+        sym_and(k >= 1, k <= dimSize),
         lambda: f"kthvalue(): selected number k out of range for dimension {dim}",
     )
 
@@ -6899,6 +6917,8 @@ def meta_histc(input, bins=100, min=0, max=0):
             input.is_floating_point(),
             lambda: f"\"histogram_cpu\" not implemented for '{input.dtype}'",
         )
+    if device_hint(input) == "cuda" and input.is_floating_point():
+        utils.alert_not_deterministic("_histc_cuda with floating point input")
     torch._check(
         isinstance(bins, IntLike),
         lambda: f"{fn_name}: argument 'bins' must be int, not {type(bins)}",
@@ -7238,6 +7258,59 @@ def sigmoid(self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
+@register_meta(aten._grouped_mm)
+@out_wrapper()
+def grouped_mm(
+    mat1: Tensor,
+    mat2: Tensor,
+    offs: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    torch._check(mat1.dim() == 2 or mat1.dim() == 3, lambda: "mat1 must be 2d or 3d")
+    torch._check(mat2.dim() == 2 or mat2.dim() == 3, lambda: "mat2 must be 2d or 3d")
+    torch._check(
+        (offs is not None) == (mat1.dim() == 2 or mat2.dim() == 2),
+        lambda: "Have to provide offsets if there is a 2d matrix, or no offset if both matrices are 3d",
+    )
+
+    if offs is not None:
+        torch._check(offs.dim() == 1, lambda: "offsets must be 1d")
+
+    out_dtype = out_dtype or mat1.dtype
+    torch._check(bias is None, lambda: "bias not supported yet")
+
+    def _compute_grouped_gemm_output_size(mat1, mat2, offs):
+        mat1_is_2d = mat1.dim() == 2
+        mat2_is_2d = mat2.dim() == 2
+
+        if mat1_is_2d:
+            if mat2_is_2d:
+                return offs.size(0), mat1.size(0), mat2.size(1)
+            else:
+                torch._check(
+                    offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
+                )
+                return mat1.size(0), mat2.size(-1)
+        else:
+            if mat2_is_2d:
+                torch._check(
+                    offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
+                )
+                return mat1.size(1), mat2.size(1)
+            else:
+                # regular bmm
+                torch._check(
+                    mat1.size(0) == mat2.size(0), "batched dimension has to match"
+                )
+                return mat1.size(0), mat1.size(1), mat2.size(-1)
+
+    out_size = _compute_grouped_gemm_output_size(mat1, mat2, offs)
+    out = mat1.new_empty(out_size, dtype=out_dtype)
+
+    return out
+
+
 @register_meta(aten._softmax)
 @out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
@@ -7250,6 +7323,48 @@ def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     result_dtype = result_dtype if not half_to_float else computation_dtype
     res = torch.empty_like(x, dtype=result_dtype, memory_format=torch.contiguous_format)
     return res
+
+
+@register_meta(aten.constant_pad_nd)
+@out_wrapper()
+def _constant_pad_nd_meta(input, pad, value=0):
+    # same checks as decomposition in torch/_refs/__init__.py:constant_pad_nd()
+    torch._check(
+        len(pad) % 2 == 0,
+        lambda: f"Length of pad must be even but instead it equals {len(pad)}",
+    )
+
+    input_sizes = input.shape
+    l_inp = len(input_sizes)
+    l_pad = len(pad) // 2
+    l_diff = l_inp - l_pad
+
+    torch._check(
+        l_inp >= l_pad,
+        lambda: "Length of pad should be no more than twice the number of "
+        f"dimensions of the input. Pad length is {len(pad)} while the input has "
+        f"{l_inp} dimensions.",
+    )
+
+    new_shape = list(input_sizes[:l_diff])
+    for i in range(l_pad):
+        pad_idx = len(pad) - ((i + 1) * 2)
+        new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+        torch._check(
+            new_dim >= 0,
+            lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
+            f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
+            f"which is invalid. Check dimension {l_diff + i} of your input.",
+        )
+        new_shape.append(new_dim)
+
+    return torch.empty(
+        new_shape,
+        dtype=input.dtype,
+        device=input.device,
+        requires_grad=input.requires_grad,
+        memory_format=suggest_memory_format(input),
+    )
 
 
 @register_meta(aten.embedding)
