@@ -69,6 +69,7 @@ class CutlassEVTCodegen:
         self.reads: OrderedSet[str] = OrderedSet()
         self.last_usages: OrderedSet[str] = OrderedSet()
         self.cur_node: Optional[ComputedBuffer] = None
+        self.name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
 
         if accumulator_node_name not in last_usages:
             self.store(accumulator_node_name, value=OpsValue(_ACCUMULATOR_ALIAS))
@@ -207,14 +208,21 @@ class CutlassEVTCodegen:
         # We only support indexing that matches the layout today because
         # CUTLASS doesn't support arbitrary indexing
         buffer_name = self.accumulator_node_name if name == _ACCUMULATOR_ALIAS else name
-        buffer = V.graph.name_to_buffer[buffer_name]
+        buffer = self.name_to_buffer[buffer_name]
         index_strides = V.graph.sizevars.stride_vars(
             index, self._get_current_index_vars()
         )
-        if buffer.get_layout().stride != index_strides:
+        stride = buffer.get_layout().stride
+        if not self._stride_compatible(stride, index_strides):
             raise NotImplementedError(
-                f"Unsupported indexing for {name} with index {index} and strides {index_strides}"
+                f"Unsupported indexing for {name} with index {index}, index strides {index_strides}, and layout stride {stride}"
             )
+
+    def _stride_compatible(self, left, right):
+        return all(
+            sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
+            for l, r in (zip(left, right))
+        )
 
     def _render_input_signature(self) -> str:
         arguments = ", ".join(
