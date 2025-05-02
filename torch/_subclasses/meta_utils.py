@@ -276,8 +276,15 @@ class MetaTensorDescriber:
         return r
 
     def describe_tensor(
-        self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
+        self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False, specialization=None
     ) -> MetaTensorDesc:
+        if specialization:
+            t = t.to('meta')
+            shape = list(t.shape)
+            for i, hint in zip(specialization.idxs, specialization.hints):
+                shape[i] = hint
+            t = torch.ones(shape, dtype=t.dtype, device='meta')
+
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -875,6 +882,7 @@ class MetaConverter(Generic[_TensorT]):
         callback_: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
+        specialization=specialization,
     ) -> _TensorT:
         callback: _MetaTensorCallbackOptDevice = functools.partial(
             callback_, device=t.device
@@ -958,6 +966,7 @@ class MetaConverter(Generic[_TensorT]):
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
+                        specialization=specialization,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
@@ -1844,6 +1853,7 @@ class MetaConverter(Generic[_TensorT]):
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace: bool = True,
+        specialization = None,
     ) -> _TensorT:
         callback_: _MetaTensorCallback[_TensorT]
         if callback is None:
@@ -1886,7 +1896,7 @@ class MetaConverter(Generic[_TensorT]):
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
-        t_desc = self.describer.describe_tensor(t, trace=trace)
+        t_desc = self.describer.describe_tensor(t, trace=trace, specialization=specialization)
 
         if trace:
             assert source is not None
@@ -1916,6 +1926,7 @@ class MetaConverter(Generic[_TensorT]):
                 callback_,
                 source,
                 symbolic_context,
+                specialization=specialization,
             )
 
         if type(t) is torch.nn.Parameter:
