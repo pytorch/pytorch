@@ -26,13 +26,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
-#if !defined(_MSC_VER)
-#include <sys/types.h>
-#include <unistd.h>
-#elif defined(_MSC_VER)
-#include <c10/util/win32-headers.h>
-#endif
-
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -1398,30 +1391,17 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def(
       "_cuda_beginAllocateCurrentThreadToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-#ifdef _MSC_VER
-        auto pid = GetCurrentProcessId();
-#else
-        auto pid = getpid();
-#endif
+        auto tid = std::this_thread::get_id();
+
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
             device, mempool_id, [=](cudaStream_t) {
-#ifdef _MSC_VER
-              auto current_pid = GetCurrentProcessId();
-#else
-              auto current_pid = getpid();
-#endif
-              return current_pid == pid;
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
             });
       });
 
   m.def(
       "_cuda_endAllocateToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-        c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
-      });
-
-  m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
       });
