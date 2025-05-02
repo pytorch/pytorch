@@ -370,7 +370,7 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor gelu(const Tensor& input, const string& approximate) {
+inline Tensor gelu(const Tensor& input, const std::string& approximate) {
   return torch::gelu(input, approximate);
 }
 } // namespace detail
