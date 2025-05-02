@@ -38,7 +38,6 @@ from ..lowering import (
     _full,
     check_and_broadcast_indices,
     empty,
-    empty_like,
     empty_strided,
     expand,
     index_output_size_and_inner_fn,
