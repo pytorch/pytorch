@@ -6860,7 +6860,7 @@ class ShapeEnv:
 
             cur = bisect_left(insts, frame.f_lasti, key=lambda x: x.offset)
         else:
-            # For Pyhton <= 3.10, instructions are always 2 bytes.
+            # For Python <= 3.10, instructions are always 2 bytes.
             cur = frame.f_lasti // 2
 
         if sys.version_info >= (3, 13):
