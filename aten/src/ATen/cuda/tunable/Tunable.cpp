@@ -31,7 +31,11 @@
 
 // for validators
 #ifdef USE_ROCM
+#ifdef _WIN32
+#include <hip/hip_version.h>
+#else
 #include <rocm-core/rocm_version.h>
+#endif
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
 #include <hipblaslt/hipblaslt.h>
@@ -218,7 +222,11 @@ TuningResultsValidator::TuningResultsValidator() {
 #ifdef USE_ROCM
   // rocm
   {
+#ifdef _WIN32
+    std::string rocm_version = HIP_VERSION_BUILD_NAME;
+#else
     std::string rocm_version = ROCM_BUILD_INFO;
+#endif
     RegisterValidator(
        "ROCM_VERSION",
        [rocm_version]() { return rocm_version; },
@@ -516,8 +524,8 @@ void TuningContext::EnableNumericsCheck(bool value) {
 }
 
 bool TuningContext::IsNumericsCheckEnabled() const {
-  const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+  if (env == "1") {
     return true;
   }
   return numerics_check_enable_;

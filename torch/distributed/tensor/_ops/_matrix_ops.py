@@ -24,7 +24,12 @@ from torch.distributed.tensor._ops.utils import (
     prod,
     register_op_strategy,
 )
-from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
+from torch.distributed.tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten
@@ -296,6 +301,24 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
     ]
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    # Shard on the batch dimension
+    single_mesh_dim_strategies.append(
+        [
+            Shard(0),  # output
+            Shard(0),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            Replicate(),  # rng_state
+            None,  # unused
+            Shard(0),  # debugattn
+            Shard(0),  # q
+            Shard(0),  # k
+            Shard(0),  # v
+        ]
+    )
+
     # Context Parallelism: shards on the sequence dim
     single_mesh_dim_strategies.append(
         [
@@ -369,6 +392,24 @@ def scaled_dot_product_flash_attention_backward_strategy(
     # at indices 6, 7, 12, 13, respectively
     num_heads_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Batch sharding
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # grad_q
+        Shard(0),  # grad_k
+        Shard(0),  # grad_v
+        Shard(0),  # grad_output
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+        Shard(0),  # output
+        Shard(0),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    batch_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
+    single_mesh_dim_strategies.append(batch_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
     seq_dim_sharding: PlacementList = [
@@ -481,6 +522,26 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
         num_heads_dim_sharding.append(Shard(1))
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    # batch sharding
+    if compute_log_sumexp:
+        logsumexp_sharding_dp: Placement = Shard(0)
+    else:
+        # empty logsumexp, replicated
+        logsumexp_sharding_dp = Replicate()
+    batch_sharding = [
+        Shard(0),  # output
+        logsumexp_sharding_dp,  # logsumexp
+        None,  # philox_seed
+        None,  # philox_offset
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+    ]
+    if has_attn_bias:
+        batch_sharding.append(Shard(0))
+
+    single_mesh_dim_strategies.append(batch_sharding)
+
     return expand_to_full_mesh_op_strategy(
         mesh,
         op_schema,
@@ -544,6 +605,27 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     # namely philox_seed and philox_offset
     num_heads_dim_sharding.extend([Replicate(), Replicate()])
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Shards on batch dim
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # grad_q
+        Shard(0),  # grad_k
+        Shard(0),  # grad_v
+        Shard(0) if has_attn_bias else None,  # grad_bias
+        Shard(0),  # grad_output
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+        Shard(0),  # output
+        Shard(0),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    if has_attn_bias:
+        batch_dim_sharding.insert(8, Shard(0))
+    batch_dim_sharding.extend([Replicate(), Replicate()])
+    single_mesh_dim_strategies.append(batch_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
     seq_dim_sharding: PlacementList = [
@@ -647,6 +729,25 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
         qkv_sharding,
     ]
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # batch parallelism
+    logsumexp_sharding = Shard(0) if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = Shard(0) if return_debug_mask else None
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # output
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        debug_attn_mask_sharding,
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+    ]
+    single_mesh_dim_strategies.append(batch_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
     cp_sharding = Shard(2)  # seq dim
@@ -767,6 +868,167 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
     )
     single_mesh_dim_strategies.append(context_parallel_sharding)
 
+    # case 4: we can accept the sharding pattern of batch parallelism, which
+    #   shards on the batch dimension
+    qkv_sharding = Shard(0)
+    output_sharding = Shard(0)
+    logsumexp_sharding = Shard(0)
+
+    batch_dim_sharding_out: PlacementList = [qkv_sharding] * 3
+    batch_dim_sharding_inp: PlacementList = [qkv_sharding] * 4
+    batch_dim_sharding_inp += [output_sharding]
+    batch_dim_sharding_inp += [logsumexp_sharding]
+    batch_dim_sharding_inp += [
+        Replicate()
+    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
+    batch_dim_sharding_inp += [Shard(0) if has_attn_bias else None]
+    batch_dim_sharding_inp += [None] * 6
+    if has_scale:
+        batch_dim_sharding_inp.append(None)
+
+    batch_dim_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
+    single_mesh_dim_strategies.append(batch_dim_sharding)
+
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=3
+    )
+
+
+@register_op_strategy(aten._grouped_mm.default)
+def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+
+    mat1_strategy = op_schema.args_schema[0]
+    assert isinstance(mat1_strategy, OpStrategy)
+    mat2_strategy = op_schema.args_schema[1]
+    assert isinstance(mat2_strategy, OpStrategy)
+    if len(op_schema.args_schema) > 3:
+        bias_strategy = op_schema.args_schema[3]
+        assert bias_strategy is None, "grouped_mm doesn't support bias yet"
+
+    single_mesh_dim_strategies = []
+
+    offs_placement = None
+    if len(op_schema.args_schema) > 2 and op_schema.args_schema[2] is not None:
+        offs_placement = Replicate()  # offs should always be replicated
+
+    all_replicate: PlacementList = [
+        Replicate(),
+        Replicate(),  # mat1
+        Replicate(),  # mat2
+        offs_placement,  # offs
+        None,  # bias
+    ]
+    partial_replicate: PlacementList = [
+        Partial(),
+        Partial(),  # mat1
+        Replicate(),  # mat2
+        offs_placement,  # offs
+        None,  # bias
+    ]
+    replicate_partial: PlacementList = [
+        Partial(),
+        Replicate(),  # mat1
+        Partial(),  # mat2
+        offs_placement,  # offs
+        None,  # bias
+    ]
+    single_mesh_dim_strategies = [all_replicate, partial_replicate, replicate_partial]
+
+    if mat1_strategy.ndim == 2 and mat2_strategy.ndim == 3:
+        # rowwise_replicate for 2dx3d not supported
+        replicate_colwise_2x3: PlacementList = [
+            Shard(1),
+            Replicate(),  # mat1
+            Shard(2),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        colwise_rowwise_2x3: PlacementList = [
+            Partial(),
+            Shard(1),  # mat1
+            Shard(1),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        single_mesh_dim_strategies.extend([replicate_colwise_2x3, colwise_rowwise_2x3])
+
+    if mat1_strategy.ndim == 3 and mat2_strategy.ndim == 2:
+        # replicate_colwise for 3dx2d not supported
+        colwise_rowwise_3x2: PlacementList = [
+            Partial(),
+            Shard(2),  # mat1
+            Shard(0),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        rowwise_replicate_3x2: PlacementList = [
+            Shard(0),
+            Shard(1),  # mat1
+            Replicate(),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        single_mesh_dim_strategies.extend([colwise_rowwise_3x2, rowwise_replicate_3x2])
+
+    if mat1_strategy.ndim == 2 and mat2_strategy.ndim == 2:
+        # colwise_rowwise for 2dx2d not supported
+        replicate_colwise_2x2: PlacementList = [
+            Shard(2),
+            Replicate(),  # mat1
+            Shard(1),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        rowwise_replicate_2x2: PlacementList = [
+            Shard(1),
+            Shard(0),  # mat1
+            Replicate(),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        single_mesh_dim_strategies.extend(
+            [replicate_colwise_2x2, rowwise_replicate_2x2]
+        )
+
+    if mat1_strategy.ndim == 3 and mat2_strategy.ndim == 3:
+        replicate_colwise_3x3: PlacementList = [
+            Shard(2),
+            Replicate(),  # mat1
+            Shard(2),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        rowwise_replicate_3x3: PlacementList = [
+            Shard(1),
+            Shard(1),  # mat1
+            Replicate(),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        colwise_rowwise_3x3: PlacementList = [
+            Partial(),
+            Shard(2),  # mat1
+            Shard(1),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        batch_dim_sharding: PlacementList = [
+            Shard(0),
+            Shard(0),  # mat1
+            Shard(0),  # mat2
+            offs_placement,  # offs
+            None,  # bias
+        ]
+        single_mesh_dim_strategies.extend(
+            [
+                replicate_colwise_3x3,
+                rowwise_replicate_3x3,
+                colwise_rowwise_3x3,
+                batch_dim_sharding,
+            ]
+        )
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=1
     )

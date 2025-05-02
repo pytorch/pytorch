@@ -1732,22 +1732,25 @@ def make_dynamo_test(
     def standard_test(
         self: Any,
         fn: Callable[..., Any],
+        kwargs,
     ) -> None:
-        def dummy(fn: Callable[..., Any]) -> None:
-            fn(self)
+        def dummy() -> None:
+            fn(self, **kwargs)
 
         actual = CompileCounter()
 
-        dummy(fn)
+        dummy()
         reset()
         opt_fn = optimize_assert(actual)(dummy)
-        opt_fn(fn)
+        opt_fn()
         reset()
 
-    def test_fn(self: Any) -> None:
+    @functools.wraps(fn)
+    def test_fn(self: Any, **kwargs) -> None:
         return standard_test(
             self,
             fn=fn,
+            kwargs=kwargs,
         )
 
     return test_fn
@@ -2031,20 +2034,24 @@ class DeterministicGuard:
         self.warn_only = warn_only
         self.fill_uninitialized_memory = fill_uninitialized_memory
 
-    def __enter__(self):
-        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
-        self.fill_uninitialized_memory_restore = torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-        torch.use_deterministic_algorithms(
-            self.deterministic,
-            warn_only=self.warn_only)
+    @classmethod
+    def _current_state(cls):
+        return cls(
+            torch.are_deterministic_algorithms_enabled(),
+            warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            fill_uninitialized_memory=torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
+        )
+
+    def _update(self):
+        torch.use_deterministic_algorithms(self.deterministic, warn_only=self.warn_only)
         torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory  # type: ignore[attr-defined]
 
+    def __enter__(self):
+        self._restore = self._current_state()
+        self._update()
+
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(
-            self.deterministic_restore,
-            warn_only=self.warn_only_restore)
-        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory_restore  # type: ignore[attr-defined]
+        self._restore._update()
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):
@@ -2806,7 +2813,10 @@ class RelaxedNumberPair(NumberPair):
         elif isinstance(number_like, Enum):
             return int(number_like)  # type: ignore[call-overload]
         else:
-            return super()._to_number(number_like, id=id)
+            number = super()._to_number(number_like, id=id)
+            if type(number) not in self._TYPE_TO_DTYPE.keys():
+                self._inputs_not_supported()
+            return number
 
 
 class TensorOrArrayPair(TensorLikePair):
@@ -3026,9 +3036,7 @@ class TestCase(expecttest.TestCase):
                         # The path isn't strictly correct but it's arguably better than nothing.
                         return os.path.split(abs_test_path)[1]
 
-                    # NB: In Python 3.8, the getfile() call will return a path relative
-                    # to the working directory, so convert that to absolute.
-                    abs_test_path = os.path.abspath(inspect.getfile(type(self)))
+                    abs_test_path = inspect.getfile(type(self))
                     test_filename = _get_rel_test_path(abs_test_path)
                     class_name = type(self).__name__
                     test_run_cmd = f"python {test_filename} {class_name}.{method_name}"
@@ -5213,23 +5221,6 @@ def skip_but_pass_in_sandcastle_if(condition, reason):
 def dtype_name(dtype):
     """ Returns the pretty name of the dtype (e.g. torch.int64 -> int64). """
     return str(dtype).split('.')[1]
-
-
-dtype_abbrs = {
-    torch.bfloat16: 'bf16',
-    torch.float64: 'f64',
-    torch.float32: 'f32',
-    torch.float16: 'f16',
-    torch.complex32: 'c32',
-    torch.complex64: 'c64',
-    torch.complex128: 'c128',
-    torch.int8: 'i8',
-    torch.int16: 'i16',
-    torch.int32: 'i32',
-    torch.int64: 'i64',
-    torch.bool: 'b8',
-    torch.uint8: 'u8',
-}
 
 
 @functools.lru_cache

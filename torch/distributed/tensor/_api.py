@@ -11,6 +11,7 @@ import torch
 import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
+from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -282,6 +283,11 @@ class DTensor(torch.Tensor):
         r._local_tensor = local_tensor
         return r
 
+    @torch._disable_dynamo
+    @mark_subclass_constructor_exportable_experimental
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
     def __repr__(self):  # type: ignore[override]
@@ -475,6 +481,8 @@ class DTensor(torch.Tensor):
         placements: Optional[Sequence[Placement]] = None,
         *,
         async_op: bool = False,
+        forward_dtype: Optional[torch.dtype] = None,
+        backward_dtype: Optional[torch.dtype] = None,
     ) -> "DTensor":
         """
         ``redistribute`` performs necessary collective operations that redistribute the current
@@ -507,6 +515,12 @@ class DTensor(torch.Tensor):
         Keyword args:
             async_op (bool, optional): whether to perform the DTensor redistribute operation
                 asynchronously or not. Default: False
+            forward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
+                ``forward_dtype`` before redistributing the local tensor in its forward.
+                The result DTensor will be in ``forward_dtype`` Default: None.
+            backward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
+                ``backward_dtype`` before redistributing the local tensor in its backward.
+                The result DTensor gradient would be converted back to the current DTensor dtype. Default: None
 
         Returns:
             A :class:`DTensor` object
@@ -539,7 +553,9 @@ class DTensor(torch.Tensor):
         placements = tuple(placements)
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-        return Redistribute.apply(self, device_mesh, placements, async_op)
+        return Redistribute.apply(
+            self, device_mesh, placements, async_op, forward_dtype, backward_dtype
+        )
 
     def full_tensor(
         self, *, grad_placements: Optional[Sequence[Placement]] = None
