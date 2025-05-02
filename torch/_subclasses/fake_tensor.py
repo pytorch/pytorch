@@ -1589,10 +1589,6 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if is_sparse_any(arg):
                     raise _BypassDispatchCache(f"{arg.layout} tensor")
-                # FIXME: For now back out caching when there are symbolic nbytes
-                # - this doesn't seem to play nice with set(). See T196779132 for examples.
-                if isinstance(arg.untyped_storage().nbytes(), SymInt):
-                    raise _BypassDispatchCache("symbolic nbytes")
                 metadata = extract_tensor_metadata(arg)
                 metadata._flatten_into(result, self, state)
             elif isinstance(arg, Tensor):
@@ -1894,11 +1890,7 @@ class FakeTensorMode(TorchDispatchMode):
         if entry.is_output_tuple:
             outputs = [
                 self._get_output_tensor_from_cache_entry(
-                    state,
-                    output_info,
-                    key,
-                    func,
-                    args,
+                    state, output_info, key, func, args
                 )
                 for output_info in entry.output_infos
             ]
