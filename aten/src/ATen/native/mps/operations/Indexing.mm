@@ -167,7 +167,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
                   index_size,
                   index_stride,
                   kernelDataOffsets,
-                  ConstMTLBufferTensor(inputTensor),
+                  ConstMTLTensor(inputTensor),
                   // inputTensor,
                   outputTensor,
                   num_indices);
