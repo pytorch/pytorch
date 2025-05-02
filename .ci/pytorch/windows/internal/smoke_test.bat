@@ -53,7 +53,7 @@ if "%PYTORCH_BUILD_VERSION:dev=%" NEQ "%PYTORCH_BUILD_VERSION%" (
 )
 
 set "EXTRA_INDEX= "
-if "%CUDA_VERSION%" == "xpu" set "EXTRA_INDEX=--index-url https://download.pytorch.org/whl/%CHANNEL%/xpu"
+if "%CUDA_VERSION%" == "xpu" set "EXTRA_INDEX=--index-url https://download.pytorch.org/whl/%CHANNEL%/xpu"  %= @lint-ignore =%
 
 for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do %PYTHON_EXEC% -m pip install "%%i" %EXTRA_INDEX%
 if errorlevel 1 exit /b 1

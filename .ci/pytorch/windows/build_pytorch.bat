@@ -110,7 +110,7 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
     @setlocal
     :: Set Flags
     if not "%CUDA_VERSION%"=="cpu" if not "%CUDA_VERSION%" == "xpu" (
-        set MAGMA_HOME=%cd%\magma_%CUDA_PREFIX%_%BUILD_TYPE%
+        set "MAGMA_HOME=%cd%\magma_%CUDA_PREFIX%_%BUILD_TYPE%"
     )
     echo "Calling arch build script"
     call %CUDA_PREFIX%.bat
