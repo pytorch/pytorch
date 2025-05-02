@@ -46,7 +46,7 @@ class TestSubgraphChoice(TestCase):
             B = k // kPartitions
             a_reshaped = torch.permute(a.reshape(m, B, kPartitions), (1, 0, 2))
             b_reshaped = b.reshape(B, kPartitions, n)
-            result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+            result = torch.bmm(a_reshaped, b_reshaped)
             result_fp32 = result.to(torch.float32)
             reduced_buf = torch.sum(result_fp32, 0)
             return reduced_buf.to(a.dtype)
