@@ -1781,25 +1781,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             z = a - b
         return x, y, z
 
-    @make_test
-    def test_set_union(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = ("shoes", "flipflops", "sneakers")
-        union_set = set1.union(set2, set3)
-        if "apple" in union_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in union_set:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in union_set:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
+    @parametrize("_type", [set, frozenset])
+    def test_set_union(self, _type):
+        @make_test
+        def fn(a, b):
+            set1 = _type({"apple", "banana", "cherry"})
+            set2 = _type({"google", "microsoft", "apple"})
+            set3 = _type({"shoes", "flipflops", "sneakers"})
+            union_set = set1.union(set2, set3)
+            if "apple" in union_set:
+                x = a + b
+            else:
+                x = a - b
+            if "banana" in union_set:
+                y = a + b
+            else:
+                y = a - b
+            if "shoes" in union_set:
+                z = a + b
+            else:
+                z = a - b
+            return x, y, z
+
+        fn(self)
 
     @make_test
     def test_set_difference(a, b):
@@ -1896,6 +1900,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             x = a - b
         return x
+
+    def test_set_to_frozenset(self):
+        @make_test
+        def fn(a, b):
+            set1 = {"apple", "banana", "cherry"}
+            set2 = frozenset({"google", "microsoft", "apple"})
+            if type(frozenset(set1)) is frozenset and type(set(set2)) is set:
+                return a + b
+            else:
+                return a - b
+
+        fn(self)
 
     def test_set_keys_view(self):
         from collections.abc import KeysView
@@ -4317,6 +4333,46 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @parametrize(
+        "method_name",
+        [
+            "copy",
+            "difference",
+            "intersection",
+            "symmetric_difference",
+            "union",
+        ],
+    )
+    def test_frozenset_return_type(self, method_name):
+        @make_test
+        def fn(a, b):
+            set1 = frozenset({"apple", "banana", "cherry"})
+            set2 = frozenset({"google", "microsoft", "apple"})
+            if method_name == "copy":
+                result = set1.copy()
+            else:
+                result = getattr(set1, method_name)(set2)
+            if type(result) is frozenset:
+                x = a + b
+            else:
+                x = a - b
+            return x
+
+        fn(self)
+
+    @parametrize("_type", [set, frozenset], name_fn=lambda t: t.__name__)
+    def test_set_call___init__(self, _type):
+        @make_test
+        def fn(a, b):
+            s = _type({"apple", "banana", "cherry"})
+            s.__init__({"google", "microsoft", "apple"})
+            if "banana" in s:
+                return a + b
+            else:
+                return a - b
+
+        fn(self)
+
     def test_frozenset_construction(self):
         def fn(x):
             s = frozenset({x})
@@ -4966,6 +5022,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(FunctionTests)
+instantiate_parametrized_tests(DefaultsTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
