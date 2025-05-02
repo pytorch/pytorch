@@ -94,7 +94,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 fn.__closure__ or (),
                 [],  # TODO tf_mode_stack,
                 code_options,
-                lambda gm, *args, **kwargs: gm.forward,
+                torch._dynamo.lookup_backend("eager"),
                 one_graph=False,
                 export=False,
                 export_constraints=None,
@@ -324,6 +324,126 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
         self._test_check_fn(ref, loaded, {"x": x}, True)
         with torch.autograd.forward_ad.dual_level():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_functorch_stack_match(self):
+        # Test when functorch stack is empty.
+        def fn(x):
+            return torch.func.jvp(torch.sin, (x,), (x,))
+
+        x = torch.randn(3, 4)
+        ref, loaded = self._test_serialization("FUNCTORCH_STACK_MATCH", fn, x)
+
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with torch._functorch.vmap.vmap_increment_nesting(2, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        def fn(x):
+            def g(x):
+                return torch.vmap(torch.func.grad(torch.sin))(x)
+
+            return torch.vmap(g)(x)
+
+        x = torch.randn(4, 5)
+        ref, loaded = self._test_serialization("FUNCTORCH_STACK_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Test when there are more than 0 functorch layers.
+        # Simulate the case where torch.compile is nested inside eager transforms.
+
+        # Case 1: vmap
+        def fn(x):
+            return x.sum()
+
+        ref = loaded = None
+
+        def run(x):
+            nonlocal ref, loaded
+            # Turn off automatic dynamic shape to so that functionalization
+            # doesn't produce extra SymInt to serialize.
+            with torch._dynamo.config.patch(automatic_dynamic_shapes=False):
+                ref, loaded = self._test_serialization("FUNCTORCH_STACK_MATCH", fn, x)
+            return fn(x)
+
+        torch.vmap(run)(x)
+
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 2: grad
+        x = torch.randn(3, 2)
+        ref = loaded = None
+        torch.func.grad(run)(x)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch._functorch.eager_transforms.grad_increment_nesting():
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 3: jvp + vmap
+        x = torch.randn(3, 4)
+        ref = loaded = None
+
+        def fn(x):
+            return torch.func.jvp(torch.sin, (x,), (x,))
+
+        torch.func.jvp(torch.vmap(run), (x,), (x,))
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.eager_transforms.jvp_increment_nesting():
+            with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+                self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            with torch._functorch.eager_transforms.jvp_increment_nesting():
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 4: functionalize
+        x = torch.randn(3, 2)
+        ref = loaded = None
+        torch.func.functionalize(run)(x)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        torch._C._functorch._func_increment_nesting(True)
+        try:
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch._C._functorch._func_decrement_nesting()
+
+        with torch._functorch.eager_transforms.jvp_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 5: vmap + grad
+        def fn(x):
+            return x.sum()
+
+        x = torch.randn(3, 2)
+        ref = loaded = None
+        torch.vmap(torch.func.grad(run))(x)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            with torch._functorch.eager_transforms.grad_increment_nesting():
+                self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.eager_transforms.grad_increment_nesting():
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
 

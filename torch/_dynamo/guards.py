@@ -475,7 +475,11 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
                     extra = f"  # {format_frame(fs, line=True)}"
                     break
         elif guard.stack:
-            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+            summary = guard.stack.summary()
+            if len(summary) > 0:
+                extra = f"  # {format_frame(summary[-1])}"
+            else:
+                extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
 
 
@@ -1591,7 +1595,7 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        cis = self.check_fn_manager.output_graph.functorch_layers
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._set_guard_export_info(guard, code)
@@ -2522,7 +2526,13 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_dispatch_key_set(cls, raw_repr: int):
         return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
 
+    @classmethod
+    def _unpickle_functorch_interpreter(cls, json: bytes):
+        return torch._C._functorch.CInterpreter.deserialize(json)
+
     def reducer_override(self, obj):
+        import sympy
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta"),
@@ -2542,6 +2552,20 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, torch._C.DispatchKeySet):
             return type(self)._unpickle_dispatch_key_set, (obj.raw_repr(),)
+
+        elif isinstance(obj, torch._C._functorch.CInterpreter):
+            return type(self)._unpickle_functorch_interpreter, (obj.serialize(),)
+
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, sympy.Function)
+            and hasattr(obj, "_torch_handler_name")
+        ):
+            assert hasattr(obj, "_torch_unpickler")
+            return obj._torch_unpickler, (obj._torch_handler_name,)
+
+        elif isinstance(obj, torch.SymInt):
+            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise RuntimeError(
