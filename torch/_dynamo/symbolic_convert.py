@@ -1437,7 +1437,21 @@ class InstructionTranslatorBase(
     def STORE_FAST(self, inst):
         name = inst.argval
         loaded_vt = self.pop()
-        loaded_vt.set_name_hint(name)
+
+        if not (
+            isinstance(loaded_vt, variables.LazyVariableTracker)
+            and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        ):
+            # Blindly calling `set_name_hint` realizes the variable tracker, so
+            # don't pass on the hint if the original vt is lazy.
+            # TODO - Compiled autograd has a bug where it installs the list as a
+            # graph input, and then it creates TensorVariable for the list
+            # items.  There is an issue where the tensor aliasing is not checked
+            # while accessing the items. Since `set_name_hint` realized the VT,
+            # it hides the bug in some cases. So, keeping the behavior same for
+            # compiled autograd.  Issue -
+            # https://github.com/pytorch/pytorch/issues/129938
+            loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
