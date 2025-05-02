@@ -22,10 +22,18 @@ from torch.testing._internal.common_utils import (
 )
 
 
+symm_mem_backend = os.getenv("TORCH_SYMMMEM")
+
+if symm_mem_backend != "NVSHMEM":
+    print(
+        "test_nvshmem requires setting `TORCH_SYMMMEM=NVSHMEM`, skipping tests",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+
 # Decorator
-# This test requires setting `TORCH_SYMMMEM=NVSHMEM`
 def requires_nvshmem():
-    symm_mem_backend = os.getenv("TORCH_SYMMMEM")
     return skip_but_pass_in_sandcastle_if(
         symm_mem_backend != "NVSHMEM",
         "test_nvshmem requires setting `TORCH_SYMMMEM=NVSHMEM`",
@@ -135,8 +143,8 @@ if __name__ == "__main__":
         sys.exit(TEST_SKIPS["no_cuda"].exit_code)
 
     # If launched by torchrun, these values would have been set
-    rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", -1))
+    rank = int(os.getenv("RANK", "-1"))
+    world_size = int(os.getenv("WORLD_SIZE", "-1"))
 
     if rank != -1:
         # Launched with torchrun or other multi-proc launchers. Directly run the test.
