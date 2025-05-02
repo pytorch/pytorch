@@ -1,7 +1,7 @@
 @echo off
 
-:: This script parses args, installs required libraries (miniconda, MKL,
-:: Magma), and then delegates to cpu.bat, cuda80.bat, etc.
+:: This script parses args, installs required libraries (MKL, Magma, libuv)
+:: and then delegates to cpu.bat, cuda80.bat, etc.
 
 if not "%CUDA_VERSION%" == "" if not "%PYTORCH_BUILD_VERSION%" == "" if not "%PYTORCH_BUILD_NUMBER%" == "" goto env_end
 if "%~1"=="" goto arg_error
@@ -36,9 +36,7 @@ set DESIRED_PYTHON_PREFIX=py%DESIRED_PYTHON_PREFIX:;=;py%
 set SRC_DIR=%~dp0
 pushd %SRC_DIR%
 
-
 set "ORIG_PATH=%PATH%"
-
 
 :: setup build environment
 :try
@@ -105,7 +103,7 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
     set "PYTHON_LIB_PATH=%CD%\Python\Library\bin"
 
     if not "%ADDITIONAL_PATH%" == "" (
-        set "PATH=%ADDITIONAL_PATH%;%ORIG_PATH%"
+        set "PATH=%ADDITIONAL_PATH%;%PATH%"
     )
 
     pip install ninja
