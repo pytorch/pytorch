@@ -478,14 +478,6 @@ inline float zeta(float x, float q) {
   return s;
 }
 
-template <typename T0>
-inline float polygamma(const int64_t order, const T0 input) {
-  float x = input;
-  float n = order;
-  float sgn = ((order % 2) ? 1 : -1);
-  return sgn * gamma(n + 1) * zeta(n + 1, x);
-}
-
 inline float calc_digamma_positive_domain(float x) {
   constexpr float DIGAMMA_COEF[7] = {
       8.33333333333333333333E-2,
@@ -544,6 +536,19 @@ inline float digamma(T0 x) {
   } else {
     return calc_digamma_positive_domain(x);
   }
+}
+
+template <typename T0>
+inline float polygamma(const int64_t order, const T0 input) {
+  // Filter out n == 0.
+  if (order == 0) {
+    return digamma(input);
+  }
+
+  float x = input;
+  float n = order;
+  float sgn = ((order % 2) ? 1 : -1);
+  return sgn * gamma(n + 1) * zeta(n + 1, x);
 }
 
 template <typename T>
