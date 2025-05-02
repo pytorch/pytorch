@@ -763,8 +763,14 @@ class SetVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        # We foward the calls to the dictionary model
-        if name == "add":
+        # We forward the calls to the dictionary model
+        if name == "__init__":
+            temp_set_vt = variables.BuiltinVariable(set).call_set(tx, *args, *kwargs)
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            self.items.update(temp_set_vt.items)
+            return ConstantVariable.create(None)
+        elif name == "add":
             assert not kwargs
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
@@ -912,6 +918,16 @@ class FrozensetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
+        elif name == "__init__":
+            return ConstantVariable.create(None)
+        elif name in (
+            "copy",
+            "difference",
+            "intersection",
+            "symmetric_difference",
+        ):
+            r = super().call_method(tx, name, args, kwargs)
+            return FrozensetVariable(r.items, source=self.source)
         return super().call_method(tx, name, args, kwargs)
 
 
