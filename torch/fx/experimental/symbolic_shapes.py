@@ -6868,6 +6868,10 @@ class ShapeEnv:
         forcing_spec: bool,
         _suppress_guards_tls: bool,
     ) -> sympy.Basic:
+        """
+        Given an expression, evaluates it, adding guards if necessary
+        """
+
         try:
             return self._evaluate_expr(
                 orig_expr,
@@ -6898,10 +6902,6 @@ class ShapeEnv:
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
-        """
-        Given an expression, evaluates it, adding guards if necessary
-        """
-
         # TODO: split conjunctions and evaluate them separately
 
         if isinstance(
