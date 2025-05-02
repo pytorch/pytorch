@@ -2,6 +2,7 @@
 import functools
 import logging
 import math
+import operator
 import sys
 import typing
 from typing import Any, Callable, Optional, TypeVar, Union
@@ -31,7 +32,11 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_oblivious
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_true,
+    guard_size_oblivious,
+    statically_known_true,
+)
 
 from . import config, inductor_prims
 from .utils import (
@@ -61,6 +66,7 @@ inductor_decompositions = get_decompositions(
         aten.bitwise_or_,
         aten.clamp_min_,
         aten.dist,
+        aten.elu,
         aten.empty_like,
         aten.flip,
         aten.gelu,
@@ -260,14 +266,16 @@ def bmm(
     self: torch.Tensor,
     batch2: torch.Tensor,
 ) -> torch.Tensor:
-    if config.coordinate_descent_tuning and self.device.type != "cpu":
-        if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
+    # TODO: Re-enable for mps once our reductions are performant enough
+    # (https://github.com/pytorch/pytorch/issues/150121)
+    if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
+        if statically_known_true(self.shape[1] == 1) or statically_known_true(
             batch2.shape[2] == 1
         ):
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
-        if guard_size_oblivious(self.size(1) == 1) and guard_size_oblivious(
+        if statically_known_true(self.size(1) == 1) and statically_known_true(
             batch2.size(-1) == 1
         ):
             counters["inductor"]["decompose_bmm"] += 1
@@ -287,7 +295,7 @@ def addmm(
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
     if self.device.type == "cpu":
-        if guard_size_oblivious(mat1.size(0) == 1) and guard_size_oblivious(
+        if statically_known_true(mat1.size(0) == 1) and statically_known_true(
             mat2.size(-1) == 1
         ):
             counters["inductor"]["decompose_addmm"] += 1
@@ -296,7 +304,7 @@ def addmm(
             ).unsqueeze(0)
             return alpha * out + beta * self
         if (
-            guard_size_oblivious(mat1.size(0) == 1)
+            statically_known_true(mat1.size(0) == 1)
             and definitely_true(mat2.size(0) <= 16)
             and definitely_true(mat2.size(1) <= 16)
         ):
@@ -314,22 +322,25 @@ def mm(
 ) -> torch.Tensor:
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
-    if config.coordinate_descent_tuning and self.device.type != "cpu":
-        if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
+
+    # TODO: Re-enable for mps once our reductions are performant enough
+    # (https://github.com/pytorch/pytorch/issues/150121)
+    if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
+        if statically_known_true(self.shape[0] == 1) or statically_known_true(
             input2.shape[1] == 1
         ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
-            guard_size_oblivious(self.size(-1) == 1)
-            and guard_size_oblivious(self.size(0) > 0)
-            and guard_size_oblivious(input2.size(0) == 1)
+            statically_known_true(self.size(-1) == 1)
+            and statically_known_true(self.size(0) > 0)
+            and statically_known_true(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
             and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
-        if guard_size_oblivious(self.size(0) == 1) and guard_size_oblivious(
+        if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):
             counters["inductor"]["decompose_mm"] += 1
@@ -348,8 +359,6 @@ def cat(
     tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     def non_empty_tensor(x: torch.Tensor) -> bool:
         # For better or worse, this is a valid cat:
         #
@@ -962,6 +971,58 @@ def index_reduce(
     )
 
 
+def _max_pool_with_indices(
+    x: torch.Tensor,
+    kernel_size: list[int],
+    stride: Optional[Union[int, list[int]]],
+    padding: Union[int, list[int]],
+    dilation: Union[int, list[int]],
+    ceil_mode: bool,
+    dim: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if dilation == 1:
+        dilation = [1] * dim
+
+    if padding == 0:
+        padding = [0] * dim
+
+    if not stride:
+        stride = kernel_size
+
+    kernel_size = pad_listlike(kernel_size, dim)
+    dilation = pad_listlike(dilation, dim)
+    padding = pad_listlike(padding, dim)
+    stride = pad_listlike(stride, dim)
+
+    window_size = functools.reduce(operator.mul, kernel_size)
+    # We fallback when using non-default dilation or when the window size is too large
+    if (
+        torch._inductor.lowering.should_fallback_max_pool_with_indices(
+            kernel_size, n_dim=dim
+        )
+        or window_size > torch.iinfo(torch.int8).max
+    ):
+        return NotImplemented
+
+    vals, offsets = prims._low_memory_max_pool_with_offsets(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        ceil_mode,
+    )
+    indices = prims._low_memory_max_pool_offsets_to_indices(
+        offsets,
+        kernel_size,
+        x.shape[-dim:],
+        stride,
+        padding,
+        dilation,
+    )
+    return vals, indices
+
+
 @register_decomposition(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
     x: torch.Tensor,
@@ -971,46 +1032,23 @@ def max_pool2d_with_indices(
     dilation: Union[int, list[int]] = 1,
     ceil_mode: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    if dilation == 1:
-        dilation = [1, 1]
-
-    if padding == 0:
-        padding = [0, 0]
-
-    if not stride:
-        stride = kernel_size
-
-    kernel_size = pad_listlike(kernel_size, 2)
-    dilation = pad_listlike(dilation, 2)
-    padding = pad_listlike(padding, 2)
-    stride = pad_listlike(stride, 2)
-
-    window_size = kernel_size[0] * kernel_size[1]
-    # We fallback when using non-default dilation or when the window size is too large
-    if (
-        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(
-            kernel_size, dilation
-        )
-        or window_size > torch.iinfo(torch.int8).max
-    ):
-        return NotImplemented
-
-    vals, offsets = prims._low_memory_max_pool2d_with_offsets(
-        x,
-        kernel_size,
-        stride,
-        padding,
-        dilation,
-        ceil_mode,
+    return _max_pool_with_indices(
+        x, kernel_size, stride, padding, dilation, ceil_mode, dim=2
     )
-    indices = prims._low_memory_max_pool2d_offsets_to_indices(
-        offsets,
-        kernel_size[1],
-        x.size(-1),
-        stride,
-        padding,
+
+
+@register_decomposition(aten.max_pool3d_with_indices)
+def max_pool3d_with_indices(
+    x: torch.Tensor,
+    kernel_size: list[int],
+    stride: Optional[Union[int, list[int]]] = None,
+    padding: Union[int, list[int]] = 0,
+    dilation: Union[int, list[int]] = 1,
+    ceil_mode: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _max_pool_with_indices(
+        x, kernel_size, stride, padding, dilation, ceil_mode, dim=3
     )
-    return vals, indices
 
 
 @register_decomposition(aten.adaptive_max_pool2d)

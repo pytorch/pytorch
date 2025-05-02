@@ -44,7 +44,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
     TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
   }
-
+  TORCH_CHECK(query.size(-3) == key.size(-3) && key.size(-3) == value.size(-3),
+              "number of heads in query/key/value should match");
   TORCH_CHECK(dropout_p == 0.0, "_scaled_dot_product_attention_math_for_mps: dropout_p != 0.0 is not supported");
   TORCH_CHECK(macOS15_0_plus || (query.is_contiguous() && key.is_contiguous() && value.is_contiguous()),
               "_scaled_dot_product_attention_math_for_mps: query, key, and value must be contiguous");
@@ -55,6 +56,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto [q_, sq] = ensure_4d(query);
   auto [k_, sk] = ensure_4d(key);
   auto [v_, sv] = ensure_4d(value);
+
   std::optional<Tensor> mask_;
   if (attn_mask) {
     auto maskExpandedDims = query.sizes().vec();
@@ -97,10 +99,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
           auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
 
           if (macOS15_0_plus && [maskedMM dataType] == MPSDataTypeFloat32) {
-            // TODO: In MacOS15 beta, there is a MPSGraph issue when the SDPA sequence gets remapped to use
-            // an improved kernel for the computation, causing NaNs in the result. This identity prevents the remapping.
-            // Limit the availability check once a fix lands.
-            maskedMM = [mpsGraph identityWithTensor:maskedMM name:nil];
+            // bug in MacOS15, without this trick SDPA leaks memory, adding 0.0f gets ignored(still takes SDPA sequence
+            // path which leaks)
+            auto oneTensor = [mpsGraph constantWithScalar:1e-20f shape:getMPSShape({1}) dataType:MPSDataTypeFloat32];
+            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:oneTensor name:nil];
           }
 
           // upcasting to float32 if needed to improve precision when multiplying by the scale factor

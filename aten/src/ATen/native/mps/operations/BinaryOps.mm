@@ -14,7 +14,6 @@
 #include <ATen/ops/atan2_native.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/eq_native.h>
-#include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/fmod_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
@@ -119,7 +118,7 @@ static void binaryOpTensor(const Tensor& self,
   }
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other, output_});
+    std::string key = op_name + getTensorsStringKey({self, other, output_});
     auto cachedGraph = LookUpOrCreateCachedGraph<BinaryOpCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->primaryTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(inputDataType), getMPSShape(self));
@@ -201,7 +200,7 @@ static void div_mode_template(const Tensor& self,
                               const Tensor& other,
                               std::optional<std::string_view> rounding_mode,
                               const Tensor& output,
-                              const string op_name) {
+                              const std::string& op_name) {
   if (rounding_mode.has_value() && *rounding_mode == "trunc") {
     TORCH_CHECK(self.scalar_type() != ScalarType::Half, "MPS: does not support trunc_divide op with float16 input");
   }
@@ -258,22 +257,30 @@ static void add_sub_lerp_template(const Tensor& self,
                                   const Scalar& alpha,
                                   const Tensor& output,
                                   std::string op_name) {
-  if (alpha.toDouble() == 0.0) {
+  if (!alpha.isComplex() && alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
       output.copy_(self);
     }
     return;
   }
 
-  const bool alpha_has_value = alpha.toDouble() != 1.0;
-  if (alpha_has_value) {
-    auto commonDtype = at::result_type(self, other);
-    at::native::alpha_check(commonDtype, alpha);
-  }
-
+  const bool alpha_has_value = alpha.isComplex() || alpha.toDouble() != 1.0;
   if (!alpha_has_value && op_name == "lerp") {
     if (!self.is_alias_of(other)) { // if inplace, no-op
       output.copy_(other);
+    }
+    return;
+  }
+
+  auto self_complex = c10::isComplexType(self.scalar_type());
+  auto other_complex = c10::isComplexType(other.scalar_type());
+  auto commonDtype = at::result_type(self, other);
+  if (self.is_mps() && other.is_mps() && (output.scalar_type() == commonDtype) && (self_complex == other_complex)) {
+    if (alpha_has_value) {
+      at::native::alpha_check(commonDtype, alpha);
+      mps::binary_op_kernel(op_name + "_alpha", self, other, output, alpha);
+    } else {
+      mps::binary_op_kernel(op_name, self, other, output);
     }
     return;
   }
@@ -397,7 +404,6 @@ TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tens
       });
 }
 TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support atan2 op with int64 input");
   mps::binaryOpTensor(
       self, other, Scalar(1.0), output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
         MPSGraph* mpsGraph = cachedGraph->graph();
@@ -448,19 +454,8 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   }
 }
 
-Tensor& floor_divide_out_mps(const Tensor& self, const Tensor& other, Tensor& result) {
-  mps::div_mode_template(self, other, "floor", result, "floor_divide_out");
-  return result;
-}
-
-Tensor floor_divide_mps(const Tensor& self, const Tensor& other) {
-  Tensor output = at::empty_like(self);
-  mps::div_mode_template(self, other, "floor", output, "floor_divide");
-  return output;
-}
-
-Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
-  return floor_divide_out_mps(self, other, self);
+static void div_floor_kernel_mps(TensorIteratorBase& iter) {
+  mps::div_mode_template(iter.input(0), iter.input(1), "floor", iter.output(0), "floor_divide_out");
 }
 
 TORCH_IMPL_FUNC(remainder_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
@@ -539,4 +534,6 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
 TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
   mps::add_sub_lerp_template(self, end, weight, out, "lerp");
 }
+
+REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel_mps);
 } // namespace at::native
