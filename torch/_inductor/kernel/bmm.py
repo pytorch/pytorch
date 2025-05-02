@@ -23,8 +23,9 @@ from ..virtualized import V
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
+    is_batch_stride_largest,
     mm_args,
-    mm_configs,
+    mm_config_kwargs,
     mm_options,
     should_fallback_to_aten,
 )
@@ -44,12 +45,6 @@ def _is_large_block_for_cpu(m, n, k):
     if m > 128 or n > 128 or k > 128:
         return True
     return m * n > 2**12
-
-
-def bmm_configs(m, n, k, *, device_type):
-    if device_type == "cpu":
-        return mm_configs(m, n, k, scale=0.5, exclude=_is_large_block_for_cpu)
-    return mm_configs(m, n, k)
 
 
 bmm_template = TritonTemplate(
@@ -80,6 +75,8 @@ bmm_template = TritonTemplate(
     group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -184,16 +181,23 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
     # options to tune from
     choices = [aten_bmm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+
+    device_type = ir.get_device_type(mat1)
+    bmm_configs = V.choices.get_base_mm_configs(device_type)
+
     if use_triton_template(layout):
-        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
+        for config in bmm_configs(
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+        ):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    static_shape, is_nonzero = _is_static_problem(layout)
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+    _, is_nonzero = _is_static_problem(layout)
+    batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
+    if batch_stride_largest and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
@@ -239,8 +243,14 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_aten_gemm_kernels()
         else []
     )
+
+    device_type = ir.get_device_type(mat1)
+    bmm_configs = V.choices.get_base_mm_configs(device_type)
+
     if use_triton_template(layout):
-        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
+        for config in bmm_configs(
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+        ):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp, mat1, mat2),

@@ -197,8 +197,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
-    GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
-        comms.reinplace_fsdp_all_gather
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
+            comms.reinplace_fsdp_all_gather
+        )
+    GraphTransformObserver(gm, "lower_scan_to_while_loop").apply_gm_pass(
+        lower_scan_to_while_loop
     )
 
     gm.recompile()
@@ -247,6 +251,217 @@ def prepare_softmax_extra_check(match):
     )
 
 
+"""
+NOTE [lower scan to while_loop]
+This pass lowers `scan` to  `while_loop` by replacing the scan fx_node with a while_loop hop.
+
+Suppose we have a function f:
+
+    def f():
+        init = torch.zeros([])
+        xs = torch.arange(4)
+        ys = []
+        for i in range(xs.size(0)):
+            init = xs[i] + init
+            ys.append(init)
+
+        # Return the final carry and stack the intermediates
+        return init, torch.stack(ys)
+
+We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
+memory usage, supporting loops over unbacked shapes and cudagraph etc.
+
+    def g():
+        def step_fn(init: torch.Tensor, x: torch.Tensor):
+            next_init = x + init
+            return next_init, next_init
+
+        init = torch.zeros([])
+        xs = torch.arange(4)
+        final_carry, ys = torch._higher_order.scan(step_fn, init, xs)
+        return final_carry, ys
+
+This pass will rewrite scan into:
+
+    def k():
+        init = torch.zeros([])
+        xs = torch.arange(4)
+
+        # we create a loop_idx and loop through xs.shape[0]
+        loop_idx = torch.zeros([])
+        ys = torch.empty_strided(_shape_stride_of_ys)
+        def cond_fn(loop_idx, ys, init, xs):
+            return loop_idx < xs.shape[0]
+
+        # we pre-allocate the output buffer ys and inplace
+        # copy the y of each intermediate into a slice.
+        # NOTE [Pre-allocate scan's output buffer].
+        def body_fn(loop_idx, ys, init, xs):
+            int_idx = loop_idx.item()
+            next_init, y = step_fn(init, xs[int_idx])
+            ys[int_idx].copy_(y)
+            return loop_idx + 1, ys, next_init, xs
+
+        final_carry, _, _, ys = torch._higher_order.while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
+        return final_carry, ys
+"""
+
+
+def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.scan),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.scan import _extract_carry_and_out
+
+        assert len(kwargs) == 0, (
+            "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+        )
+
+        combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
+        assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
+        sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
+        cur_node = match.nodes[0]
+        num_init_leaves = len(fx_init)
+        _, ys_outputs = _extract_carry_and_out(cur_node.meta["val"], num_init_leaves)
+
+        def lower_to_while_loop(*args, **kwargs):
+            """
+            The traced graph of this function will be used to replace the original scan fx_node.
+            """
+            assert len(kwargs) == 0
+
+            def resolve_shape_to_proxy(
+                shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
+            ):
+                """
+                Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
+                When we trace this function, we'll get a graph with call_function nodes that describes how the shape expr is
+                computed from bound_symbols' values.
+
+                Suppose shape = (s1*s2, s1+s2) and bound_symbols = {s1: arg0, s2: arg1}, the result will be
+                (arg0 * arg1, arg0 + arg1).
+                """
+                from torch.utils._sympy.interp import sympy_interp
+                from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+                ret = []
+                for s in shape:
+                    if isinstance(s, torch.SymInt):
+                        ret.append(
+                            sympy_interp(
+                                PythonReferenceAnalysis,
+                                bound_symbols,
+                                s.node.expr,
+                            ),
+                        )
+                    else:
+                        assert isinstance(s, int)
+                        ret.append(s)
+                return ret
+
+            # Step 1: construct necessary inputs to while_loop based on scan's input.
+            (
+                init,
+                xs,
+                additional_inputs,
+            ) = pytree.tree_unflatten(args, tree_spec)
+            scan_length = xs[0].size(0)
+            loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
+
+            # NOTE [Pre-allocate scan's output buffer]
+            # In order to pre-allocate the output buffer for ys, we rely on the meta of scan's fx_node.
+            # However, the meta consists of concrete symints, we need to bind those symints with
+            # proxies in order to trace the torch.empyt_strided call correctly.
+            #
+            # Also note that basic free symbols of tensor's shapes are guaranteed to be lifted as subgraph inputs
+            # in dynamo so we can always re-construct the sym expression from placeholders.
+            # See Note [Auto lift basic free symbols when create_graph_input] for how this is done.
+            bound_symbols = {
+                arg.node.expr: arg
+                for arg in pytree.tree_leaves((args, scan_length))
+                if isinstance(arg, torch.SymInt)
+            }
+            ys_outs = [
+                torch.empty_strided(
+                    resolve_shape_to_proxy(ys_out.size(), bound_symbols),
+                    resolve_shape_to_proxy(ys_out.stride(), bound_symbols),
+                    device=ys_out.device,
+                    dtype=ys_out.dtype,
+                    layout=ys_out.layout,
+                    requires_grad=ys_out.requires_grad,
+                )
+                for ys_out in ys_outputs
+            ]
+
+            while_loop_operands = (loop_idx, ys_outs, init, xs)
+            flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
+            _, operands_and_additional_inputs_spec = pytree.tree_flatten(
+                (*while_loop_operands, additional_inputs)
+            )
+
+            # Step 2: create the cond_fn and body_fn for while_loop
+            def cond_fn(*flat_args):
+                loop_idx, _, _, _, _ = pytree.tree_unflatten(
+                    flat_args, operands_and_additional_inputs_spec
+                )  # type: ignore[has-type]
+                return loop_idx < scan_length  # type: ignore[has-type]
+
+            def body_fn(*flat_args):
+                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
+                    flat_args,
+                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
+                )
+
+                idx_int = loop_idx.item()
+                torch.ops.aten._assert_scalar.default(idx_int >= 0, "")
+                torch.ops.aten._assert_scalar.default(idx_int < scan_length, "")
+                sub_xs = [torch.ops.aten.select.int(x, 0, idx_int) for x in xs]
+                next_carry, ys = _extract_carry_and_out(
+                    sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
+                    num_init_leaves,
+                )
+                for y, y_out in zip(ys, ys_outs):
+                    y_out_slice = torch.ops.aten.select.int(y_out, 0, idx_int)
+                    y_out_slice.copy_(y)
+                return loop_idx + 1, *ys_outs, *next_carry, *xs
+
+            # Step 3: call the while_loop operator
+            _, ys_outs, last_carry, _ = pytree.tree_unflatten(
+                torch.ops.higher_order.while_loop(
+                    cond_fn,
+                    body_fn,
+                    tuple(flat_operands),
+                    tuple(additional_inputs),
+                ),
+                operands_spec,
+            )
+            return list(last_carry) + list(ys_outs)
+
+        lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
+            (
+                fx_init,
+                fx_xs,
+                fx_additional_inputs,
+            )
+        )
+        match.replace_by_example(
+            lower_to_while_loop,
+            lower_to_while_loop_args,
+            run_functional_passes=False,
+        )
+
+    graph_pass.apply(gm)
+
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.scan
+    ):
+        raise AssertionError("scan is not lowered to while_loop")
+
+
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
@@ -270,6 +485,21 @@ def lazy_init():
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
+    if torch.distributed.is_available():
+
+        def check():
+            # This is a wait node, and `other_node`` is some collective node.
+            # Eager semantics allow waits to be issued in a different order than
+            # the collectives. Reordering this wait node might reorder collectives
+            # which cause hangs. Once we have SPMD mode, we can safely reorder them.
+            # However, increasing the locality between a collective and its wait node
+            # is generally worse for performance.
+            return node.target != torch.ops._c10d_functional.wait_tensor.default
+    else:
+
+        def check():
+            return True
+
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -277,6 +507,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
+            and check()
         ):
             # move node's producers right before it
             node.prepend(other_node)
@@ -598,9 +829,14 @@ def register_noop_decomp(targets, nop_arg=0):
 def slice_noop(self, dim=0, start=None, end=None, step=1):
     if start is None or end is None:
         return False
+
+    slice_dim_size = self.shape[dim]
     if (
         statically_known_true(sym_eq(start, 0))
-        and statically_known_true(end >= 2**63 - 1)
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_dim_size)
+        )
         and statically_known_true(sym_eq(step, 1))
     ):
         return True
@@ -613,7 +849,16 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         start = 0
     if end is None:
         end = 2**63 - 1
-    if start == 0 and end >= 2**63 - 1 and step == 1:
+    slice_scatter_dim_size = self.shape[dim]
+    if (
+        self.shape == src.shape
+        and start == 0
+        and (
+            statically_known_true(end >= 2**63 - 1)
+            or statically_known_true(end >= slice_scatter_dim_size)
+        )
+        and step == 1
+    ):
         return True
     return False
 
@@ -653,9 +898,14 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp(aten.view)
-def view_noop(arg, size):
-    return arg.shape == size
+@register_noop_decomp(aten.view.default)
+def view_default_noop(arg, size):
+    return statically_known_true(sym_eq(arg.shape, tuple(size)))
+
+
+@register_noop_decomp(aten.view.dtype)
+def view_dtype_noop(arg, dtype):
+    return arg.dtype == dtype
 
 
 # Note, we also always have a check for identical metadata, which is why these

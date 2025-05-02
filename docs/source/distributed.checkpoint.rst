@@ -21,7 +21,7 @@ Additional resources:
 * `Getting Started with Distributed Checkpoint (DCP) <https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html>`__
 * `Asynchronous Saving with Distributed Checkpoint (DCP) <https://pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html>`__
 * `TorchTitan Checkpointing Docs <https://github.com/pytorch/torchtitan/blob/main/docs/checkpoint.md>`__
-* `TorchTitan DCP Implementation <https://github.com/pytorch/torchtitan/blob/main/torchtitan/checkpoint.py>`__
+* `TorchTitan DCP Implementation <https://github.com/pytorch/torchtitan/blob/main/torchtitan/components/checkpoint.py>`__
 
 .. automodule:: torch.distributed.checkpoint
 
@@ -83,6 +83,9 @@ The following types define the planner interface used during checkpoint:
   :members:
 
 .. autoclass:: torch.distributed.checkpoint.planner.WriteItem
+  :members:
+
+.. autoclass:: torch.distributed.checkpoint.planner.BytesIOWriteData
   :members:
 
 We provide a filesystem based storage layer:
