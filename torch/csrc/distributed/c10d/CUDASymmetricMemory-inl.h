@@ -30,8 +30,8 @@ template <std::memory_order Sem>
 __device__ __forceinline__ uint32_t
 cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 #if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
-  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ref(*addr);
-  ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
+  ::cuda::atomic_ref<uint32_t, ::cuda::thread_scope_system> ref(*addr);
+  ref.compare_exchange_strong(compare, val, ::cuda::std::memory_order(Sem));
   return compare;
 #else
   CUDA_KERNEL_ASSERT(false);
