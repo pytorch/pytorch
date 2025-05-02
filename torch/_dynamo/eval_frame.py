@@ -343,6 +343,12 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
+    def __call__(self, *args, **kwargs):
+        # All the logic in `torch.nn.Module.__call__` has been captured by
+        # `self.forward = self.dynamo_ctx(self._orig_mod.__call__)`, so we
+        # override here to avoid running that logic again by default.
+        return self.forward(*args, **kwargs)
+
     def __reduce__(self):
         return (self.__class__, (self._orig_mod, self.dynamo_ctx))
 
