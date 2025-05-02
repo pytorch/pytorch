@@ -1008,6 +1008,12 @@ class cpp:
     # enable this feature by their need.
     enable_concat_linear = False
 
+    # Whether to use decomposed tanh for cpu device
+    # Disable by default due to https://github.com/pytorch/pytorch/issues/148241
+    use_decompose_tanh = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_DECOMPOSE_TANH", "0") == "1"
+    )
+
 
 # config specific to codegen/triton.py
 class triton:
