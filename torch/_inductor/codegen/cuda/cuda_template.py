@@ -19,6 +19,12 @@ from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
 
 
+if TYPE_CHECKING:
+    from ...scheduler import BaseSchedulerNode  # noqa: TC004
+else:
+    BaseSchedulerNode = Any
+
+
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 
