@@ -134,10 +134,10 @@ def set_intersection_update(set1, *others):
 
 
 def set_union(set1, *others):
-    union_set = set1.copy()
+    union_set = set(set1.copy())
     for set2 in others:
         set_update(union_set, set2)
-    return union_set
+    return type(set1)(union_set)
 
 
 def set_update(set1, *others):
