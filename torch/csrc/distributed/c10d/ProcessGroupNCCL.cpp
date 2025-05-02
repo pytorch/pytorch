@@ -84,12 +84,11 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 
 inline bool isUnsupportedFloat8(at::ScalarType t) {
   return (
-    t == at::ScalarType::Float8_e5m2fnuz
-    || t == at::ScalarType::Float8_e4m3fnuz
-    || t == at::ScalarType::Float8_e8m0fnu
+      t == at::ScalarType::Float8_e5m2fnuz ||
+      t == at::ScalarType::Float8_e4m3fnuz ||
+      t == at::ScalarType::Float8_e8m0fnu
 #ifndef NCCL_SUPPORTS_FP8
-    || t == at::ScalarType::Float8_e5m2
-    || t == at::ScalarType::Float8_e4m3fn
+      || t == at::ScalarType::Float8_e5m2 || t == at::ScalarType::Float8_e4m3fn
 #endif
   );
 }
@@ -4130,7 +4129,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   auto tensor = tensors.back();
   TORCH_CHECK(
       !isUnsupportedFloat8(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      "Unsupported Float8 type for NCCL reduction");
 #ifdef IS_NCCLX
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
@@ -4250,7 +4249,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   }
   TORCH_CHECK(
       !isUnsupportedFloat8(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      "Unsupported Float8 type for NCCL reduction");
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4279,7 +4278,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
   auto total_numel = check_gpu_tensors_same_device(tensors);
   TORCH_CHECK(
       !isUnsupportedFloat8(tensors.back().scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -4675,7 +4674,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   auto inputTensors_ = inputTensors.back();
   TORCH_CHECK(
       !isUnsupportedFloat8(outputTensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
@@ -4779,7 +4778,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   const auto& tensor = outputTensor;
   TORCH_CHECK(
       !isUnsupportedFloat8(tensor.scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      "Unsupported Float8 type for NCCL reduction");
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4838,7 +4837,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
     const ReduceScatterOptions& opts) {
   TORCH_CHECK(
       !isUnsupportedFloat8(inputs.back().scalar_type()),
-      "Float8 dtypes are not currenlty supported for NCCL reductions");
+      "Unsupported Float8 type for NCCL reduction");
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
