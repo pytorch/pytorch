@@ -16,12 +16,13 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
 
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
   const string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
+
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
       MPSDataType mpsDataType = getMPSDataType(weight.scalar_type());
