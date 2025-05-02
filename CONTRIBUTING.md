@@ -111,12 +111,6 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   you can always `uninstall` with `timeout` or in a loop if you're feeling
   lazy.)
 
-<!-- Needs updated instructions -->
-  ```bash
-  conda uninstall pytorch -y
-  yes | pip uninstall torch
-  ```
-
   Next run `python setup.py clean`. After that, you can install in `develop` mode again.
 
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
@@ -673,7 +667,6 @@ version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used.
 
-<!-- Do we need updates here? -->
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
 separate Python package environments, each of which can be tied to a

@@ -164,7 +164,6 @@ This is actually an upstream issue of Anaconda. When you initialize your
 environment with conda-forge channel, this issue will emerge. You may fix
 the intel-openmp libraries through this command.
 
-.. Does this need to be updated?
 .. code-block:: bat
 
     conda install -c defaults intel-openmp -f
