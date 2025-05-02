@@ -474,6 +474,27 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             with torch.set_grad_enabled(False):
                 self._test_serialization("WEAKREF_ALIVE", fn)
 
+    def test_mapping_keys_check(self):
+        def fn(mp):
+            return mp["a"] + 1
+
+        mp = types.MappingProxyType({"a": torch.randn(3, 2), "b": torch.randn(3, 2)})
+        ref, loaded = self._test_serialization("MAPPING_KEYS_CHECK", fn, mp)
+        self._test_check_fn(ref, loaded, {"mp": mp}, True)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "mp": types.MappingProxyType(
+                    {"b": torch.randn(3, 2), "a": torch.randn(3, 2)}
+                )
+            },
+            False,
+        )
+        self._test_check_fn(
+            ref, loaded, {"mp": types.MappingProxyType({"a": torch.randn(3, 2)})}, False
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
