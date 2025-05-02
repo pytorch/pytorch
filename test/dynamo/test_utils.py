@@ -174,6 +174,7 @@ class TestDynamoTimed(TestCase):
 
         add(torch.rand([10]), torch.rand([10]))
         utils.reset_frame_count()
+        torch._logging._internal.structured_logging_overhead.clear()
 
     @dynamo_config.patch(
         {

@@ -73,6 +73,7 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     register_op_dtype_propagation_rules,
+    register_op_requires_libdevice_fp64,
     sympy_product,
     use_scatter_fallback,
 )
@@ -572,7 +573,6 @@ def make_pointwise(
     override_return_dtype=None,
     override_device=None,
     override_fn_when_input_bool=None,
-    override_fn_when_gpu_float64=None,
     allow_alpha=False,
     triton_fallback=None,
 ):
@@ -593,7 +593,6 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
-        is_gpu_device = is_gpu(decode_device(inputs[0].get_device()).type)
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -616,12 +615,6 @@ def make_pointwise(
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif (
-                override_fn_when_gpu_float64
-                and is_gpu_device
-                and dtype == torch.float64
-            ):
-                return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
                 for inp_index, load in enumerate(loaders):
@@ -841,17 +834,11 @@ def register_pointwise(
     override_return_dtype=None,
     override_fn_when_input_bool=None,
     allow_alpha=False,
-    use_libdevice_for_f64=False,
     triton_fallback=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
     fn = ops_wrapper(name)
-    if use_libdevice_for_f64:
-        fn_libdevice = ops_wrapper("libdevice_" + name)
-        register_op_dtype_propagation_rules(
-            "libdevice_" + name, type_promotion_kind, override_return_dtype
-        )
 
     register_op_dtype_propagation_rules(
         name, type_promotion_kind, override_return_dtype
@@ -864,7 +851,6 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_gpu_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
         triton_fallback=triton_fallback,
     )
@@ -1164,13 +1150,14 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
-    if old_size_product > 0 and not free_unbacked_symbols(new_size):
-        # maybe realize the input but skip for unbacked symints since it'll
-        # choke on the size hint.
-        x.mark_reuse(
-            V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
-        )
+    if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
+        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        if old_size_product > 0:
+            # maybe realize the input but skip for unbacked symints since it'll
+            # choke on the size hint.
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+            )
 
     x_loader = x.make_loader()
     return Pointwise.create(
@@ -2367,7 +2354,9 @@ def searchsorted(
     )
 
 
-@register_lowering(aten.bucketize, type_promotion_kind=None)
+@register_lowering(
+    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+)
 def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
@@ -2625,6 +2614,7 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
+make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
 
 
 # 1.5) Easy or Impossible
@@ -3346,7 +3336,6 @@ def gather(x, dim, index, sparse_grad=False):
         # Empty index case. Return an empty array with the same shape
         return new_empty(x, index.get_size())
 
-    assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
@@ -3604,17 +3593,6 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    deterministic = torch.are_deterministic_algorithms_enabled()
-    if is_triton(values) and (accumulate or deterministic):
-        msg = (
-            "index put with accumulate."
-            if not deterministic
-            else "deterministic index put."
-        )
-        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
-            msg = f"{msg} Found from : \n {stack_trace}"
-        V.graph.disable_cudagraphs_reason = msg
-
     ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
     return self
 
@@ -6116,7 +6094,7 @@ def div_mode(a, b, rounding_mode=None):
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
-    # see the discussion at https://github.com/openai/triton/issues/605
+    # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
         return floordiv(a, b) if both_integer else floor(div(a, b))
@@ -6456,11 +6434,11 @@ def register_pointwise_numeric(op, name=None, triton_fallback=None):
     )
 
 
-def register_pointwise_numeric_ldf64(op):
+def register_pointwise_numeric_ldf64(op: torch._ops.OpOverloadPacket):
+    register_op_requires_libdevice_fp64(op.__name__)
     return register_pointwise(
         op,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        use_libdevice_for_f64=True,
     )
 
 

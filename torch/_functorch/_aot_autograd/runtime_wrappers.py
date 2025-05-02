@@ -31,7 +31,6 @@ from torch._guards import (
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
-from torch.monitor import _WaitCounter
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -249,6 +248,14 @@ def make_output_handler(info, runtime_metadata, trace_joint):
     return handler_type(info, runtime_metadata, trace_joint)
 
 
+# not sure why AOTDispatcher needs to manually set this
+def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
+    if hasattr(t, "_dynamo_weak_dynamic_indices"):
+        t._dynamo_weak_dynamic_indices |= dims
+    else:
+        t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -434,10 +441,7 @@ def _create_runtime_wrapper(
             for t, o in zip(ret_outs, runtime_metadata.output_info):
                 if o.dynamic_dims is None:
                     continue
-                if hasattr(t, "_dynamo_weak_dynamic_indices"):
-                    t._dynamo_weak_dynamic_indices |= o.dynamic_dims
-                else:
-                    t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
+                maybe_mark_dynamic_helper(t, o.dynamic_dims)
         if runtime_metadata.grad_enabled_mutation is not None:
             torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
@@ -1442,13 +1446,23 @@ def merge_view_inputs(
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
         #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
         args_to_functionalization = base_args + other_args
-        arg_to_old_idx_map = {
-            make_hashable(arg): i for (i, arg) in enumerate(fwd_inputs)
-        }
+
+        # Map each argument into its old index.
+        # There may be some repeated arguments, so we collect their indices in a list.
+        arg_to_old_idx_map = collections.defaultdict(list)
+        for i, arg in enumerate(fwd_inputs):
+            arg_to_old_idx_map[make_hashable(arg)].append(i)
+        # Reverse the list of each argument, so that we can easily pop them one-after-the-other in order.
+        for hashable_arg in arg_to_old_idx_map:
+            arg_to_old_idx_map[hashable_arg] = list(
+                reversed(arg_to_old_idx_map[hashable_arg])
+            )
+
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
-            old_idx = arg_to_old_idx_map[make_hashable(other_arg)]
+            old_idx = arg_to_old_idx_map[make_hashable(other_arg)].pop()
             inner_calling_convention_meta[old_idx] = new_idx
+
         # post process into a list
         post_processed_calling_convention_meta: list[
             Union[int, tuple[int, torch.Tensor]]
@@ -1470,10 +1484,18 @@ def merge_view_inputs(
 # with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
-    bw_module: Callable
+    bw_module: torch.fx.GraphModule
     placeholder_list: list[Any]
     saved_context: Optional[TracingContext]
     saved_compile_context: Optional[CompileContext]
+
+
+# On an AOT Autograd cache hit, we already have a lowered backward, so there is usually
+# no need to keep information around for a new lazy compilation. Except for compiled autograd,
+# which wants to retrace this backward into a larger graph, and it needs the graph module to do so.
+@dataclass
+class CachedAutogradLazyBackwardCompileInfo:
+    bw_module: torch.fx.GraphModule  # missing a couple of fields compared to AutogradLazyBackwardCompileInfo's bw_module
 
 
 def _raise_if_functorch_active():
@@ -1895,7 +1917,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_indices: list[int],
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
-        lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
+        lazy_backward_info: Optional[
+            Union[
+                AutogradLazyBackwardCompileInfo, CachedAutogradLazyBackwardCompileInfo
+            ]
+        ],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
@@ -1997,11 +2023,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 assert all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
+
+                def mark_dynamic_activations(activations: list[torch.Tensor]):
+                    for (
+                        idx,
+                        dims,
+                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                        maybe_mark_dynamic_helper(activations[idx], dims)
+                    return activations
+
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(
-                    *(
-                        x.detach() if x._is_view() else x
-                        for x in tensors_saved_for_backwards
+                    *mark_dynamic_activations(
+                        [
+                            x.detach() if x._is_view() else x
+                            for x in tensors_saved_for_backwards
+                        ]
                     )
                 )
                 symint_outs = fw_outs[
@@ -2192,6 +2229,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.compiled_bw is None:
                     assert lazy_backward_info is not None
+                    assert isinstance(
+                        lazy_backward_info, AutogradLazyBackwardCompileInfo
+                    )
 
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []
@@ -2226,9 +2266,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                         log_waitcounter=True,
                         waitcounter_name_override="entire_backward_compile",
-                    ), _WaitCounter(
-                        "pytorch.wait_counter.dynamo_compile"
-                    ).guard():
+                    ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
@@ -2238,6 +2276,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if try_save_cache_entry is not None:
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
+                                lazy_backward_info,
                                 fw_metadata,
                                 aot_config,
                             )

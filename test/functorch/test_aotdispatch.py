@@ -40,6 +40,7 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
+from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
@@ -73,6 +74,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    TEST_MKL,
     TestCase,
     xfail_inherited_tests,
     xfailIfTorchDynamo,
@@ -3964,6 +3966,156 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
+    def test_duplicated_arguments_on_tensor_overlap(self):
+        # Test whether we correctly handle duplicated arguments when changing the
+        # parameters, so that we take the base tensor as argument.
+        #
+        # - t0 and t1 must have storage overlap: triggers the target execution flow.
+        # - s0 and s1 must be equal: triggers the error in the target execution flow.
+
+        @torch.compile(dynamic=True)
+        def foo(t0, t1, s0, s1):
+            return t0.add_(s0), t1.add_(s1)
+
+        tensor = torch.rand(10)
+        foo(tensor, tensor[1:-1], 2, 2)
+
+    @parametrize("use_autograd", [False, True])
+    def test_mark_outputs_dynamic(self, use_autograd: bool):
+        counters.clear()
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn2(z):
+            return z * 2
+
+        # 1. static
+        x = torch.randn(10, 10, requires_grad=use_autograd)
+        y = torch.randn(10, 10, requires_grad=use_autograd)
+        out = fn(x, y)
+        self.assertFalse(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        out2 = fn2(out)
+        self.assertFalse(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertEqual(counters["aot_autograd"]["total"], 2)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20)
+        y = torch.randn(20, 20)
+        out = fn(x, y)
+        self.assertTrue(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        out2 = fn2(out)
+        self.assertTrue(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertEqual(counters["aot_autograd"]["total"], 2)
+        counters.clear()
+        torch._dynamo.reset()
+
+    def test_mark_activations_dynamic(self):
+        counters.clear()
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            out = torch.matmul(x, y)
+            out2 = torch.matmul(out, y)
+            out3 = torch.matmul(out2, y)
+            return torch.matmul(out3, y)
+
+        def make_assert_pack(dynamic):
+            def pack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return pack
+
+        def make_assert_unpack(dynamic):
+            def unpack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return unpack
+
+        # 1. static
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(False), make_assert_unpack(False)
+        ):
+            fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20, requires_grad=True)
+        y = torch.randn(20, 20, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(True), make_assert_unpack(True)
+        ):
+            fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+        torch._dynamo.reset()
+
+    def test_mark_activations_dynamic_with_nested(self):
+        # The flattened tensors of the nested tensor aren't
+        # marked as activations, but they add some offset
+        # to the fw_outs. This test ensures that we handle
+        # that offset properly.
+        counters.clear()
+        torch._dynamo.reset()
+
+        def make_assert_pack(dynamic):
+            def pack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return pack
+
+        def make_assert_unpack(dynamic):
+            def unpack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return unpack
+
+        # 1. static
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y, nt):
+            out = torch.matmul(x, y)
+            return out.sum() + nt.clone()
+
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(False), make_assert_unpack(False)
+        ):
+            fn(x, y, nt)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20, requires_grad=True)
+        y = torch.randn(20, 20, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(True), make_assert_unpack(True)
+        ):
+            fn(x, y, nt)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+        torch._dynamo.reset()
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -6010,7 +6162,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod = torch.fx.GraphModule(tracer.root, graph)
 
         for node in mod.graph.nodes:
-            if node.op == "output":
+            if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert "test_aotdispatch.py" in node.stack_trace
@@ -6049,7 +6201,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod = torch.fx.GraphModule(tracer.root, graph)
 
         for node in mod.graph.nodes:
-            if node.op == "output":
+            if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
             assert "test_aotdispatch.py" in node.stack_trace
@@ -6656,6 +6808,24 @@ aot_autograd_failures = {
     decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
+if not TEST_MKL:
+    aot_autograd_failures.update(
+        {
+            decorate(
+                "matmul",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "__rmatmul__",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+        }
+    )
+
 symbolic_aot_autograd_failures = {
     xfail("combinations", ""),  # aten.masked_select.default
     xfail(
@@ -7003,11 +7173,19 @@ class MockFXGraphCache:
         key, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
         if key not in self.cache:
             self.cache[key] = gm
-        gm, _ = self.load_with_key(key, [], inputs, None, None, None, None)
+        gm, _ = self.load_with_key(key, [], inputs, None, None, None, None, None)
         return gm
 
     def load_with_key(
-        self, key, debug_lines, inputs, local, remote_cache, is_backward, constants
+        self,
+        key,
+        debug_lines,
+        inputs,
+        local,
+        remote_cache,
+        is_backward,
+        constants,
+        evaluate_guards,
     ):
         gm = self.cache.get(key)
         if gm is not None:
