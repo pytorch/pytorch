@@ -117,4 +117,6 @@ jobs:
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
     secrets: inherit
