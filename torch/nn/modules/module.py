@@ -1941,8 +1941,6 @@ class Module:
             modules = self.__dict__["_modules"]
             if name in modules:
                 return modules[name]
-        if name in type(self).__dict__:
-            return type(self).__dict__[name].__get__(self)
         raise AttributeError(
             f"'{type(self).__name__}' object has no attribute '{name}'"
         )
