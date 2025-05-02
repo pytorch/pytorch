@@ -1150,13 +1150,14 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
-    if old_size_product > 0 and not free_unbacked_symbols(new_size):
-        # maybe realize the input but skip for unbacked symints since it'll
-        # choke on the size hint.
-        x.mark_reuse(
-            V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
-        )
+    if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
+        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        if old_size_product > 0:
+            # maybe realize the input but skip for unbacked symints since it'll
+            # choke on the size hint.
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+            )
 
     x_loader = x.make_loader()
     return Pointwise.create(
@@ -2353,7 +2354,9 @@ def searchsorted(
     )
 
 
-@register_lowering(aten.bucketize, type_promotion_kind=None)
+@register_lowering(
+    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+)
 def bucketize(
     input: TensorBox,
     boundaries: TensorBox,
@@ -3333,7 +3336,6 @@ def gather(x, dim, index, sparse_grad=False):
         # Empty index case. Return an empty array with the same shape
         return new_empty(x, index.get_size())
 
-    assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
@@ -3591,17 +3593,6 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    deterministic = torch.are_deterministic_algorithms_enabled()
-    if is_triton(values) and (accumulate or deterministic):
-        msg = (
-            "index put with accumulate."
-            if not deterministic
-            else "deterministic index put."
-        )
-        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
-            msg = f"{msg} Found from : \n {stack_trace}"
-        V.graph.disable_cudagraphs_reason = msg
-
     ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
     return self
 
@@ -6103,7 +6094,7 @@ def div_mode(a, b, rounding_mode=None):
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
     # floordiv and truncdiv need special handling for integer tensors on Triton,
-    # see the discussion at https://github.com/openai/triton/issues/605
+    # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
         return floordiv(a, b) if both_integer else floor(div(a, b))
@@ -6913,8 +6904,8 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
-def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
-    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))
 
 
