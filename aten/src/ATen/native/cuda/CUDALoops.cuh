@@ -188,9 +188,8 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
       elementwise_kernel_helper(f, policy);
     } else { // if this block has a full `block_work_size` data to handle, use
         // vectorized memory access
-      constexpr auto optimal_vec_size = vec_size;
       elementwise_kernel_helper(
-      f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
+      f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
     }
 #endif // __CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1000
   } else {
@@ -215,9 +214,8 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
       elementwise_kernel_helper(f, policy);
     } else { // if this block has a full `block_work_size` data to handle, use
          // vectorized memory access
-      constexpr auto optimal_vec_size = vec_size;
       elementwise_kernel_helper(
-      f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
+      f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
     }
   }
 }
@@ -248,6 +246,8 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
     constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
+    elementwise_kernel_helper(
+        f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
   }
 }
 #endif // USE_ROCM
