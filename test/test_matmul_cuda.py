@@ -721,7 +721,7 @@ def to_blocked(input_matrix) -> torch.Tensor:
     padded = input_matrix
     # Ideally we would use torch.nn.pad but it doesn't support float8_e8m0fnu for now
     if (rows, cols) != (padded_rows, padded_cols):
-        padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
+        padded = torch.ones((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
         padded[:rows, :cols] = input_matrix
 
     # Rearrange the blocks
@@ -1271,7 +1271,6 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
         "a_eye_b_eye",
-        "a_eye_b_eye_bias",
         "a_ones_b_ones",
         "a_ones_modified_b_ones",
         "a_ones_b_ones_modified",
@@ -1516,7 +1515,7 @@ class TestFP8Matmul(TestCase):
     def test_mx_fp8_bias(self, device):
         M, K, N = 128, 32, 128
         BLOCK_SIZE = 32
-        device="cuda"
+        device = "cuda"
         A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
         B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
         bias = torch.zeros(N, device=device, dtype=torch.bfloat16)
@@ -1527,7 +1526,7 @@ class TestFP8Matmul(TestCase):
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
-        C_ref =( A_ref @ B_ref.t()) + bias
+        C_ref = (A_ref @ B_ref.t()) + bias
 
         # convert to swizzled format
         A_scale = to_blocked(A_scale)
