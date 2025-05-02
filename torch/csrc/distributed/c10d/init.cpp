@@ -2918,7 +2918,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::ProcessGroupGloo::Options::global_ranks_in_group);
 
   processGroupGloo
       .def_static(

@@ -83,8 +83,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
     virtual std::chrono::milliseconds getTimeout() const = 0;
-    virtual const std::vector<at::Tensor>& getInputTensors() = 0;
-    virtual const std::vector<at::Tensor>& getOutputTensors() = 0;
+    virtual const std::vector<at::Tensor> getInputTensors() = 0;
+    virtual const std::vector<at::Tensor> getOutputTensors() = 0;
     inline std::string getProfilerTitle() const {
       return profilingTitle_;
     }
@@ -94,6 +94,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
    protected:
     friend class ProcessGroupGloo;
+    // unique id used to tell the trace buffer that this
+    // work has completed
+    std::optional<uint64_t> trace_id_;
 
    private:
     void finishWorkGloo();
@@ -244,6 +247,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
       return c10::make_intrusive<Options>(timeout);
     }
 
+    std::vector<uint64_t> global_ranks_in_group;
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };
@@ -284,6 +288,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
+
+  const std::vector<uint64_t>& groupRanks() const;
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,

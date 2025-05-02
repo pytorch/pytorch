@@ -4,10 +4,10 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <chrono>
 #include <exception>
@@ -775,9 +775,9 @@ ProcessGroupGloo::ProcessGroupGloo(
     : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(std::move(options)),
-      local_id_(process_group_id++),
       stop_(false),
-      collectiveCounter_(0) {
+      collectiveCounter_(0),
+      local_id_(process_group_id++) {
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");
@@ -837,6 +837,9 @@ ProcessGroupGloo::ProcessGroupGloo(
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
 
+  // TODO: If gloo has version, we also need to log gloo version into FR.
+  FlightRecorder::get()->record_pg_ranks(
+      std::make_tuple(pg_uid_, pg_desc_), groupRanks());
   init();
 }
 
@@ -885,9 +888,21 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
     workConsumeCV_.notify_one();
 
     AsyncWork::execute(work);
+    // TODO: Need to find a way to calculate the difference of duration of two
+    // c10d::Event
+    FlightRecorder::get()->retire_id(work->trace_id_, false);
     lock.lock();
     workInProgress_[workerIndex].reset();
   }
+}
+
+const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
+  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
+    static std::vector<uint64_t> globalRanks(size_);
+    std::iota(globalRanks.begin(), globalRanks.end(), 0);
+    return globalRanks;
+  }
+  return options_->global_ranks_in_group;
 }
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
@@ -895,7 +910,7 @@ void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   workQueue_.push_back(std::move(work));
   lock.unlock();
   // using c10d::FlightRecorder;
-  FlightRecorder::get()->record(
+  work->trace_id_ = FlightRecorder::get()->record(
       local_id_,
       std::make_tuple(pg_uid_, pg_desc_),
       collectiveCounter_,
@@ -958,11 +973,11 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return inputs;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return inputs;
   }
 
@@ -1121,11 +1136,11 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return inputs;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return inputs;
   }
 
@@ -1343,11 +1358,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return inputs;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return inputs;
   }
 
@@ -1762,11 +1777,11 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return inputs;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return inputs;
   }
 
@@ -1958,11 +1973,11 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return inputs;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return {newLikeFlat(outputs[0])};
   }
 
@@ -2254,11 +2269,11 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return input_list;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return {newLikeFlat(output_lists[0])};
   }
 
@@ -2401,11 +2416,11 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return inputs;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return {newLikeFlat(outputs[0])};
   }
 
@@ -2609,11 +2624,11 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return {newLikeFlat(inputs[0])};
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return outputs;
   }
 
@@ -2866,11 +2881,11 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return {inputTensor};
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return {outputTensor};
   }
 
@@ -3116,11 +3131,11 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
     return context->getTimeout();
   }
 
-  const std::vector<at::Tensor>& getInputTensors() override {
+  const std::vector<at::Tensor> getInputTensors() override {
     return inputs;
   }
 
-  const std::vector<at::Tensor>& getOutputTensors() override {
+  const std::vector<at::Tensor> getOutputTensors() override {
     return inputs;
   }
 
