@@ -1207,6 +1207,16 @@ def view_to_reshape(gm):
     ):
         nd.target = torch.ops.aten.reshape.default
 
+    seen_subgraphs: OrderedSet[str] = OrderedSet()
+    for nd in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph_name = nd.args[0].target
+        if subgraph_name not in seen_subgraphs:
+            seen_subgraphs.add(subgraph_name)
+            subgraph = getattr(gm, nd.args[0].target)
+            view_to_reshape(subgraph)
+
 
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
