@@ -11547,6 +11547,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @skip_if_gpu_halide
+    @skip_if_not_triton
     def test_searchsorted_broadcast(self):
         def fn(sorted_sequence, values):
             return (
@@ -11646,6 +11647,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @skip_if_gpu_halide
+    @skip_if_not_triton
     def test_bucketize_broadcast(self):
         def fn(input, boundaries):
             return (

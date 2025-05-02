@@ -722,13 +722,14 @@ def check_input_alias_and_mutation_return_ouputs(
     dict[int, int],
     Union[tuple[Any, ...], list[Any]],
 ]:
-    with disable_proxy_modes_tracing():
+    # We want to disable active functional, proxy and fake modes if any.
+    # to create a encapsulated environment for fake tensor prop
+    with torch.utils._python_dispatch._disable_current_modes():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
         changed after run gm once to detect mutation and checks tensor storage
         to detect alias.
         """
-        from torch._prims_common import clone_preserve_strides
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
@@ -739,17 +740,56 @@ def check_input_alias_and_mutation_return_ouputs(
         def _tensor_storage(t) -> StorageWeakRef:
             return StorageWeakRef(t._typed_storage())
 
+        def _get_shape_env(
+            fake_args,
+        ) -> Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]:
+            # detect_fake_mode requires there could be only one active fake mode. This
+            # restricts the usage of this function because the global TracingContext
+            # has a persistent fake mode but fake tensors can be created
+            # outside of the tracing context (e.g. in testing).
+            # Instead, we just look at fake_args fake tensor mode
+            prev_fake_mode = None
+            for arg in fake_args:
+                if isinstance(arg, torch.Tensor):
+                    assert isinstance(arg, FakeTensor)
+                    prev_fake_mode = arg.fake_mode
+            assert prev_fake_mode is not None
+            return prev_fake_mode.shape_env
+
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
+            # We need to re-use prev_fake_mode's shape env to resolve
+            # the runtime assertions for unbacked symbols.
+            new_fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=_get_shape_env(fake_args),
+                allow_non_fake_inputs=False,
+            )
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
-            ctx_stack.enter_context(torch.inference_mode(False))
+            no_inference_mode_ctx = torch.inference_mode(False)
+            ctx_stack.enter_context(new_fake_mode)
+            ctx_stack.enter_context(no_inference_mode_ctx)
+            if new_fake_mode.shape_env is not None:
+                ctx_stack.enter_context(
+                    new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                )
+
+            # create new fake tensors in new fake mode to avoid mutating original tensors
             cloned = [
-                clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+                torch.empty_strided(
+                    arg.size(),
+                    arg.stride(),
+                    dtype=arg.dtype,
+                    device=arg.device,
+                    requires_grad=arg.requires_grad,
+                    layout=arg.layout,
+                )
+                if isinstance(arg, torch.Tensor)
+                else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-            outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
+            outputs = gm(*cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [
