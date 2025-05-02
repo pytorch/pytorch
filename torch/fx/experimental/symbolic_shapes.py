@@ -939,9 +939,9 @@ def find_symbol_binding_fx_nodes(
 
 @dataclass
 class BackendSpecialization:
-    symbol: sympy.Symbol
+    source: TensorPropertySource
     hint: int
-    specialization: Callable
+    check_fn: Callable
 
 # Analogous to ConvertIntSource
 @dataclass(frozen=True)
@@ -1936,7 +1936,7 @@ class StatelessSymbolicContext(SymbolicContext):
     dynamic_strides: DimList[DimDynamic] = None  # type: ignore[assignment]
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
-    backend_specializations: Optional[List[Tuple[object, Callable[_P, _T]]]] = None
+    backend_specializations: Optional[list[list[tuple[int, Callable[_P, _T]]]]] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -4058,9 +4058,9 @@ class ShapeEnv:
                 do_not_specialize_zero_one=config.backed_size_oblivious,
                 symbolic_context=symbolic_context,
             )
-            for specialization in symbolic_context.backend_specializations:
+            for specialization in symbolic_context.backend_specializations[i]:
                 self.backend_specializations.append(BackendSpecialization(
-                    sym,
+                    TensorPropertySource(source, TensorProperty.SIZE, i),
                     *specialization,
                 ))
             if (
@@ -4232,18 +4232,19 @@ class ShapeEnv:
             symbolic_context,
         )
 
-        sym_sizes = [
-            self.create_symintnode(
+        sym_sizes = []
+        for i, (sym, hint) in enumerate(zip(size, ex_size)):
+            source = TensorPropertySource(source, TensorProperty.SIZE, i)
+            if specialization and specialization.source == source:
+                hint = specialization.hint
+            node = (self.create_symintnode(
                 sym,
                 hint=hint,
-                source=TensorPropertySource(source, TensorProperty.SIZE, i),
-            )
-            for i, (sym, hint) in enumerate(zip(size, ex_size))
-        ]
-
-        for i, size in enumerate(sym_sizes):
-            if i in specialization.idxs:
-                expect_true(specialization.lambdas[i](size))
+                source=source
+            ))
+            sym_sizes.append(node)
+            if specialization:
+                expect_true(specialization.check_fn(node))
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):

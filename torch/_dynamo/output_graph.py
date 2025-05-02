@@ -1498,8 +1498,13 @@ class OutputGraph(OutputGraphGuardsState):
 
             compiled_fns = []
             with self.restore_global_state():
-                for specialization in old_fake_mode.shape_env.backend_specializations
-                    compiled_fns.append(self.call_user_compiler(modified_gm, specialization))
+                compiled_fn = self.call_user_compiler(gm)
+                for specialization in old_fake_mode.shape_env.backend_specializations:
+                    specialized_compiled_fns.append((
+                        unique_id("__specialized_compiled_fn"),
+                        specialization,
+                        self.call_user_compiler(gm, specialization=specialization)
+                    ))
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 

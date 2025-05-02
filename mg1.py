@@ -13,7 +13,8 @@ def inductor_matmul(m, a, b):
 	# passing in m to have different compiled regions
 	return (m, torch.mm(a, b))
 
-for m in [6152, 16, 32]:
+# for m in [6152, 16, 32]:
+for m in [16]:
 	with fresh_inductor_cache():
 		print(f"m={m}")
 		n, k = 1024, 1280
@@ -24,11 +25,11 @@ for m in [6152, 16, 32]:
 		torch._dynamo.decorators.mark_dynamic(
 			dynamic_a, # s0
 			0,
-			# backend_specializations=[
-			# 	# hint, specialization
-			# 	(16, lambda x0: x0 == 16),
-			# 	(16, lambda x0: x0 % 16 == 0),
-			# ]
+			backend_specializations=[
+				# hint, specialization
+				(16, lambda x0: x0 == 16),
+				(16, lambda x0: x0 % 16 == 0),
+			]
 		)
 		torch._dynamo.decorators.mark_dynamic(
 			dynamic_a, # also s0 due to duck typing
