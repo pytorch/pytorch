@@ -4201,7 +4201,8 @@ static inline void handle_unflatten_exception(
     const std::runtime_error& e,
     const Tensor& self,
     int64_t dim,
-    SymIntArrayRef sizes) {
+    SymIntArrayRef sizes,
+    std::optional<DimnameList> names) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
   }
@@ -4255,7 +4256,7 @@ static Tensor unflatten_impl(
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more
     // user-friendly way for both tensors and named tensors
-    handle_unflatten_exception(e, self, dim, sizes);
+    handle_unflatten_exception(e, self, dim, sizes, names);
   }
 
   SymDimVector shape(self.sym_sizes().begin(), self.sym_sizes().end());
