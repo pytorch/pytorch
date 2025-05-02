@@ -67,6 +67,28 @@ struct vectorized_load_helper {
   }
 };
 
+#ifdef USE_ROCM
+// Templated version of vectorized load helper.
+// It can be used on heterogeneous input tensor element types.
+template <int arg_index>
+struct vectorized_templated_load_helper {
+  template <typename args_t, typename policy_t>
+  static __device__ void apply(policy_t& self, args_t* args, int idx) {
+    using arg_t = std::tuple_element_t<arg_index, args_t>;
+    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
+    // need a +1 offset to get the input
+
+    // Delay pointer arithmetic to the policy loader where we know the actual
+    // type of the current argument.
+    char* ptr = (self.data[arg_index + 1]);
+    auto args_accessor = [&args] __device__(int thread_unroll_idx) -> arg_t& {
+      return std::get<arg_index>(args[thread_unroll_idx]);
+    };
+    self.template load_single_arg<arg_index>(args_accessor, ptr, idx);
+  }
+};
+#endif
+
 template<int arg_index>
 struct unroll_load_helper {
   template <typename args_t, typename policy_t, typename offset_t, typename loader_t>
@@ -181,9 +203,16 @@ __device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint
 
 namespace policies {
 
-template<typename data_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t, int elems_per_thread, int num_outputs=1>
-struct unroll {
-
+template <
+    int num_threads,
+    typename data_t,
+    typename inp_calc_t,
+    typename out_calc_t,
+    typename loader_t,
+    typename storer_t,
+    int elems_per_thread,
+    int num_outputs = 1>
+struct unroll_base {
   data_t data;
   int remaining;
   inp_calc_t input_offset_calculator;
@@ -191,12 +220,24 @@ struct unroll {
   loader_t loader;
   storer_t storer;
   static constexpr int tws = elems_per_thread;
+  static constexpr int block_work_size = elems_per_thread * num_threads;
 
-  __device__ unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s):
-    data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
+  __device__ unroll_base(
+      data_t data,
+      int remaining,
+      inp_calc_t ic,
+      out_calc_t oc,
+      loader_t l,
+      storer_t s)
+      : data(data),
+        remaining(remaining),
+        input_offset_calculator(ic),
+        output_offset_calculator(oc),
+        loader(l),
+        storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x + thread_work_elem * num_threads) < remaining);
   }
 
   template<typename args_t>
@@ -205,13 +246,13 @@ struct unroll {
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < elems_per_thread; i++) {
-      if (thread_idx >= remaining) {
-        return;
+      if (thread_idx < remaining) {
+        int linear_idx = thread_idx + block_work_size * idx;
+        auto offset = input_offset_calculator.get(linear_idx);
+        detail::static_unroll<detail::unroll_load_helper, arity>::with_args(
+            *this, args, offset, loader, i, num_outputs);
+        thread_idx += num_threads;
       }
-      int linear_idx = thread_idx + elems_per_thread * num_threads() * idx;
-      auto offset = input_offset_calculator.get(linear_idx);
-      detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, loader, i, num_outputs);
-      thread_idx += num_threads();
     }
   }
 
@@ -220,22 +261,36 @@ struct unroll {
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < elems_per_thread; i++) {
-      if (thread_idx >= remaining) {
-        return;
+      if (thread_idx < remaining) {
+        int linear_idx = thread_idx + block_work_size * idx;
+        int offset = output_offset_calculator.get(linear_idx)[0];
+        storer.store(from[i], data[0], offset);
+        thread_idx += num_threads;
       }
-      int linear_idx = thread_idx + elems_per_thread * num_threads() * idx;
-      int offset = output_offset_calculator.get(linear_idx)[0];
-      storer.store(from[i], data[0], offset);
-      thread_idx += num_threads();
     }
   }
 };
 
-// Assumption:
-// all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-// Note:
-// Functions in vectorized policy does not do boundary check. It assumes the whole block
-// has its job to do. So the reminders should be handled by the caller manually.
+// Utility type for all users of unroll that extract the num_threads value from
+// the caller scope.
+template <
+    typename data_t,
+    typename inp_calc_t,
+    typename out_calc_t,
+    typename loader_t,
+    typename storer_t,
+    int elems_per_thread,
+    int num_outputs = 1>
+using unroll = unroll_base<
+    num_threads(),
+    data_t,
+    inp_calc_t,
+    out_calc_t,
+    loader_t,
+    storer_t,
+    elems_per_thread,
+    num_outputs>;
+
 template <int vec_size, typename data_t, int elems_per_thread>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 
@@ -288,6 +343,86 @@ struct vectorized {
     }
   }
 };
+
+#ifdef USE_ROCM
+// This is similar to vectorized policy above, but this one supports
+// heterogenous input tensor types as templated parameters.
+// Its use should be limited to frequently used heterogeneous data types
+// as each instantiation will generate a separate kernel, leading to code
+// bloating if applied to all combinations supported in PyTorch. Assumption: all
+// tensors are contiguous, that is: stride == sizeof(type) for all tensors.
+template <
+    int vec_size,
+    typename data_t,
+    int elems_per_thread,
+    int num_threads,
+    typename CastToT,
+    typename... CastFromTs> // vec_size: number of scalars, can be 1, 2, or 4.
+struct vectorized_templated {
+  static_assert(
+      elems_per_thread % vec_size == 0,
+      "The workload per thread must be a multiple of vec_size");
+  static constexpr int loop_size = elems_per_thread / vec_size;
+  static constexpr int tws = elems_per_thread;
+  static constexpr int block_work_size = elems_per_thread * num_threads;
+  data_t data;
+
+  __device__ vectorized_templated(data_t data) : data(data) {}
+
+  __device__ inline constexpr bool check_inbounds(int thread_work_elem) {
+    return true;
+  }
+
+  template <int arg_index, typename accessor_t>
+  __device__ inline void load_single_arg(accessor_t to, char* ptr, int idx) {
+    // extract the arg_index-th input tensor element type from the
+    // variadic template argument.
+    using CastFromT =
+        std::tuple_element_t<arg_index, std::tuple<CastFromTs...>>;
+    // Delayed pointer arithmetic from the caller: this is the place
+    // where we know the type of the argument.
+    CastFromT* block_ptr =
+        reinterpret_cast<CastFromT*>(ptr) + block_work_size * idx;
+    int thread_idx = threadIdx.x;
+#pragma unroll
+    for (int i = 0; i < loop_size; i++) {
+      int index = thread_idx + i * num_threads;
+      auto v = load_vector<vec_size>(block_ptr, index);
+#pragma unroll
+      for (int j = 0; j < vec_size; j++) {
+        to(vec_size * i + j) = c10::convert<CastToT>(v.val[j]);
+      }
+    }
+  }
+
+  template <typename args_t>
+  __device__ inline void load(args_t* args, int idx) {
+    constexpr int arity = std::tuple_size<args_t>::value;
+    detail::static_unroll<detail::vectorized_templated_load_helper, arity>::
+        with_args(*this, args, idx);
+  }
+
+  // Assume for now that from (temporary array per thread) is of the same
+  // type as to (destination tensor), which is the case for
+  // float(float,bfloat16) and functor add on float(float,float).
+  template <typename scalar_t>
+  __device__ inline void store(scalar_t* from, int idx) {
+    using vec_t = aligned_vector<CastToT, vec_size>;
+    CastToT* to = reinterpret_cast<CastToT*>(data[0]) + block_work_size * idx;
+    vec_t* to_ = reinterpret_cast<vec_t*>(to);
+    int thread_idx = threadIdx.x;
+#pragma unroll
+    for (int i = 0; i < loop_size; i++) {
+      int index = thread_idx + i * num_threads;
+      vec_t v;
+      for (int j = 0; j < vec_size; j++) {
+        v.val[j] = from[vec_size * i + j];
+      }
+      to_[index] = v;
+    }
+  }
+};
+#endif
 
 template <typename data_t, typename inp_calc_t, typename out_calc_t, int num_outputs>
 struct multi_outputs_unroll {
@@ -400,5 +535,124 @@ inline int can_vectorize_up_to(array_t pointers) {
   detail::static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
   return result;
 }
+
+
+
+template <typename T>
+__inline__ size_t get_alignment(T ptr_or_size) {
+  auto val = reinterpret_cast<uintptr_t>(ptr_or_size);
+  if (val % 16 == 0) {
+    return 16;
+  } else if (val % 8 == 0) {
+    return 8;
+  } else if (val % 4 == 0) {
+    return 4;
+  } else if (val % 2 == 0) {
+    return 2;
+  } else {
+    return 1;
+  }
+}
+
+template <>
+__inline__ size_t get_alignment<size_t>(size_t size) {
+  return get_alignment(reinterpret_cast<void*>(size));
+}
+
+template <bool Value, class... Args>
+inline constexpr bool dependent_bool_value = Value;
+
+template <class... Args>
+inline constexpr bool dependent_false = dependent_bool_value<false, Args...>;
+
+template <int Size>
+union Vec;
+
+template <>
+union Vec<4> {
+  uint16_t u16[2];
+  uint32_t u32, as_scalar;
+  float f32;
+};
+
+template <>
+union Vec<8> {
+  uint16_t u16[4];
+  uint32_t u32[2];
+  uint64_t u64, as_scalar;
+  float f32[2];
+};
+
+template <>
+union alignas(16) Vec<16> {
+  uint16_t u16[8];
+  uint32_t u32[4];
+  uint64_t u64[2];
+  uint4 u128, as_scalar;
+  float f32[4];
+};
+
+template <int Alignment, typename T>
+__device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
+  Vec<Alignment> vec;
+  if constexpr (Alignment == 16) {
+#if defined(USE_ROCM)
+    vec.u128 = *reinterpret_cast<const uint4*>(addr);
+  } else if constexpr (Alignment == 8) {
+    vec.u64 = *reinterpret_cast<const uint64_t*>(addr);
+  } else if constexpr (Alignment == 4) {
+    vec.u32 = *reinterpret_cast<const uint32_t*>(addr);
+#else
+    asm("ld.global.v4.u32 {%0,%1,%2,%3}, [%4];"
+        : "=r"(vec.u32[0]), "=r"(vec.u32[1]), "=r"(vec.u32[2]), "=r"(vec.u32[3])
+        : "l"(addr)
+        : "memory");
+  } else if constexpr (Alignment == 8) {
+    asm("ld.global.v2.u32 {%0,%1}, [%2];"
+        : "=r"(vec.u32[0]), "=r"(vec.u32[1])
+        : "l"(addr)
+        : "memory");
+  } else if constexpr (Alignment == 4) {
+    asm("ld.global.u32 %0, [%1];" : "=r"(vec.u32) : "l"(addr) : "memory");
+#endif
+  } else {
+    static_assert(dependent_false<T>);
+  }
+  return vec;
+}
+
+template <int Alignment, typename T>
+__device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
+  if constexpr (Alignment == 16) {
+#if defined(USE_ROCM)
+    reinterpret_cast<uint64_t*>(addr)[0] = vec.u64[0];
+    reinterpret_cast<uint64_t*>(addr)[1] = vec.u64[1];
+  } else if constexpr (Alignment == 8) {
+    *reinterpret_cast<uint64_t*>(addr) = vec.u64;
+  } else if constexpr (Alignment == 4) {
+    *reinterpret_cast<uint32_t*>(addr) = vec.u32;
+#else
+    asm("st.global.v4.u32 [%0], {%1,%2,%3,%4};"
+        :
+        : "l"(addr),
+          "r"(vec.u32[0]),
+          "r"(vec.u32[1]),
+          "r"(vec.u32[2]),
+          "r"(vec.u32[3])
+        : "memory");
+  } else if constexpr (Alignment == 8) {
+    asm("st.global.v2.u32 [%0], {%1,%2};"
+        :
+        : "l"(addr), "r"(vec.u32[0]), "r"(vec.u32[1])
+        : "memory");
+  } else if constexpr (Alignment == 4) {
+    asm("st.global.u32 [%0], %1;" : : "l"(addr), "r"(vec.u32) : "memory");
+#endif
+  } else {
+    static_assert(dependent_false<T>);
+  }
+}
+
+
 
 } // namespace at::native::memory

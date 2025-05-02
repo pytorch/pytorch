@@ -46,8 +46,8 @@ like so::
   Validator,ROCM_VERSION,6.0.0.0-12969-1544e39
   Validator,HIPBLASLT_VERSION,0.6.0-a9c5cc7
   Validator,ROCBLAS_VERSION,4.0.0-72e57364-dirty
-  GemmTunableOp_float_NT,nt_25088_4096_64,1219,1.262
-  GemmTunableOp_float_NT,nt_4096_4096_64,1216,0.033
+  GemmTunableOp_float_NT,nt_25088_4096_64,Gemm_Hipblaslt_1219,1.262
+  GemmTunableOp_float_NT,nt_4096_4096_64,Gemm_Rocblas_1216,0.033
 
 Note the "Validator" lines. If you change a library version, or ROCm version, or
 PyTorch version, TunableOp will detect this and reject the tunings file because
@@ -73,13 +73,18 @@ completely silent, besides file output, unless there is a warning or error
 during its use. The verbose option is only available by setting the environment
 variable PYTORCH_TUNABLEOP_VEROBSE=1.
 
-A Note on Tuning Behavior
-=========================
+A Note on Tuning Behavior, Warmup, and Cache Effects
+====================================================
 
 Tuning an operator consists of iterating through the list or registered
 implementations and profiling each one. The profile is established by running a
 single implementation in a loop multiple times and taking the average execution
-time.
+time. There is also an optional warmup phase prior to tuning that can help with
+reaching stable power states by the hardware. During tuning of a workload the
+various hardware caches will more likely produce hits than when not tuning.
+There are options for flushing the instruction cache and rotate the input tensors
+which might help produce a more faithful profile of the tuned operator as if the
+operator were run within a larger workload instead of in a tight, repetitive loop.
 
 By default, each possible solution for a given operator will be run for either
 100 iterations or as many iterations that can be run within 30ms, whichever is
@@ -102,14 +107,76 @@ or ::bgemm() will be routed through TunableOp when enabled. Calling gemm() for a
 given set of input arguments (transa, transb, m, n, k) will attempt to use the
 fastest available implementation across both rocblas and hipblaslt.
 
+Offline Tuning
+==============
+
+Motivation
+----------
+There are several use cases for offline tuning.
+
+One use case involves a workload with a high-memory utilization, where regular tuning might lead to running out of memory.
+
+Another use case is for compute-intensive workloads. In such cases, it is more resource-efficient to collect
+the GEMMs for the workload once and then tune repeatedly with different tuning parameters or libraries.
+
+Workflow
+--------
+There are basically two steps:
+1) Set the environment variables to collect the untuned GEMM and this will generate ``tunableop_untuned0.csv``:
+
+.. code-block:: python
+
+   PYTORCH_TUNABLEOP_ENABLED=1
+   PYTORCH_TUNABLEOP_TUNING=0
+   PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
+   ...
+
+2) Run a Python script that reads the ``tunableop_untuned0.csv`` and generates the ``tunableop_results0.csv``, like this:
+
+.. code-block:: python
+
+   import torch.cuda.tunable as tunable
+   import os
+
+   os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
+   os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
+   os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
+   tunable.tune_gemm_in_file("tunableop_untuned0.csv")
+
+
+It is also possible to take multiple untuned files and distribute the GEMMs for tuning to multiple GPUs
+within a single node. In the first step, the GEMMs are first gathered and duplicate GEMMs are eliminated.
+Next, the GEMMs are distributed to different GPUs for tuning. After all GEMMs are tuned, the results from
+all the GPUs are then gathered into a single file whose base filename has ``_full0`` appended to it
+(for example ``tunableop_results_full0.csv``). Finally, this new file, containing the gathered results, will be
+duplicated N times, once for each GPU as convenience to the user will run the workload with the tuned
+configuration on N GPUs.
+
+.. code-block:: python
+
+   if __name__ == "__main__":
+       num_gpus = 8 # number of GPUs that will be used during the tuning process
+       tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
+
+Note that the usage of the ``mgpu_tune_gemm_in_file`` API is different from its single GPU counterpart
+(``tune_gemm_in_file``). The body of the Python script that calls the API must be wrapped in ``main()`` as shown
+due to the use of concurrent futures module. The argument to ``mgpu_tune_gemm_in_file`` must contain a wild card
+expression (``?`` or ``*``) to generate the list of untuned files containing the GEMMs to be processed. The ``num_gpus``
+must between 1 and the total number of GPUs available.
+
 Tuning Context
 ==============
 
 The behavior of TunableOp is currently manipulated through environment
 variables, the C++ interface of at::cuda::tunable::getTuningContext(), or the
-torch.cuda.tunable python interfaces that wrap the C++ TuningContext. The
-environment variables take precedence over any setting you manipulate using the
-C++ or Python APIs.
+torch.cuda.tunable python interfaces. The environment variables take precedence
+over any setting you manipulate using the C++ or Python APIs.
+
+Environment Variable Interface
+------------------------------
+Environment variables are cached the first time they are read. You cannot use the
+environment variable interface programmatically since the settings become fixed.
+Use the C++ or Python APIs instead.
 
 """
 import concurrent.futures
@@ -370,6 +437,123 @@ def _gather_tunableop_results() -> None:
         shutil.copy(output_file, duplicate_file)
 
 
+def _create_matrices(
+    m: int,
+    n: int,
+    k: int,
+    lda: int,
+    ldb: int,
+    ldc: int,
+    transA: bool,
+    transB: bool,
+    dtypeA: torch.dtype,
+    deviceid: str,
+    dtypeB: Optional[torch.dtype] = None,
+    randn: bool = True,
+    subMatrix: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Helper function for _process_single_offline_gemm.
+    Creates matrices that are then consumed by one of the Torch GEMM APIs.
+    """
+    # Fill parameters set for use with ScaledGEMM
+    fillA = 0.25
+    fillB = 0.75
+
+    if dtypeB is None:
+        dtypeB = dtypeA
+
+    if subMatrix:
+        # User reference for understanding leading dimension:
+        # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
+        # seems to work for all UTs.
+        rowsA = rowsB = max(ldc, k)
+
+        if randn:
+            matA = torch.randn(rowsA, lda, dtype=dtypeA, device=deviceid)
+            matB = torch.randn(rowsB, ldb, dtype=dtypeA, device=deviceid)
+        else:
+            matA = torch.full((rowsA, lda), fillA, dtype=dtypeB, device=deviceid)
+            matB = torch.full((rowsB, ldb), fillB, dtype=dtypeB, device=deviceid)
+
+        subA = matA[:k, :m].t() if transA else matA[:m, :k]
+        subB = matB[:n, :k].t() if transB else matB[:k, :n]
+        return subA, subB
+    else:
+        if randn:
+            matA = (
+                torch.rand(k, m, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.rand(m, k, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.rand(n, k, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.rand(k, n, dtype=dtypeB, device=deviceid)
+            )
+        else:
+            matA = (
+                torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+            )
+        return matA, matB
+
+
+def _create_batch_matrices(
+    m: int,
+    n: int,
+    k: int,
+    b: int,
+    lda: int,
+    ldb: int,
+    ldc: int,
+    transA: bool,
+    transB: bool,
+    dtype: torch.dtype,
+    deviceid: str,
+    subMatrix: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Helper function for _process_single_offline_gemm.
+    Creates batch matrices that are then consumed by one of the Torch GEMM APIs.
+    Similar to _create_matrices but for 3D batch matrices.
+    """
+    if subMatrix:
+        # User reference for understanding leading dimension:
+        # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
+        # seems to work for all UTs.
+        rowsA = rowsB = max(ldc, k)
+
+        matA = torch.randn(b, rowsA, lda, dtype=dtype, device=deviceid)
+        matB = torch.randn(b, rowsB, ldb, dtype=dtype, device=deviceid)
+
+        subA = matA[:b, :k, :m].transpose(1, 2) if transA else matA[:b, :m, :k]
+        subB = matB[:b, :n, :k].transpose(1, 2) if transB else matB[:b, :k, :n]
+        return subA, subB
+    else:
+        matA = (
+            torch.rand(b, k, m, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(b, m, k, dtype=dtype, device=deviceid)
+        )
+        matB = (
+            torch.rand(b, n, k, dtype=dtype, device=deviceid)
+            if transB
+            else torch.rand(b, k, n, dtype=dtype, device=deviceid)
+        )
+        matA = matA.transpose(1, 2) if transA else matA
+        matB = matB.transpose(1, 2) if transB else matB
+        return matA, matB
+
+
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
 
@@ -377,6 +561,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     dtype_dict = {
         "float": torch.float32,
+        "tf32": torch.float32,
         "double": torch.float64,
         "BFloat16": torch.bfloat16,
         "Half": torch.half,
@@ -398,16 +583,24 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     dtypeB = None
     dtypeC = None
 
+    # Extract BLAS parameters
     if underscore_count == 2:
         [op_sig, data_type, layout] = untuned_gemm[0].split("_")
-        transA = layout[0] == "T"
-        transB = layout[1] == "T"
+        transB = layout[0] == "T"
+        transA = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
+        if data_type == "tf32":
+            # User must still set HIPBLASLT_ALLOW_TF32=1
+            torch.backends.cuda.matmul.allow_tf32 = True
+        else:
+            torch.backends.cuda.matmul.allow_tf32 = False
+
     else:  # ScaledGEMM
+        count = untuned_gemm[0].count("_")
+        assert count in [6, 7]
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
         # of the the number of underscores
-        count = untuned_gemm_temp.count("_")
         op_sig = untuned_gemm_temp[0]
         data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
         data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
@@ -415,86 +608,156 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
         else:
             data_typeC = untuned_gemm_temp[5]
-        transA = untuned_gemm_temp[count][0] == "T"
-        transB = untuned_gemm_temp[count][1] == "T"
+        transB = untuned_gemm_temp[count][0] == "T"
+        transA = untuned_gemm_temp[count][1] == "T"
         dtypeA = dtype_dict.get(data_typeA)
         dtypeB = dtype_dict.get(data_typeB)
         dtypeC = dtype_dict.get(data_typeC)
 
     untuned_gemm_temp = untuned_gemm[1].split("_")
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
+    if op_sig == "GemmStridedBatchedTunableOp":
+        assert untuned_gemm_temp[6] == "ld"
+        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
+    else:
+        assert untuned_gemm_temp[4] == "ld"
+        [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
+
+    # Detect subMatrix case
+    if all(item in [n, m, k] for item in [lda, ldb, ldc]):
+        subMatrix = False
+    else:
+        subMatrix = True
+
     if op_sig == "GemmTunableOp":
-        matA = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
-        )
-        matB = (
-            torch.rand(n, k, dtype=dtype, device=deviceid).t()
-            if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid)
+        # Warnings for unsupported cases:
+        if m == 1 or n == 1 or k == 1:
+            if (not transA) and (not transB):
+                pass  # case is supported
+            elif transA and n == 1:
+                pass  # case is supported
+            else:
+                warnings.warn(
+                    "Offline tuning is not supported for this GEMM. Use online tuning instead. "
+                    + f"Skipped tuning for: {untuned_gemm[1]}"
+                )
+                return
+
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        matA, matB = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
         torch.mm(matA, matB)
+
     elif op_sig == "GemmStridedBatchedTunableOp":
+        # Warnings for unsupported cases:
+        if m == 1 or n == 1 or k == 1:
+            warnings.warn(
+                "Offline tuning is not support for this GEMM. Use online tuning instead. "
+                + f"Skipped tuning for: {untuned_gemm[1]}"
+            )
+            return
+
         [b] = [int(g) for g in untuned_gemm_temp[5:6]]
-        matA = (
-            torch.rand(b, k, m, dtype=dtype, device=deviceid)
-            if transB
-            else torch.rand(b, m, k, dtype=dtype, device=deviceid)
+
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        matA, matB = _create_batch_matrices(
+            m,
+            n,
+            k,
+            b,
+            lda,
+            ldb,
+            ldc,
+            transA,
+            transB,
+            dtype,
+            deviceid,
+            subMatrix=subMatrix,
         )
-        matB = (
-            torch.rand(b, n, k, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(b, k, n, dtype=dtype, device=deviceid)
-        )
-        matA = matA.transpose(1, 2) if transB else matA
-        matB = matB.transpose(1, 2) if transA else matB
         torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
-        fillA = 0.25
-        fillB = 0.75
-        matA = (
-            torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
-            if transB
-            else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
+        # Only combination supported by PyTorch
+        assert transB is True
+        assert transA is False
+
+        # Resolve linter issue
+        if dtypeA is None or not isinstance(dtypeA, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
+
+        matA, matB = _create_matrices(
+            m,
+            n,
+            k,
+            lda,
+            ldb,
+            ldc,
+            transA,
+            transB,
+            dtypeA,
+            deviceid,
+            dtypeB=dtypeB,
+            randn=False,
+            subMatrix=subMatrix,
         )
-        matB = (
-            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid)
-            if transA
-            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid).t()
-        )
+
         assert untuned_gemm_temp[8] == "rw"
         if untuned_gemm_temp[9] == "1":
             rowwise = True
         else:
             rowwise = False
         if rowwise:
-            scaleA = torch.ones((matA.shape[0], 1), device=deviceid)
-            scaleB = torch.ones((1, matB.shape[0]), device=deviceid)
+            scaleA = (
+                torch.ones((1, m), device=deviceid)
+                if transA
+                else torch.ones((m, 1), device=deviceid)
+            )
+            scaleB = (
+                torch.ones((1, n), device=deviceid)
+                if transB
+                else torch.ones((n, 1), device=deviceid)
+            )
         else:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
 
-        torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC)
+        assert untuned_gemm_temp[10] == "bias"
+        if untuned_gemm_temp[11] == "None":  # no bias vector
+            torch._scaled_mm(
+                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC
+            )
+        else:  # bias vector present
+            fillbias = 0.10
+            bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
+            bias = (
+                torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
+                if transB
+                else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
+            )
+            torch._scaled_mm(
+                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias
+            )
+
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
         assert transA != transB
 
-        X = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        bias = torch.rand(n, dtype=dtype, device=deviceid)
+
+        X, matA = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
-        matA = (
-            torch.rand(n, k, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid).t()
-        )
-        bias = (
-            torch.rand(n, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(m, dtype=dtype, device=deviceid)
-        )
+        matA = matA.t()
         torch.nn.functional.linear(X, matA, bias)
     else:
         warnings.warn(f"error: unknown op {op_sig}")
