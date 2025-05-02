@@ -1411,7 +1411,7 @@ class CommonTemplate:
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
             self.assertEqual(
-                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
+                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 9
             )
 
     def test_add_complex5(self):
