@@ -14,6 +14,7 @@ from ...scheduler import (
     BaseScheduling,
     FusedSchedulerNode,
     SchedulerNode,
+    WhyNoFuse,
 )
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
@@ -21,6 +22,12 @@ from ..common import BackendFeature, IndentedBuffer
 
 
 log = logging.getLogger(__name__)
+
+
+class WhyNoFuseNames(WhyNoFuse):
+    def __init__(self, name1: str, name2: str) -> None:
+        self.name1 = name1
+        self.name2 = name2
 
 
 class CUDACPPScheduling(BaseScheduling):
@@ -153,7 +160,7 @@ class CUDACPPScheduling(BaseScheduling):
     def _unwrap_epilogue_nodes(
         fused_node: FusedSchedulerNode,
     ) -> list[BaseSchedulerNode]:
-        nodes = list(fused_node.get_nodes())
+        nodes = fused_node.get_nodes()
         template_node = fused_node.get_template_node()
         assert all(n.node is not None for n in nodes), (
             "All epilogue nodes should have an IRNode"
@@ -165,8 +172,8 @@ class CUDACPPScheduling(BaseScheduling):
     def _can_fuse_epilogue_impl(
         self,
         cuda_template_buffer: CUDATemplateBuffer,
-        epilogue_nodes: list[BaseSchedulerNode],
-        additional_node: BaseSchedulerNode,
+        existing_epilogue_nodes: list[BaseSchedulerNode],
+        node_to_fuse: BaseSchedulerNode,
     ) -> bool:
         """
         Check if the given node can be fused with the epilogue. At the moment, Kernels
@@ -174,44 +181,51 @@ class CUDACPPScheduling(BaseScheduling):
 
         Args:
             cuda_template_buffer : A CUDATemplateBuffer object representing the CUDA template and it's result buffer
-            epilogue_nodes : List[ir.Buffer]: The list of already fused epilogue nodes.
-            additional_node: The ir.Buffer node to be checked if it can be fused with the epilogue.
+            existing_epilogue_nodes : List[SchedulerNode]: The list of already fused epilogue nodes.
+            node_to_fuse: The SchedulerNode node to be checked if it can be fused with the epilogue.
         Returns:
         - bool: True if the given node can be fused with the epilogue, False otherwise.
 
         """
-        additional_ir_node = additional_node.node
 
-        if not isinstance(cuda_template_buffer, CUDATemplateBuffer):
+        why = WhyNoFuseNames(cuda_template_buffer.get_name(), node_to_fuse.get_name())
+
+        ir_node_to_fuse = node_to_fuse.node
+        # for typing
+        assert ir_node_to_fuse
+
+        assert isinstance(cuda_template_buffer, CUDATemplateBuffer)
+        if not isinstance(ir_node_to_fuse, ComputedBuffer):
             return False
-        # if not cuda_template_buffer.template.can_fuse_epilogue:
-        #    # The used GEMM op does not support fusing epilogues
-        #    return False
-        if not isinstance(additional_ir_node, ComputedBuffer):
-            return False
-        if not isinstance(additional_ir_node.data, Pointwise):
+        if not isinstance(ir_node_to_fuse.data, Pointwise):
             return False
         # We can fuse a Pointwise op that depends on the last fused epilogue node
         # if any. If there is no epilogue node yet, it needs to depend on the template
         # node
-        node_name = additional_ir_node.get_computed_buffer_name()  # type: ignore[attr-defined]
+        node_name = ir_node_to_fuse.get_computed_buffer_name()  # type: ignore[attr-defined]
         if node_name is None:
             return False
 
-        if len(epilogue_nodes) == 0:
-            if cuda_template_buffer.name not in additional_ir_node.get_read_names():
-                return False
-        else:
-            last_epilogue_node = epilogue_nodes[-1].node
-            assert isinstance(last_epilogue_node, ComputedBuffer)  # for mypy
-            last_epilogue_name = (
-                last_epilogue_node.name
-                if last_epilogue_node.name is not None
-                else last_epilogue_node.data.name  # type: ignore[attr-defined]
+        assert (
+            len(existing_epilogue_nodes)
+            or cuda_template_buffer.get_name() in ir_node_to_fuse.get_read_names()
+        ), "First epilogue node must read from cuda template buffer"
+
+        # dtype can differ, and strides can differ as long as they are broadcastable
+        if ir_node_to_fuse.get_size() != cuda_template_buffer.get_size():
+            why(
+                f"{cuda_template_buffer.get_name()}'s size: {cuda_template_buffer.get_size()} \
+differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
             )
-            if last_epilogue_name not in additional_ir_node.get_read_names():
-                return False
-        if additional_node.layout != cuda_template_buffer.layout:
+            return False
+        elif node_to_fuse.has_aliasing_or_mutation():
+            why(f"{node_name} has aliasing or mutation")
+            return False
+        elif node_to_fuse.is_reduction():
+            why(f"{node_name} is a reduction which is not yet supported by EVT")
+            return False
+        elif not config.epilogue_fusion:
+            why("epilogue fusion is not enabled")
             return False
 
         try:
@@ -220,20 +234,23 @@ class CUDACPPScheduling(BaseScheduling):
             )
 
             CutlassEVTCodegen.ir_to_evt_python_code(
-                cast(str, cuda_template_buffer.name), epilogue_nodes + [additional_node]
+                cuda_template_buffer.get_name(),
+                existing_epilogue_nodes + [node_to_fuse],
             )
 
         except NotImplementedError as e:
             not_implemented_op = str(e)
             if not_implemented_op.startswith("_op_"):
                 not_implemented_op = not_implemented_op[4:]
-                log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
+                why(
+                    f"Cannot fuse epilogue node {node_to_fuse} into {cuda_template_buffer.name}, \
+likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
             else:  # Likely due to unsupported dtype.
-                log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
+                why(
+                    f"Cannot fuse epilogue node {node_to_fuse} into {cuda_template_buffer.name}. \
+Reason: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
 
