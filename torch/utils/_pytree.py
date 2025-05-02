@@ -453,7 +453,7 @@ def register_dataclass(
         _flatten_fn,
         _unflatten_fn,
         serialized_type_name=serialized_type_name,
-        flatten_with_keys_fn=_flatten_fn_with_keys,
+        flatten_with_keys_func=_flatten_fn_with_keys,
     )
 
 
