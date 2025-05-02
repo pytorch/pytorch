@@ -1866,6 +1866,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def WEAKREF_ALIVE(self, guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("WEAKREF_ALIVE guard cannot be serialized.")
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
