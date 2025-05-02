@@ -120,8 +120,11 @@ class FileManager:
         self.install_dir = Path(install_dir)
         self.template_dir = Path(template_dir)
         self.files: set[Path] = set()
-        self.filenames: set[str] = set()
         self.dry_run = dry_run
+
+    @property
+    def filenames(self) -> frozenset[str]:
+        return frozenset(map(str, self.files))
 
     def _write_if_changed(self, filename: str | Path, contents: str) -> None:
         file = Path(filename)
@@ -185,7 +188,6 @@ class FileManager:
         file = self.install_dir / filename
         assert file not in self.files, f"duplicate file write {file}"
         self.files.add(file)
-        self.filenames.add(str(filename))
         if not self.dry_run:
             substitute_out = self.substitute_with_template(
                 template_fn=template_fn,
