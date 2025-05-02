@@ -104,6 +104,7 @@ if TYPE_CHECKING:
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 
     from ..ir import IRNode
+    from .common import ShapeType
     from .simd_kernel_features import SIMDKernelFeatures
 
     _T = TypeVar("_T")
@@ -2441,7 +2442,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
         return f"{value}[{', '.join(sizes)}]"
 
-    def reduction_collapse_dims(self, buffer, value: str, dtype: torch.dtype) -> str:
+    def reduction_resize_and_shape(self, value: CSEVariable) -> tuple[str, ShapeType]:
+        ndims = self.triton_tensor_ndim()
+        if ndims == 1:
+            return f"triton_helpers.promote_to_tensor({value})", value.shape
+
+        nreduce = self.num_reduction_dims
+        sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
+        new_shape = (
+            (*value.shape[: (ndims - nreduce)], *[1] * nreduce)
+            if value.shape is not None
+            else None
+        )
+        return f"{value}[{', '.join(sizes)}]", new_shape
+
+    def reduction_collapse_dims(
+        self, buffer, value: CSEVariable, dtype: torch.dtype
+    ) -> CSEVariable:
         """
         Reshape to RBLOCK, collapsing all reduction dims.
         """
@@ -2452,13 +2469,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         target_ndim = self.triton_tensor_ndim() - self.num_reduction_dims
         initial_shape = self.dense_size_list()
         target_shape = initial_shape[:target_ndim] + ["RBLOCK"]
-        return str(
-            self.cse.generate(
-                buffer,
-                triton_reshape(value, initial_shape, target_shape),
-                dtype=dtype,
-                shape=target_shape,
-            )
+        return self.cse.generate(
+            buffer,
+            triton_reshape(str(value), initial_shape, target_shape),
+            dtype=dtype,
+            shape=target_shape,
         )
 
     def reduction(
@@ -2519,9 +2534,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         def final_reduction(
             buffer,
-            value: str,
+            value: CSEVariable,
             result_type: Optional[str],
-        ) -> str:
+        ) -> CSEVariable:
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
@@ -2530,23 +2545,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
             if reduction_type in ("max", "min"):
-                value = self.reduction_resize(
+                result = self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
             else:
-                value = self.reduction_resize(
+                result = self.reduction_resize(
                     f"{module}.{reduction_type}({value}, {dim})"
                 )
 
             if result_type is not None:
-                value = f"{value}.to({result_type})"
+                result = f"{result}.to({result_type})"
 
-            return value
+            return self.cse.generate(buffer, result, dtype=dtype, shape=value.shape)
 
         def final_reduction_define(
             buffer,
             result_var: str,
-            value: str,
+            value: CSEVariable,
             result_type: Optional[str],
         ) -> None:
             """
@@ -2637,10 +2652,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert isinstance(masked_value, Sequence)
                 (mean, m2, weight) = masked_value
                 result_var = tuple(
-                    self.cse.generate(
-                        self.compute, value, dtype=dtype, shape=value.shape
-                    )
-                    for value in self._welford(
+                    self.cse.generate(self.compute, value, dtype=dtype, shape=shape)
+                    for value, shape in self._welford(
                         self.compute, mean, m2, weight, dim, dtype
                     )
                 )
@@ -2650,12 +2663,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_var = self.prepare_softmax_twopass_fallback(dtype, value)
             else:
                 assert isinstance(masked_value, CSEVariable)
-                result_var = self.cse.generate(
-                    self.compute,
-                    final_reduction(self.compute, str(masked_value), None),
-                    dtype=masked_value.dtype,
-                    shape=result_shape,
-                )
+                result_var = final_reduction(self.compute, masked_value, None)
         else:
             accumulator = self.cse.namedvar(
                 f"_{result_var}", dtype=torch_acc_type, shape=self.dense_size_list()
@@ -2751,18 +2759,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     # to
                     #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
                     # which is needed because tl.reduce doesn't support tl.int1
-                    accumulator_casted_str = f"{accumulator}.to(tl.int8)"
+                    accumulator = self.cse.generate(
+                        self.compute,
+                        f"{accumulator}.to(tl.int8)",
+                        dtype=accumulator.dtype,
+                        shape=accumulator.shape,
+                    )
                     result_type = triton_compute_type(dtype)
-                    final_reduction_define(
-                        self.post_loop_combine,
-                        str(result_var),
-                        accumulator_casted_str,
-                        result_type,
-                    )
-                else:
-                    final_reduction_define(
-                        self.post_loop_combine, str(result_var), str(accumulator), None
-                    )
+
+                final_reduction_define(
+                    self.post_loop_combine, result_var, accumulator, None
+                )
 
         if self.cooperative_reduction:
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -2828,9 +2835,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 peers = self.codegen_cooperative_reduction_peer_combine(
                     result_var, upcast_acc_dtype(src_dtype), default
                 )
-                final_reduction_define(
-                    self.post_loop_store, str(result_var), peers, None
-                )
+                final_reduction_define(self.post_loop_store, result_var, peers, None)
             exit_stack.close()
 
         self.cse.reduction_cache[cache_key] = result_var
@@ -2890,11 +2895,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for value in (mean, m2, weight)
         )
         welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
-        welford_results = [str(self.cse.newvar(dtype=dtype)) for _ in range(3)]
-        buffer.writeline(f"{', '.join(welford_results)} = {welford}")
 
-        result_values = tuple(self.reduction_resize(value) for value in welford_results)
-        return result_values
+        def reduced_shape(shape):
+            result = list(shape)
+            del result[dim]
+            return tuple(result)
+
+        welford_results = [
+            self.cse.newvar(dtype=dtype, shape=reduced_shape(value.shape))
+            for value in (mean, m2, weight)
+        ]
+        buffer.writeline(f"{', '.join([str(r) for r in welford_results])} = {welford}")
+
+        return tuple(
+            self.reduction_resize_and_shape(value) for value in welford_results
+        )
 
     def welford_reduce(
         self, result_var, reduction_type, value, where_cond, acc_type, dtype
@@ -2902,9 +2917,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """Helper to codegen a welford reduction"""
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
-        accumulator = f"{result_var}_mean"
-        accumulator_m2 = f"{result_var}_m2"
-        accumulator_weight = f"{result_var}_weight"
+        accumulator = TritonCSEVariable(
+            f"{result_var}_mean",
+            shape=self.dense_size_list(),
+            dtype=acc_type,
+            bounds=ValueRanges.unknown(),
+        )
+        accumulator_m2 = TritonCSEVariable(
+            f"{result_var}_m2",
+            shape=self.dense_size_list(),
+            dtype=acc_type,
+            bounds=ValueRanges.unknown(),
+        )
+        accumulator_weight = TritonCSEVariable(
+            f"{result_var}_weight",
+            shape=self.dense_size_list(),
+            dtype=acc_type,
+            bounds=ValueRanges.unknown(),
+        )
         self.body.writeline(
             f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
         )
@@ -2941,13 +2971,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
         )
         result_mean = result_var
-        result_m2 = self.cse.newvar(dtype=dtype)
-        result_weight = self.cse.newvar(dtype=dtype)
         return self.welford_reduce_final_reduction(
             self.post_loop_combine,
             result_mean,
-            result_m2,
-            result_weight,
+            None,
+            None,
             accumulator,
             accumulator_m2,
             accumulator_weight,
@@ -2968,12 +2996,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         dtype,
     ):
         """Helper to codegen call to triton_helpers.welford"""
-        values = self._welford(buffer, mean, m2, weight, dim, dtype)
+        values = list(self._welford(buffer, mean, m2, weight, dim, dtype))
+
         result_exprs = [result_mean, result_m2, result_weight]
-        for result_expr, value in zip(result_exprs, values):
+        for i, (result_expr, (value, shape)) in enumerate(zip(result_exprs, values)):
+            if result_expr is None:
+                result_expr = self.cse.newvar(dtype=dtype, shape=shape)
+                result_exprs[i] = result_expr
             buffer.splice(f"{result_expr} = {value}")
 
-        return result_mean, result_m2, result_weight
+        return tuple(result_exprs)
 
     def online_softmax_reduce_final_reduction(
         self, buffer, result_max, result_sum, peer_max, peer_sum, dim, dtype
@@ -3204,9 +3236,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # of repeating the scan op as a reduction, we use sum to select the
             # last scan value
             def _partial_scan_shape(var):
-                shape = list(var.shape)
-                shape[-1] = "1"
-                return shape
+                if var.shape is None:
+                    return None
+                else:
+                    shape = list(var.shape)
+                    shape[-1] = "1"
+                    return shape
 
             partial_reduce_vars = [
                 cse_compute(
