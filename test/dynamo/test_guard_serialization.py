@@ -456,6 +456,24 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         ):
             self._test_serialization("DUPLICATE_INPUT", fn, x, x)
 
+    def test_weakref_alive(self):
+        mod = torch.nn.Linear(10, 10, bias=False)
+        for p in mod.parameters():
+            p.grad = torch.rand_like(p)
+
+        opt = torch.optim.SGD(mod.parameters(), lr=0.1)
+
+        def fn():
+            params = []
+            opt._init_group(opt.param_groups[0], params, [], [])
+            return params[0].sum()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "WEAKREF_ALIVE guard cannot be serialized"
+        ):
+            with torch.set_grad_enabled(False):
+                self._test_serialization("WEAKREF_ALIVE", fn)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
