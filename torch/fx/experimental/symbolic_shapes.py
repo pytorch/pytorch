@@ -6821,6 +6821,10 @@ class ShapeEnv:
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
+        """
+        Given an expression, evaluates it, adding guards if necessary
+        """
+
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
         return self._inner_evaluate_expr(
@@ -6838,10 +6842,6 @@ class ShapeEnv:
         forcing_spec: bool,
         _suppress_guards_tls: bool,
     ) -> sympy.Basic:
-        """
-        Given an expression, evaluates it, adding guards if necessary
-        """
-
         try:
             return self._evaluate_expr(
                 orig_expr,
