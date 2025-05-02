@@ -1978,6 +1978,7 @@ coverage_ignore_functions = [
     "get_cachingallocator_config",
     "get_clang_version",
     "get_cmake_version",
+    "get_conda_packages",
     "get_cpu_info",
     "get_cuda_module_loading_config",
     "get_cudnn_version",
