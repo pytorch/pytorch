@@ -160,14 +160,16 @@ kernel void binary_strided(
     constant uint3& ndim [[buffer(7)]],
     uint index [[thread_position_in_grid]]) {
   F f;
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T>;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim.x);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
   const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
-  const auto a = val_at_offs<T>(input, input_offs);
-  const auto b = val_at_offs<T>(other, other_offs);
-  ref_at_offs<result_of<F, T, T>>(output, output_offs) = f(a, b);
+  const auto a = val_at_offs<om_t>(input, input_offs);
+  const auto b = val_at_offs<om_t>(other, other_offs);
+  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b));
 }
 
 template <typename T, typename F>
@@ -183,14 +185,17 @@ kernel void alpha_binary_strided(
     constant uint3& ndim [[buffer(8)]],
     uint index [[thread_position_in_grid]]) {
   F f;
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T, T>;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim.x);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
   const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
-  const auto a = val_at_offs<T>(input, input_offs);
-  const auto b = val_at_offs<T>(other, other_offs);
-  ref_at_offs<result_of<F, T, T, T>>(output, output_offs) = f(a, b, *alpha);
+  const auto a = val_at_offs<om_t>(input, input_offs);
+  const auto b = val_at_offs<om_t>(other, other_offs);
+  ref_at_offs<res_t>(output, output_offs) =
+      static_cast<res_t>(f(a, b, om_t(*alpha)));
 }
 
 template <typename T, typename F>
@@ -205,16 +210,18 @@ kernel void binary_strided_cast(
     constant uint3& ndim_types [[buffer(7)]],
     uint index [[thread_position_in_grid]]) {
   F f;
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T>;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
   const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
-  const auto a =
-      val_at_offs<T>(input, input_offs, static_cast<ScalarType>(ndim_types.y));
-  const auto b =
-      val_at_offs<T>(other, other_offs, static_cast<ScalarType>(ndim_types.z));
-  ref_at_offs<result_of<F, T, T>>(output, output_offs) = f(a, b);
+  const auto a = val_at_offs<om_t>(
+      input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  const auto b = val_at_offs<om_t>(
+      other, other_offs, static_cast<ScalarType>(ndim_types.z));
+  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b));
 }
 
 template <typename T, typename F>
@@ -230,16 +237,19 @@ kernel void alpha_binary_strided_cast(
     constant uint3& ndim_types [[buffer(8)]],
     uint index [[thread_position_in_grid]]) {
   F f;
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T, T>;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim_types.x);
   const auto input_offs = offset_from_coord(pos, input_strides, ndim_types.x);
   const auto other_offs = offset_from_coord(pos, other_strides, ndim_types.x);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim_types.x);
-  const auto a =
-      val_at_offs<T>(input, input_offs, static_cast<ScalarType>(ndim_types.y));
-  const auto b =
-      val_at_offs<T>(other, other_offs, static_cast<ScalarType>(ndim_types.z));
-  ref_at_offs<result_of<F, T, T, T>>(output, output_offs) = f(a, b, *alpha);
+  const auto a = val_at_offs<om_t>(
+      input, input_offs, static_cast<ScalarType>(ndim_types.y));
+  const auto b = val_at_offs<om_t>(
+      other, other_offs, static_cast<ScalarType>(ndim_types.z));
+  ref_at_offs<res_t>(output, output_offs) =
+      static_cast<res_t>(f(a, b, om_t(*alpha)));
 }
 
 template <typename T, typename F>
@@ -249,7 +259,9 @@ kernel void binary_dense(
     constant T* other [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
-  out[tid] = f(input[tid], other[tid]);
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T>;
+  out[tid] = static_cast<res_t>(f(om_t(input[tid]), om_t(other[tid])));
 }
 
 template <typename T, typename F>
@@ -260,7 +272,10 @@ kernel void alpha_binary_dense(
     constant T* alpha [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
-  out[tid] = f(input[tid], other[tid], *alpha);
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T, T>;
+  out[tid] =
+      static_cast<res_t>(f(om_t(input[tid]), om_t(other[tid]), om_t(*alpha)));
 }
 
 template <typename T, typename F>
@@ -271,11 +286,13 @@ kernel void binary_dense_cast(
     constant uint4& sizes_types [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
-  const auto a = val_at_offs<T>(
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T>;
+  const auto a = val_at_offs<om_t>(
       input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
-  const auto b = val_at_offs<T>(
+  const auto b = val_at_offs<om_t>(
       other, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
-  out[tid] = f(a, b);
+  out[tid] = static_cast<res_t>(f(a, b));
 }
 
 template <typename T, typename F>
@@ -287,11 +304,13 @@ kernel void alpha_binary_dense_cast(
     constant uint4& sizes_types [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
-  const auto a = val_at_offs<T>(
+  using om_t = opmath_t<T>;
+  using res_t = result_of<F, T, T, T>;
+  const auto a = val_at_offs<om_t>(
       input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
-  const auto b = val_at_offs<T>(
+  const auto b = val_at_offs<om_t>(
       other, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
-  out[tid] = f(a, b, *alpha);
+  out[tid] = static_cast<res_t>(f(a, b, om_t(*alpha)));
 }
 
 #define REGISTER_BINARY_OP(NAME, DTYPEI, DTYPEO)                               \
