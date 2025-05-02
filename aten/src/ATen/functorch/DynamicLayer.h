@@ -15,8 +15,6 @@
 #include <ATen/functorch/ADInterpreters.h>
 #include <ATen/functorch/FunctionalizeInterpreter.h>
 
-#include <nlohmann/json.hpp>
-
 // Forward declared
 namespace c10 { struct AutogradMetaInterface; }
 
