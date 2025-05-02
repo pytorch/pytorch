@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 
 # Tools needed for development
 RUN apt-get -y update && \
-    apt-get install -y \
+    apt-get install --no-install-recommends -y \
     build-essential \
     cmake \
     ninja-build \
@@ -11,14 +11,18 @@ RUN apt-get -y update && \
     python3-pip \
     python3-dev \
     python3-venv \
-    libopenblas-dev
+    libopenblas-dev && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Tools needed for llvm
-RUN apt-get install -y \
+RUN apt-get install --no-install-recommends -y \
     lsb-release \
     wget \
     software-properties-common \
-    gnupg
+    gnupg && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create Python virtual environment
 RUN python3 -m venv /opt/venv
@@ -33,9 +37,9 @@ RUN if [ -n "$CLANG_VERSION" ]; then \
     ./llvm.sh "${CLANG_VERSION}"; \
     echo 'export CC=clang' >> ~/.bashrc; \
     echo 'export CXX=clang++' >> ~/.bashrc; \
-    apt update; \
-    apt install -y clang; \
-    apt install -y libomp-dev; \
+    apt install --no-install-recommends -y clang; libomp-dev && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*; \
     fi
 
 # Install CUDA if version is specified
@@ -45,7 +49,7 @@ RUN if [ -n "$CUDA_VERSION" ]; then \
     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
     dpkg -i cuda-keyring_1.0-1_all.deb && \
     apt-get update && \
-    apt-get install -y cuda-toolkit-${CUDA_VERSION}; \
+    apt-get install --no-install-recommends -y cuda-toolkit-${CUDA_VERSION}; \
     fi
 
 # Set PATH for CUDA
