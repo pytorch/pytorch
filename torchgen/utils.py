@@ -10,8 +10,8 @@ import textwrap
 from dataclasses import fields, is_dataclass
 from enum import auto, Enum
 from pathlib import Path
-from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never, Self
+from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
+from typing_extensions import Self
 
 from torchgen.code_template import CodeTemplate
 
@@ -96,6 +96,13 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
         raise
 
 
+# A little trick from https://github.com/python/mypy/issues/6366
+# for getting mypy to do exhaustiveness checking
+# TODO: put this somewhere else, maybe
+def assert_never(x: NoReturn) -> NoReturn:
+    raise AssertionError(f"Unhandled type: {type(x).__name__}")
+
+
 @functools.cache
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
@@ -111,36 +118,35 @@ def string_stable_hash(s: str) -> int:
 # of what files have been written (so you can write out a list of output
 # files)
 class FileManager:
-    def __init__(
-        self,
-        install_dir: str | Path,
-        template_dir: str | Path,
-        dry_run: bool,
-    ) -> None:
-        self.install_dir = Path(install_dir)
-        self.template_dir = Path(template_dir)
-        self.files: set[Path] = set()
+    install_dir: str
+    template_dir: str
+    dry_run: bool
+    filenames: set[str]
+
+    def __init__(self, install_dir: str, template_dir: str, dry_run: bool) -> None:
+        self.install_dir = install_dir
+        self.template_dir = template_dir
+        self.filenames = set()
         self.dry_run = dry_run
 
-    def _write_if_changed(self, filename: str | Path, contents: str) -> None:
-        file = Path(filename)
-        old_contents: str | None = None
+    def _write_if_changed(self, filename: str, contents: str) -> None:
+        old_contents: str | None
         try:
-            old_contents = file.read_text(encoding="utf-8")
+            with open(filename) as f:
+                old_contents = f.read()
         except OSError:
-            pass
+            old_contents = None
         if contents != old_contents:
             # Create output directory if it doesn't exist
-            file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_text(contents, encoding="utf-8")
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            with open(filename, "w") as f:
+                f.write(contents)
 
     # Read from template file and replace pattern with callable (type could be dict or str).
     def substitute_with_template(
-        self,
-        template_fn: str | Path,
-        env_callable: Callable[[], str | dict[str, Any]],
+        self, template_fn: str, env_callable: Callable[[], str | dict[str, Any]]
     ) -> str:
-        template_path = self.template_dir / template_fn
+        template_path = os.path.join(self.template_dir, template_fn)
         env = env_callable()
         if isinstance(env, dict):
             if "generated_comment" not in env:
@@ -172,30 +178,30 @@ class FileManager:
 
     def write_with_template(
         self,
-        filename: str | Path,
-        template_fn: str | Path,
+        filename: str,
+        template_fn: str,
         env_callable: Callable[[], str | dict[str, Any]],
     ) -> None:
-        file = self.install_dir / filename
-        assert file not in self.files, "duplicate file write {file}"
-        self.files.add(file)
+        filename = f"{self.install_dir}/{filename}"
+        assert filename not in self.filenames, "duplicate file write {filename}"
+        self.filenames.add(filename)
         if not self.dry_run:
             substitute_out = self.substitute_with_template(
                 template_fn=template_fn,
                 env_callable=env_callable,
             )
-            self._write_if_changed(filename=file, contents=substitute_out)
+            self._write_if_changed(filename=filename, contents=substitute_out)
 
     def write(
         self,
-        filename: str | Path,
+        filename: str,
         env_callable: Callable[[], str | dict[str, Any]],
     ) -> None:
         self.write_with_template(filename, filename, env_callable)
 
     def write_sharded(
         self,
-        filename: str | Path,
+        filename: str,
         items: Iterable[T],
         *,
         key_fn: Callable[[T], str],
@@ -217,8 +223,8 @@ class FileManager:
 
     def write_sharded_with_template(
         self,
-        filename: str | Path,
-        template_fn: str | Path,
+        filename: str,
+        template_fn: str,
         items: Iterable[T],
         *,
         key_fn: Callable[[T], str],
@@ -227,7 +233,6 @@ class FileManager:
         base_env: dict[str, Any] | None = None,
         sharded_keys: set[str],
     ) -> None:
-        file = Path(filename)
         everything: dict[str, Any] = {"shard_id": "Everything"}
         shards: list[dict[str, Any]] = [
             {"shard_id": f"_{i}"} for i in range(num_shards)
@@ -265,26 +270,31 @@ class FileManager:
             merge_env(shards[sid], env)
             merge_env(everything, env)
 
+        dot_pos = filename.rfind(".")
+        if dot_pos == -1:
+            dot_pos = len(filename)
+        base_filename = filename[:dot_pos]
+        extension = filename[dot_pos:]
+
         for shard in all_shards:
             shard_id = shard["shard_id"]
             self.write_with_template(
-                file.with_stem(f"{file.stem}{shard_id}"),
+                f"{base_filename}{shard_id}{extension}",
                 template_fn,
                 lambda: shard,
             )
 
         # filenames is used to track compiled files, but FooEverything.cpp isn't meant to be compiled
-        self.files.discard(self.install_dir / file.with_stem(f"{file.stem}Everything"))
+        self.filenames.discard(
+            f"{self.install_dir}/{base_filename}Everything{extension}"
+        )
 
-    def write_outputs(self, variable_name: str, filename: str | Path) -> None:
-        """Write a file containing the list of all outputs which are generated by this script."""
-        content = "\n".join(
-            (
-                "set(",
-                f"    {variable_name}",
-                *(f'    "{name}"' for name in sorted(self.files)),
-                ")",
-            )
+    def write_outputs(self, variable_name: str, filename: str) -> None:
+        """Write a file containing the list of all outputs which are
+        generated by this script."""
+        content = "set({}\n    {})".format(
+            variable_name,
+            "\n    ".join('"' + name + '"' for name in sorted(self.filenames)),
         )
         self._write_if_changed(filename, content)
 
@@ -299,15 +309,12 @@ class FileManager:
 
 # Helper function to generate file manager
 def make_file_manager(
-    options: Namespace,
-    install_dir: str | Path | None = None,
+    options: Namespace, install_dir: str | None = None
 ) -> FileManager:
     template_dir = os.path.join(options.source_path, "templates")
     install_dir = install_dir if install_dir else options.install_dir
     return FileManager(
-        install_dir=install_dir,
-        template_dir=template_dir,
-        dry_run=options.dry_run,
+        install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run
     )
 
 
@@ -430,10 +437,7 @@ class NamespaceHelper:
     """
 
     def __init__(
-        self,
-        namespace_str: str,
-        entity_name: str = "",
-        max_level: int = 2,
+        self, namespace_str: str, entity_name: str = "", max_level: int = 2
     ) -> None:
         # cpp_namespace can be a colon joined string such as torch::lazy
         cpp_namespaces = namespace_str.split("::")
@@ -450,8 +454,7 @@ class NamespaceHelper:
 
     @staticmethod
     def from_namespaced_entity(
-        namespaced_entity: str,
-        max_level: int = 2,
+        namespaced_entity: str, max_level: int = 2
     ) -> NamespaceHelper:
         """
         Generate helper from nested namespaces as long as class/function name. E.g.: "torch::lazy::add"
