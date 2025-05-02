@@ -167,9 +167,9 @@ kernel void binary_strided(
   const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
   const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
-  const auto a = val_at_offs<om_t>(input, input_offs);
-  const auto b = val_at_offs<om_t>(other, other_offs);
-  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(a, b));
+  const auto a = val_at_offs<T>(input, input_offs);
+  const auto b = val_at_offs<T>(other, other_offs);
+  ref_at_offs<res_t>(output, output_offs) = static_cast<res_t>(f(om_t(a), om_t(b)));
 }
 
 template <typename T, typename F>
@@ -192,10 +192,10 @@ kernel void alpha_binary_strided(
   const auto input_offs = offset_from_coord(pos, input_strides, ndim.x);
   const auto other_offs = offset_from_coord(pos, other_strides, ndim.x);
   const auto output_offs = offset_from_coord(pos, output_strides, ndim.x);
-  const auto a = val_at_offs<om_t>(input, input_offs);
-  const auto b = val_at_offs<om_t>(other, other_offs);
+  const auto a = val_at_offs<T>(input, input_offs);
+  const auto b = val_at_offs<T>(other, other_offs);
   ref_at_offs<res_t>(output, output_offs) =
-      static_cast<res_t>(f(a, b, om_t(*alpha)));
+      static_cast<res_t>(f(om_t(a), om_t(b), om_t(*alpha)));
 }
 
 template <typename T, typename F>
