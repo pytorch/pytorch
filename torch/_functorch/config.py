@@ -186,7 +186,7 @@ unlift_effect_tokens = False
 # ProxyTensor tracing.
 custom_op_default_layout_constraint: Literal[
     "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
-] = "needs_fixed_stride_order"
+] = "needs_exact_strides"
 
 
 # Run aot eager decomp partition with CrossRefFakeMode
