@@ -87,11 +87,11 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Create message header
   struct msghdr msg {
     // destination socket address and size of it
-    .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un),
     // message content in msg_iov and number of such structs (1 in our case)
-    .msg_iov = &io, .msg_iovlen = 1,
     // auxiliary data with the value of fd and size of it
-    .msg_control = cbuf, .msg_controllen = sizeof(cbuf)
+    .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un),
+    .msg_iov = &io, .msg_iovlen = 1, .msg_control = cbuf,
+    .msg_controllen = sizeof(cbuf)
   };
 
   // This points to the first control message header
@@ -237,7 +237,12 @@ void map_block(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
 #elif defined(USE_ROCM)
   C10_HIP_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
-  C10_HIP_CHECK(hipMemMap(*ptr, size, 0, reinterpret_cast<hipMemGenericAllocationHandle_t>(handle), 0ULL));
+  C10_HIP_CHECK(hipMemMap(
+      *ptr,
+      size,
+      0,
+      reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
+      0ULL));
   C10_HIP_CHECK(hipMemMap(
       *ptr,
       size,
