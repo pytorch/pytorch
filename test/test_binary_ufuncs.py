@@ -2575,6 +2575,16 @@ class TestBinaryUfuncs(TestCase):
             floating_types_and(torch.half, torch.bfloat16),
         )
     )
+
+    @onlyNativeDeviceTypes
+    def test_copysign_scalar_device_mismatch(self, device):
+        if device == "mps":
+            # Ensure scalar on CPU is promoted to match input device (MPS)
+            a = torch.tensor([-1.0, 0.0, 1.0], device="mps")
+            b = torch.copysign(a, -2.0)  # scalar is CPU by default
+            expected = torch.tensor([-1.0, -0.0, -1.0], device="mps")
+            self.assertEqual(b, expected)
+
     def test_copysign_subgradient(self, device, dtypes):
         # Input is 0.0
         x = torch.tensor(
