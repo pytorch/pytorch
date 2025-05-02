@@ -2061,6 +2061,49 @@ if HAS_CUDA:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
+        def test_side_stream_memory_allocation(self):
+            from torch._inductor.cudagraph_trees import cudagraphify_impl
+
+            def multi_stream_allocation(args):
+                side_stream = torch.cuda.Stream()
+                side_stream.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(side_stream):
+                    side_stream_buffer = torch.ones(
+                        *args, device="cuda:0", dtype=torch.float32
+                    )
+                torch.cuda.current_stream().wait_stream(side_stream)
+
+                main_stream_buffer = torch.ones(
+                    *args, device="cuda:0", dtype=torch.float32
+                )
+
+                if isinstance(args, list):
+                    args.clear()
+
+                return main_stream_buffer, side_stream_buffer
+
+            graphed_multi_stream_func = cudagraphify_impl(
+                multi_stream_allocation,
+                inputs=[],
+                static_input_idxs=[],
+                is_backward=False,
+                is_inference=False,
+                device_index=0,
+                stack_traces=["dummy stack trace1", "dummy stack trace2"],
+            )
+
+            ref_out = torch.ones((2, 3), device="cuda:0", dtype=torch.float32)
+
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                main_stream_buffer, side_stream_buffer = graphed_multi_stream_func(
+                    [2, 3]
+                )
+                self.assertEqual(main_stream_buffer, ref_out)
+                self.assertEqual(side_stream_buffer, ref_out)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
         def test_static_inputs_address_mutation_log(self):
