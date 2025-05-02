@@ -36,7 +36,7 @@ RUN if [ -n "$CLANG_VERSION" ]; then \
     echo 'export CC=clang' >> ~/.bashrc; \
     echo 'export CXX=clang++' >> ~/.bashrc; \
     apt install --no-install-recommends -y clang; libomp-dev && \
-    apt-get clean -y \
+    apt-get clean -y; \
     fi
 
 # Install CUDA if version is specified
@@ -45,8 +45,8 @@ RUN if [ -n "$CUDA_VERSION" ]; then \
     CUDA_REPO_VERSION=$(echo ${CUDA_VERSION} | sed 's/\./\-/g'); \
     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
     dpkg -i cuda-keyring_1.0-1_all.deb && \
-    apt-get install --no-install-recommends -y cuda-toolkit-${CUDA_VERSION}; && \
-    apt-get clean -y \
+    apt-get install --no-install-recommends -y cuda-toolkit-${CUDA_VERSION}; \
+    apt-get clean -y; \
     fi
 
 # Set PATH for CUDA
