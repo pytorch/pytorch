@@ -2,7 +2,7 @@ include (CMakePrintHelpers)
 
 # Generate AITER/CK Asm code
 execute_process(
-    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/../../../../../../../../../third_party/aiter/csrc/py_itfs_cu/fmha_bwd_pre_post_kernel.py --receipt 1 --output_dir ${CMAKE_CURRENT_LIST_DIR}
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/aiter/csrc/py_itfs_cu/fmha_bwd_pre_post_kernel.py --receipt 1 --output_dir ${CMAKE_CURRENT_LIST_DIR}
     RESULT_VARIABLE ret
 )
 
@@ -11,7 +11,7 @@ if(ret AND NOT ret EQUAL 0)
 endif()
 
 execute_process(
-    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/../../../../../../../../../third_party/aiter/csrc/cpp_itfs/mha_bwd_generate.py --receipt 3 --output_dir ${CMAKE_CURRENT_LIST_DIR}
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/aiter/csrc/cpp_itfs/mha_bwd_generate.py --receipt 3 --output_dir ${CMAKE_CURRENT_LIST_DIR}
     RESULT_VARIABLE ret
 )
 
