@@ -25,6 +25,7 @@ inline void infer_size_impl(
   // N.B. this is an index, not a sym dim!
   std::optional<int64_t> infer_dim;
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
+    // We can avoid failing on unbacked shape[dim] and assert that it is >=0 following python behaviour.
     if (shape[dim] == -1) {
       if (infer_dim) {
         throw std::runtime_error("only one dimension can be inferred");
@@ -38,7 +39,7 @@ inline void infer_size_impl(
   }
   
   auto set_infer_dim = [&](){
-      // We have a degree of freedom here to select the dimension size; follow
+    // We have a degree of freedom here to select the dimension size; follow
     // NumPy semantics and just bail.  However, a nice error message is needed
     // because users often use `view` as a way to flatten & unflatten
     // dimensions and will otherwise be confused why
