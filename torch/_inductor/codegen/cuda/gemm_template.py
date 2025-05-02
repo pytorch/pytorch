@@ -998,8 +998,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             "op argument is required and has to be an instance of GemmOperation"
         )
 
-        # if epilogue_nodes and not self._has_tma_epilogue(op):
-        #    raise NotImplementedError("Non-TMA epilogue visitor tree is not supported in Cutlass.")
+        if epilogue_nodes and not self._has_tma_epilogue(op):
+            raise NotImplementedError(
+                "Non-TMA epilogue visitor tree is not supported in Cutlass."
+            )
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
