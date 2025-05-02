@@ -8,6 +8,7 @@
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #elif defined(USE_ROCM)
+#include <c10/hip/HIPException.h>
 #include <hip/hip_runtime_api.h>
 #endif
 
