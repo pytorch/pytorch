@@ -6,7 +6,7 @@ from contextlib import nullcontext
 from typing import Any, Callable, Optional, Union
 
 import torch
-from functorch.experimental.control_flow import _unstack_pytree
+from torch._higher_order_ops.map import _unstack_pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata

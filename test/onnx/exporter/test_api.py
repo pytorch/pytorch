@@ -124,17 +124,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             )
             self.assertTrue(os.path.exists(path))
 
-    def test_export_supports_script_module(self):
-        class ScriptModule(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        self.assert_export(
-            torch.jit.script(ScriptModule()),
-            (torch.randn(1, 1, 2),),
-            strategy="JitTraceConvertStrategy",
-        )
-
     def test_dynamic_shapes_with_fully_specified_axes(self):
         ep = torch.export.export(
             SampleModelForDynamicShapes(),

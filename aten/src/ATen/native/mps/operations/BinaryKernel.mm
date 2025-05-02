@@ -3,6 +3,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/Lerp.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -155,6 +156,10 @@ static void complex_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "make_complex");
 }
 
+static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
+  lib.exec_binary_kernel(iter, "lerp_alpha", weight);
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -169,4 +174,5 @@ REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
+REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
 } // namespace at::native
