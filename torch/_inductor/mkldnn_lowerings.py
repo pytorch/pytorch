@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -35,15 +35,17 @@ def create_int8_compensation(
     x_scale: ir.TensorBox,
     x_zp: ir.TensorBox,
     w_scale: ir.TensorBox,
-) -> tuple[bool, ir.TensorBox, Optional[ir.TensorBox]]:
-    use_int8_fast_compensation_path = False
-    weight_compens = None
-    x_w_scale = None
-    if all(
+) -> tuple[
+    bool,
+    Union[ir.TensorBox, ir.ShapeAsConstantBuffer],
+    Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]],
+]:
+    x_w_scale: Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]] = None
+    use_int8_fast_compensation_path = all(
         isinstance(item, ir.TensorBox) and item.get_name() in V.graph.constants
         for item in [x_scale, x_zp, w_scale]
-    ):
-        use_int8_fast_compensation_path = True
+    )
+    if use_int8_fast_compensation_path:
         x_w_scale_tensor = (
             V.graph.constants[x_scale.get_name()]
             * V.graph.constants[w_scale.get_name()]

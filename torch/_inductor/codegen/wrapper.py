@@ -761,11 +761,6 @@ class MultiOutputLine(WrapperLine):
         )
 
 
-@dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
-
-
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
@@ -774,6 +769,8 @@ class PythonWrapperCodegen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
     """
+
+    supports_caching = True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
@@ -1371,11 +1368,7 @@ class PythonWrapperCodegen(CodeGen):
             if config.profile_bandwidth:
                 self.generate_start_graph()
 
-            # We disable planning during training because it presently increases peak memory consumption.
-            if is_inference and config.memory_planning:
-                self.memory_plan()
-            else:
-                self.memory_plan_reuse()
+            self.run_wrapper_ir_passes(is_inference)
 
             if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_reset_kernel_saved_flags()
@@ -1522,6 +1515,13 @@ class PythonWrapperCodegen(CodeGen):
         _total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
+
+    def run_wrapper_ir_passes(self, is_inference: bool):
+        # We disable planning during training because it presently increases peak memory consumption.
+        if is_inference and config.memory_planning:
+            self.memory_plan()
+        else:
+            self.memory_plan_reuse()
 
     def codegen_input_symbol_assignment(
         self,
@@ -1817,8 +1817,9 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
+    @staticmethod
     def _format_kernel_definition(
-        self, kernel_name: str, kernel_body: str, metadata: Optional[str] = None
+        kernel_name: str, kernel_body: str, metadata: Optional[str] = None
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"

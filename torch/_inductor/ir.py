@@ -7345,16 +7345,22 @@ class MultiOutputLayout(OutputSpec):
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_multi_output(self)
-        self.codegen_size_asserts(wrapper)
-        self.codegen_alignment_asserts(wrapper)
+        if not self.skip_size_stride_alignment_checks:
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
 
     def __init__(
-        self, layout: OutputSpec, input: IRNode, indices: list[tuple[Any, ...]]
+        self,
+        layout: OutputSpec,
+        input: IRNode,
+        indices: list[tuple[Any, ...]],
+        skip_size_stride_alignment_checks: bool = False,
     ) -> None:
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
         self.indices = indices
+        self.skip_size_stride_alignment_checks = skip_size_stride_alignment_checks
 
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
@@ -7660,10 +7666,9 @@ class InvokeSubgraph(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(cls, subgraph: Subgraph, operands: Sequence[IRNode]) -> IRNode:
+    def create(cls, subgraph: Subgraph, *operands: IRNode) -> IRNode:
         # TODO(anijain2305) - Support sym expr as operands in future.
-        fx_operands = V.graph.current_node.args[-1]
-
+        fx_operands = V.graph.current_node.args[2:]
         assert isinstance(fx_operands, Sequence), type(fx_operands)
         assert all(isinstance(n, Node) for n in fx_operands)
         fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
@@ -7731,6 +7736,7 @@ class InvokeSubgraph(ExternKernel):
                     ),
                     invoke_subgraph,
                     [(list, ind)],
+                    skip_size_stride_alignment_checks=True,
                 )
 
         outputs_ = [create_output(output, i) for i, output in enumerate(outputs)]
