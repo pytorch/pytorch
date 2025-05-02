@@ -96,6 +96,12 @@ from torch.utils._sympy.value_ranges import (
     ValueRanges,
 )
 from torch.utils._traceback import CapturedTraceback, format_frame
+from typing import List, Tuple
+from typing_extensions import ParamSpec, TypeVar
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
 
 
 if TYPE_CHECKING:
@@ -1930,7 +1936,7 @@ class StatelessSymbolicContext(SymbolicContext):
     dynamic_strides: DimList[DimDynamic] = None  # type: ignore[assignment]
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
-    backend_specializations = None
+    backend_specializations: Optional[List[Tuple[object, Callable[_P, _T]]]] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -1991,12 +1997,12 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     other values - dynamic_sizes and constraint_sizes will not be read if we cache
     hit.
 
-    It is the cache owner's responsibility to maintain the lifecycle of the cache
-    with respect to different shape_envs, clearing, etc.
+    It is the cache owners responsibility to maintain the lifecycle of the cache
+    w/r/t different shape_envs, clearing, etc.
     """
 
     tensor_source: Source = None  # type: ignore[assignment]
-    # Why is this keyed on int first?
+    # Why is this keyd on int first?
     # That integer is actually the id of the shape_env. This cache short-circuits symbol
     # creation, and we must store it per shape env. Now, while tracing invariants are a single
     # shape env per tracing context, and every new frame gets a new shape_env. So where would we have
@@ -5195,9 +5201,8 @@ class ShapeEnv:
                         source, constraint
                     )
                     msg = (
-                        f"You marked {self._debug_name(source)} as dynamic but your code "
-                        f"specialized it to be a constant ({val}). Either remove the mark_dynamic "
-                        f"or use a less strict API such as maybe_mark_dynamic or Dim.AUTO."
+                        f"Not all values of {var_with_range} are valid because "
+                        f"{self._debug_name(source)} was inferred to be a constant ({val})."
                     )
                     record_constraint_violation(
                         constraint.warn_only, self._debug_name(source), msg

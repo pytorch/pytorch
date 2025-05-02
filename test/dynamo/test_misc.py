@@ -10975,7 +10975,7 @@ fn
         torch._dynamo.decorators.mark_unbacked(x, 1, strict=True)
         y = torch.randn(5, 5)
 
-        with self.assertRaisesRegex(RuntimeError, "specialized"):
+        with self.assertRaisesRegex(RuntimeError, "RelaxedUnspecConstraint"):
             fn(x, y)
 
     def test_sym_max_unbacked_sizelike_simplification(self):
