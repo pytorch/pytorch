@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import heapq
+import importlib
 import logging
 import operator
 import sys
+import time
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -15,6 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .dependencies import WeakDep
+from .memory import estimate_peak_memory, FreeableInputBuffer, get_freeable_input_buf
 from .utils import (
     contains_collective,
     contains_wait,
@@ -24,13 +28,14 @@ from .utils import (
     is_fallback_op,
     is_wait,
 )
+from .virtualized import V
 
 
 log = logging.getLogger(__name__)
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 if TYPE_CHECKING:
-    from .scheduler import BaseSchedulerNode
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
@@ -68,6 +73,189 @@ def reorder_compute_for_overlap(
     return _schedule_for_comm(
         snodes, raise_comms=True, sink_waits=True, reorder_for_overlap=True
     )
+
+
+def reorder_communication_preserving_peak_memory(
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
+    """
+    Reorders communication ops relative to computation ops to improve communication-compute overlapping and hide comm
+    latency.  Stops moving a particular op if it reaches a point that would have increased the peak memory footprint.
+
+    Currently, follows these heuristics (subject to change or tune):
+    - never reorders collectives relative to one another, for SPMD safety
+    - has an option for per-collective prefetch limit, but does not enable it by default
+    - limits the total number of reorder steps to some factor of the graph size to prevent worst-case quadratic
+      performance
+
+    Prerequisite: sink_comms_and_waits - ensure comm and wait nodes are scheduled as late as possible, respecting data
+    dependencies.  That allows reorder_communication_preserving_peak_memory to take a best case peak-memory snapshot,
+    and then monotonically improve latency by moving collectives backward in time.
+
+    Peak memory impact is computed in an iterative fashion.  First, memory use at each timestep is computed, and global
+    peak memory is computed as a max over timesteps.  Then, when swapping any two adjacent nodes, only the curr-memory
+    for the earlier of the nodes after the swap is affected.  This enables checking step by step whether a swap is
+    peak-memory-safe, and bailing out if not.  Example:
+
+    0   n0      C0
+    1   n1      C0 + Allocs(n1) - Frees(n1)
+    2   n2      C0 + Allocs(n1) - Frees(n1) + Allocs(n2) - Frees(n2)
+
+    0   n0      C0
+    1   n2      C0 + Allocs(n2) - Frees(n2)    <-- After moving n2 to Time 1, only time1 memory changes
+    2   n1      C0 + Allocs(n2) - Frees(n2) + Allocs(n1) - Frees(n1)
+
+    """
+    reordered_snodes, node_stats = (
+        _reorder_communication_preserving_peak_memory_internal(snodes)
+    )
+    improvement = {snode: node_stats[snode].improvement for snode in node_stats}
+    total_improvement = sum([improvement[snode] for snode in improvement])
+    total_moves = sum([node_stats[snode].moves for snode in node_stats])
+    overlap_log.info(
+        "reorder_communication_preserving_peak_memory improved overlap by %f ns after %d reorders",
+        total_improvement,
+        total_moves,
+    )
+
+    if importlib.util.find_spec("tabulate"):
+        from tabulate import tabulate
+
+        overlap_log.info(
+            tabulate(
+                [
+                    [
+                        node_summary(snode),
+                        node_reorder_info.initial_exposed,
+                        node_reorder_info.final_exposed,
+                        node_reorder_info.improvement,
+                        node_reorder_info.limiting_factor,
+                        node_reorder_info.moves,
+                    ]
+                    for snode, node_reorder_info in node_stats.items()
+                ],
+                headers=[
+                    "Collective node",
+                    "initial exposed",
+                    "final exposed",
+                    "improvement",
+                    "limiting factor",
+                    "moves",
+                ],
+            )
+        )
+    else:
+        overlap_log.info(
+            "Please `pip install tabulate` to nicely render overlap stats."
+        )
+
+    return reordered_snodes
+
+
+@dataclass
+class ReorderInfo:
+    """
+    Debug info describing how an individual snode was reordered
+    """
+
+    initial_exposed: float = -1
+    final_exposed: float = -1
+    limiting_factor: str = "None"
+    moves: int = 0
+
+    @property
+    def improvement(self):
+        assert self.initial_exposed >= self.final_exposed >= 0
+        return self.initial_exposed - self.final_exposed
+
+
+def _reorder_communication_preserving_peak_memory_internal(
+    snodes: list[BaseSchedulerNode],
+) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:
+    """
+    Internal testing helper that also returns debug info.
+    Returns:
+        - reordered snodes list
+        - dict {snode: ReorderInfo}
+    """
+    # heuristic to avoid degenerating to quadratic time
+    MOVE_LIMIT = len(snodes) * 100
+    total_moves = 0
+    # TODO - experiment with whether this limit is useful, setting `len(snodes)` disables it
+    PER_COLLECTIVE_PREFETCH_LIMIT = len(snodes)
+    if config.reorder_prefetch_limit is not None:
+        PER_COLLECTIVE_PREFETCH_LIMIT = config.reorder_prefetch_limit
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
+        snodes, graph_inputs
+    )
+    peak_memory, curr_memory = estimate_peak_memory(
+        snodes, name_to_freeable_input_buf, graph_outputs
+    )
+    runtimes = {snode: estimate_op_runtime(snode) for snode in snodes}
+
+    # debug stats
+    stats: dict[BaseSchedulerNode, ReorderInfo] = {}
+
+    def exposed_communication_time(collective_snode, remaining_snodes):
+        # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
+        comm_time = estimate_op_runtime(collective_snode)
+        compute_time = 0.0
+        for snode in remaining_snodes:
+            if contains_collective(snode):
+                continue
+            if contains_wait(snode):
+                # TODO - if the wait is for a collective that started before this collective or on another stream,
+                # we can ignore it. Otherwise, it's the end of the road for overlap opportunities
+                break
+
+            compute_time += runtimes[snode]
+        return max(0, comm_time - compute_time)
+
+    for i, snode in enumerate(snodes):
+        if contains_collective(snode):
+            reorder_info = stats[snode] = ReorderInfo()
+            reorder_info.initial_exposed = reorder_info.final_exposed = (
+                exposed_communication_time(snode, snodes[i + 1 :])
+            )
+            if total_moves >= MOVE_LIMIT:
+                reorder_info.limiting_factor = "move limit"
+                continue
+            for j in range(i - 1, -1, -1):
+                prev_snode = snodes[j]
+                if j < max(0, i - PER_COLLECTIVE_PREFETCH_LIMIT):
+                    reorder_info.limiting_factor = "prefetch limit"
+                    break
+                if contains_collective(prev_snode):
+                    reorder_info.limiting_factor = "collective ordering"
+                    break
+                dep_names = OrderedSet([s.name for s in snode.unmet_dependencies])
+                if any(
+                    o.get_name() in dep_names for o in prev_snode.get_outputs()
+                ) and not contains_wait(prev_snode):
+                    reorder_info.limiting_factor = "data dependency"
+                    break
+                if peak_memory - curr_memory[j] < curr_memory[j - 1] - curr_memory[j]:
+                    reorder_info.limiting_factor = "peak memory"
+                    break
+                if reorder_info.final_exposed > runtimes[snode]:
+                    reorder_info.limiting_factor = "sufficient overlapping"
+                    break
+                reorder_info.moves += 1
+                total_moves += 1
+                tmp = snodes[j]
+                snodes[j] = snodes[j + 1]
+                snodes[j + 1] = tmp
+                # swapping nodes j and j+1 affects curr memory at j only
+                j_plus_one_alloc = curr_memory[j + 1] - curr_memory[j]
+                j_alloc = curr_memory[j] - curr_memory[j - 1]
+                curr_memory[j] = curr_memory[j] - j_alloc + j_plus_one_alloc
+                reorder_info.final_exposed = exposed_communication_time(
+                    snode, snodes[j + 1 :]
+                )
+
+    return snodes, stats
 
 
 def _schedule_for_comm(
@@ -259,43 +447,67 @@ def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
 
 
 def node_summary(snode):
-    detail = ""
-    if isinstance(snode.node, ir.ExternKernelOut):
-        detail = f" ({snode.node.python_kernel_name})"
-    out_tensor_info = ""
-    layout = snode.node.get_output_spec()
-    if isinstance(layout, ir.Layout):
-        out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
-    node_name = snode.node.maybe_get_name() or ""
-    return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name})"
+    snodes = snode.get_nodes()
+    if len(snodes) == 1:
+        detail = ""
+        if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
+            detail = f" ({snode.node.python_kernel_name})"
+        layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
+        out_tensor_info = ",".join(
+            [
+                f" (size={layout.size}, stride={layout.stride})"
+                if isinstance(layout, ir.Layout)
+                else ""
+                for layout in layouts
+            ]
+        )
+        try:
+            node_name = snode.node.maybe_get_name()
+        except AttributeError:
+            # TODO: node_summary was written without FusedSchedulerNode in mind, generally needs to be hardened
+            node_name = ""
+        return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name} ({snode.get_estimated_runtime():.0f} ns)"
+
+    # Flatten the summaries for Fused/Foreach/Grouped nodes
+    summaries = []
+    for child_snode in snodes:
+        summaries.append(node_summary(child_snode))
+    return f"{snode.__class__.__name__}: {', '.join(summaries)}"
 
 
 def visualize_overlap(order):
+    # TODO - this function probably doesn't do a very good job estimating the runtime becuase it doesn't carefully model
+    # streams and overlap. For now its mostly useful as a debug visualization.
+
     total_est_runtime: float = 0.0
     cur_comm_node = None
-    for snode in order:
+
+    def step_log(step, msg):
+        overlap_log.debug(f"{step:>6}: {msg}")  # noqa: G004
+
+    for step, snode in enumerate(order):
         if cur_comm_node is None:
             if contains_collective(snode):
                 total_est_runtime += estimate_op_runtime(snode)
                 cur_comm_node = snode.node
             elif is_wait(snode.node):
-                raise AssertionError(
-                    "Wait is not expected when there is no collective running"
-                )
+                # raise AssertionError(
+                #     "Wait is not expected when there is no collective running"
+                # )
+                pass
             else:  # exposed compute op
                 total_est_runtime += estimate_op_runtime(snode)
-            overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+            step_log(step, f"{node_summary(snode)}")
         else:  # cur_comm_node is not None
             if contains_collective(snode):
-                raise AssertionError(
-                    "Found two collectives running at the same time. "
-                    "`visualize_overlap` needs to be updated to handle this case"
-                )
+                total_est_runtime += estimate_op_runtime(snode)
+                cur_comm_node = snode.node
+                step_log(step, f"{node_summary(snode)}")  # noqa: G004
             elif is_wait(snode.node):  # end of this comm op
-                overlap_log.debug(f"{node_summary(snode)}")  # noqa: G004
+                step_log(step, f"{node_summary(snode)}")
                 cur_comm_node = None
             else:  # overlapped compute op
-                overlap_log.debug(f"| {node_summary(snode)}")  # noqa: G004
+                step_log(step, f"| {node_summary(snode)}")
     overlap_log.debug(
         f"Est. runtime (ms): {total_est_runtime / 1000 / 1000}"  # noqa: G004
     )
@@ -305,27 +517,35 @@ def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
     order = snodes
-
+    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass
+
+        peak_memory, _ = estimate_peak_memory(
+            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
+        )
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
-                f"==== Visualize overlap before reordering pass {p} ===="  # noqa: G004
+                f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
             )
-            try:
-                visualize_overlap(order)
-            except Exception as e:
-                overlap_log.debug(str(e))
+            visualize_overlap(order)
+        t0 = time.time()
         order = p(order)  # type: ignore[operator]
+        t = time.time() - t0
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
-                f"==== Visualize overlap after reordering pass {p} ===="  # noqa: G004
+                f"==== Visualize overlap after reordering pass {p} (ran in {t} sec)===="  # noqa: G004
             )
             try:
                 visualize_overlap(order)
             except Exception as e:
                 overlap_log.debug(str(e))
+        peak_memory, _ = estimate_peak_memory(
+            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
+        )
+        print(f"final {peak_memory=}")
     return order
 
 
