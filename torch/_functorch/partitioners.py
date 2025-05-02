@@ -1780,8 +1780,14 @@ def choose_saved_values_set(
         ]
 
     recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes)
-    # sort first by name, to ensure determinism when multiple nodes have same size
-    recomputable_banned_nodes = sorted(recomputable_banned_nodes, key=lambda x: x.name)
+    must_save_nodes = [
+        i
+        for i in recomputable_banned_nodes
+        if i.meta.get("recompute", False) == CheckpointPolicy.MUST_SAVE
+    ]
+    recomputable_banned_nodes = [
+        i for i in recomputable_banned_nodes if i not in must_save_nodes
+    ]
 
     # default: runtime_optimized_saved_values
     # more aggressive: more_aggressive_saved_values
@@ -1791,7 +1797,7 @@ def choose_saved_values_set(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
     if len(all_recomputable_banned_nodes) == 0:
-        return node_info.inputs
+        return node_info.inputs + must_save_nodes
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]
