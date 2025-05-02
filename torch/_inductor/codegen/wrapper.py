@@ -758,11 +758,6 @@ class MultiOutputLine(WrapperLine):
 
 
 @dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
-
-
-@dataclasses.dataclass
 class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
