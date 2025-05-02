@@ -931,6 +931,12 @@ def find_symbol_binding_fx_nodes(
     return r
 
 
+@dataclass
+class BackendSpecialization:
+    symbol: sympy.Symbol
+    hint: int
+    specialization: Callable
+
 # Analogous to ConvertIntSource
 @dataclass(frozen=True)
 class ConvertIntKey:
@@ -3561,6 +3567,8 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
 
+        self.backend_specializations = []
+
         from torch.fx.experimental.validator import translation_validation_enabled
 
         self._translation_validation_enabled = translation_validation_enabled()
@@ -4044,6 +4052,11 @@ class ShapeEnv:
                 do_not_specialize_zero_one=config.backed_size_oblivious,
                 symbolic_context=symbolic_context,
             )
+            for specialization in symbolic_context.backend_specializations:
+                self.backend_specializations.append(BackendSpecialization(
+                    sym,
+                    *specialization,
+                ))
             if (
                 config.backed_size_oblivious
                 and isinstance(sym, sympy.Symbol)  # could be static

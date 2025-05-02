@@ -1498,7 +1498,7 @@ class OutputGraph(OutputGraphGuardsState):
 
             compiled_fns = []
             with self.restore_global_state():
-                for specialization in backend_specializations
+                for specialization in old_fake_mode.shape_env.backend_specializations
                     compiled_fns.append(self.call_user_compiler(modified_gm, specialization))
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
