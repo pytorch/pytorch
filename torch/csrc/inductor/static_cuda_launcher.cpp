@@ -385,11 +385,11 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
     // No need to do any work if we're outside of grid bounds
     Py_RETURN_NONE;
   }
-  CUcontext pctx;
+  CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     // Ensure device context exists
-    CUdevice device;
+    CUdevice device = 0;
     AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGet(&device, 0));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxRetain(&pctx, device));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
