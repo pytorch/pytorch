@@ -556,6 +556,20 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             False,
         )
 
+    def test_constant_match(self):
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(3)
+        y = 5
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 5}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": 5}, True)
+        # guard should fail for different y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 6}, False)
+
     def test_dict_version(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
