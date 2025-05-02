@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: ignore-errors
 import builtins
 import contextlib
 import dataclasses
@@ -18,16 +18,13 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
-from typing_extensions import Self
 from unittest.mock import patch
 
 import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._dynamo.utils import counters, dynamo_timed, identity
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
@@ -39,6 +36,12 @@ from .autotune_process import (
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
     TritonGPUBenchmarkRequest,
+)
+from .autotune_utils import (
+    AutotuneArgs,
+    benchmark_choices,
+    Benchmarkable,
+    generate_example_value,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
@@ -57,7 +60,6 @@ from .codegen.triton import (
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
-from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
@@ -68,7 +70,6 @@ from .utils import (
     ceildiv,
     FakeIndentedBuffer,
     get_dtype_size,
-    is_gpu,
     Placeholder,
     restore_stdout_stderr,
     sympy_dot,
@@ -101,58 +102,6 @@ class KernelNamespace:
 
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
-
-
-@dataclasses.dataclass
-class BenchmarkTensors:
-    """Represents a set of inputs and outputs for autotuning with a template"""
-
-    input_tensors: list[torch.Tensor]
-    output_tensor: Optional[torch.Tensor]
-
-    def unpack(self):
-        return self.input_tensors, self.output_tensor
-
-
-@dataclasses.dataclass
-class AutotuneArgs:
-    """During autotuning, we need to pass the same inputs to all choices.
-    Note:
-        Since we typically have a mix of external choices and triton choices, we create
-        two lists of inputs for the same underlying buffers:
-        - External inputs (for aten kernels): Include offset for sliced tensors
-        - Triton inputs: Use base pointer for sliced tensors, without offset
-    """
-
-    triton: BenchmarkTensors
-    extern: BenchmarkTensors
-    expected: Optional[torch.Tensor] = None
-
-    def get_benchmark_tensors(self, extern=False) -> BenchmarkTensors:
-        """Returns the inputs and output tensors for a given choice."""
-        bench_tensors = self.extern if extern else self.triton
-        return bench_tensors
-
-    @classmethod
-    def from_choice_args(
-        cls,
-        example_inputs: list[torch.Tensor],
-        example_inputs_extern: list[torch.Tensor],
-        out: torch.Tensor,
-        out_extern: torch.Tensor,
-        expected: Optional[torch.Tensor] = None,
-    ) -> Self:
-        """Factory method to create AutotuneInputs from separate inputs/outputs"""
-        return cls(
-            triton=BenchmarkTensors(example_inputs, out),
-            extern=BenchmarkTensors(example_inputs_extern, out_extern),
-            expected=expected,
-        )
-
-    def verify(self, **kwargs):
-        """Verify the correctness of the benchmarking results"""
-
-        torch.testing.assert_close(self.extern.output_tensor, self.expected, **kwargs)
 
 
 class PartialRender:
@@ -1441,7 +1390,7 @@ class ExternKernelChoice:
         )
 
 
-class TritonTemplateCaller(ir.TritonTemplateCallerBase):
+class TritonTemplateCaller(ir.TritonTemplateCallerBase, Benchmarkable):
     def __init__(
         self,
         name,
@@ -1530,7 +1479,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         return f"type={type_name}_BLOCK-M={BLOCK_M}_BLOCK-K={BLOCK_K}_BLOCK-N={BLOCK_N}_numstages={num_stages}_numwarps={num_warps}"
 
 
-class ExternKernelCaller(ChoiceCaller):
+class ExternKernelCaller(ChoiceCaller, Benchmarkable):
     def __init__(
         self,
         choice: ExternKernelChoice,
@@ -1547,6 +1496,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
+
+    def is_extern(self) -> bool:
+        return True
 
     def benchmark(self, *args, out):
         if out.numel() == 0:
@@ -2175,74 +2127,11 @@ class AlgorithmSelectorCache(PersistentCache):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        def benchmark_choice_in_current_process(
-            choice: ChoiceCaller, autotune_args: AutotuneArgs
-        ) -> float:
-            is_extern = isinstance(choice, ExternKernelCaller)
-            benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
-            inpts, output = benchmark_tensors.unpack()
-            output.zero_()
-            result = choice.benchmark(*inpts, out=output)
-            device_type = next(
-                (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
-                "cuda",
-            )
-            device_interface = get_interface_for_device(device_type)
-            if device_interface.is_available():
-                device_interface.synchronize()  # shake out any CUDA errors
-
-            if VERIFY and autotune_args.expected is not None:
-                autotune_args.verify(**VERIFY)
-            return result
-
         def benchmark_in_current_process(
             choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
         ) -> dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
             inputs = get_inputs(choices)
-            timings = {}
-            for choice in choices:
-                try:
-                    timing = benchmark_choice_in_current_process(choice, inputs)
-                except CUDACompileError as e:
-                    log.error(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        str(e),
-                    )
-                    timing = float("inf")
-                except NotImplementedError as e:
-                    log.warning("Not yet implemented: %s", e)
-                    timing = float("inf")
-                except RuntimeError as e:
-                    msg = str(e)
-                    if "invalid argument" in msg:
-                        msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                    else:
-                        if "illegal memory access" in msg:
-                            msg += "\n\nEither error in template or triton bug.\n"
-                    log.error(
-                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                        msg,
-                    )
-                    timing = float("inf")
-                except AssertionError as e:
-                    raise AssertionError(  # noqa: B904
-                        f"Incorrect result from choice {choice}\n\n{e}"
-                    )
-                except Exception as e:
-                    try:
-                        from triton.runtime.autotuner import OutOfResources
-
-                        if isinstance(e, OutOfResources):
-                            log.warning(e)
-                            timing = float("inf")
-                        else:
-                            raise e
-                    except ImportError:
-                        raise e from None
-
-                timings[choice] = timing
-
-            return timings
+            return benchmark_choices(choices, inputs, VERIFY)
 
         def benchmark_in_sub_process(
             choices: Union[list[ExternKernelCaller], list[TritonTemplateCaller]],
@@ -2404,25 +2293,9 @@ class AlgorithmSelectorCache(PersistentCache):
     def generate_example_value(
         size, stride, device, dtype, extra_size, allocation_size=None
     ):
-        # preserve rng states to avoid the rand_strided call below changes
-        # the rng states for the real model code.
-        with preserve_rng_state():
-            if allocation_size is None or allocation_size == size:
-                return rand_strided(
-                    size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                )
-            else:
-                return rand_strided(
-                    allocation_size,
-                    stride,
-                    device=device,
-                    dtype=dtype,
-                    extra_size=extra_size,
-                ).as_strided(size, stride)
+        return generate_example_value(
+            size, stride, device, dtype, extra_size, allocation_size
+        )
 
     @staticmethod
     def key_of(node):
