@@ -343,23 +343,18 @@ class TestDynamismExpression(TestCase):
         seq_len = torch.tensor(5)
         torch.export.export(MySlice(), args=(x, seq_len))
 
-    torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_reshape_view_backed_size_oblivious(self):
         N = 3
 
         class MyModel(torch.nn.Module):
-            def forward(
-                self, 
-                x # [s0, 32], [10, 32]
-            ):
-                y = x[:-1, :]   # [s0 - 1, 32] [9, 32]
-                stacked = torch.stack([y] * N, dim=0)   # [N * (s0 - 1), 32] [27, 32]
-                reshaped = stacked.reshape(-1, N, 32)  # -> [(s0 - 1), N, 32],  [-1, 3, 32] 
+            def forward(self, x):
+                y = x[:-1, :]  # [s0 - 1, 32]
+                stacked = torch.stack([y] * N, dim=0)  # [N * (s0 - 1), 32]
+                reshaped = stacked.reshape(-1, N, 32)  # [(s0 - 1), N, 32]
                 return reshaped
 
-        inps = (
-            torch.randn((10, 32), device="cuda"),
-        )
+        inps = (torch.randn(10, 32),)
         spec = {
             "x": (Dim.AUTO, Dim.STATIC),
         }
