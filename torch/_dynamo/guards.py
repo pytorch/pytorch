@@ -2531,6 +2531,8 @@ class GuardsStatePickler(pickle.Pickler):
         return torch._C._functorch.CInterpreter.deserialize(json)
 
     def reducer_override(self, obj):
+        import sympy
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta"),
@@ -2553,6 +2555,17 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, torch._C._functorch.CInterpreter):
             return type(self)._unpickle_functorch_interpreter, (obj.serialize(),)
+
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, sympy.Function)
+            and hasattr(obj, "_torch_handler_name")
+        ):
+            assert hasattr(obj, "_torch_unpickler")
+            return obj._torch_unpickler, (obj._torch_handler_name,)
+
+        elif isinstance(obj, torch.SymInt):
+            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise RuntimeError(
