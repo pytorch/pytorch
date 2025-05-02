@@ -40,16 +40,16 @@ pushd %SRC_DIR%
 set "ORIG_PATH=%PATH%"
 
 
-:: create a new conda environment and install packages
+:: create a new environment and install packages
 :try
 SET /A tries=3
 :loop
 IF %tries% LEQ 0 GOTO :exception
-call condaenv.bat
+call setup_build.bat
 IF %ERRORLEVEL% EQU 0 GOTO :done
 SET /A "tries=%tries%-1"
 :exception
-echo "Failed to create conda env"
+echo "Failed to setup build"
 exit /B 1
 :done
 
