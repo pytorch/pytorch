@@ -50,7 +50,8 @@
   _(nvmlDeviceGetHandleByPciBusId_v2)    \
   _(nvmlDeviceGetNvLinkRemoteDeviceType) \
   _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
-  _(nvmlDeviceGetComputeRunningProcesses)
+  _(nvmlDeviceGetComputeRunningProcesses)\
+  _(nvmlSystemGetCudaDriverVersion_v2)
 
 namespace c10::cuda {
 
