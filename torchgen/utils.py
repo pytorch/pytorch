@@ -21,7 +21,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
 
-REPO_ROOT = Path(__file__).absolute().parent.parent
+TORCHGEN_ROOT = Path(__file__).absolute().parent
+REPO_ROOT = TORCHGEN_ROOT.parent
 
 
 # Many of these functions share logic for defining both the definition
@@ -171,11 +172,24 @@ class FileManager:
                     ),
                 }
             template = _read_template(template_path)
-            return template.substitute(env)
-        elif isinstance(env, str):
+            substitute_out = template.substitute(env)
+            # Ensure an extra blank line before the class/function definition
+            # if it is followed by a docstring
+            return re.sub(
+                r'''
+                (""")\n+             # match triple quotes
+                (
+                    ([ ]*@.+\n)*     # match decorators if any
+                    [ ]*(class|def)  # match class/function definition
+                )
+                ''',
+                r"\g<1>\n\n\g<2>",
+                substitute_out,
+                flags=re.VERBOSE,
+            )
+        if isinstance(env, str):
             return env
-        else:
-            assert_never(env)
+        assert_never(env)
 
     def write_with_template(
         self,
@@ -305,7 +319,7 @@ class FileManager:
         that varies across builds. So, just use the path relative to this file,
         which will point to the codegen source but will be stable.
         """
-        return os.path.relpath(self.template_dir, os.path.dirname(__file__))
+        return self.template_dir.relative_to(TORCHGEN_ROOT).as_posix()
 
 
 # Helper function to generate file manager
