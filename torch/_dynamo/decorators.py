@@ -587,7 +587,10 @@ def mark_dynamic(t, index, *, min=None, max=None, backend_specializations=None):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+
+        if not hasattr(t, "_backend_specializations"):
             t._backend_specializations = {}
+
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
