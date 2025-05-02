@@ -20,6 +20,7 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
@@ -210,32 +211,6 @@ class _Namespace:
         assert obj in self._obj_to_name
         self._obj_to_name[obj] = name
         self._used_names.add(name)
-
-
-dtype_abbrs = {
-    torch.bfloat16: "bf16",
-    torch.float64: "f64",
-    torch.float32: "f32",
-    torch.float16: "f16",
-    torch.float8_e4m3fn: "f8e4m3fn",
-    torch.float8_e5m2: "f8e5m2",
-    torch.float8_e4m3fnuz: "f8e4m3fnuz",
-    torch.float8_e5m2fnuz: "f8e5m2fnuz",
-    torch.float8_e8m0fnu: "f8e8m0fnu",
-    torch.complex32: "c32",
-    torch.complex64: "c64",
-    torch.complex128: "c128",
-    torch.int8: "i8",
-    torch.int16: "i16",
-    torch.int32: "i32",
-    torch.int64: "i64",
-    torch.bool: "b8",
-    torch.uint8: "u8",
-    torch.uint16: "u16",
-    torch.uint32: "u32",
-    torch.uint64: "u64",
-    torch.bits16: "b16",
-}
 
 
 @compatibility(is_backward_compatible=True)
@@ -437,7 +412,7 @@ class CodeGen:
             global_name = namespace.create_name(name_hint, obj)
 
             if global_name in globals_:
-                assert globals_[global_name] is obj
+                assert globals_[global_name] == obj
                 return global_name
             globals_[global_name] = obj
             return global_name
@@ -619,8 +594,10 @@ class CodeGen:
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
                 # use string as annotation, to make it valid python code
-
-                if isinstance(meta_val, torch.Tensor):
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                ):
                     stride_annotation = (
                         f"{stringify_shape(meta_val.stride())}"
                         if include_stride
@@ -1723,8 +1700,6 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
-            num_warnings = 0
-            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == "call_function":
                     if not callable(node.target):
@@ -1756,29 +1731,8 @@ class Graph:
                                 f"Node {node} target {node.target} {atom} of {seen_qualname} does "
                                 "not reference an nn.Module"
                             )
-                        elif (
-                            node.op == "get_attr"
-                            and not isinstance(new_m_itr, torch.nn.Module)
-                            and not isinstance(new_m_itr, torch.nn.Parameter)
-                            and atom not in m_itr._buffers
-                        ):
-                            if num_warnings < MAX_WARNINGS:
-                                # Don't emit this warning too frequently,
-                                # for very large graphs this can become very expensive
-                                # from a performance perspective.
-                                warnings.warn(
-                                    f"Node {node} target {node.target} {atom} of {seen_qualname} does "
-                                    "not reference an nn.Module, nn.Parameter, or buffer, which is "
-                                    "what 'get_attr' Nodes typically target"
-                                )
-                            num_warnings += 1
-                        else:
-                            m_itr = new_m_itr
-            if num_warnings > MAX_WARNINGS:
-                warnings.warn(
-                    f"Additional {num_warnings - MAX_WARNINGS} warnings "
-                    "suppressed about get_attr references"
-                )
+
+                        m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
@@ -1829,10 +1783,14 @@ class Graph:
         # DCE below will not behave as expected.
         self.lint()
 
+        impure_random = True
+        if torch._guards.TracingContext.try_get():
+            impure_random = torch._inductor.config.fallback_random
+
         def has_side_effect(node):
             if is_impure_node is not None:
                 return is_impure_node(node)
-            return node.is_impure()
+            return node.is_impure(impure_random)
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
