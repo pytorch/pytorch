@@ -92,7 +92,6 @@ from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
-from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -1876,7 +1875,7 @@ class AotCodeCompiler:
                 magic_number = 0
             else:
                 magic_number = cast(
-                    int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
+                    "int", torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
                 )
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
@@ -1896,6 +1895,10 @@ class AotCodeCompiler:
                 ):
                     constant = constant.real_obj
                 assert isinstance(constant, torch._C.ScriptObject)
+                from torch.export.pt2_archive._constants import (
+                    CUSTOM_OBJ_FILENAME_PREFIX,
+                )
+
                 custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
 
                 log.debug("saving script object %s as %s", name, custom_obj_name)

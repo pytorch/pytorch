@@ -1501,10 +1501,10 @@ class TestSaveLoad(TestCase):
         inp = (torch.randn(2, 2),)
         ep = export_for_training(f, inp, strict=True)
 
-        with tempfile.NamedTemporaryFile() as f:
-            save(ep, f)
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            save(ep, f.name)
             f.seek(0)
-            loaded_ep = load(f)
+            loaded_ep = load(f.name)
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
@@ -1518,7 +1518,7 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor([6]), torch.tensor([7]))
         ep = export_for_training(f, inp, strict=True)
 
-        with TemporaryFileName() as fname:
+        with TemporaryFileName(suffix=".pt2") as fname:
             path = Path(fname)
             save(ep, path)
             loaded_ep = load(path)
@@ -1555,18 +1555,18 @@ class TestSaveLoad(TestCase):
         ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Serialized version .* does not match our current"
+            RuntimeError, r"Saved archive version -1 does not match our current"
         ):
-            with tempfile.NamedTemporaryFile() as f:
-                save(ep, f)
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+                save(ep, f.name)
                 f.seek(0)
 
                 # Modify the version
                 with zipfile.ZipFile(f, "a") as zipf:
-                    zipf.writestr("version", "-1.1")
+                    zipf.writestr("version", "-1")
 
                 f.seek(0)
-                load(f)
+                load(f.name)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
