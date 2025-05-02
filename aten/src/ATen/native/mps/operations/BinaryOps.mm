@@ -19,7 +19,6 @@
 #include <ATen/ops/gt_native.h>
 #include <ATen/ops/hypot_native.h>
 #include <ATen/ops/le_native.h>
-#include <ATen/ops/lerp_native.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/logical_and_native.h>
@@ -447,10 +446,6 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
     return outputTensor;
   };
   mps::binaryOpTensor(self, other, output, "xlogy_out_mps", xlogy_op_block);
-}
-
-TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
-  mps::add_sub_lerp_template(self, end, weight, out, "lerp");
 }
 
 REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel_mps);
