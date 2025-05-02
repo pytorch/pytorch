@@ -1150,13 +1150,14 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
-    if old_size_product > 0 and not free_unbacked_symbols(new_size):
-        # maybe realize the input but skip for unbacked symints since it'll
-        # choke on the size hint.
-        x.mark_reuse(
-            V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
-        )
+    if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
+        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        if old_size_product > 0:
+            # maybe realize the input but skip for unbacked symints since it'll
+            # choke on the size hint.
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+            )
 
     x_loader = x.make_loader()
     return Pointwise.create(
