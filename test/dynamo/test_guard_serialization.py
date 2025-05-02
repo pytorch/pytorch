@@ -446,6 +446,16 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         with torch._functorch.eager_transforms.grad_increment_nesting():
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_duplicate_input(self):
+        def fn(x, x_):
+            return x + x_
+
+        x = torch.randn(3, 2)
+        with self.assertRaisesRegex(
+            RuntimeError, "DUPLICATE_INPUT guard cannot be serialized"
+        ):
+            self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
