@@ -2535,7 +2535,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def final_reduction(
             buffer,
             value: CSEVariable,
-            result_type: Optional[str],
+            result_type: Optional[torch.dtype],
         ) -> CSEVariable:
             """
             Helper to generate a reduction call, e.g. tl.sum.
@@ -2554,15 +2554,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
             if result_type is not None:
-                result = f"{result}.to({result_type})"
+                result = f"{result}.to({self.dtype_to_str(result_type)})"
+            else:
+                result_type = value.dtype
 
-            return self.cse.generate(buffer, result, dtype=dtype, shape=value.shape)
+            return self.cse.generate(
+                buffer, result, dtype=result_type, shape=value.shape
+            )
 
         def final_reduction_define(
             buffer,
-            result_var: str,
+            result_var: CSEVariable,
             value: CSEVariable,
-            result_type: Optional[str],
+            result_type: Optional[torch.dtype],
         ) -> None:
             """
             Generate a reduction and assign it to an existing variable.
@@ -2663,7 +2667,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_var = self.prepare_softmax_twopass_fallback(dtype, value)
             else:
                 assert isinstance(masked_value, CSEVariable)
-                result_var = final_reduction(self.compute, masked_value, None)
+                result_var = final_reduction(
+                    self.compute, masked_value, masked_value.dtype
+                )
         else:
             accumulator = self.cse.namedvar(
                 f"_{result_var}", dtype=torch_acc_type, shape=self.dense_size_list()
@@ -2760,12 +2766,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
                     # which is needed because tl.reduce doesn't support tl.int1
                     accumulator = self.cse.generate(
-                        self.compute,
+                        self.post_loop_combine,
                         f"{accumulator}.to(tl.int8)",
-                        dtype=accumulator.dtype,
+                        dtype=torch.int8,
                         shape=accumulator.shape,
                     )
-                    result_type = triton_compute_type(dtype)
 
                 final_reduction_define(
                     self.post_loop_combine, result_var, accumulator, None
@@ -3024,7 +3029,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_cooperative_reduction_peer_combine(
         self, result_var, dtype, default_val
-    ):
+    ) -> CSEVariable:
         """
         Generate code to save a [XBLOCK, RSPLIT] temporary workspace, where each thread block writes a different
         column.  After the barrier, every thread block loads the completed value so that it can compute the final
@@ -3043,11 +3048,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """,
             strip=True,
         )
+        peers = self.create_cse_var(
+            f"{result_var}_peers",
+            shape=["XBLOCK", "RSPLIT"],
+            dtype=dtype,
+            bounds=ValueRanges.unknown(),
+        )
         self.post_loop_store.writeline(
-            f"{result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + rsplit_arange), "
+            f"{peers} = tl.load({result_var}_ws + (xindex * RSPLIT + rsplit_arange), "
             f"rsplit_mask, eviction_policy='evict_first', other=triton_helpers.if_mask(rsplit_mask, {constant_repr(default_val)}))"
         )
-        return f"{result_var}_peers"
+        return peers
 
     def store_reduction(
         self,
@@ -3257,7 +3268,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 cse_compute(
                     f"tl.where(roffset > 0, {full_scan}, {partial_scan})",
                     dtype=partial_scan.dtype,
-                    shape=full_scan.shape,
+                    shape=partial_scan.shape,
                 )
                 for full_scan, partial_scan in zip(full_scan_vars, partial_scan_vars)
             ]
