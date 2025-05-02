@@ -276,17 +276,12 @@ void Logger::set_runtime_stats_and_log() {
   num_iterations_stats_recorded_++;
   // Set ith iteration when the runtime stats are set.
   ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
+  ddp_logging_data_->ints_map["num_buckets_reduced"] =
+      reducer_->num_buckets_reduced_;
   // When get_ddp_logging_data() is called, "unused_parameter_size",
   // "has_rebuilt_buckets" and "rebuilt_bucket_sizes" are updated in the latest
   // sampling iteration.
-  // If unused_parameters_ is not empty, calculate its sizes.
-  // unused_parameters_ is calculated in forward call of
-  // each iteration.
-  if (reducer_->unused_parameters_.empty() &&
-      reducer_->find_unused_parameters_) {
-    // No unused params in this iteration
-    ddp_logging_data_->ints_map["unused_parameter_size"] = 0;
-  }
+  ddp_logging_data_->ints_map["unused_parameter_size"] = 0;
   for (const auto& unused_index : reducer_->unused_parameters_) {
     const auto& v = reducer_->params_[unused_index];
     ddp_logging_data_->ints_map["unused_parameter_size"] +=

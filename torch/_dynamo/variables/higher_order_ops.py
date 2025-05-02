@@ -20,7 +20,6 @@ their semantic behavior.
 """
 
 import contextlib
-import copy
 import functools
 import inspect
 import itertools
@@ -41,11 +40,10 @@ from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch._ops import HigherOrderOperator
-from torch.fx.node import map_arg
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..exc import (
     IncorrectUsage,
     UncapturedHigherOrderOpError,
@@ -253,6 +251,107 @@ def _check_supported_callable_arg(
         unimplemented(
             f"{arg_name} should be a Callable but is of type {str(func_var)}."
         )
+
+
+def are_same_graph_modules(a_mod, b_mod, fake_mode):
+    from torch._subclasses._fake_tensor_utils import _CacheKeyState
+    from torch._subclasses.fake_tensor import extract_tensor_metadata
+
+    # Maps the equivalent nodes from a to b
+    node_map = {}
+
+    def check_all_args(a_nodes, b_nodes):
+        for arg_a, arg_b in zip(a_nodes, b_nodes):
+            if isinstance(arg_a, torch.fx.Node):
+                if node_map[arg_a] != arg_b:
+                    return False
+            elif isinstance(arg_a, slice):
+                if not isinstance(arg_b, slice):
+                    return False
+                if not check_all_args(
+                    (arg_a.start, arg_a.stop, arg_a.step),
+                    (arg_b.start, arg_b.stop, arg_b.step),
+                ):
+                    return False
+            elif arg_a != arg_b:
+                # This is a catch-all for everything else. `slice` was a
+                # surprise but can there be other data structures that can
+                # contain fx.Nodes in them?
+                return False
+        return True
+
+    for a_node, b_node in zip(a_mod.graph.nodes, b_mod.graph.nodes):
+        if a_node.op != b_node.op:
+            return False
+
+        if a_node.op == "placeholder":
+            a_value = a_node.meta["example_value"]
+            b_value = b_node.meta["example_value"]
+
+            if isinstance(a_value, torch.Tensor):
+                if not isinstance(b_value, torch.Tensor):
+                    return False
+                # Extract fake tensor metadata for a and b and then compare
+                a_result = []
+                state = _CacheKeyState(fake_mode.shape_env)
+                a_metadata = extract_tensor_metadata(a_value)
+                a_metadata._flatten_into(a_result, fake_mode, state)
+
+                b_result = []
+                state = _CacheKeyState(fake_mode.shape_env)
+                b_metadata = extract_tensor_metadata(b_value)
+                b_metadata._flatten_into(b_result, fake_mode, state)
+                if a_result != b_result:
+                    return False
+            elif isinstance(a_value, torch.SymInt):
+                if not isinstance(b_value, torch.SymInt):
+                    return False
+                if a_value is not b_value:
+                    return False
+        elif a_node.op == "call_function":
+            if a_node.target is not b_node.target:
+                return False
+            a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
+            b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
+            if not check_all_args(a_flat, b_flat):
+                # print("call_function args failed")
+                return False
+        elif a_node.op == "call_method":
+            if a_node.target != b_node.target:
+                return False
+            a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
+            b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
+            if not check_all_args(a_flat, b_flat):
+                # print("call_method args failed")
+                return False
+        elif a_node.op == "output":
+            a_flat, _ = pytree.tree_flatten((a_node.args, a_node.kwargs))
+            b_flat, _ = pytree.tree_flatten((b_node.args, b_node.kwargs))
+            if not check_all_args(a_flat, b_flat):
+                # print("output args failed")
+                return False
+        elif a_node.op == "get_attr":
+            a_attr = getattr(a_mod, a_node.target)
+            b_attr = getattr(b_mod, b_node.target)
+            if isinstance(a_attr, torch.fx.GraphModule):
+                if not isinstance(b_attr, torch.fx.GraphModule):
+                    return False
+                # This is an example of a HOP inside a HOP
+                if not are_same_graph_modules(a_attr, b_attr, fake_mode):
+                    return False
+            else:
+                # TODO - write an example with tensor as a graph attribute in
+                # the Fx graph
+                raise NotImplementedError(f"get_attr with {type(a_attr)}")
+        else:
+            # TODO - call_module is not supported because Dynamo Fx graph does
+            # not install a call_module
+            raise NotImplementedError(f"Graph equivalence check saw a {a_node.op}")
+
+        # Two nodes are equal - add them to them map
+        node_map[a_node] = b_node
+
+    return True
 
 
 def validate_args_and_maybe_create_graph_inputs(
@@ -785,6 +884,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return HintsWrapperHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "flex_attention":
             return FlexAttentionHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "flex_attention_backward":
+            return FlexAttentionBackwardHighOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -1826,10 +1927,8 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.supports_input_mutation = True
-        self.supports_aliasing = True
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -3003,85 +3102,9 @@ def maybe_positional_arg_names(func):
     return result
 
 
-def canonicalize(gmod, root_gmod):
-    # autograd_cache_key is sensitive to the name of the placeholder and intermediate nodes.
-    # So, we first canonicalize it.
-    new_graph = torch.fx.Graph()
-    env = {}
-
-    placeholder_counter = itertools.count(0)
-
-    def next_placeholder_name():
-        nonlocal placeholder_counter
-        return f"placeholder_{next(placeholder_counter)}"
-
-    node_counter = itertools.count(0)
-
-    def next_node_name():
-        nonlocal node_counter
-        return f"node_{next(node_counter)}"
-
-    for node in gmod.graph.nodes:
-        if node.op == "placeholder":
-            env[node] = new_graph.placeholder(next_placeholder_name())
-        else:
-            # Can't use node_copy because node.name will not be unique.
-            args = map_arg(node.args, lambda x: env[x])
-            kwargs = map_arg(node.kwargs, lambda x: env[x])
-            env[node] = new_graph.create_node(
-                node.op, node.target, args, kwargs, next_node_name(), node.type
-            )
-        env[node].meta = copy.copy(node.meta)
-
-    new_graph.lint()
-    new_gmod = torch.fx.GraphModule(root_gmod, new_graph)
-    return new_gmod
-
-
-@functools.lru_cache(None)
-def get_dummy_aot_autograd_config():
-    from torch._functorch._aot_autograd.schemas import AOTConfig
-
-    return AOTConfig(
-        fw_compiler=None,
-        bw_compiler=None,
-        inference_compiler=None,
-        partition_fn=None,
-        decompositions={},
-        num_params_buffers=0,
-        aot_id=0,
-        keep_inference_input_mutations=False,
-        dynamic_shapes=True,
-        aot_autograd_arg_pos_to_source=None,
-        is_export=False,
-        no_tangents=False,
-        enable_log=False,
-    )
-
-
-def hash_graph_and_inputs(tx, gmod, fake_inputs):
-    # Here, we use the existing autograd_cache_key infrastructure to hash the
-    # graph and fake inputs.
-
-    # TODO(anijain2305) - Consider reorganizing autograd_cache_key such that the
-    # namespaces seem more intuitive. It seems somewhat confusing that we are
-    # calling an API from aot_autograd here.
-    from torch._functorch._aot_autograd.autograd_cache import autograd_cache_key
-
-    # autograd_cache_key is sensitive to the name of the placeholder nodes.
-    # So, we first canonicalize it.
-    canonicalized_gmod = canonicalize(gmod, tx.output.nn_modules)
-    config = get_dummy_aot_autograd_config()
-
-    key, _ = autograd_cache_key(canonicalized_gmod, fake_inputs, config, {})
-    return key
-
-
 class BaseHOPVariable(WrapHigherOrderVariable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.supports_input_mutation = False
-        self.supports_aliasing = False
+    supports_input_mutation = False
+    supports_aliasing = False
 
     def python_type(self):
         return type(self.value)
@@ -3117,10 +3140,8 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.supports_input_mutation = False
-        self.supports_aliasing = False
+    supports_input_mutation = False
+    supports_aliasing = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
@@ -3130,13 +3151,13 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
 
-        fake_inputs = [
-            node.meta["example_value"]
-            for node in body_gmod.graph.nodes
-            if node.op == "placeholder"
-        ]
-
-        key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
+        if not isinstance(fn_vt, (UnspecializedNNModuleVariable, UserFunctionVariable)):
+            unimplemented_v2(
+                gb_type=f"Encountered non user function variable during invoke_subgraph HOP tracing : {fn_vt}",
+                context="",
+                explanation="invoke_subgraph does not support non user function variable",
+                hints=graph_break_hints.SUPPORTABLE,
+            )
 
         invoke_subgraph_cache = (
             tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
@@ -3144,15 +3165,30 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             )
         )
 
+        if isinstance(fn_vt, UserFunctionVariable):
+            fn_id = id(fn_vt.get_function())
+        else:
+            assert isinstance(fn_vt, UnspecializedNNModuleVariable)
+            fn_id = id(fn_vt.value.forward.__func__)
+        previously_installed_submodules = []
         if invoke_subgraph_cache:
-            if identifier := invoke_subgraph_cache.get_dynamo_identifier(key):
-                return identifier
+            previously_installed_submodules = (
+                invoke_subgraph_cache.get_dynamo_installed_submodules(fn_id)
+            )
+            current_mod = body_gmod
+            # NB - reverse is more likely to cause a hit sooner because first
+            # graph can have requires_grad=False for a few inputs
+            for submodule_name in reversed(previously_installed_submodules):
+                assert submodule_name in tx.output.nn_modules
+                previous_mod = tx.output.nn_modules[submodule_name]
+                if are_same_graph_modules(previous_mod, current_mod, tx.fake_mode):
+                    return submodule_name
 
         body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "invoke_subgraph"
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "subgraph"
         )
         if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_dynamo_identifier(key, body_name)
+            invoke_subgraph_cache.add_dynamo_installed_submodule(fn_id, body_name)
 
         return body_name
 
@@ -3185,7 +3221,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         p_args = (
             p_args[0],
             body_name,
-            p_args[1:],
+            *p_args[1:],
         )
         return _call_function_and_unflatten_output(
             tx,

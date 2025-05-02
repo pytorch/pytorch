@@ -987,6 +987,33 @@ class CPUReproTests(TestCase):
         # aten parallel.
         self.common(fn, (v,), atol=5e-1, rtol=5e-1)
 
+    def test_parallel_reduction_vectorization(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/151523
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3,
+                    out_channels=16,
+                    kernel_size=(1, 7),
+                    stride=(2, 1),
+                    padding=0,
+                )
+
+            def forward(self, x, weight):
+                x = self.conv(x)
+                x = F.hardshrink(x, lambd=0)
+                x = x.view(x.size(0), -1)
+                x = torch.mv(weight, x[0])
+                return x
+
+        mod = Model().eval()
+        x = torch.randn(2, 3, 127, 255)
+        weight = torch.randn(10, 254976)
+        # Use same criterion as test_inplace_squeeze_needed
+        # for parallel reduction.
+        self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+
     def test_cat_mul(self):
         # https://github.com/pytorch/pytorch/issues/93365
         def fn(p0, p1):
@@ -1042,6 +1069,23 @@ class CPUReproTests(TestCase):
 
         x = torch.randn(1, 3, 64, 64)
         self.common(Model(), (x,))
+
+    @config.patch("cpp.use_decompose_tanh", "1")
+    def test_tanh_atan2_use_decompose_tanh(self):
+        # https://github.com/pytorch/pytorch/issues/148241
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.shrink(x)
+                x = torch.atan2(x, x)
+                return x
+
+        x = torch.randn(1, 3, 64, 64)
+        with self.assertRaises(AssertionError):
+            self.common(Model(), (x,))
 
     def test_index_propagation_issue_102065(self):
         def fn(x):

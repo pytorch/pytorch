@@ -1,4 +1,4 @@
-add_loop_eager,compile_time_instruction_count,2944000000,0.015
+add_loop_eager,compile_time_instruction_count,2960000000,0.015
 
 
 
@@ -6,19 +6,19 @@ add_loop_eager_dynamic,compile_time_instruction_count,5633000000,0.025
 
 
 
-add_loop_inductor,compile_time_instruction_count,28810000000,0.015
+add_loop_inductor,compile_time_instruction_count,29160000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,42490000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,42960000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,25120000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,25505620920,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,963100000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,1005000000,0.015
 
 
 
@@ -26,7 +26,7 @@ basic_modules_ListOfLinears_inductor,compile_time_instruction_count,17990000000,
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,16130000000,0.015
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,16220000000,0.015
 
 
 
@@ -38,11 +38,11 @@ update_hint_regression,compile_time_instruction_count,1608000000,0.02
 
 
 
-float_args,compile_time_instruction_count,417400000,0.015
+float_args,compile_time_instruction_count,439200000,0.015
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,985300000,0.015
+sum_floordiv_regression,compile_time_instruction_count,998400000,0.015
 
 
 
@@ -54,11 +54,11 @@ symint_sum_loop,compile_time_instruction_count,4180000000,0.015
 
 
 
-aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2042000000,0.015
+aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2074000000,0.015
 
 
 
-aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5884000000,0.015
+aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5944000000,0.015
 
 
 
@@ -70,8 +70,8 @@ aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1856000000,0.015
 
 
 
-aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3751000000,0.015
+aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3795000000,0.015
 
 
 
-aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10200000000,0.015
+aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10280000000,0.015

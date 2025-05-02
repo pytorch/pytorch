@@ -1,5 +1,6 @@
-#include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #include <ATen/ceil_div.h>
@@ -8,256 +9,34 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 
+#include <sys/socket.h>
+#include <unistd.h>
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
-
-#include <sys/socket.h>
-#include <sys/syscall.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
 #define CUDART_SUPPORTS_MULTICAST
 #endif
 
-namespace {
-
-bool device_has_multicast_support(int device_idx) {
-  if (c10::utils::check_env("TORCH_SYMM_MEM_DISABLE_MULTICAST") == true) {
-    return false;
-  }
-  return c10d::cuda::deviceSupportsMulticast(device_idx);
-}
-
-bool allow_overlapping_devices() {
-  return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
-      true;
-}
-
-class IpcChannel {
- public:
-  IpcChannel() : socket_name_(get_socket_name(getpid())) {
-    TORCH_CHECK(
-        (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
-        "Failed to create socket: ",
-        c10::utils::str_error(errno));
-
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
-
-    TORCH_CHECK(
-        bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
-        "Failed to bind socket: ",
-        c10::utils::str_error(errno));
-  }
-
-  ~IpcChannel() {
-    close(socket_);
-    unlink(socket_name_.c_str());
-  }
-
-  void send_fd(int dst_pid, int fd) {
-    struct sockaddr_un addr = {.sun_family = AF_UNIX};
-    auto socket_name = get_socket_name(dst_pid);
-    std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
-
-    struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
-
-    char cbuf[CMSG_SPACE(sizeof(int))];
-    memset(cbuf, 0, sizeof(cbuf));
-
-    struct msghdr msg {
-      .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un),
-      .msg_iov = &io, .msg_iovlen = 1, .msg_control = cbuf,
-      .msg_controllen = sizeof(cbuf)
-    };
-
-    auto cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-
-    if (fd != -1) {
-      std::copy(
-          reinterpret_cast<const char*>(&fd),
-          reinterpret_cast<const char*>(&fd) + sizeof(fd),
-          reinterpret_cast<char*>(CMSG_DATA(cmsg)));
-    } else {
-      msg.msg_controllen = 0;
-    }
-
-    TORCH_CHECK(
-        sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", c10::utils::str_error(errno));
-  }
-
-  int recv_fd() {
-    char buf[2];
-    struct iovec io = {.iov_base = (void*)buf, .iov_len = sizeof(buf)};
-
-    char cbuf[CMSG_SPACE(sizeof(int))];
-    memset(cbuf, 0, sizeof(cbuf));
-
-    struct msghdr msg = {
-        .msg_iov = &io,
-        .msg_iovlen = 1,
-        .msg_control = cbuf,
-        .msg_controllen = sizeof(cbuf)};
-
-    TORCH_CHECK(
-        recvmsg(socket_, &msg, 0) > 0,
-        "Failed to receive fd: ",
-        c10::utils::str_error(errno));
-
-    if (msg.msg_controllen == 0) {
-      return -1;
-    }
-
-    auto cmsg = CMSG_FIRSTHDR(&msg);
-    TORCH_CHECK(cmsg != NULL);
-    TORCH_CHECK(cmsg->cmsg_len == CMSG_LEN(sizeof(int)));
-    TORCH_CHECK(
-        cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS);
-    return *reinterpret_cast<int*>(CMSG_DATA(cmsg));
-  }
-
-  std::vector<int> all_gather_fds(
-      int rank,
-      const std::vector<int>& pids,
-      int fd) {
-    size_t world_size = pids.size();
-    std::vector<int> fds(pids.size());
-    fds[rank] = fd;
-
-    int dst_rank = (rank + 1) % world_size;
-    for (size_t step = 1; step < world_size; ++step) {
-      int src_rank = (rank + world_size - step) % world_size;
-      send_fd(pids[dst_rank], fd);
-      fd = recv_fd();
-      fds[src_rank] = fd;
-    }
-    return fds;
-  }
-
-  int broadcast_fds(
-      int rank,
-      int src_rank,
-      const std::vector<int>& pids,
-      int fd) {
-    size_t world_size = pids.size();
-
-    if (rank == src_rank) {
-      for (int dst_rank = 0; dst_rank < (int)world_size; ++dst_rank) {
-        if (dst_rank == rank) {
-          continue;
-        }
-        send_fd(pids[dst_rank], fd);
-      }
-      return fd;
-    }
-    return recv_fd();
-  }
-
- private:
-  static std::string get_socket_name(int pid) {
-    const char* tmp_dir = "/tmp";
-    for (const char* env_var : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
-      if (const char* path = getenv(env_var)) {
-        tmp_dir = path;
-        break;
-      }
-    }
-    std::ostringstream oss;
-    oss << tmp_dir << "/symm_mem-" << pid;
-    return oss.str();
-  }
-
-  std::string socket_name_;
-  int socket_;
-};
-
-constexpr size_t signal_pad_size = 2048;
-const std::string store_comm_prefix = "CUDASymmetricMemory";
-
-static size_t store_comm_seq_id = 0;
-
-template <typename T>
-std::vector<T> store_all_gather(
-    const c10::intrusive_ptr<c10d::Store>& store,
-    int rank,
-    int world_size,
-    T val) {
-  static_assert(std::is_trivially_copyable_v<T>);
-
-  std::vector<std::string> peer_keys;
-  for (int r = 0; r < world_size; ++r) {
-    std::ostringstream oss;
-    oss << store_comm_prefix << "/" << store_comm_seq_id << "/" << r;
-    peer_keys.push_back(oss.str());
-  }
-  ++store_comm_seq_id;
-
-  {
-    std::vector<uint8_t> payload(
-        reinterpret_cast<uint8_t*>(&val),
-        reinterpret_cast<uint8_t*>(&val) + sizeof(T));
-    store->set(peer_keys[rank], payload);
-  }
-
-  std::vector<T> peer_vals;
-  for (int r = 0; r < world_size; ++r) {
-    if (r == rank) {
-      peer_vals.push_back(val);
-      continue;
-    }
-    store->wait({peer_keys[r]});
-    auto payload = store->get(peer_keys[r]);
-    TORCH_CHECK(payload.size() == sizeof(T));
-    T peer_val{};
-    std::memcpy(&peer_val, payload.data(), sizeof(T));
-    peer_vals.push_back(peer_val);
-  }
-  return peer_vals;
-}
-
-void store_barrier(
-    const c10::intrusive_ptr<c10d::Store>& store,
-    int rank,
-    int world_size) {
-  store_all_gather(store, rank, world_size, 0);
-}
-
-void map_block(
-    void** ptr,
-    c10d::symmetric_memory::HandleType handle,
-    size_t size,
-    int device_idx) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::cuda::DriverAPI::get();
-  auto dev_ptr = reinterpret_cast<CUdeviceptr*>(ptr);
-  C10_CUDA_DRIVER_CHECK(
-      driver_api->cuMemAddressReserve_(dev_ptr, size, 0ULL, 0, 0ULL));
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMemMap_(*dev_ptr, size, 0, handle, 0ULL));
-
-  CUmemAccessDesc desc;
-  desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  desc.location.id = static_cast<int>(device_idx);
-  desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
-}
-
-} // namespace
-
 namespace c10d {
 namespace symmetric_memory {
 
-AllocationRef::AllocationRef(void* ptr, HandleType handle, size_t block_size, int device_idx)
-    : ptr(ptr), handle(handle), block_size(block_size), device_idx(device_idx) {}
+/* Start of CUDASymmetricMemory implementation */
+
+// A set of exchange methods with prefix "CUDASymmetricMemory"
+static StoreExchange storeExchange = StoreExchange("CUDASymmetricMemory");
+
+AllocationRef::AllocationRef(
+    void* ptr,
+    HandleType handle,
+    size_t block_size,
+    int device_idx)
+    : ptr(ptr),
+      handle(handle),
+      block_size(block_size),
+      device_idx(device_idx) {}
 
 AllocationRef::~AllocationRef() {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -572,12 +351,12 @@ int CUDASymmetricMemory::get_world_size() {
 }
 
 Block::Block(
-  c10::intrusive_ptr<AllocationRef> alloc_ref,
-  int device_idx,
-  size_t block_size,
-  size_t buffer_size,
-  size_t signal_pad_offset,
-  const std::optional<std::string>& group_name)
+    c10::intrusive_ptr<AllocationRef> alloc_ref,
+    int device_idx,
+    size_t block_size,
+    size_t buffer_size,
+    size_t signal_pad_offset,
+    const std::optional<std::string>& group_name)
     : alloc_ref(std::move(alloc_ref)),
       device_idx(device_idx),
       block_size(block_size),
@@ -618,7 +397,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
   AT_CUDA_CHECK(cudaMemset(ptr, 0, block_size));
 
-  auto alloc_ref = c10::make_intrusive<AllocationRef>(ptr, handle, block_size, device_idx);
+  auto alloc_ref =
+      c10::make_intrusive<AllocationRef>(ptr, handle, block_size, device_idx);
   auto block = c10::make_intrusive<Block>(
       std::move(alloc_ref),
       device_idx,
@@ -727,6 +507,8 @@ static void init_multicast_for_block(
     mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
     mc_prop.size = block->block_size;
 
+    // create a multicast object, which acts as a handle that allows multiple
+    // devices or processes to access the same memory allocation coherently.
     auto err = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
     if (err != CUDA_SUCCESS) {
       const char* err_str;
@@ -744,6 +526,7 @@ static void init_multicast_for_block(
     }
 
     int mc_fd;
+    // using the CUDA Driver API to export a multicast object into a POSIX file descriptor.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
         &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
     ipc_channel.broadcast_fds(rank, 0, pids, mc_fd);
@@ -754,6 +537,7 @@ static void init_multicast_for_block(
     if (mc_fd == -1) {
       return;
     }
+    // Convert back to a handle from the broadcasted POSIX file descriptor.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &mc_handle,
         (void*)(uintptr_t)mc_fd,
@@ -768,7 +552,7 @@ static void init_multicast_for_block(
       mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0));
 
   map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
-  store_barrier(store, rank, world_size);
+  storeExchange.barrier(store, rank, world_size);
 #endif
 }
 
@@ -805,6 +589,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   c10::cuda::CUDAGuard guard(block->device_idx);
 
+  // Currently, IpcChannel is using a file based socket for inter-process communication
   IpcChannel ipc_channel;
   auto group_info = get_group_info(group_name_);
   auto store = group_info.store;
@@ -813,6 +598,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   auto driver_api = c10::cuda::DriverAPI::get();
   int block_fd;
+  // using the CUDA Driver API to export a GPU memory block as a
+  // POSIX file descriptor (FD), so it can be shared across processes via IPC.
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
       &block_fd,
       block->alloc_ref->handle,
@@ -826,7 +613,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       .buffer_size = block->buffer_size,
       .signal_pad_offset = block->signal_pad_offset,
       .has_multicast_support = device_has_multicast_support(block->device_idx)};
-  auto reqs = store_all_gather(store, rank, world_size, local_req);
+  auto reqs = storeExchange.all_gather(store, rank, world_size, local_req);
   validate_rendezvous_requests(reqs, world_size);
 
   std::vector<int> pids(world_size);
@@ -846,6 +633,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       signal_pads[r] = (void*)((uintptr_t)ptr + block->signal_pad_offset);
       continue;
     }
+    // This api imports a GPU memory allocation that was previously exported as a file
+    // descriptor and it returns a memory handle.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &handles[r],
         (void*)(uintptr_t)imported_fds[r],
@@ -854,7 +643,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     signal_pads[r] = (void*)((uintptr_t)buffers[r] + block->signal_pad_offset);
     close(imported_fds[r]);
   }
-  store_barrier(store, rank, world_size);
+  storeExchange.barrier(store, rank, world_size);
   close(block_fd);
 
   HandleType mc_handle{};
@@ -908,9 +697,13 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
 
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
-    register_allocator(
-        c10::DeviceType::CUDA,
-        c10::make_intrusive<CUDASymmetricMemoryAllocator>());
+    // Query backend used for CUDA tensor
+    // "CUDA" backend stands for this implementation
+    if (getSymmMemBackendCUDA() == "CUDA") {
+      register_allocator(
+          c10::DeviceType::CUDA,
+          c10::make_intrusive<CUDASymmetricMemoryAllocator>());
+    }
   }
 };
 
