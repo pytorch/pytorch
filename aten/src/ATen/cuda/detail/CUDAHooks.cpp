@@ -18,7 +18,10 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#endif
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -95,6 +98,7 @@ void CUDAHooks::init() const {
   // CUDA_MODULE_LOADING="LAZY" is default for all drivers released for CUDA 12.2+.
   // Check the driver version and only set the env variable if needed.
   bool set_lazy_module_loading = true;
+  #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   // Initialize NVML
   if (driver_api->nvmlInit_v2_() == NVML_SUCCESS) {
@@ -104,11 +108,11 @@ void CUDAHooks::init() const {
     if (res == NVML_SUCCESS) {
       // Check if driver is sufficiently new
       if (version >= 12020) {
-       LOG(WARNING) << "disabling set_env";
         set_lazy_module_loading = false;
       }
     }
   }
+  #endif
   if (set_lazy_module_loading) {
     c10::utils::set_env("CUDA_MODULE_LOADING", "LAZY", false);
   }
