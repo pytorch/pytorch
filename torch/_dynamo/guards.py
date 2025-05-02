@@ -2534,6 +2534,10 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_functorch_interpreter(cls, json: bytes):
         return torch._C._functorch.CInterpreter.deserialize(json)
 
+    @classmethod
+    def _unpickle_mapping_proxy(cls, d):
+        return types.MappingProxyType(d)
+
     def reducer_override(self, obj):
         import sympy
 
@@ -2570,6 +2574,9 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, torch.SymInt):
             raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+
+        elif isinstance(obj, types.MappingProxyType):
+            return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise RuntimeError(
