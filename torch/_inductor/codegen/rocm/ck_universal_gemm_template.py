@@ -17,7 +17,7 @@ from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 
-from ...utils import IndentedBuffer, try_import_ck_lib, is_dynamic
+from ...utils import IndentedBuffer, is_dynamic, try_import_ck_lib
 
 
 _, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
