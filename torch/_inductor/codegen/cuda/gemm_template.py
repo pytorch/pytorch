@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import enum
+import functools
 import logging
 import re
 import time
@@ -24,7 +25,7 @@ from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
-from .cutlass_presets import PRESETS
+from .cutlass_presets import gen_cutlass_presets
 
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ GEMM_TEMPLATE_CUTLASS_3X = r"""
 extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
-  int B = {{kernel.size(Y, 0, -3, default_value=1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -110,13 +110,13 @@ GEMM_ARGS_CUTLASS_3X = r"""
       {
         {{template.cute_int(kernel.stride(X, -2), "stride_x0")}},
         {{template.cute_int(kernel.stride(X, -1), "stride_x1")}},
-        {{template.cute_int(kernel.stride(X, -3), "batch_stride_x")}}
+        {{template.cute_int(kernel.batch_stride(X), "batch_stride_x")}}
       },  // StrideA dA
       {{template.cutlass_type_cast(W, kernel.ptr(W))}},  // ElementB const* ptr_B
       {
         {{template.cute_int(kernel.stride(W, -1), "stride_w1")}},
         {{template.cute_int(kernel.stride(W, -2), "stride_w0")}},
-        {{template.cute_int(kernel.stride(W, -3), "batch_stride_w")}}
+        {{template.cute_int(kernel.batch_stride(W), "batch_stride_w")}}
       },  // StrideB dB
     },  // MainloopArguments mainloop
     {{epilogue_arguments}},
@@ -135,13 +135,13 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
       {
         {{template.cute_int(kernel.stride(Bias, -2, 1), "stride_bias0")}},
         {{template.cute_int(kernel.stride(Bias, -1, 1), "stride_bias1")}},
-        {{template.cute_int(kernel.stride(Bias, -3), "batch_stride_bias")}}
+        {{template.cute_int(kernel.batch_stride(Bias), "batch_stride_bias")}}
       },  // StrideC dC
       {{template.cutlass_type_cast(Y, kernel.ptr(Y))}},  // ElementD const* ptr_D
       {
         {{template.cute_int(kernel.stride(Y, -2), "stride_y0")}},
         {{template.cute_int(kernel.stride(Y, -1), "stride_y1")}},
-        {{template.cute_int(kernel.stride(Y, -3), "batch_stride_y")}}
+        {{template.cute_int(kernel.batch_stride(Y), "batch_stride_y")}}
       },  // StrideD dD
     },  // EpilogueArguments epilogue
 """
@@ -331,10 +331,11 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     int M = {{kernel.get_layout_args()[0]}};
     int N = {{kernel.get_layout_args()[1]}};
     int K = {{kernel.get_layout_args()[2]}};
-    int lda = {{kernel.get_layout_args()[3]}};
-    int ldb = {{kernel.get_layout_args()[4]}};
-    int ldc = {{kernel.get_layout_args()[5]}};
-    int ldd = {{kernel.get_layout_args()[6]}};
+    int B = {{kernel.get_layout_args()[3]}};
+    int lda = {{kernel.get_layout_args()[4]}};
+    int ldb = {{kernel.get_layout_args()[5]}};
+    int ldc = {{kernel.get_layout_args()[6]}};
+    int ldd = {{kernel.get_layout_args()[7]}};
     uint8_t swizzle = {{kernel.runtime_arg_values[0]}};
 
     using ElementA = {{kernel.cutlass_dtype(X)}};
@@ -621,6 +622,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return cutlass_lib.LayoutType.RowMajor
 
     @staticmethod
+    @functools.lru_cache(32)
     def layout_match(
         torch_layout: ir.Layout,
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined] # noqa: F821
@@ -865,11 +867,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             if inductor_cuda_config.cutlass_op_allowlist_regex:
                 patterns.append(inductor_cuda_config.cutlass_op_allowlist_regex)
             if inductor_cuda_config.cutlass_presets:
+                presets = gen_cutlass_presets()
                 preset_nums = [
                     int(x) for x in inductor_cuda_config.cutlass_presets.split(",")
                 ]
                 for preset_num in preset_nums:
-                    preset = PRESETS.get(preset_num, {}).get(
+                    preset = presets.get(preset_num, {}).get(
                         inductor_cuda_config.cutlass_instantiation_level, []
                     )
 
@@ -910,16 +913,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 for op in op_list:
                     assert isinstance(op, cutlass_gemm_op.GemmOperation)
                     filter_res = self.filter_op(op)
-                    if (
-                        filter_res is not None
-                        and filter_res.configuration_name() != op.configuration_name()
-                    ):
-                        log.debug(
-                            "Detected change in configuration name. Original "
-                            "name: %s, filtered configuration name: %s",
-                            op.configuration_name(),
-                            filter_res.configuration_name(),
-                        )
                     if (
                         filter_res is not None
                         and res.get(filter_res.configuration_name(), None) is None
@@ -1091,7 +1084,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
@@ -1123,6 +1116,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
+    @functools.lru_cache(1)
     def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
@@ -1199,7 +1193,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         if len(layouts) == 3:
             C_layout = layouts[2]
-            C_size = [int(i) for i in C_layout.size]
+            C_size = [V.graph.sizevars.size_hint(i) for i in C_layout.size]
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims

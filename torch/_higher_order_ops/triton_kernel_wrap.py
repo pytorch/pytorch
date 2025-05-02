@@ -25,6 +25,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.types import IntLikeType
 
 
 if TYPE_CHECKING:
@@ -71,9 +72,9 @@ log = logging.getLogger("torch._dynamo")
 TMADescriptorMetadata = dict[
     str,  # kernel parameter name
     tuple[
-        list[Union[int, SymInt]],  # dims
-        list[Union[int, SymInt]],  # block_dims
-        Union[int, SymInt],  # element_size
+        list[IntLikeType],  # dims
+        list[IntLikeType],  # block_dims
+        IntLikeType,  # element_size
     ],
 ]
 

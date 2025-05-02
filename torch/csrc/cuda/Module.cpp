@@ -264,7 +264,7 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 
 PyObject* THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = at::cuda::getCachingHostAllocator();
+  c10::Allocator* allocator = at::getHostAllocator(at::kCUDA);
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }
@@ -553,7 +553,7 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
 PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    at::cuda::CachingHostAllocator_emptyCache();
+    at::getHostAllocator(at::kCUDA)->empty_cache();
   }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
@@ -677,7 +677,7 @@ PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
     return dict;
   };
 
-  const HostStats stats = at::cuda::CachingHostAllocator_getStats();
+  const HostStats stats = at::getHostAllocator(at::kCUDA)->get_stats();
 
   py::dict result;
   result["num_host_alloc"] = stats.num_host_alloc;
@@ -697,7 +697,7 @@ PyObject* THCPModule_resetAccumulatedHostMemoryStats(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  at::cuda::CachingHostAllocator_resetAccumulatedStats();
+  at::getHostAllocator(at::kCUDA)->reset_accumulated_stats();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -706,7 +706,7 @@ PyObject* THCPModule_resetPeakHostMemoryStats(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  at::cuda::CachingHostAllocator_resetPeakStats();
+  at::getHostAllocator(at::kCUDA)->reset_peak_stats();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -1034,8 +1034,6 @@ std::string uuid_to_string(const char* uuid_bytes) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
-  // until internal build is using a rocm version with uuid attr
-#ifndef FBCODE_CAFFE2
   // CUuuid is defined in either cuda.h or driver_types.h
   // hipified to hipUUID which is defined in hip_runtime_api.h
   py::class_<CUuuid>(m, "_CUuuid")
@@ -1047,7 +1045,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def("__str__", [](const CUuuid& uuid) {
         return uuid_to_string(uuid.bytes);
       });
-#endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
@@ -1085,9 +1082,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::name
 #endif // USE_ROCM
           )
-#ifndef FBCODE_CAFFE2
       .def_readonly("uuid", &cudaDeviceProp::uuid)
-#endif
+      .def_readonly("pci_bus_id", &cudaDeviceProp::pciBusID)
+      .def_readonly("pci_device_id", &cudaDeviceProp::pciDeviceID)
+      .def_readonly("pci_domain_id", &cudaDeviceProp::pciDomainID)
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
@@ -1098,9 +1096,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-#ifndef FBCODE_CAFFE2
                << ", uuid=" << uuid_to_string(prop.uuid.bytes)
-#endif
+               << ", pci_bus_id=" << prop.pciBusID
+               << ", pci_device_id=" << prop.pciDeviceID
+               << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
         return stream.str();
@@ -1390,7 +1389,19 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
+      "_cuda_beginAllocateCurrentThreadToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        auto tid = std::this_thread::get_id();
+
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [=](cudaStream_t) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
+      });
+
+  m.def(
+      "_cuda_endAllocateToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
       });
@@ -2170,7 +2181,6 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
-void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
