@@ -11,10 +11,10 @@ RUN apt-get -y update && \
     python3-pip \
     python3-dev \
     python3-venv \
-    libopenblas-dev \
+    libopenblas-dev
 
 # Tools needed for llvm
-    apt-get install -y \
+RUN apt-get install -y \
     lsb-release \
     wget \
     software-properties-common \
