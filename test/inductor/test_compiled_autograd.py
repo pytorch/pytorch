@@ -4154,7 +4154,7 @@ def wrap_test_class(orig_cls):
             fullgraph = name not in known_graph_breaks_tests
             ctxs = [
                 compiled_autograd._enable(make_compiler_fn(fullgraph=fullgraph)),
-                test_contexts.get(name, contextlib.nullcontext()),
+                test_specific_contexts.get(name, contextlib.nullcontext()),
             ]
             dct[name] = make_wrapped(fn, ctxs)
 
@@ -4240,7 +4240,7 @@ known_graph_breaks_tests = {
     "test_backward_to_node",  # retains_grad_hooks
 }
 
-test_contexts = {
+test_specific_contexts = {
     "test_setitem_mask": config.patch(capture_dynamic_output_shape_ops=True),
     "test_index_backward_does_not_save_tensor": config.patch(
         capture_dynamic_output_shape_ops=True
