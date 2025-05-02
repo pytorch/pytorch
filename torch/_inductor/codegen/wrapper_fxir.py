@@ -69,6 +69,9 @@ class SymbolBuffer(CodegenSymbol):
     def get_name(self) -> str:
         return str(self.symbol)
 
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        return self.symbol
+
 
 CodegenBuffer = Union[BufferLike, SymbolBuffer]
 
@@ -187,16 +190,7 @@ class FxConverter:
         name = buffer.get_name()
         assert name
         node.name = name
-        node.meta["val"] = (
-            convert_to_symint(buffer.symbol)
-            if isinstance(buffer, SymbolBuffer)
-            else self._fake_tensor(
-                tuple(buffer.get_size()),
-                tuple(buffer.get_stride()),
-                dtype=buffer.get_dtype(),
-                device=buffer.get_device(),
-            )
-        )
+        node.meta["val"] = buffer.get_example()
 
     def _record_allocation(self, buffer: CodegenBuffer, node: torch.fx.Node) -> None:
         """
@@ -417,12 +411,7 @@ class FxConverter:
             torch.as_strided, args=(input_node, size, stride, offset)
         )
         result_node.name = name
-        result_node.meta["val"] = self._fake_tensor(
-            size,
-            stride,
-            dtype=layout.dtype,
-            device=layout.device,
-        )
+        result_node.meta["val"] = layout.get_example()
         self._record_allocation(result_buffer, result_node)
 
     def _generate_reuse(self, line: WrapperLine) -> None:

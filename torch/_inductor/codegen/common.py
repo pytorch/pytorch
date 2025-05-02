@@ -150,6 +150,10 @@ class CodegenSymbol(ABC):
     def get_name(self) -> str:
         pass
 
+    @abstractmethod
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        pass
+
 
 @ir_dataclass(frozen=True)
 class WorkspaceArg(CodegenSymbol):
@@ -214,6 +218,9 @@ class WorkspaceArg(CodegenSymbol):
 
     def get_dtype(self) -> torch.dtype:
         return self.dtype
+
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        return self.get_layout().get_example()
 
     def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
