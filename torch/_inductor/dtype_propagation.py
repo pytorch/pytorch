@@ -181,7 +181,7 @@ class DtypePropagationOpsHandler:
         ):
             return upcast_compute_type(dtype)
 
-        return torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
+        return V.kernel.get_index_dtype_as_torch_dtype()
 
     @staticmethod
     def to_dtype(
@@ -355,10 +355,6 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def lshift(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        return promote_types([x])
-
-    @staticmethod
-    def libdevice_abs(x: DTypeArg) -> torch.dtype:
         return promote_types([x])
 
     @staticmethod
