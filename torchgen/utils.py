@@ -177,10 +177,12 @@ class FileManager:
         template_fn: str | Path,
         env_callable: Callable[[], str | dict[str, Any]],
     ) -> None:
+        filename = Path(filename)
+        assert not filename.is_absolute(), f"filename must be relative: {filename}"
         file = self.install_dir / filename
         assert file not in self.files, "duplicate file write {file}"
         self.files.add(file)
-        self.filenames.add(filename)
+        self.filenames.add(filename.as_posix())
         if not self.dry_run:
             substitute_out = self.substitute_with_template(
                 template_fn=template_fn,
@@ -230,6 +232,7 @@ class FileManager:
         sharded_keys: set[str],
     ) -> None:
         file = Path(filename)
+        assert not file.is_absolute(), f"filename must be relative: {filename}"
         everything: dict[str, Any] = {"shard_id": "Everything"}
         shards: list[dict[str, Any]] = [
             {"shard_id": f"_{i}"} for i in range(num_shards)
