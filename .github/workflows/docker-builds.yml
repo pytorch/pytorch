@@ -117,7 +117,7 @@ jobs:
         run: |
           # This can be deleted after people have rebased their PRs/the new name has been in main for a while
           set -euox pipefail
-          docker_image_name="docker.io/pytorch/${{ matrix.docker-image-name }}"
+          docker_image_name="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}"
           foldersha=${ECR_DOCKER_IMAGE##*-}
           docker tag "${ECR_DOCKER_IMAGE}" "${docker_image_name}:${foldersha}"
           docker push "${docker_image_name}:${foldersha}"
