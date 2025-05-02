@@ -1389,7 +1389,19 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
+      "_cuda_beginAllocateCurrentThreadToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        auto tid = std::this_thread::get_id();
+
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [=](cudaStream_t) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
+      });
+
+  m.def(
+      "_cuda_endAllocateToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
       });
