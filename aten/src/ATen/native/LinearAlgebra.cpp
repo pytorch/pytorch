@@ -23,6 +23,7 @@
 #include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <variant>
 
@@ -1366,8 +1367,8 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
       //it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 : 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
-    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
+    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    return value.has_value() ? std::stoi(value.value()) : default_min_dim;
   }();
   return value;
 }
@@ -1380,8 +1381,8 @@ static inline int64_t get_mkldnn_matmul_min_size() {
       // it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 * 1024 : 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
-    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
+    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    return value.has_value() ? std::stoi(value.value()) : default_min_size;
   }();
   return value;
 }
