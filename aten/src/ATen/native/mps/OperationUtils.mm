@@ -387,7 +387,8 @@ void printTensorNDArray(const TensorBase& t) {
   auto selfDType = getMPSDataType(t.scalar_type());
 
   // Initialize data
-  id<MTLBuffer> selfBuf = getMTLBufferStorage(t);
+  id<MTLBuffer> selfBuf = ConstMTLTensor(t).mtl_buffer_unsafe();
+  // id<MTLBuffer> selfBuf = getMTLBufferStorage(t);
   MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf shape:selfShape
                                                                     dataType:selfDType] autorelease];
   C10_CLANG_DIAGNOSTIC_PUSH()

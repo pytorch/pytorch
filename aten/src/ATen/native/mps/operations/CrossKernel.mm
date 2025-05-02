@@ -21,8 +21,8 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
 
   auto iter = TensorIteratorConfig()
                   .add_output(out)
-                  .add_input(input)
-                  .add_input(other)
+                  .add_const_input(input)
+                  .add_const_input(other)
                   .resize_outputs(false)
                   .declare_static_shape(out.sizes(), /*squash_dims=*/dim)
                   .build();

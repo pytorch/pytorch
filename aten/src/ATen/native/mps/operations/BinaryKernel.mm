@@ -45,7 +45,7 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   auto common_dtype = output.scalar_type();
   auto input_cast = input.to(kMPS, common_dtype);
   auto other_cast = other.to(kMPS, common_dtype);
-  auto iter = TensorIteratorConfig().add_output(output).add_input(input_cast).add_input(other_cast).build();
+  auto iter = TensorIteratorConfig().add_output(output).add_const_input(input_cast).add_const_input(other_cast).build();
 
   lib.exec_binary_kernel(iter, "complex_mul");
 }
@@ -64,8 +64,12 @@ void binary_op_kernel(const std::string func_name,
     return;
   }
 
-  auto iter =
-      TensorIteratorConfig().add_output(output).add_input(input).add_input(other).check_all_same_dtype(false).build();
+  auto iter = TensorIteratorConfig()
+                  .add_output(output)
+                  .add_const_input(input)
+                  .add_const_input(other)
+                  .check_all_same_dtype(false)
+                  .build();
 
   lib.exec_binary_kernel(iter, func_name, alpha);
 }

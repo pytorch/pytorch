@@ -208,6 +208,37 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(b))
         self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
 
+    def test_clone_after_lazy_clone(self, device):
+        a = torch.randn(10, device=device)
+        orig_data_ptr = torch._C._data_address_resolve_unified(a)
+        b = torch._lazy_clone(a)
+
+        self.assertTrue(torch._C._is_cow_tensor(a))
+        self.assertTrue(torch._C._is_cow_tensor(b))
+        self.assertEqual(torch._C._data_address_resolve_unified(a), orig_data_ptr)
+        self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
+
+        c = b.clone()
+
+        self.assertTrue(torch._C._is_cow_tensor(a))
+        self.assertTrue(torch._C._is_cow_tensor(b))
+        self.assertFalse(torch._C._is_cow_tensor(c))
+        self.assertEqual(torch._C._data_address_resolve_unified(a), orig_data_ptr)
+        self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
+
+        self.assertEqual(b.clone(), c)
+        self.assertEqual(a.clone(), c)
+
+        self.assertTrue(torch._C._is_cow_tensor(a))
+        self.assertTrue(torch._C._is_cow_tensor(b))
+        self.assertFalse(torch._C._is_cow_tensor(c))
+        self.assertEqual(torch._C._data_address_resolve_unified(a), orig_data_ptr)
+        self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
+
+        self.assertEqual(a, b)
+        self.assertEqual(a, c)
+        self.assertEqual(b, c)
+
 
 instantiate_device_type_tests(TestLazyCloneDeviceType, globals(), allow_mps=True)
 

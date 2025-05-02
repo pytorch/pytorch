@@ -108,8 +108,48 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
+  // return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().mutable_data());
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
+
+// Marks a tensor argument as const so that COW materialization is not triggered
+// when the `id<MTLBuffer>` is obtained. Unfortunately, there is no way to mark
+// the data that an `id<MTLBuffer>` points to as const, so this should only be
+// used on tensor arguments that we know will not be written to.
+class ConstMTLTensor {
+ public:
+  ConstMTLTensor(const TensorBase& tensor) : _tensor(tensor) {}
+
+  // WARNING: Do not write to the buffer returned by this function.
+  id<MTLBuffer> mtl_buffer_unsafe() const {
+    return __builtin_bit_cast(id<MTLBuffer>, _tensor.storage().data());
+  }
+
+  const TensorBase& tensor() const {
+    return _tensor;
+  }
+
+ private:
+  const TensorBase& _tensor;
+};
+
+// Marks a tensor argument as mutable so that COW materialization is triggered
+// when the `id<MTLBuffer>` is obtained.
+class MutableMTLTensor {
+ public:
+  MutableMTLTensor(const TensorBase& tensor) : _tensor(tensor) {}
+
+  id<MTLBuffer> mtl_buffer() const {
+    return __builtin_bit_cast(id<MTLBuffer>, _tensor.storage().mutable_data());
+  }
+
+  const TensorBase& tensor() const {
+    return _tensor;
+  }
+
+ private:
+  const TensorBase& _tensor;
+};
 
 class Placeholder {
  public:
@@ -352,6 +392,8 @@ template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
                                       std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
 static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
+  // TODO: Maybe should add a static assert here saying that all tensor args
+  // should be wrapped in either `ConstMTLTensor` or `MutableMTLTensor`.
   if (C10_UNLIKELY(t.device().type() == kCPU)) {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
       TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
@@ -362,6 +404,40 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
     return;
   }
   [encoder setBuffer:getMTLBufferStorage(t) offset:t.storage_offset() * t.element_size() atIndex:idx];
+}
+
+template <typename encoder_t,
+          typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
+                                      std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
+static inline void mtl_setBuffer(encoder_t encoder, ConstMTLTensor b, unsigned idx) {
+  const TensorBase& t = b.tensor();
+  if (C10_UNLIKELY(t.device().type() == kCPU)) {
+    if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
+      TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
+      [encoder setBytes:b.mtl_buffer_unsafe() length:t.element_size() atIndex:idx];
+    } else {
+      TORCH_CHECK(false, "Passed CPU tensor to MPS op");
+    }
+    return;
+  }
+  [encoder setBuffer:b.mtl_buffer_unsafe() offset:t.storage_offset() * t.element_size() atIndex:idx];
+}
+
+template <typename encoder_t,
+          typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||
+                                      std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
+static inline void mtl_setBuffer(encoder_t encoder, MutableMTLTensor b, unsigned idx) {
+  const TensorBase& t = b.tensor();
+  if (C10_UNLIKELY(t.device().type() == kCPU)) {
+    if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
+      TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
+      [encoder setBytes:b.mtl_buffer() length:t.element_size() atIndex:idx];
+    } else {
+      TORCH_CHECK(false, "Passed CPU tensor to MPS op");
+    }
+    return;
+  }
+  [encoder setBuffer:b.mtl_buffer() offset:t.storage_offset() * t.element_size() atIndex:idx];
 }
 
 // Implementation of setBytes for containers vs trivially copiable types must be separate
@@ -395,8 +471,18 @@ inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, id<MTLBuffer> val, 
   [encoder setBuffer:val offset:0 atIndex:idx];
 }
 
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, ConstMTLTensor val, unsigned idx) {
+  mtl_setBuffer(encoder, val, idx);
+}
+
+inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, MutableMTLTensor val, unsigned idx) {
+  mtl_setBuffer(encoder, val, idx);
+}
+
 template <>
 inline void mtl_setArg(id<MTLComputeCommandEncoder> encoder, const Tensor& val, unsigned idx) {
+  // TODO: Probably should add a static assert here saying that all tensor args
+  // should be wrapped in either `ConstMTLTensor` or `MutableMTLTensor`.
   mtl_setBuffer(encoder, val, idx);
 }
 
