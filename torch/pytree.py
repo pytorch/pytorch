@@ -19,14 +19,14 @@ from __future__ import annotations
 from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING
 
 from torch.utils.pytree import (
-    is_namedtuple as is_namedtuple,
-    is_namedtuple_class as is_namedtuple_class,
-    is_namedtuple_instance as is_namedtuple_instance,
-    is_structseq as is_structseq,
-    is_structseq_class as is_structseq_class,
-    is_structseq_instance as is_structseq_instance,
-    PyTree as PyTree,
-    PyTreeSpec as PyTreeSpec,
+    is_namedtuple,
+    is_namedtuple_class,
+    is_namedtuple_instance,
+    is_structseq,
+    is_structseq_class,
+    is_structseq_instance,
+    PyTree,
+    PyTreeSpec,
     register_pytree_node as register_node,
     tree_all as all,
     tree_all_only as all_only,
