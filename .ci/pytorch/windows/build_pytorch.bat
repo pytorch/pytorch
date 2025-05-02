@@ -40,7 +40,7 @@ pushd %SRC_DIR%
 set "ORIG_PATH=%PATH%"
 
 
-:: create a new environment and install packages
+:: setup build environment
 :try
 SET /A tries=3
 :loop
@@ -49,7 +49,7 @@ call setup_build.bat
 IF %ERRORLEVEL% EQU 0 GOTO :done
 SET /A "tries=%tries%-1"
 :exception
-echo "Failed to setup build"
+echo "Failed to setup build environment"
 exit /B 1
 :done
 
@@ -99,16 +99,15 @@ set TH_BINARY_BUILD=1
 set INSTALL_TEST=0
 
 for %%v in (%DESIRED_PYTHON_PREFIX%) do (
-    :: Activate Python Environment
-    set PYTHON_PREFIX=%%v
 
+    :: Set Environment vars for the build
     set "CMAKE_PREFIX_PATH=%CD%\Python\Library\;%PATH%"
     set "PYTHON_LIB_PATH=%CD%\Python\Library\bin"
+
     if not "%ADDITIONAL_PATH%" == "" (
-        set "PATH=%ADDITIONAL_PATH%;%CONDA_HOME%\envs\%%v;%CONDA_HOME%\envs\%%v\scripts;%CONDA_HOME%\envs\%%v\Library\bin;%ORIG_PATH%"
-    ) else (
-        set "PATH=%CONDA_HOME%\envs\%%v;%CONDA_HOME%\envs\%%v\scripts;%CONDA_HOME%\envs\%%v\Library\bin;%ORIG_PATH%"
+        set "PATH=%ADDITIONAL_PATH%;%ORIG_PATH%"
     )
+
     pip install ninja
     @setlocal
     :: Set Flags

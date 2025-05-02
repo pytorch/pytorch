@@ -23,4 +23,4 @@ if errorlevel 1 exit /b 1
 start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
 if errorlevel 1 exit /b 1
 
-set "PATH=%CD%\Python%DESIRED_PYTHON%\Scripts;%CD%\Python%DESIRED_PYTHON%;%PATH%"
+set "PATH=%CD%\Python\Scripts;%CD%\Python;%PATH%"
