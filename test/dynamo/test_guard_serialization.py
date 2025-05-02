@@ -619,7 +619,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "NN_MODULE guard cannot be serialized."
             ):
-                ref, loaded = self._test_serialization("NN_MODULE", fn, m, x)
+                self._test_serialization("NN_MODULE", fn, m, x)
 
     def test_dict_version(self):
         def fn(x):
