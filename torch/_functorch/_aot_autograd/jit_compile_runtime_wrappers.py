@@ -707,7 +707,7 @@ def run_joint_graph_passes_on_hops(
                 args=(
                     new_fw_mod_attr,
                     new_fw_mod_attr_name,
-                    fw_node.args[2],
+                    *fw_node.args[2:],
                 ),
             )
             propagate_meta_info(new_fw_hop_gm, new_fw_node, fw_node)
@@ -744,7 +744,7 @@ def run_joint_graph_passes_on_hops(
 
         num_primals = new_hop_graphs[identifier].old_num_fw_inputs
         assert num_primals is not None
-        tangents = list(bw_node.args[2][num_primals:])
+        tangents = list(bw_node.args[2 + num_primals :])
         operands = sym_nodes + saved_tensor_nodes + tangents
 
         # Insert the new_bw_hop_gm into the joint_gm
@@ -758,7 +758,7 @@ def run_joint_graph_passes_on_hops(
                 args=(
                     new_bw_mod_attr,
                     new_bw_mod_attr_name,
-                    tuple(operands),
+                    *operands,
                 ),
             )
             propagate_meta_info(new_bw_hop_gm, new_bw_node, bw_node)
