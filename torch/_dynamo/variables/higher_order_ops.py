@@ -3185,7 +3185,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     return submodule_name
 
         body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "invoke_subgraph"
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "subgraph"
         )
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_dynamo_installed_submodule(fn_id, body_name)
@@ -3221,7 +3221,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         p_args = (
             p_args[0],
             body_name,
-            p_args[1:],
+            *p_args[1:],
         )
         return _call_function_and_unflatten_output(
             tx,
