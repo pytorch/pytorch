@@ -117,10 +117,29 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   return input;
 }
 
+at::Tensor nvshmem_all_to_all(
+    at::Tensor& input,
+    at::Tensor& out,
+    std::string group_name) {
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  int rank = input_hdl->get_rank();
+  int world_size = input_hdl->get_world_size();
+  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
+
+  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
+  size_t bytes_per_rank = input_hdl->get_buffer_size() / world_size;
+
+  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+  nvshmemx_alltoallmem_on_stream(team, output_ptr, input_ptr, bytes_per_rank, stream);
+  return out;
+}
 
 } // namespace c10d::nvshmem_extension
 
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
 }

@@ -49,7 +49,6 @@ from .codegen.common import (
     WorkspaceArg,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
-from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -2179,7 +2178,7 @@ class AlgorithmSelectorCache(PersistentCache):
         def benchmark_choice_in_current_process(
             choice: ChoiceCaller, autotune_args: AutotuneArgs
         ) -> float:
-            is_extern = isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
+            is_extern = isinstance(choice, ExternKernelCaller)
             benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
             inpts, output = benchmark_tensors.unpack()
             output.zero_()
