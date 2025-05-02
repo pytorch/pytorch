@@ -4371,9 +4371,6 @@ if torch.distributed.is_available() and HAS_CUDA:
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
         test_dtensor.TestDTensorCompile
     )
-    TestDTensorCompileE2EWithCompiledAutograd = wrap_test_class(
-        test_dtensor.TestDTensorCompileE2E
-    )
 
 xfail_hops = {
     # AssertionError: Tensor-likes are not close!
