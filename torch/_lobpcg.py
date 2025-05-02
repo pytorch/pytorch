@@ -498,7 +498,7 @@ def lobpcg(
       [DuerschEtal2018] Jed A. Duersch, Meiyue Shao, Chao Yang, Ming
       Gu. (2018) A Robust and Efficient Implementation of LOBPCG.
       SIAM J. Sci. Comput., 40(5), C655-C676. (22 pages)
-      https://epubs.siam.org/doi/abs/10.1137/17M1129830
+      https://arxiv.org/abs/1704.07458
 
     """
 
@@ -795,9 +795,9 @@ class LOBPCG:
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert (
-            count >= prev_count
-        ), f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
+        assert count >= prev_count, (
+            f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
+        )
         self.ivars["converged_count"] = count
         self.tvars["rerr"] = rerr
         return count

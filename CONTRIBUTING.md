@@ -130,8 +130,8 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git submodule deinit -f .
       git clean -xdf
       python setup.py clean
-      git submodule update --init --recursive # very important to sync the submodules
-      python setup.py develop                 # then try running the command again
+      git submodule update --init --recursive
+      python setup.py develop
       ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
@@ -281,8 +281,6 @@ dependencies as well as the nightly binaries into the repo directory.
 * [caffe2](caffe2) - The Caffe2 library.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2.
-  * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
@@ -669,7 +667,7 @@ details.
 One downside to using `python setup.py develop` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
-used.
+used).
 
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
@@ -795,17 +793,15 @@ python setup.py develop
 
 #### Use a faster linker
 
-If you are editing a single file and rebuilding in a tight loop, the time spent
-linking will dominate. The system linker available in most Linux distributions
-(GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+If you are editing a single file and rebuilding in a tight loop, the time spent linking will dominate. The system linker available in most Linux distributions (GNU `ld`) is quite slow. To improve build times, consider using a faster linker such as [mold](https://github.com/rui314/mold) or [lld](https://lld.llvm.org/).
 
-People on Mac, follow [this guide](https://stackoverflow.com/questions/42730345/how-to-install-llvm-for-mac) instead.
+- **mold**: A modern, high-performance linker that significantly reduces linking time. It is typically available via package managers like `apt` or `yum`. Note that `mold` requires GCC version 12 or higher.
+- **lld**: A fast linker from the LLVM project. The easiest way to get `lld` is from a [LLVM release](https://releases.llvm.org/download.html).
 
-The easiest way to use `lld` this is download the
-[latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
+Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
-```bash
-ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
+```sh
+CMAKE_LINKER_TYPE=MOLD python setup.py develop
 ```
 
 #### Use pre-compiled headers

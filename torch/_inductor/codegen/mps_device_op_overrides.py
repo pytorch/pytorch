@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .common import DeviceOpOverrides, register_device_op_overrides
 
 
@@ -8,7 +10,7 @@ class MPSDeviceOpOverrides(DeviceOpOverrides):
 
     def set_device(self, device_idx: int) -> str:
         assert device_idx == 0
-        return "# MPS set device"
+        return "pass  # MPS set device"
 
 
 register_device_op_overrides("mps", MPSDeviceOpOverrides())

@@ -141,6 +141,8 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
 
     TuningStatus Call(const GemmParams<T>* params) override {
       auto input_output_type = RocBlasDataTypeFor<T>();
+      if (at::globalContext().allowTF32CuBLAS() && input_output_type == rocblas_datatype_f32_r)
+        return FAIL;  // no support for TF32 in rocBLAS
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
       auto h_b = DoCastForHalfOrBfloat16(params->beta);
@@ -192,9 +194,6 @@ auto GetRocBlasGemmTypeStringAndOps() {
                                                             rocblas_gemm_flags_none,
                                                             solutions.data(),
                                                             &solution_size));
-  // Sort the solutions in ascending order to make the solution vector deterministic across runs
-  std::sort(solutions.begin(), solutions.end());
-
   std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmParams<T>>>>> ret;
   for (size_t i = 0; i < solutions.size(); ++i) {
     auto callable = std::make_unique<RocblasGemmOp<T>>(solutions[i]);
@@ -210,6 +209,8 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
 
     TuningStatus Call(const GemmStridedBatchedParams<T>* params) override {
       auto input_output_type = RocBlasDataTypeFor<T>();
+      if (at::globalContext().allowTF32CuBLAS() && input_output_type == rocblas_datatype_f32_r)
+        return FAIL;  // no support for TF32 in rocBLAS
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
       auto h_b = DoCastForHalfOrBfloat16(params->beta);

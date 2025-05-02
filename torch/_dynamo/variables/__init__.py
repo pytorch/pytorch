@@ -1,3 +1,21 @@
+"""
+This package implements variable tracking and symbolic execution capabilities for Dynamo,
+which are essential for converting Python code into FX graphs. It provides a comprehensive
+set of variable types that handle different Python constructs during tracing.
+
+Each variable type (like BuiltinVariable, TensorVariable, NNModuleVariable, etc.) is responsible
+for tracking and symbolically executing operations on specific Python objects. This enables
+Dynamo to:
+- Track the flow of values through Python code
+- Maintain correct semantics during graph conversion
+- Handle complex Python features like context managers, iterators, and custom objects
+- Support both eager and symbolic execution modes
+
+The VariableTracker base class provides the foundation for all variable types, with each
+subclass implementing specific behavior for different Python constructs. This modular design
+allows Dynamo to accurately trace and optimize Python code while preserving its semantics.
+"""
+
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -8,6 +26,7 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
+    DynamoConfigPatchVariable,
     FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
@@ -18,6 +37,7 @@ from .ctx_manager import (
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
+    TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
@@ -26,6 +46,7 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    MappingProxyVariable,
     NNModuleHooksDictVariable,
     SetVariable,
 )
@@ -37,6 +58,8 @@ from .functions import (
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -62,12 +85,10 @@ from .iter import (
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
-    FxImmutableListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    RestrictedListSubclassVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -79,7 +100,6 @@ from .misc import (
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
-    InspectSignatureVariable,
     LambdaVariable,
     MethodWrapperVariable,
     NewGlobalVariable,
@@ -118,6 +138,9 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedExceptionClassVariable,
+    UserDefinedExceptionObjectVariable,
+    UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedTupleVariable,
 )
@@ -142,11 +165,11 @@ __all__ = [
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
     "DictKeySetVariable",
+    "DynamoConfigPatchVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
-    "InspectSignatureVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
@@ -168,12 +191,12 @@ __all__ = [
     "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
-    "RestrictedListSubclassVariable",
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
+    "TemporarilyPopInterpreterStackCtxManagerVariable",
     "TensorVariable",
     "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",
@@ -191,4 +214,5 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "MappingProxyVariable",
 ]

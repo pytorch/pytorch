@@ -99,7 +99,7 @@ jobs:
 
       - name: configure aws credentials
         if : ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-test
@@ -408,13 +408,24 @@ jobs:
           find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Store Core dumps on S3
-        uses: seemethere/upload-artifact-s3@v5
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         if: failure()
         with:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
           retention-days: 14
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
+
+      - name: Upload utilization stats
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
@@ -434,8 +445,6 @@ jobs:
       - name: Check NVIDIA driver installation step
         if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
         shell: bash
-        env:
-          RUNNER_WORKSPACE: ${{ runner.workspace }}
         run: |
           set +e
           set -x

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Union
 
 import torch
+import torch._library.utils as library_utils
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
@@ -194,17 +195,17 @@ def write_view_information_to_args(
 
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
         arg = kwargs[arg_name]
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             if arg is None:
                 kwargs[f"_{arg_name}_length"] = None
+            else:
+                kwargs[f"_{arg_name}_length"] = len(arg)
+                for i, elem in enumerate(arg):
+                    write_single_view(
+                        f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
+                    )
 
-            kwargs[f"_{arg_name}_length"] = len(arg)
-            for i, elem in enumerate(arg):
-                write_single_view(
-                    f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
-                )
-
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
@@ -257,7 +258,7 @@ def read_view_information_from_args(
 
     args_view_info: dict[str, Any] = {}
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             length = get_arg(f"_{arg_name}_length")
             if length is None:
                 # The whole list is None.
@@ -267,7 +268,7 @@ def read_view_information_from_args(
                     read_single_view(f"_{arg_name}_{i}") for i in range(length)
                 ]
 
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             args_view_info[arg_name] = read_single_view(f"_{arg_name}")
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -315,7 +316,7 @@ class AutoFunctionalized(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized")
+        super().__init__("auto_functionalized", cacheable=True)
 
     def __call__(
         self,
@@ -344,7 +345,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized_v2")
+        super().__init__("auto_functionalized_v2", cacheable=True)
 
     def __call__(
         self,
@@ -382,20 +383,10 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
             continue
         if not arg.alias_info.is_write:
             continue
-        if type(arg.type) is torch.TensorType:
+        if torch._library.utils.is_tensor_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.OptionalType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
+        if torch._library.utils.is_tensorlist_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.ListType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
-            continue
-        # Not yet supported: other Tensor types. This includes things like
-        # Tensor?[], Tensor[]?.
         return False
 
     if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
@@ -412,26 +403,33 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
-def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
+def get_mutable_args_from_schema(
+    schema: torch.FunctionSchema,
+) -> tuple[list[str], list[torch.Type]]:
     """
     Returns the list of argument names that get mutated according to the
     schema and their types.
     """
     mutable_args_names = [
         arg.name
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
 
     mutable_args_types = [
         arg.type
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
-    return mutable_args_names, mutable_args_types
+    return mutable_args_names, mutable_args_types  # type: ignore[return-value]
+
+
+def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
+    return get_mutable_args_from_schema(op._schema)
 
 
 def do_auto_functionalize(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
@@ -445,7 +443,7 @@ def do_auto_functionalize(
     """
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -521,13 +519,14 @@ def do_auto_functionalize(
 
 
 def do_auto_functionalize_v2(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -742,14 +741,33 @@ def auto_functionalized_v2_dense(
     _only_clone_these_bases: Optional[tuple[int, ...]] = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
-    all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
-    mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
+    _all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
+    if _only_clone_these_bases is None:
+        _only_clone_these_bases = tuple(range(len(_all_bases)))
+
+    schema = _mutable_op._schema
+    op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
+        schema,
+        kwargs,
+        _all_bases,
+        _only_clone_these_bases,
+    )
+
+    out = _mutable_op(**op_kwargs_new)
+
+    if isinstance(out, tuple):
+        return (*out, *all_bases_new)  # type: ignore[return-value]
+    else:
+        return (out, *all_bases_new)  # type: ignore[return-value]
+
+
+def _generate_new_op_kwargs_from_bases(
+    schema, kwargs, all_bases, _only_clone_these_bases
+):
+    mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
     )
-
-    if _only_clone_these_bases is None:
-        _only_clone_these_bases = tuple(range(len(all_bases)))
 
     def maybe_copy(i, t):
         if t is None:
@@ -783,12 +801,7 @@ def auto_functionalized_v2_dense(
                 all_bases_new
             )
 
-    out = _mutable_op(**new_kwargs)
-
-    if isinstance(out, tuple):
-        return (*out, *all_bases_new)  # type: ignore[return-value]
-    else:
-        return (out, *all_bases_new)  # type: ignore[return-value]
+    return new_kwargs, all_bases_new
 
 
 @auto_functionalized_v2.py_impl(FakeTensorMode)
