@@ -86,7 +86,7 @@ class TORCH_API DebugInfoWriter {
   static std::atomic<bool> hasWriterRegistered_;
 };
 
-struct TORCH_API FlightRecorder {
+struct FlightRecorder {
   static FlightRecorder* get() {
     // intentionally leak on exit
     // because this will hold python state that may get destructed
