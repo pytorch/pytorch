@@ -341,10 +341,6 @@ TORCH_IMPL_FUNC(div_out_mode_mps)
   mps::div_mode_template(self, other, rounding_mode, output, "div_mode_out");
 }
 
-TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::div_mode_template(self, other, std::nullopt, output, "div_out");
-}
-
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
   mps::add_sub_lerp_template(self, other, alpha, output, "add");
 }
