@@ -594,7 +594,7 @@ def mark_dynamic(t, index, *, min=None, max=None, backend_specializations=None):
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
-        t._backend_specializations[index] = backend_specializations
+        t._backend_specializations[index] = backend_specializations if backend_specializations is not None else []
         return
 
     assert isinstance(index, (list, tuple))

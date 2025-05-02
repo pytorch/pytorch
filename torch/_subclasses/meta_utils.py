@@ -882,7 +882,7 @@ class MetaConverter(Generic[_TensorT]):
         callback_: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
-        specialization=specialization,
+        specialization = None,
     ) -> _TensorT:
         callback: _MetaTensorCallbackOptDevice = functools.partial(
             callback_, device=t.device
@@ -966,7 +966,7 @@ class MetaConverter(Generic[_TensorT]):
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
-                        specialization=specialization,
+                        specialization=specialization
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
@@ -1896,7 +1896,7 @@ class MetaConverter(Generic[_TensorT]):
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
-        t_desc = self.describer.describe_tensor(t, trace=trace, specialization=specialization)
+        t_desc = self.describer.describe_tensor(t, trace=trace)
 
         if trace:
             assert source is not None
@@ -1926,7 +1926,7 @@ class MetaConverter(Generic[_TensorT]):
                 callback_,
                 source,
                 symbolic_context,
-                specialization=specialization,
+                specialization=specialization
             )
 
         if type(t) is torch.nn.Parameter:

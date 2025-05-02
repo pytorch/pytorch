@@ -22,6 +22,7 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
+from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 
 from . import graph_break_hints, utils
 from .bytecode_transformation import (
@@ -599,7 +600,7 @@ class PyCodegen:
     def make_specialized_call_generated_code(
         self,
         fn_name: str,
-        specializations: List[Tuple[str, BackendSpecialization]],
+        specializations: list[tuple[str, BackendSpecialization]],
     ) -> None:
         """Try specializations in order; fall back to fn_name if none match"""
         graphargs = self.tx.output.graphargs
