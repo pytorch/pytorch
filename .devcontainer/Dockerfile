@@ -52,3 +52,5 @@ RUN if [ -n "$CUDA_VERSION" ]; then \
 # Set PATH for CUDA
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+RUN chown -R vscode:vscode /opt/venv
