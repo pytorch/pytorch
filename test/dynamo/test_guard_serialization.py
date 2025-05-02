@@ -557,6 +557,40 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         )
 
     def test_constant_match(self):
+        # === bool constant ===
+        def fn(x, y):
+            if y:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3)
+        y = True
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": True}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": True}, True)
+        # guard should fail for different y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": False}, False)
+
+        # === None constant ===
+        def fn(x, y):
+            if y is None:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3)
+        y = None
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": None}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": None}, True)
+        # guard should fail for non-None y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 5}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": True}, False)
+
+        # === int constant ===
         def fn(x, y):
             return x + y
 
