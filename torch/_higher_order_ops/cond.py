@@ -458,6 +458,26 @@ def _merge_tensors(
         assert a is None and b is None, (a, b)
         return None
 
+    def min_max(s0, s1):
+        def _bound(s0, lower_bound: bool):
+            if isinstance(s0, int):
+                return s0
+            r = mode.shape_env.var_to_range.get(  # type: ignore[union-attr]
+                s0.node.expr,
+                torch.utils._sympy.value_ranges.ValueRanges.unknown(),
+            )
+            return r.lower if lower_bound else r.upper
+
+        return min(_bound(s0, True), _bound(s1, True)), max(
+            _bound(s0, False), _bound(s1, False)
+        )
+
+    if type(a) is int and type(b) is int:
+        assert mode.shape_env is not None
+        merged_out = mode.shape_env.create_unbacked_symint()
+        mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
+        return merged_out
+
     assert type(a) is FakeTensor and type(b) is FakeTensor, (a, type(a), b, type(b))
 
     # Note: we don't check size, stride because
@@ -499,21 +519,6 @@ def _merge_tensors(
         if SymIntEqByExpr(s0) == SymIntEqByExpr(s1):
             merged_size.append(s0)
         else:
-
-            def min_max(s0, s1):
-                def _bound(s0, lower_bound: bool):
-                    if isinstance(s0, int):
-                        return s0
-                    r = mode.shape_env.var_to_range.get(  # type: ignore[union-attr]
-                        s0.node.expr,
-                        torch.utils._sympy.value_ranges.ValueRanges.unknown(),
-                    )
-                    return r.lower if lower_bound else r.upper
-
-                return min(_bound(s0, True), _bound(s1, True)), max(
-                    _bound(s0, False), _bound(s1, False)
-                )
-
             assert mode.shape_env is not None
             new_size = mode.shape_env.create_unbacked_symint()
             mode.shape_env.constrain_symbol_range(new_size.node.expr, *min_max(s0, s1))

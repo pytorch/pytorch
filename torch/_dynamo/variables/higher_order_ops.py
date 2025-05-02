@@ -1052,7 +1052,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 should_flatten_outputs=True,
             )
 
-            if not only_consist_of(ret_val, (TensorVariable,)):
+            if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
                 unimplemented(
                     "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
                 )

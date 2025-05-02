@@ -1299,6 +1299,16 @@ graph():
         M()(torch.randn(7))
         torch.export.export(M(), (torch.randn(7),), strict=strict)
 
+    def test_cond_branches_return_constant_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.cond(x.sum() > 3, lambda: 0, lambda: 1, tuple())
+
+        args = (torch.randn(3, 3),)
+        m = M()
+        ep = export(M(), args)
+        self.assertEqual(m(*args), ep.module()(*args))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_contains_unbacked_no_escape(self):
         class M(torch.nn.Module):
