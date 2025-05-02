@@ -523,7 +523,9 @@ struct DifferentiableGraphOp {
   Gradient grad;
   GraphExecutor grad_executor;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t num_inputs;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t num_outputs;
 };
 
