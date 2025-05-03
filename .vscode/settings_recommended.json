@@ -1,7 +1,4 @@
 {
-    "[python]": {
-        "editor.tabSize": 4
-    },
     "files.associations": {
         "*.py.in": "python",
         "*.pyi.in": "python"
@@ -10,6 +7,13 @@
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
     "files.trimTrailingWhitespace": true,
-    "python.linting.enabled": true,
-    "python.linting.flake8Enabled": true
+    "[python]": {
+        "editor.tabSize": 4,
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    },
+    "python.analysis.inlayHints.functionReturnTypes": true,
+    "flake8.importStrategy": "fromEnvironment",
+    "ruff.importStrategy": "fromEnvironment",
+    "ruff.lineLength": 88,
+    "ruff.organizeImports": false
 }
