@@ -568,7 +568,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
           }
         }
         if constexpr (is_low_precision) {
-          sum[i] += z * static_cast<opmath_t>(column_[i]);
+          sum[i] += z * column_[i];
         } else {
           y[i * incy] += z * column_[i];
         }
