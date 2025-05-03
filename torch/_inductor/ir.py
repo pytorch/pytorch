@@ -5720,6 +5720,7 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+
             wrapper.writeline(
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
@@ -6015,7 +6016,6 @@ class SubgraphBuffer(ExternKernel):
         self.subgraph = V.graph.make_subgraph(
             self.gm, self.example_inputs, subgraph_name
         )
-
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
@@ -6033,9 +6033,11 @@ class SubgraphBuffer(ExternKernel):
                 self.graph = graph
                 self.name = graph.name
 
-        wrapper.codegen_subgraph(
+        outer_inputs = [t.codegen_reference() for t in self.inputs]
+
+        wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
-            [*[buffer.get_name() for buffer in self.inputs]],
+            outer_inputs,
             [self.name],
         )
 
@@ -7128,19 +7130,22 @@ class MultiOutputLayout(OutputSpec):
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_multi_output(self)
-        self.codegen_size_asserts(wrapper)
-        self.codegen_alignment_asserts(wrapper)
+        if not self.skip_size_stride_alignment_checks:
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
         layout: OutputSpec,
         input,
         indices: list[tuple[Any, ...]],
+        skip_size_stride_alignment_checks=False,
     ) -> None:
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
         self.indices = indices
+        self.skip_size_stride_alignment_checks = skip_size_stride_alignment_checks
 
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
@@ -7443,9 +7448,9 @@ class InvokeSubgraph(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(cls, subgraph: Subgraph, operands):  # type: ignore[no-untyped-def]
+    def create(cls, subgraph: Subgraph, *operands):  # type: ignore[no-untyped-def]
         # TODO(anijain2305) - Support sym expr as operands in future.
-        fx_operands = V.graph.current_node.args[-1]
+        fx_operands = V.graph.current_node.args[2:]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         # Realize the inputs. Also intermediates can have different strides than
@@ -7507,6 +7512,7 @@ class InvokeSubgraph(ExternKernel):
                     ),
                     invoke_subgraph,
                     [(list, ind)],
+                    skip_size_stride_alignment_checks=True,
                 )
 
         outputs = [create_output(output, i) for i, output in enumerate(outputs)]

@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+import atexit
 import functools
 import logging
 import os
+import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -25,6 +27,25 @@ log = logging.getLogger(__name__)
 CUTLASS_OPERATION_KIND: str = "gemm"
 
 
+@atexit.register
+def move_cutlass_compiled_cache() -> None:
+    """Move CUTLASS compiled cache file to the cache directory if it exists."""
+    if "cutlass" not in sys.modules:
+        return
+
+    import cutlass  # type: ignore[import-not-found]
+
+    if not os.path.exists(cutlass.CACHE_FILE):
+        return
+
+    try:
+        filename = os.path.basename(cutlass.CACHE_FILE)
+        shutil.move(cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
+        log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
+    except OSError as e:
+        log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
+
+
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
     for cutlass_module in cutlass_modules:
         content = content.replace(
@@ -45,11 +66,21 @@ def try_import_cutlass() -> bool:
        which is the directory when developers build from source.
     """
     if config.is_fbcode():
+        try:
+            import cutlass  # type: ignore[import-not-found]
+            import cutlass_library  # type: ignore[import-not-found]
+        except ImportError as e:
+            log.warning(
+                "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
+                str(e),
+            )
+            return False
+
         return True
 
     try:
-        import cutlass  # type: ignore[import-not-found]
-        import cutlass_library  # type: ignore[import-not-found]
+        import cutlass  # type: ignore[import-not-found]  # noqa: F811
+        import cutlass_library  # type: ignore[import-not-found]  # noqa: F811
 
         cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
         if cutlass_minor_vesion < 7:
@@ -68,6 +99,7 @@ def try_import_cutlass() -> bool:
                 "source",
             )
         )
+
         return True
     except ModuleNotFoundError:
         log.debug(
