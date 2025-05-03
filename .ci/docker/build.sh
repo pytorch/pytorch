@@ -241,11 +241,11 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-rocm-n-1-py3)
+  pytorch-linux-jammy-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.2.4
+    ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -254,11 +254,11 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-rocm-n-py3)
+  pytorch-linux-jammy-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.3
+    ROCM_VERSION=6.4
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
