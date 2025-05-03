@@ -47,6 +47,7 @@ from .codegen.common import (
     KernelTemplate,
     OpOverrides,
     WorkspaceArg,
+    WorkspaceZeroMode,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
@@ -1308,6 +1309,23 @@ class TritonTemplate(KernelTemplate):
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
+        workspace_args = []
+        if workspace_arg is not None:
+            # Create workspace tensor
+            workspace_size = workspace_arg.count
+            workspace_tensor = torch.empty_strided(
+                (workspace_size,),
+                (1,),
+                dtype=torch.uint8,
+                device=layout.device.type,
+            )
+
+            # Handle zero initialization if needed
+            if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
+                workspace_tensor.zero_()
+
+            workspace_args.append(workspace_tensor)
+
         options = result.kernel_options
 
         def make_kernel_render(out_node):
@@ -1344,7 +1362,7 @@ class TritonTemplate(KernelTemplate):
             module_path=result.mod.__file__,
             module_cache_key=result.mod.key,
             kernel_name=f"triton_{self.name}",
-            extra_args=[*extra_args, *grid],
+            extra_args=[*extra_args, *workspace_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
             num_consumer_groups=num_consumer_groups,
@@ -1354,7 +1372,6 @@ class TritonTemplate(KernelTemplate):
             kpack=kwargs.get("kpack", 2),
             input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
-            workspace_arg=workspace_arg,
         )
 
         return TritonTemplateCaller(
