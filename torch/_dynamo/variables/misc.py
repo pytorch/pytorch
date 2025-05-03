@@ -742,7 +742,7 @@ class AutogradFunctionVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
         else:
             unimplemented_v2(
-                gb_type="Unsupported autograd.Function structure",
+                gb_type="Non-function or method in subclass of torch.autograd.Function",
                 context=f"call_apply {self} {args} {kwargs}",
                 explanation="Dynamo requires the `forward` attribute of a "
                 "`torch.autograd.Function` subclass to be a standard Python "
