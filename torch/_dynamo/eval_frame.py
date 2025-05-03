@@ -389,6 +389,15 @@ class OptimizedModule(torch.nn.Module):
             return super().__setattr__(name, val)
         return setattr(self._orig_mod, name, val)
 
+    def __delattr__(self, name):
+        # This mirrors `__setattr__`
+        if hasattr(type(self), name):
+            return super().__delattr__(name)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__delattr__(name)
+        return delattr(self._orig_mod, name)
+
     def _call_lazy_check(self, *args, **kwargs):
         if (
             hasattr(self._orig_mod, "_initialize_hook")
