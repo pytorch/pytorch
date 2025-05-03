@@ -837,7 +837,8 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       return at::dot(t1.flatten(), t2.flatten()).reshape_symint(rsizes);
     } else {
       // Otherwise mul + sum can be faster as it avoids at most 2x contiguous() calls
-      return (t1.squeeze() * t2.squeeze()).sum().reshape_symint(rsizes);
+      // NOTE: t1.dtype == t2.dtype -- check above
+      return (t1.squeeze() * t2.squeeze()).sum(t1.scalar_type()).reshape_symint(rsizes);
     }
   }
 }
