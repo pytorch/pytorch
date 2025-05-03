@@ -332,6 +332,18 @@ class CKTileGemmTemplate(CKTileTemplate):
             return None
         if op.layout_c != torch_layout_to_ck_layout(Y_meta):
             return None
+
+        M = X_meta.size[-2]
+        K = X_meta.size[-1]
+        N = W_meta.size[-1]
+
+        if (not op.m_is_padded) and is_static_int(M) and (M % op.tile_m != 0):
+            return None
+        if (not op.n_is_padded) and is_static_int(N) and (N % op.tile_n != 0):
+            return None
+        if (not op.k_is_padded) and is_static_int(K) and (K % op.tile_k != 0):
+            return None
+
         return op
 
     def emit_ck_instance(self, op: "CKTileGemmOperation"):
