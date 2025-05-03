@@ -1499,10 +1499,10 @@ class OutputGraph(OutputGraphGuardsState):
             specialized_compiles = []
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm)
+                sources = [a.source for a in self.graphargs]
                 for specialization in old_fake_mode.shape_env.backend_specializations:
-                    source_index = [a.source for a in self.graphargs].index(specialization.source)
+                    source_index = sources.index(specialization.source)
                     specialized_compiles.append((
-                        unique_id("__specialized_compiled_fn"),
                         functools.partial(lambda idx, args: specialization.check_fn(args[idx]), source_index),
                         self.call_user_compiler(gm, specialization=specialization)
                     ))
@@ -1538,7 +1538,7 @@ class OutputGraph(OutputGraphGuardsState):
             # This is safe because we pre-process name to be unique
             if specialized_compiles:
                 def specialized_dispatch(*args, **kwargs):
-                    for fn_name, check_fn, specialized_compiled_fn in specialized_compiles:
+                    for check_fn, specialized_compiled_fn in specialized_compiles:
                         if check_fn(args):
                             return specialized_compiled_fn(*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
