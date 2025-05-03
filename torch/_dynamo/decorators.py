@@ -599,7 +599,9 @@ def mark_dynamic(t, index, *, min=None, max=None, backend_specializations=None):
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i, min=min, max=max, backend_specializations=backend_specializations)
+        mark_dynamic(
+            t, i, min=min, max=max, backend_specializations=backend_specializations
+        )
 
 
 @forbid_in_graph
