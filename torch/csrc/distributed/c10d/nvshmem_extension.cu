@@ -7,12 +7,16 @@
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
 #include <cuda_awbarrier_primitives.h>
+// Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
+#include <ATen/cuda/cub.cuh>
 #include <nvshmem.h>
 
 namespace c10d::nvshmem_extension {
 
 using c10d::symmetric_memory::StoreExchange;
 static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
+
+#define THREADS_PER_BLOCK 512
 
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
@@ -117,10 +121,178 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   return input;
 }
 
+at::Tensor nvshmem_all_to_all(
+    at::Tensor& input,
+    at::Tensor& out,
+    std::string group_name) {
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  int rank = input_hdl->get_rank();
+  int world_size = input_hdl->get_world_size();
+  auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
+
+  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
+  size_t bytes_per_rank = input_hdl->get_buffer_size() / world_size;
+
+  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+  nvshmemx_alltoallmem_on_stream(team, output_ptr, input_ptr, bytes_per_rank, stream);
+  return out;
+}
+
+// This is an exclusive prefix sum function that calculates read (or write) offsets for each peer.
+__device__ void prefixSum(int64_t *odata, int64_t *idata, int n) {
+  // Specialize BlockScan for a 1D block of threads, of type int64_t.
+  // - `BLOCK_SCAN_WARP_SCANS` is a low-latency scan algorithm (instead of high
+  // throughput which we don't need here).
+  // - `at_cuda_detail::cub` is torch's cub wrapper, see #55292.
+  using BlockScanT = at_cuda_detail::cub::BlockScan<int64_t, THREADS_PER_BLOCK, at_cuda_detail::cub::BLOCK_SCAN_WARP_SCANS>;
+  // Allocate shared memory for BlockScan
+  __shared__ typename BlockScanT::TempStorage temp_storage;
+
+  // TODO: currently it is assumed that the number of PE's is smaller than
+  // `THREADS_PER_BLOCK`
+  CUDA_KERNEL_ASSERT(n <= THREADS_PER_BLOCK);
+
+  // Obtain input item for each thread
+  int tid = threadIdx.x;
+  int64_t thread_data = (tid < n) ? idata[tid] : 0;
+
+  // Collectively compute the block-wide exclusive prefix sum
+  BlockScanT(temp_storage).ExclusiveSum(thread_data, thread_data);
+
+  // Store the result
+  if (tid < n) {
+    odata[tid] = thread_data;
+  }
+}
+
+// This kernel is used to exchange output splits and source offsets between peers.
+// `in_out_splits` is of size (3, npes) and contains:
+// - input splits (IN)
+// - output splits (OUT) and
+// - source offsets (OUT).
+__global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
+  auto input_splits = in_out_splits;
+  auto output_splits = in_out_splits + npes;
+  auto source_offsets = in_out_splits + npes * 2;
+  int tid = threadIdx.x;
+
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+
+  // Scan input splits to get the source offsets
+  prefixSum(peer_offsets, input_splits, npes);
+  __syncthreads();;
+
+  // Use 1 block to do the exchange
+  if (tid < npes) {
+    int peer = tid;
+    nvshmem_int64_p(source_offsets + mype, peer_offsets[peer], peer);
+    nvshmem_int64_p(output_splits + mype, input_splits[peer], peer);
+  }
+  // This barrier ensures that all remote PEs see the updated values
+  nvshmemx_barrier_all_block();
+}
+
+// This kernel is used to do the actual data exchange.
+// `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
+__global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
+  auto output_splits = in_out_splits + npes;
+  auto source_offsets = in_out_splits + npes * 2;
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+
+  // Calculate the output offsets
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+  prefixSum(peer_offsets, output_splits, npes);
+  __syncthreads();
+
+  // Each block targets a different peer
+  size_t row_size = stride * sizeof(float);  // Assuming float (TODO)
+  for (int i = bid; i < npes; i += gridDim.x) {
+    int peer = (mype + i) % npes;
+    auto size = output_splits[peer] * row_size;
+    auto source_offset = source_offsets[peer] * row_size;
+    auto write_offset = peer_offsets[peer] * row_size;
+    nvshmemx_getmem_block(
+      (char*)recv_data + write_offset,
+      (char*)send_data + source_offset,
+      size,
+      peer);
+  }
+  // Write out the output offsets (to the scratchpad line)
+  if (bid == 0 && tid < npes) {
+    source_offsets[tid] = peer_offsets[tid];
+  }
+}
+
+at::Tensor nvshmem_all_to_all_vdev(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& in_out_splits,
+    std::string group_name) {
+  /* Perform AllToAllv operation using NVSHMEM, with split information provided on device.
+   * Arguments:
+   *  - `input` is the input tensor
+   *  - `out` is the output tensor
+   *  - `in_out_splits` is a 2D tensor of size (3, npes). The rows are (in order):
+        input splits (IN)
+        output splits (OUT) and
+        output offsets (OUT).
+  */
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
+  auto splits_hdl = c10d::symmetric_memory::rendezvous(in_out_splits, group_name);
+  int rank = input_hdl->get_rank();
+  int world_size = input_hdl->get_world_size();
+
+  void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
+  void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
+  int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
+
+  auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+
+  // Exchange output splits and source offsets
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &splits_ptr,
+      &rank,
+      &world_size};
+  nvshmemx_collective_launch(
+      (const void*)exchangeSplitAndOffset,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+
+  // All to all data exchange
+  // Limit the number of blocks to 16
+  int num_blocks = std::min(world_size, 16);
+  // Stride at dim 0 (assuming input is contiguous, TODO)
+  size_t stride = input.stride(0);
+  void* args1[] = {
+      &input_ptr,
+      &output_ptr,
+      &splits_ptr,
+      &stride,
+      &rank,
+      &world_size};
+  nvshmemx_collective_launch(
+      (const void*)allToAllV,
+      dim3(num_blocks),
+      dim3(THREADS_PER_BLOCK),
+      args1,
+      0,
+      stream);
+  return out;
+}
 
 } // namespace c10d::nvshmem_extension
 
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
+  m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
 }

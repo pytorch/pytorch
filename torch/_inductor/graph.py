@@ -23,6 +23,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
     compute_required_storage_length,
@@ -85,6 +86,7 @@ from .lowering import (
     maybe_layout_constraints,
     needs_realized_inputs,
     require_contiguous,
+    tag_to_layout_constraint,
     unsupported_output_tensor,
 )
 from .runtime import autotune_cache
@@ -241,6 +243,14 @@ def mark_nodes_dislike_padding(
         if isinstance(
             cur.target,
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
+        if (
+            isinstance(cur.target, torch._ops.OpOverload)
+            and get_layout_constraint_tag(cur.target)
+            == torch._C.Tag.needs_exact_strides
         ):
             cur.meta["dislike_padding"] = True
             continue
@@ -1163,34 +1173,26 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                # use contiguous unless the (custom) op asks something else
-                # explicitly
-                if torch._C.Tag.needs_exact_strides in target.tags:
-                    decided_constraint = constrain_to_fake_tensors  # type: ignore[assignment]
-                elif torch._C.Tag.needs_fixed_stride_order in target.tags:
-                    decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
-                elif torch._C.Tag.flexible_layout in target.tags:
-                    decided_constraint = None  # type: ignore[assignment]
-                else:
-                    # If there are no tags, we do different things depending on
-                    # if it's a builtin ATen/prim ops or custom ops.
-                    # For ATen ops, we require_contiguous to fix https://github.com/pytorch/pytorch/issues/140452
-                    # For custom ops, we constrain_to_fx_strides to maintain the
-                    # behavior of PyTorch 2.5: https://github.com/pytorch/pytorch/issues/148356
+                tag = get_layout_constraint_tag(target, with_default=False)
+                if (
+                    tag is None
+                    and torch._library.utils.is_builtin(target)
+                    and self.is_backward
+                ):
+                    # for implicit fallback ATen ops during backward, if there
+                    # is no layout constraint tag, we conservatively require contiguous
+                    # input since some eager kernels do not
+                    # support non-contiguous inputs. Otherwise they may silently cause
+                    # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
+                    # We only do this For ATen ops and for backward.
                     #
-                    # For ATen ops, only apply the constraint for backward
-                    # ops since fwd ops should work for any strides.
-                    if torch._library.utils.is_builtin(target) and self.is_backward:
-                        decided_constraint = require_contiguous  # type: ignore[assignment]
-                    else:
-                        # maybe_layout_constraints will decide the layout constraint for the custom op
-                        # lazily
-                        decided_constraint = None  # type: ignore[assignment]
+                    # TODO: should really switch to "needs_fixed_stride" constraint on these
+                    # and identify them one by one.
+                    decided_constraint = require_contiguous  # type: ignore[assignment]
+                else:
+                    tag = get_layout_constraint_tag(target, with_default=True)
+                    decided_constraint = tag_to_layout_constraint(tag)
 
-                # for implicitly fallback ops, we conservatively requires
-                # contiguous input since some eager kernels does not
-                # support non-contiguous inputs. They may silently cause
-                # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
                 make_fallback(target, layout_constraint=decided_constraint)
 
             elif get_decompositions([target]):
@@ -1782,6 +1784,17 @@ class GraphLowering(torch.fx.Interpreter):
         for op in self.operations[operation_watermark:]:
             new_unbacked_defs |= op.get_unbacked_symbol_defs()
 
+        shape_env = V.graph.sizevars.shape_env
+
+        # An input can an unbacked symint i.e.: when mark_unabcked is used.
+        # in that case add it to new_unbacked_defs.
+        if (
+            n.op == "placeholder"
+            and isinstance(result, sympy.Symbol)
+            and shape_env.is_unbacked_symint(result)
+        ):
+            new_unbacked_defs.add(result)
+
         def format_new_defs() -> str:
             r = [
                 f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
@@ -1793,96 +1806,98 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return "***\n".join(r)
 
-        if n.op != "placeholder":
-            # Note [Backwards runtime asserts]
-            # Backwards poses an interesting problem for deferred runtime
-            # asserts.  In the easy case, we may solely close over data
-            # dependent sized tensors, and there are no binding sites for
-            # unbacked SymInts.  In this case, we can just drop all the
-            # runtime asserts on the floor: no non-placeholder bindings, no
-            # problem.
-            #
-            # However, it is *possible* for a fresh runtime assert to show up
-            # between forwards and backwards.  Right now, the freezing process
-            # that happens when we lower forwards means that we will freeze
-            # runtime asserts, and then the moment the backwards lowering
-            # process attempts to add a new deferred runtime assert, we will
-            # fail.  Let's say you remove that assert.  Now when we get here,
-            # we need to make sure we actually emit these asserts (because we
-            # can't emit them in forwards, we already compiled it).  So we
-            # have to do something here.  But we don't want to reemit ALL
-            # deferred runtime asserts, we only want to emit the NEW ones.
-            # Therefore needing some sort of stratification in the ShapeEnv.
-            # This is all doable, it just hasn't been done yet.
-            shape_env = V.graph.sizevars.shape_env
+        # We do not skip unbacked symints that are input for backward see the note below.
+        if V.graph.is_backward and n.op == "placeholder":
+            return result
 
-            def make_assert(expr: SympyBoolean, msg: str) -> None:
-                assert_op = ir.AssertScalar(expr, msg)
-                self.register_buffer(assert_op, set_name=True)
-                self.register_operation(assert_op)
+        # Note [Backwards runtime asserts]
+        # Backwards poses an interesting problem for deferred runtime
+        # asserts.  In the easy case, we may solely close over data
+        # dependent sized tensors, and there are no binding sites for
+        # unbacked SymInts.  In this case, we can just drop all the
+        # runtime asserts on the floor: no non-placeholder bindings, no
+        # problem.
+        #
+        # However, it is *possible* for a fresh runtime assert to show up
+        # between forwards and backwards.  Right now, the freezing process
+        # that happens when we lower forwards means that we will freeze
+        # runtime asserts, and then the moment the backwards lowering
+        # process attempts to add a new deferred runtime assert, we will
+        # fail.  Let's say you remove that assert.  Now when we get here,
+        # we need to make sure we actually emit these asserts (because we
+        # can't emit them in forwards, we already compiled it).  So we
+        # have to do something here.  But we don't want to reemit ALL
+        # deferred runtime asserts, we only want to emit the NEW ones.
+        # Therefore needing some sort of stratification in the ShapeEnv.
+        # This is all doable, it just hasn't been done yet.
 
-            # bound_unbacked_symbols tracks the symbols that are created so far,
-            # we use it to make sure that runtime assertions are added after all
-            # symbols used in them are defined.
-            self.bound_unbacked_symbols |= new_unbacked_defs
+        def make_assert(expr: SympyBoolean, msg: str) -> None:
+            assert_op = ir.AssertScalar(expr, msg)
+            self.register_buffer(assert_op, set_name=True)
+            self.register_operation(assert_op)
 
-            unbacked_bindings = resolve_unbacked_bindings(
-                V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
-            )
-            assert unbacked_bindings is not None
-            # When we do lowering, it is possible we reallocate unbacked SymInts.
-            # So we need to line up the unbacked SymInts when performing the test
-            # here
-            #
-            # In principle, we could permit lowering to introduce MORE unbacked
-            # SymInts: as long as all the old unbacked ones are accounted for,
-            # it's fine for inductor to introduce extra calls to item()/unbacked()
-            # whatever.  This actually happens in practice when an unbacked SymInt
-            # gets memoized away; naively, when Inductor reprocesses a kernel, it
-            # doesn't know that the memo still applies, and ends up allocating a
-            # new symbol.  However, this is generally a bad thing: we may still
-            # end up needing to test equalities on the symbols, and a fresh
-            # symbol is likely to hit lots of GuardOnDataDependent errors that
-            # we already know facts for.
-            renamed_unbacked_bindings = OrderedSet(
-                V.fake_mode.shape_env.unbacked_renamings.get(s, s)
-                for s in unbacked_bindings.keys()
-            )
-            assert new_unbacked_defs >= renamed_unbacked_bindings, (
-                f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
-                f"fx node is: {n.format_node()}\n"
-                f"new operations are:\n\n{format_new_defs()}"
-            )
+        # bound_unbacked_symbols tracks the symbols that are created so far,
+        # we use it to make sure that runtime assertions are added after all
+        # symbols used in them are defined.
+        self.bound_unbacked_symbols |= new_unbacked_defs
 
-            # Emit code for runtime asserts that can be inserted at this point.
-            for i0 in new_unbacked_defs:
-                ras = self.ras_by_symbol.pop(i0, [])
-                # NB: size-like not needed, we won't retrace
-                vr = shape_env.var_to_range[i0]
-                if not shape_env._default_unspecified_value_range().issubset(vr):
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
+        )
+        assert unbacked_bindings is not None
+        # When we do lowering, it is possible we reallocate unbacked SymInts.
+        # So we need to line up the unbacked SymInts when performing the test
+        # here
+        #
+        # In principle, we could permit lowering to introduce MORE unbacked
+        # SymInts: as long as all the old unbacked ones are accounted for,
+        # it's fine for inductor to introduce extra calls to item()/unbacked()
+        # whatever.  This actually happens in practice when an unbacked SymInt
+        # gets memoized away; naively, when Inductor reprocesses a kernel, it
+        # doesn't know that the memo still applies, and ends up allocating a
+        # new symbol.  However, this is generally a bad thing: we may still
+        # end up needing to test equalities on the symbols, and a fresh
+        # symbol is likely to hit lots of GuardOnDataDependent errors that
+        # we already know facts for.
+        renamed_unbacked_bindings = OrderedSet(
+            V.fake_mode.shape_env.unbacked_renamings.get(s, s)
+            for s in unbacked_bindings.keys()
+        )
+        assert new_unbacked_defs >= renamed_unbacked_bindings, (
+            f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+            f"fx node is: {n.format_node()}\n"
+            f"new operations are:\n\n{format_new_defs()}"
+        )
 
-                    def is_convertible(s: Expr) -> bool:
-                        if s in (int_oo, -int_oo):
-                            return False
-                        try:
-                            int(s)
-                            return True
-                        except TypeError:
-                            return False
+        # Emit code for runtime asserts that can be inserted at this point.
+        for i0 in new_unbacked_defs:
+            ras = self.ras_by_symbol.pop(i0, [])
+            # NB: size-like not needed, we won't retrace
+            vr = shape_env.var_to_range[i0]
+            if not shape_env._default_unspecified_value_range().issubset(vr):
 
-                    if is_convertible(vr.lower):
-                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
-                    if is_convertible(vr.upper):
-                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
+                def is_convertible(s: Expr) -> bool:
+                    if s in (int_oo, -int_oo):
+                        return False
+                    try:
+                        int(s)
+                        return True
+                    except TypeError:
+                        return False
 
-                for ra in ras:
-                    fvs = free_unbacked_symbols(ra.expr)
-                    missing = fvs - self.bound_unbacked_symbols
-                    if missing:
-                        i1 = min(missing, key=str)
-                        self.ras_by_symbol.setdefault(i1, []).append(ra)
-                    else:
-                        make_assert(ra.expr, f"{ra.expr}")
+                if is_convertible(vr.lower):
+                    make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
+                if is_convertible(vr.upper):
+                    make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
+
+            for ra in ras:
+                fvs = free_unbacked_symbols(ra.expr)
+                missing = fvs - self.bound_unbacked_symbols
+                if missing:
+                    i1 = min(missing, key=str)
+                    self.ras_by_symbol.setdefault(i1, []).append(ra)
+                else:
+                    make_assert(ra.expr, f"{ra.expr}")
 
         return result
 

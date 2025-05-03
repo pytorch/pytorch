@@ -106,6 +106,7 @@ def check_meta_consistency_vt(
     vars2: list[VariableTracker],
     lhs_name: str,
     rhs_name: str,
+    include_contiguity: bool = True,
 ) -> None:
     from torch._higher_order_ops.utils import check_meta_consistency
 
@@ -124,7 +125,13 @@ def check_meta_consistency_vt(
     unwrapped1 = [_unwrap_var(var) for var in vars1]
     unwrapped2 = [_unwrap_var(var) for var in vars2]
 
-    return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name)
+    return check_meta_consistency(
+        unwrapped1,
+        unwrapped2,
+        lhs_name,
+        rhs_name,
+        include_contiguity=include_contiguity,
+    )
 
 
 @contextlib.contextmanager
@@ -1332,11 +1339,17 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         validate_subgraph_output_types(body_r)
 
+        # We set include contiguity=False because we have vmap x HOP tests, where if
+        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+        # "querying is_contiguous inside of vmap for memory_format other than
+        # torch.contiguous_format is not yet implemented". This is okay because stride
+        # is still checked.
         check_meta_consistency_vt(
             body_r.unpack_var_sequence(tx),
             operands_seq,
             "body_fn_output",
             "carried_inputs",
+            include_contiguity=False,
         )
 
         (
@@ -1417,9 +1430,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
 
-        from . import TensorVariable
-        from .builder import wrap_fx_proxy
-
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         def arg_extractor(combine_fn, xs, additional_inputs):
@@ -1427,15 +1437,54 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         combine_fn, xs, additional_inputs = arg_extractor(*args, **kwargs)
 
-        if xs.python_type() != list:
-            unimplemented(
-                f"Expected xs to be a list of tensors but got {xs.python_type()}",
-            )
-        assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
+        if args[0].python_type() is functools.partial:
+            # This is the standard case when the user calls the frontend
+            # and the frontend invokes dynamo
+            if len(args) != 2:
+                unimplemented(
+                    f"Expected 2 positional arguments but got {len(args)}.\n"
+                    f"Usage: associative_scan(combine_fn, xs)",
+                )
 
-        # Ensure that all additional_inputs are TensorVariables and no
-        # ints or SymInts as this is not yet supported
-        assert all(isinstance(t, TensorVariable) for t in additional_inputs.items)
+            xs_treespec = args[0].keywords["spec"]
+
+            # combine_fn input check
+            # We need to get the pure combine_fn from the functools.partial
+            _check_supported_callable_arg(
+                tx, combine_fn.keywords["combine_fn"], "combine_fn"
+            )
+        else:
+            # This case is hit during re-tracing, for example in export tests
+            # In this case, the combine_fn is a callable and not a functools.partial
+            xs_treespec = _make_inlined(tx, pytree.tree_structure)(xs)
+
+            _check_supported_callable_arg(tx, combine_fn, "combine_fn")
+
+        # xs input check
+        if not isinstance(xs, (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected xs to be a list/tuple but got "
+                f"{xs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        xs_vars = xs.unpack_var_sequence(tx)
+        _check_all_tensorvariable(xs_vars)
+
+        # additional_inputs input check
+        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected additional_inputs to be a list/tuple but got "
+                f"{additional_inputs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        additional_inputs_vars = additional_inputs.unpack_var_sequence(tx)
+        _check_all_tensorvariable(additional_inputs_vars)
+
+        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
+        if scan_length == 0:
+            unimplemented(
+                "associative_scan() operator doesn't support zero-sized tensors during tracing."
+            )
 
         # Trace the subgraph
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
@@ -1443,11 +1492,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         with discard_graph_changes(tx):
             sub_args = [
                 _make_inlined(tx, first_slice_copy)(leaf)
-                for leaf in itertools.chain(xs.items, xs.items)
+                for leaf in itertools.chain(xs_vars, xs_vars)
             ]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
-                for t in additional_inputs.items
+                for t in additional_inputs_vars
             ]
 
         sub_args = sub_args + sub_args_additional_inputs
@@ -1465,6 +1514,52 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
 
+        # Ensure that the output of scan is a flattened list of elements,
+        # because downstream operations assume that the output of HOPs
+        # is flattened
+        output_node = combine_graph.find_nodes(op="output")[0]
+        output_node.args = (pytree.tree_leaves(output_node.args),)
+        combine_graph.lint()
+
+        # Collect the results from the combine_fn
+        results, _combine_treespec = _make_inlined(tx, pytree.tree_flatten)(
+            combine_result
+        ).unpack_var_sequence(tx)
+
+        # Check whether the combine_fn returns one child tree for the output.
+        if _combine_treespec.as_python_constant().num_leaves < 1:
+            unimplemented(
+                f"combine_fn needs to produce one pytree for the output "
+                f"but combine_fn produces the pytree {_combine_treespec.as_python_constant()}."
+            )
+
+        # Check whether the outs produced by combine_fn has the same treespec as xs
+        # We need to have this check this way, because in case init is a TreeSpec and carry
+        # but carry is only a LeafSpec, these two cannot be compared correctly.
+        if (
+            isinstance(xs_treespec.as_python_constant(), pytree.LeafSpec)
+            != isinstance(_combine_treespec.as_python_constant(), pytree.LeafSpec)
+        ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            xs_treespec, _combine_treespec
+        ).as_python_constant():
+            unimplemented(
+                f"The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got "
+                f"xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}."
+            )
+
+        # We set include contiguity=False because we have vmap x HOP tests, where if
+        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+        # "querying is_contiguous inside of vmap for memory_format other than
+        # torch.contiguous_format is not yet implemented". This is okay because stride
+        # is still checked.
+        check_meta_consistency_vt(
+            [_make_inlined(tx, first_slice_copy)(t) for t in xs_vars],
+            results.items,
+            "initial_xs",
+            "combine_fn_output",
+            include_contiguity=False,
+        )
+
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
 
         from torch._higher_order_ops.utils import (
@@ -1473,15 +1568,21 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             _maybe_fake_tracing,
         )
         from torch._inductor.utils import is_pointwise_use
+        from torch._subclasses.fake_tensor import FakeTensor
 
         with tx.fake_mode:
             xs_fake = [
                 first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
-                for leaf in itertools.chain(xs.items, xs.items)
+                for leaf in itertools.chain(xs_vars, xs_vars)
             ]
             additional_fake = [
                 leaf.proxy.node.meta["example_value"].clone()
-                for leaf in additional_inputs.items
+                for leaf in additional_inputs_vars
+            ] + [
+                leaf.node.meta["example_value"].clone()
+                if isinstance(leaf.node.meta["example_value"], FakeTensor)
+                else leaf.node.meta["example_value"]
+                for leaf in combine_lifted_freevars.keys()
             ]
             sub_args_fake = xs_fake + additional_fake
             pre_dispatch = False
@@ -1508,25 +1609,14 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ):
                 raise RuntimeError("Combine_fn might be aliasing the input!")  # noqa: F541
 
-        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
-
-        if combine_result.python_type() != list:
-            unimplemented(
-                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
-            )
-
-        xs_proxy = xs.as_proxy()
-        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
-        check_meta_consistency_vt(
-            [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
-            combine_result.unpack_var_sequence(tx),
-            "initial_xs",
-            "combine_fn_output",
-        )
-
         combine_fn_name = tx.output.install_subgraph(
             "associative_scan_combine_fn", combine_gm
         )
+
+        # Compute the proxies
+        xs_proxy = xs.as_proxy()
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
+        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1538,12 +1628,14 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = tuple(
                 inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
             )
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function", torch.ops.higher_order.associative_scan, p_args, {}
-            ),
-            example_value=out_meta,
+
+        return _call_function_and_unflatten_output(
+            tx,
+            torch.ops.higher_order.associative_scan,
+            p_args,
+            {},
+            out_meta,
+            xs_treespec,
         )
 
 
@@ -1686,8 +1778,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_vars = _make_inlined(tx, pytree.tree_leaves)(
                 out_vars
             ).unpack_var_sequence(tx)
+
             # additional output checking
-            init_treespec = args[0].keywords["spec_init"]
             _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
 
             check_meta_consistency_vt(
@@ -1697,28 +1789,20 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "carry",
             )
 
-            # Check whether the combine_fn returns two child trees.
-            # One for the carries and one for the outputs
-            if len(combine_result_vars) != 2:
-                unimplemented(
-                    f"combine_fn needs to produce two pytrees, one for the carries and one for the outputs "
-                    f"but combine_fn produces the pytree {_combine_treespec.as_python_constant()}."
-                )
-
-            # Check whether the carries produced by combine_fn has the same treespec as the init
-            # We need to have this check this way, because in case init is a TreeSpec and carry
-            # but carry is only a LeafSpec, these two cannot be compared correctly.
-            if (
-                isinstance(init_treespec.as_python_constant(), pytree.LeafSpec)
-                != isinstance(carry_treespec.as_python_constant(), pytree.LeafSpec)
-            ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
-                init_treespec, carry_treespec
-            ).as_python_constant():
-                unimplemented(
-                    f"The tree structure of the inits and the carries produced by the combine_fn "
-                    f"are expected to be identical, but got "
-                    f"init: {init_treespec.as_python_constant()} vs carry: {carry_treespec.as_python_constant()}."
-                )
+        # Check meta data of carries and inits. If we pass this stage, we are sure that the init and carries
+        # have the same tree structure.
+        # We set include contiguity=False because we have vmap x HOP tests, where if
+        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+        # "querying is_contiguous inside of vmap for memory_format other than
+        # torch.contiguous_format is not yet implemented". This is okay because stride
+        # is still checked.
+        check_meta_consistency_vt(
+            init_vars,
+            carry_vars,
+            "init",
+            "carry",
+            include_contiguity=False,
+        )
 
         xs_proxy = xs.as_proxy()
         init_proxy = init.as_proxy()
@@ -3185,7 +3269,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     return submodule_name
 
         body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "invoke_subgraph"
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "subgraph"
         )
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_dynamo_installed_submodule(fn_id, body_name)
@@ -3221,7 +3305,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         p_args = (
             p_args[0],
             body_name,
-            p_args[1:],
+            *p_args[1:],
         )
         return _call_function_and_unflatten_output(
             tx,

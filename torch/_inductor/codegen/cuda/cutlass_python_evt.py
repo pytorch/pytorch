@@ -1,5 +1,5 @@
 import itertools
-from collections.abc import Generator, Iterator, Sequence
+from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from os import linesep
 from typing import Any, Optional
@@ -218,7 +218,9 @@ class CutlassEVTCodegen:
                 f"Unsupported indexing for {name} with index {index}, index strides {index_strides}, and layout stride {stride}"
             )
 
-    def _stride_compatible(self, left, right):
+    def _stride_compatible(
+        self, left: Iterable[sympy.Expr], right: Iterable[sympy.Expr]
+    ) -> bool:
         return all(
             sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
             for l, r in (zip(left, right))
