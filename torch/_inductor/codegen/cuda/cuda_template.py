@@ -2,7 +2,7 @@
 import functools
 import itertools
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 from unittest.mock import patch
 

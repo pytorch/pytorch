@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing_extensions import assert_never
-
 from torchgen.api import cpp
 from torchgen.api.types import (
     ArgName,
@@ -32,6 +30,7 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
+from torchgen.utils import assert_never
 
 
 # This file describes the translation of JIT schema to the structured functions API.
