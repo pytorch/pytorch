@@ -681,7 +681,7 @@ class AutogradFunctionVariable(VariableTracker):
             jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented_v2(
-                    gb_type="Unsupported autograd.Function feature",
+                    gb_type="Unsupported custom jvp",
                     context=f"call_apply {self} {args} {kwargs}",
                     explanation="Dynamo does not support tracing "
                     "`torch.autograd.Function` subclasses that define "
