@@ -1011,7 +1011,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                 )
         else:
             unimplemented_v2(
-                gb_type="Unsupported autograd engine method",
+                gb_type="Unsupported torch._C._ImperativeEngine method",
                 context=f"call_method {self} {name}",
                 explanation="Dynamo only supports the `queue_callback` method "
                 f"on a torch._C._ImperativeEngine instance, but found: `{name}`.",
