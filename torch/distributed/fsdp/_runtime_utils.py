@@ -297,9 +297,13 @@ def _unshard(
                 "FullyShardedDataParallel.rate_limiter"
             ):
                 event.synchronize()
+    if _FSDPState._all_gather_work_handle is not None:
+        _FSDPState._all_gather_work_handle.wait_all_gather_work()
+        _FSDPState._all_gather_work_handle = None
     with state._device_handle.stream(unshard_stream):
         handle.unshard()
         handle.post_unshard()
+        _FSDPState._all_gather_work_handle = handle
 
 
 @no_type_check
@@ -400,7 +404,10 @@ def _pre_forward(
             input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
             args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
         _register_post_backward_reshard_only_hook(state, handle, args, kwargs)
-        _p_assert(handle is None or handle._all_gather_work is None, "wait_unshard_work() must be called to ensure unshard work is completed")
+        _p_assert(
+            handle is None or handle._all_gather_work is None,
+            "handle.wait_all_gather_work() must be called to ensure unshard work is completed",
+        )
         return args, kwargs
 
 
@@ -417,7 +424,7 @@ def _pre_forward_unshard(
     if not handle._prefetched:
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     # Explicitly wait to ensure unshard operation has completed
-    handle.wait_unshard_work()
+    handle.wait_all_gather_work()
     handle._needs_pre_forward_unshard = False
     # Don't wait during trace
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
@@ -683,7 +690,7 @@ def _pre_backward_hook(
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 state._device_handle.current_stream().wait_stream(state._unshard_stream)
             # Explicitly wait to ensure unshard operation has completed
-            handle.wait_unshard_work()
+            handle.wait_all_gather_work()
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
         handle._needs_pre_backward_unshard = False
@@ -693,7 +700,10 @@ def _pre_backward_hook(
             _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         handle._ran_pre_backward_hook = True
-        _p_assert(handle is None or handle._all_gather_work is None, "wait_unshard_work() must be called to ensure unshard work is completed")
+        _p_assert(
+            handle is None or handle._all_gather_work is None,
+            "handle.wait_all_gather_work() must be called to ensure unshard work is completed",
+        )
         return grad
 
 
@@ -856,11 +866,25 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             if handle._use_fake_reduce
             else state.process_group
         )
-        dist.reduce_scatter_tensor(
+        if _FSDPState._reduce_scatter_work_handle is not None:
+            _FSDPState._reduce_scatter_work_handle.wait_reduce_scatter_work()
+            _FSDPState._reduce_scatter_work_handle = None
+        if dist.get_backend() == "mpi" and not uses_hybrid_sharded_strategy:
+            # Set async_op to True to delay the wait for reduce_scatter work for gradient collection.
+            # This enables overlapping of communication and computation, and overlapping of
+            # reduce_scatter (for gradient collection) and all_gather (for unshard) when using
+            # the MPI backend, improving utilization of compute and network resources.
+            async_op = True
+        else:
+            async_op = False
+        reduce_scatter_work = dist.reduce_scatter_tensor(
             new_sharded_grad,
             padded_unsharded_grad,
             group=pg,
+            async_op=async_op,
         )
+        handle._reduce_scatter_work = reduce_scatter_work
+        _FSDPState._reduce_scatter_work_handle = handle
         if uses_hybrid_sharded_strategy:
             # Don't wait during trace
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
@@ -1103,6 +1127,9 @@ def _post_backward_final_callback(
         # since it currently runs in the post-backward stream. That can be
         # pushed to the next forward if run in a different stream
         current_stream.wait_stream(root_state._post_backward_stream)
+        if _FSDPState._reduce_scatter_work_handle is not None:
+            _FSDPState._reduce_scatter_work_handle.wait_reduce_scatter_work()
+            _FSDPState._reduce_scatter_work_handle = None
         if root_state._all_reduce_stream is not current_stream:  # uses HSDP
             current_stream.wait_stream(root_state._all_reduce_stream)
         if root_state.cpu_offload.offload_params:
