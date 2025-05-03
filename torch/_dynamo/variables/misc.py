@@ -1003,7 +1003,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                 )
             else:
                 unimplemented_v2(
-                    gb_type="Unsupported autograd engine operation",
+                    gb_type="Unsupported torch._C._ImperativeEngine.queue_callback()",
                     context=f"call_method {self} {name}",
                     explanation="queue_callback() is only supported when "
                     "Compiled Autograd is enabled with fullgraph=True.",
