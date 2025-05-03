@@ -455,7 +455,7 @@ class ExceptionVariable(VariableTracker):
                 )
         else:
             unimplemented_v2(
-                gb_type="Unsupported attribute assignment",
+                gb_type="Unsupported attribute assignment on Exception object",
                 context=f"call_setattr {self} {name}",
                 explanation="Dynamo does not support setting the attribute "
                 f"'{name}' on tracked exception objects. Only `__context__`, "
