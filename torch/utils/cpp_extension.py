@@ -2470,7 +2470,7 @@ def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
             elif 'gpu-rdc' in flag:
                 has_gpu_rdc_flag = True
         if has_custom_flags:
-            return '' if has_gpu_rdc_flag else '-fno-gpu-rdc'
+            return [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
     # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
     _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
