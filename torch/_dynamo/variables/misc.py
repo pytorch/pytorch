@@ -257,7 +257,7 @@ class SuperVariable(VariableTracker):
                     gb_type="Non-constant attribute given to `super().__delattr__()`",
                     context=f"call_method {self} {name}",
                     explanation="Dynamo requires the attribute name passed to "
-                    "`super().__delattr__(...)` to be a constant string.",
+                    "`super().__delattr__(...)` to be a constant (string).",
                     hints=[
                         "Ensure the attribute name is a string literal or a constant variable."
                     ],
