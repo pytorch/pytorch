@@ -165,6 +165,10 @@ static void mul_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "mul");
 }
 
+static void div_true_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "div_true");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -181,4 +185,5 @@ REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
 REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
+REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 } // namespace at::native
