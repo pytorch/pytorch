@@ -8,7 +8,11 @@ import torch
 from torch import Tensor
 from torch._inductor import config, utils
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM,
+)
+from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -698,6 +702,44 @@ class TestFP8Lowering(TestCase):
                 w_inverse_scale,
                 bias,
             )
+        self.assertEqual(y_eager.dtype, dtype)
+        self.assertEqual(y_compiled.dtype, dtype)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
+    def test_mx_fp8_max_autotune(self):
+        M, K, N = 128, 32, 128
+        BLOCK_SIZE = 32
+        device = "cuda"
+        dtype = torch.bfloat16
+        A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
+        B_ref = torch.eye(N, device=device, dtype=torch.bfloat16)
+        A = A_ref.to(torch.float8_e4m3fn)
+        B = B_ref.to(torch.float8_e4m3fn)
+        A_scale = torch.full(
+            (M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        B_scale = torch.full(
+            (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
+        )
+        A_scale = to_blocked(A_scale)
+        B_scale = to_blocked(B_scale)
+
+        def linear(A, B, A_scale, B_scale):
+            y = torch._scaled_mm(
+                A,
+                B.t(),
+                A_scale,
+                B_scale,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+            return y
+
+        y_eager = linear(A, B, A_scale, B_scale)
+
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        y_compiled = linear_compiled(A, B, A_scale, B_scale)
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
