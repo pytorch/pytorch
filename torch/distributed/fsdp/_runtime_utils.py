@@ -400,7 +400,7 @@ def _pre_forward(
             input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
             args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
         _register_post_backward_reshard_only_hook(state, handle, args, kwargs)
-        _p_assert(handle is None or handle._unwaited_unshard_work is None, "wait_unshard_work() must be called to ensure unshard work is completed")
+        _p_assert(handle is None or handle._all_gather_work is None, "wait_unshard_work() must be called to ensure unshard work is completed")
         return args, kwargs
 
 
@@ -693,7 +693,7 @@ def _pre_backward_hook(
             _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         handle._ran_pre_backward_hook = True
-        _p_assert(handle is None or handle._unwaited_unshard_work is None, "wait_unshard_work() must be called to ensure unshard work is completed")
+        _p_assert(handle is None or handle._all_gather_work is None, "wait_unshard_work() must be called to ensure unshard work is completed")
         return grad
 
 

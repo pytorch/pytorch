@@ -575,7 +575,7 @@ class FlatParamHandle:
         # Was the handle prefetched? Set on successful _prefetch_handle and unshard
         self._prefetched = False
         # Allgather work for unsharding
-        self._unwaited_unshard_work: Optional[dist.Work] = None
+        self._all_gather_work: Optional[dist.Work] = None
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1350,10 +1350,10 @@ class FlatParamHandle:
 
     def wait_unshard_work(self):
         """Wait for the unshard work to complete."""
-        if self._unwaited_unshard_work is None:
+        if self._all_gather_work is None:
             return  # no-op when there is no unshard work to wait for
-        self._unwaited_unshard_work.wait()
-        self._unwaited_unshard_work = None
+        self._all_gather_work.wait()
+        self._all_gather_work = None
 
     def needs_unshard(self) -> bool:
         """Return if the handle's flat parameter needs to be unsharded."""
@@ -1463,7 +1463,7 @@ class FlatParamHandle:
             )
         self.wait_unshard_work()
         if async_op:
-            self._unwaited_unshard_work = all_gather_work
+            self._all_gather_work = all_gather_work
 
         if self._offload_params:
             # In case of offloading, `flat_param.data` (i.e. sharded param) is
