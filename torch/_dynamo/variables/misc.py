@@ -930,7 +930,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             )
         if self.saved_tensors is None:
             unimplemented_v2(
-                gb_type="Unsupported autograd.Function context usage",
+                gb_type="Unsupported autograd.Function context `save_for_backward`",
                 context=f"call_method {self} {name}",
                 explanation="Dynamo requires the `saved_tensors` attribute "
                 "to be initialized on the `autograd.Function` context object.",
