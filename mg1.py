@@ -27,9 +27,8 @@ for m in [16]:
 			0,
 			backend_specializations=[
 				# hint, specialization
-				(15, lambda x0: x0 == 15),
-				# (16, lambda x0: x0 == 16),
-				# (16, lambda x0: x0 % 16 == 0),
+				(16, lambda x0: x0 == 16),
+				(16, lambda x0: x0 % 16 == 0),
 			]
 		)
 		torch._dynamo.decorators.mark_dynamic(
@@ -45,8 +44,8 @@ for m in [16]:
 			1,
 		)
 		inductor_matmul(m, static_a, static_b)
-		# ms = do_bench(lambda: inductor_matmul(m, static_a, static_b))
-		# print("static ms taken:", ms)
+		ms = do_bench(lambda: inductor_matmul(m, static_a, static_b))
+		print("static ms taken:", ms)
 		inductor_matmul(m, dynamic_a, dynamic_b)
-		# ms = do_bench(lambda: inductor_matmul(m, dynamic_a, dynamic_b))
-		# print("dynamic ms taken:", ms)
+		ms = do_bench(lambda: inductor_matmul(m, dynamic_a, dynamic_b))
+		print("dynamic ms taken:", ms)

@@ -1539,7 +1539,6 @@ class OutputGraph(OutputGraphGuardsState):
             if specialized_compiles:
                 def specialized_dispatch(*args, **kwargs):
                     for fn_name, check_fn, specialized_compiled_fn in specialized_compiles:
-                        print(check_fn(args))
                         if check_fn(args):
                             return specialized_compiled_fn(*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
