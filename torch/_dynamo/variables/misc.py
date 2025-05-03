@@ -265,7 +265,7 @@ class SuperVariable(VariableTracker):
                 )
             if not tx.output.side_effects.is_attribute_mutation(self.objvar):
                 unimplemented_v2(
-                    gb_type="Unsupported super() operation",
+                    gb_type="Attempted super().__delattr__() on an object without mutation tracking",
                     context=f"call_method {self} {name}",
                     explanation="Dynamo needs to track mutations on an object "
                     "before `super().__delattr__` can be used on it. But the "
