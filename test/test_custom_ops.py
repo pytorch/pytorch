@@ -3838,6 +3838,7 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertEqual(result, w * 2 * 3 * 42)
 
     def test_layout_constraint_tags(self):
+        needs_exact_strides = torch._C.Tag.needs_exact_strides
         needs_fixed_stride_order = torch._C.Tag.needs_fixed_stride_order
         flexible_layout = torch._C.Tag.flexible_layout
         # (tags, the result of the tag inference)
@@ -3845,11 +3846,11 @@ Please use `add.register_fake` to add an fake impl.""",
             ({needs_fixed_stride_order}, needs_fixed_stride_order),
             ({flexible_layout}, flexible_layout),
             # If no tags are provided, then the following is the default
-            (set(), needs_fixed_stride_order),
+            (set(), needs_exact_strides),
             # If multiple tags are provided, then we use the most constrained tag.
             ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
         ]
-        from torch._inductor.lowering import get_layout_constraint_tag
+        from torch._library.utils import get_layout_constraint_tag
 
         for tags, expected in tests:
             with torch.library._scoped_library("mylib", "FRAGMENT") as m:
@@ -4472,9 +4473,9 @@ class TestTypeConversion(TestCase):
 
 
 class TestOpProfiles(TestCase):
-    def get_sample_op_profile(self, opname) -> dict[str, set[OpProfile]]:
+    def get_sample_op_profile(self) -> dict[str, set[OpProfile]]:
         return {
-            opname: {
+            "mylib.foo.default": {
                 OpProfile(
                     args_profile=(
                         TensorMetadata(
@@ -4507,46 +4508,46 @@ class TestOpProfiles(TestCase):
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
 
-        op_profiles = self.get_sample_op_profile("mylib.foo2.default")
+        op_profiles = self.get_sample_op_profile()
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo2",
+                "mylib::foo",
                 "(Tensor a, Tensor b) -> Tensor",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo2", "cpu", lib=lib)
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
             def foo_impl(a, b):
                 return a + b
 
             with (
                 self.assertRaisesRegex(
                     torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                    "mylib.foo2.default",
+                    "mylib.foo.default",
                 ),
                 fm,
             ):
-                torch.ops.mylib.foo2(t1, t2)
+                torch.ops.mylib.foo(t1, t2)
 
             with (
                 torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles),
                 fm,
             ):
-                torch.ops.mylib.foo2(t1, t2)
+                torch.ops.mylib.foo(t1, t2)
 
-                with self.assertRaisesRegex(MissingOpProfile, "mylib::foo2"):
-                    torch.ops.mylib.foo2(torch.ones(3, 3, 3), torch.ones(3, 3, 3))
+                with self.assertRaisesRegex(MissingOpProfile, "mylib::foo"):
+                    torch.ops.mylib.foo(torch.ones(3, 3, 3), torch.ones(3, 3, 3))
 
             with (
                 self.assertRaisesRegex(
                     torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                    "mylib.foo2.default",
+                    "mylib.foo.default",
                 ),
                 fm,
             ):
-                torch.ops.mylib.foo2(t1, t2)
+                torch.ops.mylib.foo(t1, t2)
 
     def test_duplicate_registration_impl(self):
         fm = torch._subclasses.FakeTensorMode(
@@ -4555,33 +4556,33 @@ class TestOpProfiles(TestCase):
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
 
-        op_profiles = self.get_sample_op_profile("mylib.foo3.default")
+        op_profiles = self.get_sample_op_profile()
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo3",
+                "mylib::foo",
                 "(Tensor a, Tensor b) -> Tensor",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo3", "cpu", lib=lib)
-            def foo3_impl(a, b):
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo_impl(a, b):
                 return a + b
 
-            @torch.library.register_fake("mylib::foo3", lib=lib)
-            def foo3_impl_fake(a, b):
+            @torch.library.register_fake("mylib::foo", lib=lib)
+            def foo_impl_fake(a, b):
                 return (a + b).to(dtype=torch.bfloat16)
 
             with fm:
-                self.assertEqual(torch.ops.mylib.foo3(t1, t2).dtype, torch.bfloat16)
+                self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
 
             with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
                 with fm:
-                    self.assertEqual(torch.ops.mylib.foo3(t1, t2).dtype, torch.float32)
+                    self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.float32)
 
             with fm:
-                self.assertEqual(torch.ops.mylib.foo3(t1, t2).dtype, torch.bfloat16)
+                self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
 
     def test_duplicate_registration_custom_op(self):
         fm = torch._subclasses.FakeTensorMode(
@@ -4590,7 +4591,7 @@ class TestOpProfiles(TestCase):
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
 
-        op_profiles = self.get_sample_op_profile("mylib.foo1.default")
+        op_profiles = self.get_sample_op_profile()
 
         @torch.library.custom_op("mylib::foo1", mutates_args=())
         def foo_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -4602,6 +4603,10 @@ class TestOpProfiles(TestCase):
 
         with fm:
             self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.bfloat16)
+
+        op_profiles = {
+            "mylib.foo1.default": self.get_sample_op_profile()["mylib.foo.default"]
+        }
 
         with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
             with fm:
