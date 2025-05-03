@@ -23,8 +23,8 @@ RUN apt-get install --no-install-recommends -y \
     apt-get clean -y
 
 # Create Python virtual environment
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# RUN python3 -m venv /opt/venv
+# ENV PATH="/opt/venv/bin:$PATH"
 RUN pip3 install --upgrade pip
 
 # Install CLANG if version is specified
@@ -52,5 +52,7 @@ RUN if [ -n "$CUDA_VERSION" ]; then \
 # Set PATH for CUDA
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+ENV PIP_BREAK_SYSTEM_PACKAGES=1  
 
 RUN chown -R vscode:vscode /opt/venv
+
