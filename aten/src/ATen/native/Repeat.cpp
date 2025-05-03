@@ -42,10 +42,16 @@ namespace at::native {
 Tensor repeat_interleave_cpu(
     const Tensor& repeat,
     std::optional<int64_t> output_size) {
+  Tensor promoted = repeat;
+  if (repeat.scalar_type() == at::kChar ||
+    repeat.scalar_type() == at::kByte ||
+    repeat.scalar_type() == at::kShort) {
+    promoted = repeat.to(at::kInt);
+  }
   Tensor output;
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
+  AT_DISPATCH_INDEX_TYPES(promoted.scalar_type(), "repeat_interleave_cpu", [&](){
     output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
-        repeat, output_size);
+        promoted, output_size);
   });
 
   return output;
