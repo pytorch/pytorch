@@ -180,7 +180,7 @@ struct make_complex_functor {
   }
 };
 
-struct complex_mul_functor {
+struct mul_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     return c10::metal::mul(a, b);
@@ -225,6 +225,14 @@ REGISTER_BINARY_OP(add, short, short);
 REGISTER_BINARY_OP(add, uchar, uchar);
 REGISTER_BINARY_OP(add, char, char);
 REGISTER_BINARY_OP(add, bool, bool);
+REGISTER_BINARY_OP(mul, long, long);
+REGISTER_BINARY_OP(mul, int, int);
+REGISTER_OPMATH_BINARY_OP(mul, float, float);
+REGISTER_OPMATH_BINARY_OP(mul, half, half);
+REGISTER_BINARY_OP(mul, short, short);
+REGISTER_BINARY_OP(mul, uchar, uchar);
+REGISTER_BINARY_OP(mul, char, char);
+REGISTER_BINARY_OP(mul, bool, bool);
 REGISTER_BINARY_OP(sub, long, long);
 REGISTER_BINARY_OP(sub, int, int);
 REGISTER_BINARY_OP(sub, float, float);
@@ -272,6 +280,7 @@ REGISTER_BINARY_OP(chebyshev_polynomial_w, bfloat, bfloat);
 REGISTER_BINARY_OP(hermite_polynomial_h, bfloat, bfloat);
 REGISTER_BINARY_OP(hermite_polynomial_he, bfloat, bfloat);
 REGISTER_BINARY_OP(add, bfloat, bfloat);
+REGISTER_OPMATH_BINARY_OP(mul, bfloat, bfloat);
 REGISTER_BINARY_OP(sub, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat);
@@ -283,8 +292,8 @@ REGISTER_BINARY_OP(polar, float, float2);
 REGISTER_BINARY_OP(polar, half, half2);
 REGISTER_BINARY_OP(make_complex, float, float2);
 REGISTER_BINARY_OP(make_complex, half, half2);
-REGISTER_BINARY_OP(complex_mul, float2, float2);
-REGISTER_BINARY_OP(complex_mul, half2, half2);
+REGISTER_OPMATH_BINARY_OP(mul, float2, float2);
+REGISTER_OPMATH_BINARY_OP(mul, half2, half2);
 REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
 REGISTER_BINARY_OP(sub, float2, float2);

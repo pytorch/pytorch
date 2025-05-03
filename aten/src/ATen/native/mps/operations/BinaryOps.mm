@@ -27,7 +27,6 @@
 #include <ATen/ops/lt_native.h>
 #include <ATen/ops/maximum_native.h>
 #include <ATen/ops/minimum_native.h>
-#include <ATen/ops/mul_native.h>
 #include <ATen/ops/ne_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
@@ -330,15 +329,6 @@ CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
-TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  if (!mps::supportsComplex() && (c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type()))) {
-    return mps::complex_mul_out(self, other, output);
-  }
-  mps::binaryOpTensor(self, other, output, "mul", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    return [mpsGraph multiplicationWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryCastTensor name:nil];
-  });
-}
 TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
   mps::binaryOpTensor(self, other, output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
