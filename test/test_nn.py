@@ -11553,7 +11553,7 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     def test_ctc_loss_cudnn_tensor_cpu_length_cuda(self):
         # batch size
-        N = 50 
+        N = 50
         # audio length
         T = 100
         # text dimension

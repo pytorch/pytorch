@@ -151,9 +151,12 @@ bool _use_cudnn_ctc_loss_tensor(
         }
       }
     } else {
-      if (target_lengths.device().type() != at::kCUDA || input_lengths.device().type() != at::kCUDA) {
-        TORCH_CHECK(false, "CTCLoss cannot be graph captured with CPU length tensors. "
-                           "Move CPU length tensors to GPU memory to enable graph capture.")
+      if (target_lengths.device().type() != at::kCUDA ||
+          input_lengths.device().type() != at::kCUDA) {
+        TORCH_CHECK(
+            false,
+            "CTCLoss cannot be graph captured with CPU length tensors. "
+            "Move CPU length tensors to GPU memory to enable graph capture.")
       }
       at::_assert_async(at::lt(input_lengths.max(), 256));
       at::_assert_async(at::le(target_lengths, input_lengths).all());
