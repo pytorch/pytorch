@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
     requires_nccl,
     requires_nccl_version,
+    sm_is_or_higher_than,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -248,8 +249,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_allreduce_float8(self):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
-        numel = 1024
+        if not sm_is_or_higher_than(device, 9, 0):
+            self.skipTest("Float8 requires sm >= 90")
 
+        numel = 1024
         tensor = torch.ones(numel, dtype=torch.float32, device=device).to(
             torch.float8_e4m3fn
         )
@@ -913,8 +916,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_float8(self):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
-        numel = 1024
+        if not sm_is_or_higher_than(device, 9, 0):
+            self.skipTest("Float8 requires sm >= 90")
 
+        numel = 1024
         output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(
             torch.float8_e5m2
         )
