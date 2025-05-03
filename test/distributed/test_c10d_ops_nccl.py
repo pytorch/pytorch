@@ -916,17 +916,15 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         numel = 1024
 
         output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(
-            torch.float8_e4m3fn
+            torch.float8_e5m2
         )
         input_tensor = torch.ones(
             self.world_size * numel, dtype=torch.float32, device=device
-        ).to(torch.float8_e4m3fn)
+        ).to(torch.float8_e5m2)
         dist.reduce_scatter_tensor(output_tensor, input_tensor)
 
         expected = (
-            torch.empty_like(output_tensor)
-            .fill_(self.world_size)
-            .to(torch.float8_e4m3fn)
+            torch.empty_like(output_tensor).fill_(self.world_size).to(torch.float8_e5m2)
         )
         torch.testing.assert_close(output_tensor, expected)
 
