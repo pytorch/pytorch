@@ -353,7 +353,7 @@ class SuperVariable(VariableTracker):
         unimplemented_v2(
             gb_type="Attempted to call a super() attribute that is not a function or method",
             context=f"call_method {self} {name}",
-            explanation="Dynamo does not know how to trace `super()` for the "
+            explanation=f"Dynamo does not know how to trace the call `super().{name}()` because `super().{name}` is not a function or method".
             f"attribute `{name}`.",
             hints=[
                 "Ensure the attribute accessed via `super()` is a standard method or function.",
