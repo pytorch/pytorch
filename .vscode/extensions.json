@@ -1,5 +1,7 @@
 {
   "recommendations": [
     "ms-python.python",
+    "charliermarsh.ruff",
+    "ms-python.flake8",
   ]
 }
