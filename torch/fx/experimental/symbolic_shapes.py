@@ -1944,6 +1944,12 @@ class StatelessSymbolicContext(SymbolicContext):
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self) -> None:
+        if self.backend_specializations is None:
+            object.__setattr__(
+                self,
+                "backend_specializations",
+                [[]] * len(self.dynamic_sizes),
+            )
         if self.dynamic_strides is None:
             object.__setattr__(
                 self,
