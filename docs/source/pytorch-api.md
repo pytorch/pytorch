@@ -67,7 +67,7 @@ sparse
 storage
 torch.testing <testing>
 torch.utils <utils>
-torch.utils.pytree <pytree>
+torch.utils.pytree
 torch.utils.benchmark <benchmark_utils>
 torch.utils.bottleneck <bottleneck>
 torch.utils.checkpoint <checkpoint>
