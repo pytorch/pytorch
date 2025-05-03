@@ -834,10 +834,10 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
     if (t1.is_contiguous() && t2.is_contiguous()) {
       // If t1 and t2 are both contiguous, then flatten is a view,
       // then dot is the method of choice
-      return at::dot(t1.flatten(), t2.flatten());
+      return at::dot(t1.flatten(), t2.flatten()).reshape_symint(rsizes);
     } else {
       // Otherwise mul + sum can be faster as it avoids at most 2x contiguous() calls
-      return (t1.squeeze() * t2.squeeze()).sum();
+      return (t1.squeeze() * t2.squeeze()).sum().reshape_symint(rsizes);
     }
   }
 }
