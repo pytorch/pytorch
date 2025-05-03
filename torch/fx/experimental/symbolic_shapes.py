@@ -96,12 +96,6 @@ from torch.utils._sympy.value_ranges import (
     ValueRanges,
 )
 from torch.utils._traceback import CapturedTraceback, format_frame
-from typing import List, Tuple
-from typing_extensions import ParamSpec, TypeVar
-
-_P = ParamSpec("_P")
-_T = TypeVar("_T")
-
 
 
 if TYPE_CHECKING:
@@ -1930,7 +1924,6 @@ class StatelessSymbolicContext(SymbolicContext):
     dynamic_strides: DimList[DimDynamic] = None  # type: ignore[assignment]
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
-    backend_specializations: Optional[List[Tuple[object, Callable[_P, _T]]]] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
