@@ -937,7 +937,7 @@ def find_symbol_binding_fx_nodes(
     return r
 
 
-@dataclass
+@dataclass(frozen=True)
 class BackendSpecialization:
     source: TensorPropertySource
     hint: int
@@ -1582,7 +1582,7 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
+def expect_true(a: BoolLikeType, skip: int = 0, guard: bool = True) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1591,7 +1591,7 @@ def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0
+            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0, guard=guard
         )
     assert type(a) is bool, a
     return a
@@ -3579,7 +3579,7 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
 
-        self.backend_specializations = []
+        self.backend_specializations = set()
 
         from torch.fx.experimental.validator import translation_validation_enabled
 
@@ -4065,7 +4065,7 @@ class ShapeEnv:
                 symbolic_context=symbolic_context,
             )
             for specialization in symbolic_context.backend_specializations[i]:
-                self.backend_specializations.append(BackendSpecialization(
+                self.backend_specializations.add(BackendSpecialization(
                     TensorPropertySource(source, TensorProperty.SIZE, i),
                     *specialization,
                 ))
@@ -4250,7 +4250,7 @@ class ShapeEnv:
             ))
             sym_sizes.append(node)
             if specialization:
-                expect_true(specialization.check_fn(node))
+                expect_true(specialization.check_fn(node), guard=False)
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
