@@ -443,7 +443,7 @@ class ExceptionVariable(VariableTracker):
                 self.__traceback__ = val
             else:
                 unimplemented_v2(
-                    gb_type="Unsupported attribute assignment",
+                    gb_type="Set Exception object `__traceback__` attribute to not-`None`",
                     context=f"call_setattr {self} {name}",
                     explanation="Dynamo does not support setting the attribute "
                     "'__traceback__' on tracked exception objects to anything "
