@@ -351,7 +351,7 @@ class SuperVariable(VariableTracker):
             return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
         unimplemented_v2(
-            gb_type="Unsupported super() attribute type",
+            gb_type="Attempted to call a super() attribute that is not a function or method",
             context=f"call_method {self} {name}",
             explanation="Dynamo does not know how to trace `super()` for the "
             f"attribute `{name}`.",
