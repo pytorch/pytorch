@@ -667,7 +667,7 @@ class AutogradFunctionVariable(VariableTracker):
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
             if vjp_fn is not torch.autograd.Function.vjp:
                 unimplemented_v2(
-                    gb_type="Unsupported autograd.Function feature",
+                    gb_type="Unsupported custom vjp",
                     context=f"call_apply {self} {args} {kwargs}",
                     explanation="Dynamo does not support tracing "
                     "`torch.autograd.Function` subclasses that define "
