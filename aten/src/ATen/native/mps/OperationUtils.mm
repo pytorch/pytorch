@@ -1025,11 +1025,12 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
+  iter.cast_inputs_to_common_dtype(true);
+  iter.promote_common_dtype(true);
+
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
-  if (other.device() != input.device()) {
-     other = other.to(input.device());    //This ensures that in torch.copysign(t_mps, -2.0), the scalar is moved to MPS 
-  }
+
   Tensor out = iter.output();
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
