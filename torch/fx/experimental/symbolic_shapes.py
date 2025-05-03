@@ -4,6 +4,7 @@ import sympy
 from sympy import S
 
 from torch._prims_common import BoolLike, FloatLike, IntLike
+from torch.utils._ordered_set import OrderedSet
 
 
 """
@@ -3579,7 +3580,7 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
 
-        self.backend_specializations = set()
+        self.backend_specializations = OrderedSet()
 
         from torch.fx.experimental.validator import translation_validation_enabled
 
