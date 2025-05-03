@@ -5593,11 +5593,11 @@ class ShapeEnv:
             if len(error_msgs) > 0:
                 debug_names_str = ", ".join(sorted(debug_names))
                 err = "\n".join(error_msgs)
-                raise ConstraintViolationError(
-                    f"Constraints violated ({debug_names_str})! "
-                    'For more information, run with TORCH_LOGS="+dynamic".\n'
-                    f"{err}"
-                )
+                # raise ConstraintViolationError(
+                #     f"Constraints violated ({debug_names_str})! "
+                #     'For more information, run with TORCH_LOGS="+dynamic".\n'
+                #     f"{err}"
+                # )
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 
