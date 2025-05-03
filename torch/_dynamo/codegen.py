@@ -18,7 +18,7 @@ import re
 import sys
 import types
 from collections import Counter
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union, Any
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
@@ -597,12 +597,14 @@ class PyCodegen:
         if source not in self.tempvars:
             self.tempvars[source] = None
 
-    def make_specialized_call_generated_code(
+    def make_call_specialized_code(
         self,
         fn_name: str,
-        specializations: list[tuple[str, BackendSpecialization]],
+        specializations: list[tuple[str, BackendSpecialization, Any]],
     ) -> None:
         """Try specializations in order; fall back to fn_name if none match"""
+        from .variables.builder import (GraphArg)
+
         graphargs = self.tx.output.graphargs
         seen_sources: OrderedSet[Source] = OrderedSet()
 
@@ -620,14 +622,13 @@ class PyCodegen:
             if arg.source is not None:
                 collect_temp_source(arg.source)
 
-        for fn_spec_name, spec in specializations:
-            # Reconstruct the source expression to evaluate the specialization condition
-            self.call_reconstruct(GraphArg(source=spec.source, example_value=None))
-            self.extend_output(self.create_store_var("spec_value"))
+        for fn_spec_name, spec, _ in specializations:
+            self.call_reconstruct(spec.source)
+            self.extend_output(self.create_store("spec_value"))
 
             # Load the specialization function and call it with spec_value
-            self.extend_output(self.create_load_const(spec.specialization))
-            self.extend_output(self.create_load_var("spec_value"))
+            self.extend_output(self.create_load_const(spec.check_fn))
+            self.extend_output(self.create_load("spec_value"))
             self.extend_output(create_call_function(1, False))
 
             skip_label = self.new_block()

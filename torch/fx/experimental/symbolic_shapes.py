@@ -937,7 +937,7 @@ def find_symbol_binding_fx_nodes(
     return r
 
 
-@dataclass
+@dataclass(frozen=True)
 class BackendSpecialization:
     source: TensorPropertySource
     hint: int
@@ -3579,7 +3579,7 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
 
-        self.backend_specializations = []
+        self.backend_specializations = set()
 
         from torch.fx.experimental.validator import translation_validation_enabled
 
@@ -4065,7 +4065,7 @@ class ShapeEnv:
                 symbolic_context=symbolic_context,
             )
             for specialization in symbolic_context.backend_specializations[i]:
-                self.backend_specializations.append(BackendSpecialization(
+                self.backend_specializations.add(BackendSpecialization(
                     TensorPropertySource(source, TensorProperty.SIZE, i),
                     *specialization,
                 ))
