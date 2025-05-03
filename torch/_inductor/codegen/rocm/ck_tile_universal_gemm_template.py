@@ -77,7 +77,7 @@ class CKTileGemmOperation:
         )
 
     def name(self):
-        return "cktile_gemm_universal" + "_".join(
+        return "ck_tile_gemm_universal_" + "_".join(
             [
                 f"{self.layout_repr()}",
                 f"{self.dtype_repr()}",
@@ -131,6 +131,7 @@ def _default_ops_list():
         for k_is_padded in ["true", "false"]
         for (pipeline, scheduler) in [
             ("CompV3", "Intrawave"),
+            ("CompV4", "Intrawave"),
             ("Mem", "Intrawave"),
             ("Mem", "Interwave"),
         ]
@@ -369,7 +370,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         constexpr bool permuteA = false;
         constexpr bool permuteB = false;
-        constexpr bool DoubleSmemBuffer = false;
+        constexpr bool DoubleSmemBuffer = {{has_double_smem_buffer}};
         constexpr bool TransposeC = false;
 
         constexpr int kBlockPerCu                         = 1;
@@ -478,6 +479,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             rendered_scheduler=render_scheduler(op.scheduler),
             rendered_pipeline=render_pipeline(op.pipeline),
             rendered_epilogue=render_epilogue(op.epilogue),
+            has_double_smem_buffer=("true" if op.pipeline == "CompV4" else "false"),
         )
         return rendered_definition
 
@@ -535,10 +537,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             {{rendered_without_hot_loop}}
         } // if has_hot_loop
         """
-            pipeline_to_valid_tailnums = {
-                "CompV3": ("Full", "Odd", "Even"),
-                "Mem": ("Full", "One", "Two", "Three", "Four", "Five", "Six", "Seven"),
-            }
             if pipeline_type == "CompV3":
                 return self._template_from_string(dispatch_template).render(
                     rendered_with_hot_loop=self._template_from_string(
@@ -547,7 +545,6 @@ class CKTileGemmTemplate(CKTileTemplate):
                         has_hot_loop="ck_tile::integral_constant<bool, true>{}",
                         valid_tailnums=("Full", "Odd", "Even"),
                         pipeline=pipeline_type,
-                        instance_namespace=op_name,
                     ),
                     rendered_without_hot_loop=self._template_from_string(
                         switch_tailnum_template
@@ -555,7 +552,6 @@ class CKTileGemmTemplate(CKTileTemplate):
                         has_hot_loop="ck_tile::integral_constant<bool, false>{}",
                         valid_tailnums=("Full", "Odd", "Even"),
                         pipeline=pipeline_type,
-                        instance_namespace=op_name,
                     ),
                 )
             elif pipeline_type == "Mem":
@@ -567,7 +563,23 @@ class CKTileGemmTemplate(CKTileTemplate):
                         has_hot_loop="ck_tile::integral_constant<bool, false>{}",
                         valid_tailnums=("Full", "Odd", "Even"),
                         pipeline=pipeline_type,
-                        instance_namespace=op_name,
+                    ),
+                )
+            elif pipeline_type == "CompV4":
+                return self._template_from_string(dispatch_template).render(
+                    rendered_with_hot_loop=self._template_from_string(
+                        switch_tailnum_template
+                    ).render(
+                        has_hot_loop="ck_tile::integral_constant<bool, true>{}",
+                        valid_tailnums=("Two", "Three"),
+                        pipeline=pipeline_type,
+                    ),
+                    rendered_without_hot_loop=self._template_from_string(
+                        switch_tailnum_template
+                    ).render(
+                        has_hot_loop="ck_tile::integral_constant<bool, false>{}",
+                        valid_tailnums=("Full", "Odd", "Even"),
+                        pipeline=pipeline_type,
                     ),
                 )
             else:
