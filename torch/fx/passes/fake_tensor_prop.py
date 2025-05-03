@@ -43,6 +43,15 @@ class FakeTensorProp(torch.fx.Interpreter):
             rebind_unbacked,
         )
 
+        if (
+            n.op == "call_function"
+            and n.target is torch.ops.higher_order.invoke_subgraph
+        ):
+            subgraph_example_inputs = [a.meta["val"] for a in n.args[2:]]  # type: ignore[union-attr,arg-type]
+            FakeTensorProp(
+                getattr(self.module, n.args[0].target), mode=self._mode  # type: ignore[union-attr,arg-type]
+            ).propagate(*subgraph_example_inputs)
+
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)
 
