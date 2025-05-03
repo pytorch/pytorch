@@ -3,7 +3,7 @@
 {
   "name": "PyTorch - CPU",
   "build": {
-    "context": "../..",
+    "context": "./",
     "dockerfile": "../Dockerfile",
     "args": {
       "USERNAME": "vscode",
@@ -11,11 +11,14 @@
       "CLANG_VERSION": ""
     }
   },
+  // Mount the full repo only after the container starts
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/pytorch,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace/pytorch",
 
   // Features to add to the dev container. More info: https://containers.dev/features.
   "features": {
     // This is needed for lintrunner
-    "ghcr.io/devcontainers/features/rust:1" : {}
+    "ghcr.io/devcontainers/features/rust:1": {}
   },
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
