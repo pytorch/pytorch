@@ -254,7 +254,7 @@ class SuperVariable(VariableTracker):
                 attr = attr.as_python_constant()
             except NotImplementedError as exc:
                 unimplemented_v2(
-                    gb_type="Unsupported non-const delattr attribute",
+                    gb_type="Non-constant attribute given to `super().__delattr__()`",
                     context=f"call_method {self} {name}",
                     explanation="Dynamo requires the attribute name passed to "
                     "`super().__delattr__(...)` to be a constant string.",
