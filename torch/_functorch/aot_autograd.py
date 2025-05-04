@@ -1036,6 +1036,7 @@ def _try_get_metadata_from_dynamo(
         assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
+
         static_input_indices.append(i)
 
     # Collect the dynamo graph inputs
@@ -1051,8 +1052,8 @@ def _try_get_metadata_from_dynamo(
 
         # input[i] in dynamo is now:
         # input[i + len(extra_params)] in AOT,
-        # where extra_params are the params/buffers that dynamo baked into
-        # the OutputGraph
+        # where extra_params are the params/buffers that dynamo baked into the
+        # OutputGraph
         actual_pos = pos + len(param_keys)
 
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
