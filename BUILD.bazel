@@ -1,4 +1,5 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@com_github_google_flatbuffers//:build_defs.bzl", "flatbuffer_cc_library")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
@@ -659,6 +660,15 @@ cc_library(
 # torch
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 
+flatbuffer_cc_library(
+    name = "torch_flatbuffers",
+    srcs = [
+        "torch/csrc/jit/serialization/mobile_bytecode.fbs",
+    ],
+    flatc_args = ["--cpp", "--gen-mutable", "--scoped-enums"],
+    out_prefix = "torch/csrc/jit/serialization/",
+)
+
 cc_library(
     name = "torch_headers",
     hdrs = if_cuda(
@@ -672,6 +682,7 @@ cc_library(
         ],
         exclude = [
             "torch/csrc/*/generated/*.h",
+            "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
         ] + torch_cuda_headers,
     ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
     includes = [
@@ -686,6 +697,7 @@ cc_library(
     deps = [
         ":aten_headers",
         ":caffe2_headers",
+        ":torch_flatbuffers",
         "//c10",
         "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
@@ -728,6 +740,7 @@ cc_library(
             "torch/csrc/distributed/c10d/intra_node_comm.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
             "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
+            "torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp",
             "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
             "torch/csrc/distributed/c10d/NanCheck.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
