@@ -614,13 +614,13 @@ PickleOpCode Unpickler::readInstruction() {
           device.is_mtia() || device.is_hpu() || device.is_mps() ||
           device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
-      } else if (device.type() != DeviceType::CPU) {
+      } else if (device.type() != at::DeviceType::CPU) {
         TORCH_CHECK(
             false,
             "supported devices include CPU, CUDA, HPU and ",
             c10::get_privateuse1_backend(),
             " however got ",
-            DeviceTypeName(device.type(), false));
+            at::DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));
     } break;

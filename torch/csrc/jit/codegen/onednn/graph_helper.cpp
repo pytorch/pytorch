@@ -309,7 +309,7 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
   return makeWildcardOp(node);
 }
 
-static DeviceType inferDeviceFromValue(Value* v) {
+static at::DeviceType inferDeviceFromValue(Value* v) {
   auto tt = v->type()->cast<TensorType>();
   if (!tt) {
     return at::kCPU;
@@ -321,7 +321,7 @@ static DeviceType inferDeviceFromValue(Value* v) {
   return device->type();
 }
 
-static DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
+static at::DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
   auto dt = inferDeviceFromValue(graph->inputs()[0]);
   TORCH_CHECK(
       std::all_of(
@@ -332,9 +332,9 @@ static DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
   return dt;
 }
 
-static dnnl::engine::kind getLlgaEngineKind(DeviceType type) {
+static dnnl::engine::kind getLlgaEngineKind(at::DeviceType type) {
   switch (type) {
-    case DeviceType::CPU:
+    case at::DeviceType::CPU:
       return dnnl::engine::kind::cpu;
     default:
       TORCH_CHECK(false, "Not support device type ", type);

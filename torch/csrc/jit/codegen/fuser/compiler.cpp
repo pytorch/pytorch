@@ -283,7 +283,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =
-      getConstructor(use_cuda ? DeviceType::CUDA : DeviceType::CPU);
+      getConstructor(use_cuda ? at::DeviceType::CUDA : at::DeviceType::CPU);
   return kernel_ctor(
       device.index(),
       name,

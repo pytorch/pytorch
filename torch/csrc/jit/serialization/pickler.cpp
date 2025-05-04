@@ -726,7 +726,7 @@ WriteableTensorData getWriteableTensorData(
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() != DeviceType::CPU && to_cpu) {
+  if (tensor.storage().device_type() != at::DeviceType::CPU && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.

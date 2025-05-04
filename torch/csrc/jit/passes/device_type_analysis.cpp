@@ -47,7 +47,7 @@ bool setReturnsToDevice(Node* n, std::optional<Device> device) {
   return changed;
 }
 
-PropRule setReturnstoDeviceRule(DeviceType deviceType) {
+PropRule setReturnstoDeviceRule(at::DeviceType deviceType) {
   Device device = Device(deviceType);
   return [=](Node* n) { return setReturnsToDevice(n, device); };
 }
@@ -222,11 +222,11 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
 
     static OperatorMap<PropRule> temp_registry{
         {"aten::cpu(Tensor self) -> Tensor",
-         setReturnstoDeviceRule(DeviceType::CPU)},
+         setReturnstoDeviceRule(at::DeviceType::CPU)},
         {"aten::cuda(Tensor self) -> Tensor",
-         setReturnstoDeviceRule(DeviceType::CUDA)},
+         setReturnstoDeviceRule(at::DeviceType::CUDA)},
         {"aten::to_mkldnn(Tensor self, ScalarType? dtype) -> Tensor",
-         setReturnstoDeviceRule(DeviceType::MKLDNN)},
+         setReturnstoDeviceRule(at::DeviceType::MKLDNN)},
         {"aten::reshape_as(Tensor self, Tensor other) -> Tensor",
          returnFirstArgDeviceRule},
         {"aten::view_as(Tensor self, Tensor other) -> Tensor",

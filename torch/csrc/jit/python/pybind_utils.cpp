@@ -282,7 +282,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       auto stream = c10::Stream::unpack3(
           thp_stream->stream_id,
           static_cast<c10::DeviceIndex>(thp_stream->device_index),
-          static_cast<c10::DeviceType>(thp_stream->device_type));
+          static_cast<at::DeviceType>(thp_stream->device_type));
       return stream;
     }
     case TypeKind::ListType: {
