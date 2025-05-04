@@ -64,6 +64,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
+from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -1685,15 +1686,18 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with config.patch(
-            specialize_int=True,
-            specialize_float=specialize_float,
-            assume_static_by_default=assume_static_by_default,
-            automatic_dynamic_shapes=False,
-            capture_dynamic_output_shape_ops=True,
-            capture_scalar_outputs=True,
-            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-            allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        with (
+            config.patch(
+                specialize_int=True,
+                specialize_float=specialize_float,
+                assume_static_by_default=assume_static_by_default,
+                automatic_dynamic_shapes=False,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+                prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            ),
+            _compiling_state_context(),
         ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
