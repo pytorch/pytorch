@@ -1,4 +1,5 @@
 #include <torch/csrc/lazy/core/helpers.h>
+#include <algorithm>
 
 #include <c10/util/Half.h>
 #include <c10/util/irange.h>
@@ -10,6 +11,7 @@ std::vector<int64_t> DropDimensions(
     c10::ArrayRef<int64_t> sizes,
     c10::ArrayRef<int64_t> drop_dims) {
   std::vector<int64_t> new_dims;
+  new_dims.reserve(std::max(sizes.size() - drop_dims.size(), 0));
   size_t drop_index = 0;
   for (const auto i : c10::irange(sizes.size())) {
     if (drop_index < drop_dims.size() &&
