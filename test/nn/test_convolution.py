@@ -2359,7 +2359,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # same convolution ensures that o = i
         # To satisfy this, p = (k - 1) / 2
         # for k = 4, the padding is asymmetric (p = 1.5),
-        # so we will slice one unit on the left and two on the right.
+        # so we will slice two units on the left and one on the right.
         # For k = 5, the padding is symetric (p = 2)
         expect = F.conv_transpose2d(x, y, padding=(1, 2))[..., 1:, :]
         actual = F.conv_transpose2d(x, y, padding="same")
