@@ -400,7 +400,7 @@ def _get_subgraph_names(
     subgraph_names: OrderedSet[str] = OrderedSet()
     for node in sorted(gm.graph.find_nodes(op="get_attr")):
         attr_name = node.target
-        if attr_name not in subgraph_names:
+        if "." not in attr_name and attr_name not in subgraph_names:
             attr = getattr(gm, attr_name)
             if isinstance(attr, torch.fx.GraphModule):
                 subgraph_names.add(attr_name)
