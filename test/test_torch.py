@@ -8598,22 +8598,66 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             lambda: res.map2_(y, z, lambda a, b, c: a + b * c))
 
     def test_Size(self):
+        s0 = torch.Size([])
         x = torch.Size([1, 2, 3])
+
         self.assertIsInstance(x, tuple)
-        self.assertEqual(x[0], 1)
-        self.assertEqual(x[1], 2)
-        self.assertEqual(x[2], 3)
         self.assertEqual(len(x), 3)
         self.assertRaises(TypeError, lambda: torch.Size(torch.ones(3)))
 
-        self.assertIsInstance(x + (4, 5), torch.Size)
-        self.assertIsInstance((4, 5) + x, torch.Size)
-        self.assertIsInstance(torch.Size([]) + (), torch.Size)
-        self.assertIsInstance(() + torch.Size([]), torch.Size)
-        self.assertIsInstance(2 * x, torch.Size)
-        self.assertIsInstance(x * 2, torch.Size)
+        # type check __getitem__[int]
+        self.assertIsInstance(x[0], int)
+        self.assertIsInstance(x[1], int)
+        self.assertIsInstance(x[2], int)
+        # value check __getitem__[int]
+        self.assertEqual(x[0], 1)
+        self.assertEqual(x[1], 2)
+        self.assertEqual(x[2], 3)
+        # type check __getitem__[slice]
+        self.assertIsInstance(x[:], torch.Size)
         self.assertIsInstance(x[:-1], torch.Size)
+        self.assertIsInstance(x[0:0], torch.Size)
+        # value check __getitem__[slice]
+        self.assertEqual(x[:], (1, 2, 3))
+        self.assertEqual(x[:-1], (1, 2))
+        self.assertEqual(x[0:0], ())
+        # type check __add__
+        self.assertIsInstance(s0 + (), torch.Size)
+        self.assertIsInstance(x + (), torch.Size)
+        self.assertIsInstance(x + (4, 5), torch.Size)
         self.assertIsInstance(x + x, torch.Size)
+        # value check __add__
+        self.assertEqual(s0 + (), ())
+        self.assertEqual(x + (), (1, 2, 3))
+        self.assertEqual(x + (4, 5), (1, 2, 3, 4, 5))
+        self.assertEqual(x + x, (1, 2, 3, 1, 2, 3))
+        # type check __radd__
+        self.assertIsInstance(() + s0, torch.Size)
+        self.assertIsInstance((4, 5) + x, torch.Size)
+        # value check __radd__
+        self.assertEqual(() + x, (1, 2, 3))
+        self.assertEqual((4, 5) + x, (4, 5, 1, 2, 3))
+        # type check __mul__
+        self.assertIsInstance(s0 * 0, torch.Size)
+        self.assertIsInstance(x * 0, torch.Size)
+        self.assertIsInstance(x * 1, torch.Size)
+        self.assertIsInstance(x * 2, torch.Size)
+        # value check __mul__
+        self.assertEqual(s0 * 0, ())
+        self.assertEqual(x * 0, ())
+        self.assertEqual(x * 1, (1, 2, 3))
+        self.assertEqual(x * 2, (1, 2, 3, 1, 2, 3))
+        # type check __rmul__
+        self.assertIsInstance(0 * s0, torch.Size)
+        self.assertIsInstance(0 * x, torch.Size)
+        self.assertIsInstance(1 * x, torch.Size)
+        self.assertIsInstance(2 * x, torch.Size)
+        # value check __rmul__
+        self.assertEqual(0 * s0, ())
+        self.assertEqual(0 * x, ())
+        self.assertEqual(1 * x, (1, 2, 3))
+        self.assertEqual(2 * x, (1, 2, 3, 1, 2, 3))
+
 
     def test_Size_scalar(self):
         three = torch.tensor(3)
