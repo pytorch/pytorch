@@ -236,7 +236,7 @@ struct div_trunc_functor {
       typename T,
       ::metal::enable_if_t<!::metal::is_integral_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
-    return metal::trunc(c10::metal::div(a, b));
+    return T(metal::trunc(c10::metal::div(a, b)));
   }
   template <
       typename T,
@@ -310,8 +310,8 @@ REGISTER_BINARY_OP(div_floor, char, char);
 REGISTER_BINARY_OP(div_floor, bool, bool);
 REGISTER_BINARY_OP(div_trunc, long, long);
 REGISTER_BINARY_OP(div_trunc, int, int);
-REGISTER_OPMATH_BINARY_OP(div_trunc, float, float);
-REGISTER_OPMATH_BINARY_OP(div_trunc, half, half);
+REGISTER_BINARY_OP(div_trunc, float, float);
+REGISTER_BINARY_OP(div_trunc, half, half);
 REGISTER_BINARY_OP(div_trunc, short, short);
 REGISTER_BINARY_OP(div_trunc, uchar, uchar);
 REGISTER_BINARY_OP(div_trunc, char, char);
@@ -366,7 +366,7 @@ REGISTER_BINARY_OP(add, bfloat, bfloat);
 REGISTER_OPMATH_BINARY_OP(mul, bfloat, bfloat);
 REGISTER_BINARY_OP(sub, bfloat, bfloat);
 REGISTER_OPMATH_BINARY_OP(div_floor, bfloat, bfloat);
-REGISTER_OPMATH_BINARY_OP(div_trunc, bfloat, bfloat);
+REGISTER_BINARY_OP(div_trunc, bfloat, bfloat);
 REGISTER_OPMATH_BINARY_OP(div_true, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat);

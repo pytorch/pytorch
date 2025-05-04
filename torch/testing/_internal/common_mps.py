@@ -594,7 +594,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             # trunc_tensor not working properly for float16 and bfloat16
-            "divtrunc_rounding": [torch.float16, torch.bfloat16],
             "fmod": [torch.float16],
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
@@ -933,7 +932,6 @@ if torch.backends.mps.is_available():
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
             # trunc_tensor not working properly for float16
-            "divtrunc_rounding": [torch.float16],
             "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
