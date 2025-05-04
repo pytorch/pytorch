@@ -34,6 +34,7 @@ from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     TEST_CUDNN,
     TEST_MULTIGPU,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -164,6 +165,7 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
+    @serialTest
     def test_host_memory_stats(self):
         # Helper functions
         def empty_stats():
@@ -1130,7 +1132,7 @@ class TestCuda(TestCase):
         torch.cuda.set_device(src_device)
         with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.cuda.current_device(), 1)
-        self.assertEqual(torch.cuda.set_device(), src_device)
+        self.assertEqual(torch.cuda.current_device(), src_device)
 
     def test_stream_context_manager(self):
         prev_stream = torch.cuda.current_stream()
@@ -4865,15 +4867,16 @@ class TestBlockStateAbsorption(TestCase):
             torch.cuda.synchronize()
             stream = torch.cuda.Stream()
             stream.wait_stream(torch.cuda.current_stream())
-            stream_context = torch.cuda.stream(stream)
-            stream_context.__enter__()
-            torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
-            try:
-                yield
-            finally:
-                torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
-                torch._C._cuda_releasePool(device, mem_pool)
-                stream_context.__exit__(None, None, None)
+
+            with torch.cuda.stream(stream), torch.device(device):
+                torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
+                try:
+                    yield
+                finally:
+                    torch._C._cuda_endAllocateToPool(device, mem_pool)
+                    torch._C._cuda_releasePool(device, mem_pool)
+
+            torch.cuda.current_stream().wait_stream(stream)
 
         segments = get_cudagraph_segments(pool)
         self.assertEqual(len(get_cudagraph_segments(pool)), 1)
@@ -6210,7 +6213,7 @@ class TestCompileKernel(TestCase):
 
         # Verify results
         expected_int = a_int + b_int
-        torch.testing.assert_close(c_int, expected_int)
+        self.assertEqual(c_int, expected_int)
 
         # Test with header code
         header_code = """
@@ -6244,7 +6247,7 @@ class TestCompileKernel(TestCase):
 
         # Verify scaling
         expected_scaled = input_tensor * 2.0
-        torch.testing.assert_close(output_tensor, expected_scaled)
+        self.assertEqual(output_tensor, expected_scaled)
 
         # Test error handling with invalid kernel
         invalid_kernel_source = """
@@ -6256,6 +6259,7 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             _compile_kernel(invalid_kernel_source, "invalid_kernel")
 
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
@@ -6303,7 +6307,7 @@ class TestCompileKernel(TestCase):
 
         # Verify results
         expected = torch.matmul(A, B)
-        torch.testing.assert_close(C, expected, rtol=1e-5, atol=1e-5)
+        self.assertEqual(C, expected)
 
         # Test with different compute capability if specified
         device_props = torch.cuda.get_device_properties(torch.cuda.current_device())
@@ -6324,7 +6328,7 @@ class TestCompileKernel(TestCase):
         )
 
         # Verify results
-        torch.testing.assert_close(C_explicit, expected, rtol=1e-5, atol=1e-5)
+        self.assertEqual(C_explicit, expected)
 
 
 instantiate_parametrized_tests(TestCuda)
