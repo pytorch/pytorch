@@ -175,12 +175,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    # Temporarily disable
-    # The reason is that these three tests need to be compiled during testing,
-    # and they rely on the rocm header files, but the relevant header files are missing or not exposed in the test environment
-    "test_cpp_extensions_open_device_registration",
-    "test_openreg",
-    "test_transformers_privateuse1",
 ]
 
 S390X_BLOCKLIST = [
