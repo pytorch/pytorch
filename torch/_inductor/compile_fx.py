@@ -411,7 +411,7 @@ def _get_subgraph_names(
                 op="call_function", target=torch.ops.higher_order.invoke_subgraph
             )
         ):
-            subgraph_names.remove(node.args[0].target)
+            subgraph_names.discard(node.args[0].target)
 
     yield from subgraph_names
 
