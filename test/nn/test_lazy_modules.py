@@ -156,10 +156,7 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertTrue(isinstance(lazy_module, nn.Linear))
         self.assertTrue(lazy_module.weight.shape == (10, 5))
         self.assertTrue(lazy_module.bias.shape == (10,))
 
@@ -173,15 +170,10 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
-        self.assertTrue(isinstance(lazy_module, nn.LazyLinear))
+        self.assertTrue(isinstance(lazy_module, nn.Linear))
 
         input = torch.randn(5, 5)
         lazy_module(input)
-        self.assertFalse(isinstance(lazy_module, nn.LazyLinear))
         self.assertTrue(lazy_module.in_features == 5)
 
     def _check_lazy_conv(
@@ -245,10 +237,8 @@ class TestLazyModules(TestCase):
         module = gen_module()
         lazy_module = gen_lazy_module()
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Conv one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+
+        self.assertTrue(isinstance(lazy_module, module.__class__))
         self.assertEqual(lazy_module.weight.shape, expected_weight_shape)
         if lazy_module.bias is not None:
             self.assertEqual(lazy_module.bias.shape, expected_bias_shape)
@@ -605,10 +595,7 @@ class TestLazyModules(TestCase):
         module = cls(10)
         lazy_module = lazy_cls(affine=True, track_running_stats=True)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Conv one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertTrue(isinstance(lazy_module, cls))
         self.assertEqual(lazy_module.weight.shape, (10,))
         self.assertEqual(lazy_module.bias.shape, (10,))
         self.assertEqual(lazy_module.running_mean.shape, (10,))
@@ -627,10 +614,7 @@ class TestLazyModules(TestCase):
                     affine=affine, track_running_stats=track_running_stats
                 )
                 lazy_module.load_state_dict(module.state_dict())
-                # Parameters have been initialized but the module won't become a full
-                # InstanceNorm one until the first iteration. This is due to
-                # limitations on the state_dict loading logic
-                self.assertFalse(lazy_module.has_uninitialized_params())
+                self.assertTrue(isinstance(lazy_module, cls))
                 if affine:
                     self.assertEqual(lazy_module.weight.shape, (10,))
                     self.assertEqual(lazy_module.bias.shape, (10,))
