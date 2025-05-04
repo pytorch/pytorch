@@ -1,10 +1,10 @@
+import argparse
 import dataclasses
 import datetime
 import tempfile
 from collections import defaultdict
 from types import ModuleType
 from typing import Any, Optional, Protocol
-import argparse
 
 import torch
 from torch.autograd import DeviceType
@@ -366,11 +366,13 @@ def ncu_analyzer(
     else:
         ncu_cmd.extend(["--set", "full"])
 
-    ncu_cmd.extend([
-        "python",
-        "-c",
-        python_cmd,
-    ])
+    ncu_cmd.extend(
+        [
+            "python",
+            "-c",
+            python_cmd,
+        ]
+    )
 
     try:
         subprocess.run(ncu_cmd, check=True)
@@ -440,13 +442,20 @@ def compiled_module_main(
         "--ncu-kernel-regex",
         type=str,
         default=None,
-        help="Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). Maps to '--kernel-name regex:<regex>'. If None, NCU will profile all kernels.",
+        help=(
+            "Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). "
+            "Maps to '--kernel-name regex:<regex>'. "
+            "If None, NCU will profile all kernels."
+        ),
     )
     parser.add_argument(
         "--ncu-metrics",
         type=str,
         default=None,
-        help="Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). If None, NCU will use '--set full'.",
+        help=(
+            "Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). "
+            "If None, NCU will use '--set full'."
+        ),
     )
     args = parser.parse_args()
 
