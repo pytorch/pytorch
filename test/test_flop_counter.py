@@ -854,5 +854,6 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
+
 if __name__ == "__main__":
     run_tests()
