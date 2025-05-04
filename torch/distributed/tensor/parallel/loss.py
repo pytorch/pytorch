@@ -7,6 +7,7 @@ import torch
 import torch._prims_common as utils
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
+from torch.distributed.tensor._ops.utils import normalize_dim
 from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
@@ -160,6 +161,7 @@ def _log_softmax_handler(
     half_to_float = cast(bool, args[2])
 
     spec = x._spec
+    dim = normalize_dim(dim, x.dim()); 
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, dim)
 
     output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)
@@ -279,6 +281,7 @@ def _nll_loss_forward_handler(
 
     channel_dim = 1 if x.dim() >= 2 else 0
     spec = x._spec
+    dim = normalize_dim(dim, x.dim())
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 
     # Check user input: if target and weight are not DTensors, convert them to DTensors;
@@ -425,6 +428,7 @@ def _nll_loss_backward_handler(
 
     channel_dim = 1 if x.dim() >= 2 else 0
     spec = x._spec
+    dim = normalize_dim(dim, x.dim())
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 
     # if target and weight are not DTensors, convert them to DTensors
