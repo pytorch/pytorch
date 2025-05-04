@@ -279,11 +279,15 @@ class MetaTensorDescriber:
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False, specialization=None
     ) -> MetaTensorDesc:
         if specialization:
+            if not t.is_contiguous():
+                raise RuntimeError(
+                    "Backend specializations are only supported for contiguous tensors."
+                )
             t = t.to('meta')
             shape = list(t.shape)
             for i, hint in zip(specialization.idxs, specialization.hints):
                 shape[i] = hint
-            t = torch.ones(shape, dtype=t.dtype, device='meta')
+            t = torch.empty(shape, dtype=t.dtype, device='meta')
 
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
