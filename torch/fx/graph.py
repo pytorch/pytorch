@@ -1808,7 +1808,7 @@ class Graph:
             subgraph_names: OrderedSet[str] = OrderedSet()
             for node in sorted(self.find_nodes(op="get_attr")):
                 attr_name = node.target
-                if attr_name not in subgraph_names:
+                if "." not in attr_name and attr_name not in subgraph_names:
                     sub_mod = getattr(self.owning_module, attr_name)
                     if isinstance(sub_mod, torch.fx.GraphModule):
                         subgraph_names.add(attr_name)
