@@ -495,6 +495,46 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
+            "cross_entropy_loss": [
+                "def cross_entropy_loss({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self: Tensor",
+                            "target: Tensor",
+                            "weight: Option[Tensor] = None",
+                            "reduction: int = 1",
+                            "ignore_index: _int = -100",
+                            "label_smoothing: float = 0.0",
+                        ]
+                    )
+                )
+            ],
+            "elu": [
+                "def elu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self: Tensor",
+                            "alpha: int = 1",
+                            "scale: int = 1",
+                            "input_scale: int = 1",
+                            "*",
+                            "out: Tensor",
+                        ]
+                    )
+                )
+            ],
+            "upsample_trilinear3d": [
+                "def upsample_trilinear3d({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            f"{INPUT}",
+                            "output_size: union[_int, _size]",
+                            "align_corners: bool",
+                            "scales: list[float] = None",
+                        ]
+                    )
+                )
+            ],
         }
     )
 
