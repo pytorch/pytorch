@@ -98,12 +98,7 @@ from torch.utils._sympy.value_ranges import (
 )
 from torch.utils._traceback import CapturedTraceback, format_frame
 from typing import List, Tuple
-from typing_extensions import ParamSpec, TypeVar
-
-_P = ParamSpec("_P")
-_T = TypeVar("_T")
-
-
+from typing_extensions import ParamSpec
 
 if TYPE_CHECKING:
     import types
@@ -134,6 +129,7 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
+    "BackendSpecialization",
     "guard_or_false",
     "guard_or_true",
     "has_symbolic_sizes_strides",
@@ -204,6 +200,7 @@ def log_lru_cache_stats(wrapped_f: functools._lru_cache_wrapper[object]) -> None
 SympyBoolean: TypeAlias = "sympy.logic.boolalg.Boolean"
 
 
+_P = ParamSpec("_P")
 _T = TypeVar("_T")
 _SympyT = TypeVar("_SympyT", sympy.Expr, SympyBoolean, sympy.Basic)
 
@@ -1583,7 +1580,7 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: BoolLikeType, skip: int = 0, guard: bool = True) -> bool:
+def expect_true(a: BoolLikeType, skip: int = 0, dont_guard: bool = False) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1592,7 +1589,7 @@ def expect_true(a: BoolLikeType, skip: int = 0, guard: bool = True) -> bool:
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0, guard=guard
+            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0, dont_guard=dont_guard
         )
     assert type(a) is bool, a
     return a
@@ -4241,17 +4238,17 @@ class ShapeEnv:
 
         sym_sizes = []
         for i, (sym, hint) in enumerate(zip(size, ex_size)):
-            source = TensorPropertySource(source, TensorProperty.SIZE, i)
-            if specialization and specialization.source == source:
+            node_source = TensorPropertySource(source, TensorProperty.SIZE, i)
+            if specialization and specialization.source == node_source:
                 hint = specialization.hint
             node = (self.create_symintnode(
                 sym,
                 hint=hint,
-                source=source
+                source=node_source
             ))
             sym_sizes.append(node)
             if specialization:
-                expect_true(specialization.check_fn(node), guard=False)
+                expect_true(specialization.check_fn(node), dont_guard=True)
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
