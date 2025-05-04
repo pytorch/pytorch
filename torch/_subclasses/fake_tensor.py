@@ -24,7 +24,6 @@ import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
@@ -61,6 +60,7 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+    from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 
 log = logging.getLogger(__name__)
 

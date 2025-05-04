@@ -126,6 +126,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
+    from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 
     from .ir import ExternKernelNode
 
