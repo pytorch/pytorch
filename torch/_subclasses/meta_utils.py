@@ -55,8 +55,11 @@ if TYPE_CHECKING:
     # Import here to avoid cycle
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
-    from torch.fx.experimental.symbolic_shapes import BackendSpecialization
+    from torch.fx.experimental.symbolic_shapes import (
+        BackendSpecialization,
+        ShapeEnv,
+        SymbolicContext,
+    )
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
@@ -291,7 +294,7 @@ class MetaTensorDescriber:
                     "Backend specializations are only supported for contiguous tensors."
                 )
             shape = list(t.shape)
-            if specialization.source.base == source:
+            if specialization.source.base == source and specialization.source.idx:
                 shape[specialization.source.idx] = specialization.hint
             t = torch.empty(shape, dtype=t.dtype, device=t.device)
 
@@ -1909,7 +1912,9 @@ class MetaConverter(Generic[_TensorT]):
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
-        t_desc = self.describer.describe_tensor(t, trace=trace, source=source, specialization=specialization)
+        t_desc = self.describer.describe_tensor(
+            t, trace=trace, source=source, specialization=specialization
+        )
 
         if trace:
             assert source is not None

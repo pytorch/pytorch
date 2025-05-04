@@ -59,8 +59,11 @@ if TYPE_CHECKING:
 
     from torch._guards import Source
     from torch._ops import OpOverload
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
-    from torch.fx.experimental.symbolic_shapes import BackendSpecialization
+    from torch.fx.experimental.symbolic_shapes import (
+        BackendSpecialization,
+        ShapeEnv,
+        SymbolicContext,
+    )
 
 log = logging.getLogger(__name__)
 

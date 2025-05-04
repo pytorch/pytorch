@@ -300,7 +300,7 @@ class OutputGraphGuardsState:
     global_scope: Scope
     # This records the initial torch function mode stack for guarding
     torch_function_mode_stack: list[torch.overrides.TorchFunctionMode]
-    guard_on_key_order: set[str]
+    guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
     export: bool = False
@@ -1505,7 +1505,7 @@ class OutputGraph(OutputGraphGuardsState):
                 sources = [a.source for a in self.graphargs]
                 for specialization in old_fake_mode.shape_env.backend_specializations:
                     source_index = sources.index(specialization.source)
-                    check_fn = guards.LAMBDA_GUARD(
+                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
                         specialization.check_fn,
                         [inspect.getsource(specialization.check_fn)],
                     )
@@ -2461,12 +2461,21 @@ class SubgraphTracer(fx.Tracer):
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
-            if (
-                not is_strict_export
-                and not is_non_strict_export
-                and isinstance(example_value, torch.Tensor)
-            ):
-                self._lift_basic_symbols(example_value, source)
+            if not is_strict_export and not is_non_strict_export:
+                if isinstance(example_value, torch.Tensor):
+                    self._lift_basic_symbols(example_value, source)
+                elif isinstance(example_value, (list, tuple)):
+                    for i, e in enumerate(example_value):
+                        if not isinstance(e, torch.Tensor):
+                            continue
+
+                        e_source = None
+                        if source:
+                            e_source = GetItemSource(
+                                base=source, index=i, index_is_slice=False
+                            )
+
+                        self._lift_basic_symbols(e, e_source)
 
             # Bound the symbol to ph if example_value is a SymInt with basic symbol.
             if isinstance(example_value, torch.SymInt) and isinstance(

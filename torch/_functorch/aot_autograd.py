@@ -15,7 +15,6 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import (
     CompileEventLogger,
@@ -32,7 +31,7 @@ from torch.fx.experimental.proxy_tensor import (
     _pytree_subclasses_that_lose_info,
     make_fx,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import BackendSpecialization, ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
@@ -1039,6 +1038,7 @@ def _try_get_metadata_from_dynamo(
         assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
+
         static_input_indices.append(i)
 
     # Collect the dynamo graph inputs
@@ -1054,8 +1054,8 @@ def _try_get_metadata_from_dynamo(
 
         # input[i] in dynamo is now:
         # input[i + len(extra_params)] in AOT,
-        # where extra_params are the params/buffers that dynamo baked into
-        # the OutputGraph
+        # where extra_params are the params/buffers that dynamo baked into the
+        # OutputGraph
         actual_pos = pos + len(param_keys)
 
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
