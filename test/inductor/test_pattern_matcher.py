@@ -1729,6 +1729,78 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f(inp.clone().detach()), f_replaced(inp.clone().detach()))
         self.assertEqual(count, 1)
 
+    def test_mutable_op_view_inputs_register_replacement(self):
+        @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x"})
+        def foo_inplace(x: torch.Tensor) -> None:
+            x.add_(1)
+
+        # NOTE: only returning None is supported; the custom op cannot return `out` because it's part of op input.
+        @torch.library.custom_op("mylib::bar", mutates_args={"out"})
+        def bar_out(x: torch.Tensor, out: torch.Tensor) -> None:
+            out.copy_(x + 2)
+
+        @register_fake("mylib::bar")
+        def bar_out_fake(x: torch.Tensor, out: torch.Tensor) -> None:
+            return None
+
+        @torch.library.custom_op("mylib::foobar_out", mutates_args={"out"})
+        def foobar_out(x: torch.Tensor, out: torch.Tensor) -> None:
+            x.add_(1)
+            out.copy_(x + 7)  # intentionally different from bar_out
+
+        def mutable_ops_pattern(x, out):
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def mutable_ops_replacement(x, out):
+            foobar_out(x, out)
+            return out
+
+        inp = torch.randn(3, 3)
+
+        my_patterns = PatternMatcherPass()
+        register_replacement(
+            search_fn=mutable_ops_pattern,
+            replace_fn=mutable_ops_replacement,
+            example_inputs=[inp[0].clone().detach(), inp[0].clone().detach()],
+            trace_fn=functools.partial(fwd_only, apply_auto_functionalize=True),
+            pass_dicts=my_patterns,
+        )
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        # user-function
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f(x):
+            x = x.clone()[0]
+            out = torch.zeros_like(x)
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def f_replaced(x):
+            x = x.clone()[0]
+            out = torch.zeros_like(x)
+            foobar_out(x, out)
+            return out
+
+        self.assertEqual(f(inp.clone().detach()), f_replaced(inp.clone().detach()))
+        self.assertEqual(count, 1)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

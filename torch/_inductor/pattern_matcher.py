@@ -2097,6 +2097,8 @@ def fwd_only(
         if apply_auto_functionalize:
             fn = dispatch_functionalize(fn)
         gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
+        if apply_auto_functionalize:
+            print(f"DEBUG here3: fwd_only: called make_fx, gm.graph: {gm.graph}")
 
     from .fx_passes.post_grad import remove_noop_ops
 
