@@ -4,8 +4,8 @@ from torch._inductor.utils import fresh_inductor_cache
 
 @torch.compile(
     options={
-        # "max_autotune": True,
-        # "max_autotune_gemm_backends": "TRITON",
+        "max_autotune": True,
+        "max_autotune_gemm_backends": "TRITON",
     },
     dynamic=False,
 )

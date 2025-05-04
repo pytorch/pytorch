@@ -4239,7 +4239,8 @@ class ShapeEnv:
         sym_sizes = []
         for i, (sym, hint) in enumerate(zip(size, ex_size)):
             node_source = TensorPropertySource(source, TensorProperty.SIZE, i)
-            if specialization and specialization.source == node_source:
+            should_specialize = specialization and specialization.source == node_source
+            if should_specialize:
                 hint = specialization.hint
             node = (self.create_symintnode(
                 sym,
@@ -4247,7 +4248,7 @@ class ShapeEnv:
                 source=node_source
             ))
             sym_sizes.append(node)
-            if specialization:
+            if should_specialize:
                 expect_true(specialization.check_fn(node), dont_guard=True)
 
         sym_stride = []

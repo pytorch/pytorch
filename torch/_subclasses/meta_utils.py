@@ -942,6 +942,7 @@ class MetaConverter(Generic[_TensorT]):
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
+            specialization = None
         ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
             assert t.stride is not None
             if shape_env is not None:
@@ -1690,7 +1691,7 @@ class MetaConverter(Generic[_TensorT]):
                         sizes,
                         strides,
                         storage_offset,
-                    ) = sym_sizes_strides_storage_offset(t, source, symbolic_context)
+                    ) = sym_sizes_strides_storage_offset(t, source, symbolic_context, specialization=specialization)
 
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
