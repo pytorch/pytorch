@@ -151,7 +151,7 @@ static PyObject* THPSize_repr(THPSize* self) {
 
 static PyObject* THPSize_add(PyObject* self, PyObject* other) {
   HANDLE_TH_ERRORS
-  if (!PyTuple_Check(other)) {
+  if (!PyTuple_Check(self) || !PyTuple_Check(other)) {
     Py_RETURN_NOTIMPLEMENTED;
   }
 

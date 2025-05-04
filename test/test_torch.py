@@ -8637,6 +8637,20 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(1 * x, (1, 2, 3))
         self.assertEqual(2 * x, (1, 2, 3, 1, 2, 3))
 
+    def test_Size_add_sequence(self):
+        from collections.abc import Sequence
+
+        class DummySequence(Sequence):
+            vals = list(range(5))
+            def __len__(self): return len(self.vals)
+            def __getitem__(self, i): return self.vals[i]
+            def __iter__(self): return iter(self.vals)
+
+        s = torch.Size([1, 2, 3])
+        seq = DummySequence()
+
+        self.assertRaises(TypeError, lambda: s + seq)
+        self.assertRaises(TypeError, lambda: seq + s)
 
     def test_Size_scalar(self):
         three = torch.tensor(3)
