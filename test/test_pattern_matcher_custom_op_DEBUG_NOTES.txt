@@ -1,0 +1,6 @@
+DEBUG NOTES:
+1. even the nonmutable-op version doesn't work right now, because custom op is automatically wrapped in auto_functionalized / auto_functionalized_v2,
+   while the pattern is looking for vanilla ops.
+   TODO: we should convert the pattern to auto_functionalized_v2 and then do matching.
+    - Richard said we can maybe use torch.func.functionalize + make_fx
+2. after the nonmutable-op version is fixed, we will move to mutable-op-nonview version.

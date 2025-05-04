@@ -77,6 +77,7 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
+from torch._subclasses.functional_tensor import FunctionalTensorMode, FunctionalTensor, dispatch_functionalize
 
 
 log = logging.getLogger(__name__)
@@ -1017,8 +1018,12 @@ class PatternPrettyPrinter:
         """
 
         pp = PatternPrettyPrinter()
-        assert hasattr(obj, "pretty_print")
-        out_str = obj.pretty_print(pp=pp)
+        print(f"obj: {obj}, type(obj): {type(obj)}")
+        if isinstance(obj, KeywordArg):
+            out_str = obj.name
+        else:
+            assert hasattr(obj, "pretty_print")
+            out_str = obj.pretty_print(pp=pp)
 
         output = [
             f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}"
@@ -1072,6 +1077,7 @@ class PatternEntry:
         target: Union[torch.fx.node.Target, None] = None,
         prepend: bool = False,
     ) -> None:
+        print(f"target: {target}, self.pattern: {self.pattern}")
         if target is None:
             assert hasattr(self.pattern, "fns")
             for fn in self.pattern.fns:
@@ -1902,6 +1908,12 @@ class PatternMatcherPass:
         return self.patterns[item]
 
     def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
+        import traceback
+        traceback.print_stack()
+        if "pass_pattern_" in str(traceback.format_stack()):
+            print(f"PatternMatcherPass: apply: entering, pass_pattern_, gm: {gm}")
+            for op, target in self.patterns:
+                print(f"self.patterns: op: {op}, target: {target}")
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
@@ -2082,15 +2094,18 @@ def fwd_only(
     fn: Callable[..., Any],
     args: Sequence[Any],
     *,
+    apply_auto_functionalize: bool = False,
     run_functional_passes: bool = True,
     get_decomp_fn: Optional[Callable[..., Any]] = None,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
-    # TODO - look into using aot autograd, asserting no mutating ops here
+
     with enable_python_dispatcher():
         decompositions = (
             get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
         )
+        if apply_auto_functionalize:
+            fn = dispatch_functionalize(fn)
         gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
