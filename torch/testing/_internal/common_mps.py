@@ -283,8 +283,6 @@ if torch.backends.mps.is_available():
         }
         # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
         MACOS_BEFORE_13_3_XFAILLIST = {
-            # float16 seems horribly wrong on MacOS13
-            "floor_divide": [torch.float16],
             # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
             "tan": [torch.float32],
             "cdist": [torch.float32],
