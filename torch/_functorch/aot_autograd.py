@@ -15,6 +15,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
+from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import (
     CompileEventLogger,
@@ -489,7 +490,7 @@ def process_inputs(
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
     ignore_shape_env: bool = False,
-    specialization = None,
+    specialization: Optional[BackendSpecialization] = None,
 ) -> FakifiedFlatArgs:
     with fake_mode:
 
@@ -548,7 +549,7 @@ def process_inputs(
                 symbolic_context=symbolic_context,
                 source=source,
                 trace=trace,
-                specialization=specialization
+                specialization=specialization,
             )
             return result
 
@@ -1085,7 +1086,7 @@ def aot_module_simplified(
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     ignore_shape_env: bool = False,
-    specialization = None,
+    specialization: Optional[BackendSpecialization] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1157,7 +1158,12 @@ def aot_module_simplified(
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(
-        full_args, aot_config, fake_mode, shape_env, ignore_shape_env, specialization=specialization
+        full_args,
+        aot_config,
+        fake_mode,
+        shape_env,
+        ignore_shape_env,
+        specialization=specialization,
     )
 
     def dispatch_and_compile():

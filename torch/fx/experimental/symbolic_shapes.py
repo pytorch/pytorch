@@ -41,6 +41,7 @@ from typing import (
     Any,
     Callable,
     cast,
+    Generic,
     NamedTuple,
     NoReturn,
     Optional,
@@ -48,7 +49,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias, TypeGuard
+from typing_extensions import deprecated, ParamSpec, TypeAlias, TypeGuard
 
 import torch
 import torch.fx
@@ -71,7 +72,6 @@ from torch.fx.experimental.recording import (
 )
 from torch.fx.experimental.sym_node import SymNode, SymTypes
 from torch.types import py_sym_types
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
     Application,
@@ -97,8 +97,7 @@ from torch.utils._sympy.value_ranges import (
     ValueRanges,
 )
 from torch.utils._traceback import CapturedTraceback, format_frame
-from typing import List, Tuple
-from typing_extensions import ParamSpec
+
 
 if TYPE_CHECKING:
     import types
@@ -106,6 +105,7 @@ if TYPE_CHECKING:
     from torch import Tensor
     from torch._subclasses.fake_tensor import FakeTensor
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
+    from torch._dynamo.source import TensorPropertySource
 
 
 InputList = list
@@ -941,6 +941,7 @@ class BackendSpecialization:
     hint: int
     check_fn: Callable
 
+
 # Analogous to ConvertIntSource
 @dataclass(frozen=True)
 class ConvertIntKey:
@@ -1589,7 +1590,9 @@ def expect_true(a: BoolLikeType, skip: int = 0, dont_guard: bool = False) -> boo
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0, dont_guard=dont_guard
+            frame.f_code.co_filename if frame else "",
+            frame.f_lineno if frame else 0,
+            dont_guard=dont_guard,
         )
     assert type(a) is bool, a
     return a
@@ -1922,8 +1925,11 @@ class SymIntSymbolicContext(SymbolicContext):
     constraint: DimConstraint
 
 
+_P1 = ParamSpec("_P1")
+_T1 = TypeVar("_T1")
+
 @dataclass(frozen=True)
-class StatelessSymbolicContext(SymbolicContext):
+class StatelessSymbolicContext(Generic[_P1, _T1], SymbolicContext):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
     a symbolic_context determination as given by ``DimDynamic`` and ``DimConstraint``.
@@ -1934,7 +1940,7 @@ class StatelessSymbolicContext(SymbolicContext):
     dynamic_strides: DimList[DimDynamic] = None  # type: ignore[assignment]
     constraint_sizes: DimList[DimConstraint] = None  # type: ignore[assignment]
     constraint_strides: DimList[DimConstraint] = None  # type: ignore[assignment]
-    backend_specializations: Optional[list[list[tuple[int, Callable[_P, _T]]]]] = None
+    backend_specializations: Optional[list[list[tuple[int, Callable[_P1, _T1]]]]] = None
     # If the tensor is a view, this should be populated for the base. It contains
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
@@ -3577,7 +3583,7 @@ class ShapeEnv:
 
         self.trace_asserts = trace_asserts
 
-        self.backend_specializations = OrderedSet()
+        self.backend_specializations: OrderedSet[BackendSpecialization] = OrderedSet()
 
         from torch.fx.experimental.validator import translation_validation_enabled
 
@@ -4062,11 +4068,14 @@ class ShapeEnv:
                 do_not_specialize_zero_one=config.backed_size_oblivious,
                 symbolic_context=symbolic_context,
             )
-            for specialization in symbolic_context.backend_specializations[i]:
-                self.backend_specializations.add(BackendSpecialization(
-                    TensorPropertySource(source, TensorProperty.SIZE, i),
-                    *specialization,
-                ))
+            if isinstance(symbolic_context, StatelessSymbolicContext):
+                for specialization in symbolic_context.backend_specializations[i]:
+                    self.backend_specializations.add(
+                        BackendSpecialization(
+                            TensorPropertySource(source, TensorProperty.SIZE, i),
+                            *specialization,
+                        )
+                    )
             if (
                 config.backed_size_oblivious
                 and isinstance(sym, sympy.Symbol)  # could be static
@@ -4165,7 +4174,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-        specialization = None,
+        specialization: Optional[BackendSpecialization] = None,
     ) -> tuple[tuple[IntLikeType, ...], tuple[IntLikeType, ...], IntLikeType,]:
         dim = len(ex_size)
 
@@ -4241,14 +4250,12 @@ class ShapeEnv:
             node_source = TensorPropertySource(source, TensorProperty.SIZE, i)
             should_specialize = specialization and specialization.source == node_source
             if should_specialize:
+                assert specialization # make mypy happy
                 hint = specialization.hint
-            node = (self.create_symintnode(
-                sym,
-                hint=hint,
-                source=node_source
-            ))
+            node = self.create_symintnode(sym, hint=hint, source=node_source)
             sym_sizes.append(node)
             if should_specialize:
+                assert specialization # make mypy happy
                 expect_true(specialization.check_fn(node), dont_guard=True)
 
         sym_stride = []
