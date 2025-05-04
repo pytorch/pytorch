@@ -1,5 +1,6 @@
 #include <string>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <fmt/format.h>
 #include <iostream>
 #include <optional>
 
@@ -23,6 +24,8 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Attention_metallib.h>
 #endif
+
+static constexpr int SIMD_SIZE = 32;
 
 // expand potential 3d to 4d tensor
 static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
@@ -170,9 +173,9 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   size_t v_head_stride = v_.stride(1);
   size_t v_seq_stride = v_.stride(2);
 
-  auto out = at::empty({batchSize, num_head, qSize, headSize}, orig_query.options());
-  auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, orig_query.options());
-  auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
+  auto out = at::empty({batchSize, num_head, qSize, headSize}, q_.options());
+  auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, q_.options());
+  auto scale_factor = sdp::calculate_scale(q_, scale).expect_float();
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
@@ -182,8 +185,8 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
       bool has_mask = mask_.has_value();
       bool query_transposed = q_.is_contiguous();
 
-      std::string pipelineKey = "sdpa_vector_" + scalarToMetalTypeString(q_) + "_" + std::to_string(q_.size(-1)) + "_" +
-          std::to_string(v_.size(-1));
+      const std::string pipelineKey =
+          fmt::format("sdpa_vector_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
       auto attentionPSO = lib.getPipelineStateForFunc(pipelineKey);
       [computeEncoder setComputePipelineState:attentionPSO];
       mtl_setArgs(computeEncoder,
@@ -248,25 +251,23 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   size_t v_head_stride = v_.stride(1);
   size_t v_seq_stride = v_.stride(2);
 
-  auto out = at::empty({batchSize, num_heads, seq_len_q, headSize}, orig_query.options());
-  auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, headSize}, orig_query.options());
-  auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, orig_query.options());
-  auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, orig_query.options());
+  auto out = at::empty({batchSize, num_heads, seq_len_q, headSize}, q_.options());
+  auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, headSize}, q_.options());
+  auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options());
+  auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options());
 
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
   bool has_mask = mask_.has_value();
   bool query_transposed = !q_.is_contiguous();
-  std::string kname = "sdpa_vector_2pass_1_";
-  kname += scalarToMetalTypeString(q_);
-  kname += "_" + std::to_string(q_.size(-1));
-  kname += "_" + std::to_string(v_.size(-1));
+  std::string kname =
+      fmt::format("sdpa_vector_2pass_1_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
 
   auto& lib = MetalShaderLibrary::getBundledLibrary();
   MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      MTLSize group_dims = MTLSizeMake(8 * 32, 1, 1);
+      MTLSize group_dims = MTLSizeMake(8 * SIMD_SIZE, 1, 1);
       MTLSize grid_dims = MTLSizeMake(B, seq_len_q, blocks);
 
       auto pipeline = lib.getPipelineStateForFunc(kname);
@@ -369,22 +370,20 @@ static inline std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q
   }
 
   float scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
-  auto out = at::empty_like(orig_query);
+  auto out = at::empty_like(q_);
 
-  int wm = 4;
-  int wn = 1;
-  int bq = 32;
-  int bd = headSize;
-  int bk = (bd < 128 ? 32 : 16);
-  int gqa_factor = static_cast<int>(q_.size(1) / k_.size(1));
+  constexpr uint wm = 4;
+  constexpr uint wn = 1;
+  constexpr uint bq = 32;
+  uint bd = headSize;
+  uint bk = (bd < 128 ? 32 : 16);
+  uint gqa_factor = static_cast<int>(q_.size(1) / k_.size(1));
 
   const int NQ = (qL + bq - 1) / bq;
   const int NK = (kL + bk - 1) / bk;
 
-  std::ostringstream kernelNameStream;
-  kernelNameStream << "attention_" << scalarToMetalTypeString(q_) << "_bq" << bq << "_bk" << bk << "_bd" << bd << "_wm"
-                   << wm << "_wn" << wn;
-  std::string base_name = kernelNameStream.str();
+  std::string base_name =
+      fmt::format("attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}", scalarToMetalTypeString(q_), bq, bk, bd, wm, wn);
 
   auto& lib = MetalShaderLibrary::getBundledLibrary();
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -422,7 +421,7 @@ static inline std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q
                                           static_cast<uint32_t>(out.stride(2))});
 
       MTLSize group_dims = MTLSizeMake(NQ, num_heads, batchSize);
-      MTLSize threadsPerGroup = MTLSizeMake(32, wm, wn);
+      MTLSize threadsPerGroup = MTLSizeMake(SIMD_SIZE, wm, wn);
       [computeEncoder dispatchThreadgroups:group_dims threadsPerThreadgroup:threadsPerGroup];
     }
   });
@@ -468,7 +467,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       (query_head_dim == value_head_dim) && (query_head_dim == 64 || query_head_dim == 80 || query_head_dim == 128);
 
   // TODO Irakli this should be tuned to find the best perf
-  int threshold = 32; //
+  int threshold = 32;
   int query_seq_len = q_.size(2);
   // Fast Full attention: when the sequence length is long enough,
   // no mask is provided and the head dimensions are supported.
@@ -481,7 +480,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       ((!mask_.has_value()) || (mask_.value().dtype() == at::kBool)) && sdpa_vector_supported_head_dim;
 
   // boolean to decide if we can use kernel paths
-  bool supports_fast_sdpa = supports_sdpa_vector || supports_sdpa_full;
+  bool supports_fast_sdpa = !is_causal && (supports_sdpa_vector || supports_sdpa_full);
 
   // if none of the fast paths apply, fall back to the generic mps graph solution
   if (!supports_fast_sdpa) {
@@ -490,16 +489,34 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
 
   // dispatch to the fast SDPA implementation
   if (query_seq_len <= 8) {
+    auto is_contiguous_or_head_seq_transposed = [](const Tensor& t) -> bool {
+      if (t.is_contiguous())
+        return true;
+      auto sizes = t.sizes();
+      auto strides = t.strides();
+      return (strides[3] == 1) && (strides[2] == sizes[3] * sizes[1]) && (strides[1] == sizes[3]) &&
+          (strides[0] == strides[2] * sizes[2]);
+    };
+
+    Tensor q_contig = is_contiguous_or_head_seq_transposed(q_) ? q_ : q_.contiguous();
+    Tensor k_contig = k_.contiguous();
+    Tensor v_contig = v_.contiguous();
+
     // For short sequences, further differentiate based on key sequence length
     if ((k_.size(2) >= 1024) || (k_.size(1) < q_.size(1) && k_.size(2) >= 4096)) {
-      return sdpa_vector_2pass_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+      return sdpa_vector_2pass_mps(
+          q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
     } else {
-      return sdpa_vector_fast_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+      return sdpa_vector_fast_mps(
+          q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
     }
   } else {
-    return sdpa_full_attention_mps(q_, k_, v_, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
+    Tensor q_contig = q_.contiguous();
+    Tensor k_contig = k_.contiguous();
+    Tensor v_contig = v_.contiguous(); ////
+    return sdpa_full_attention_mps(
+        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
 }
-
 } // namespace native
 } // namespace at

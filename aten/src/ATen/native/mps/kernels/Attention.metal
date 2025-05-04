@@ -67,7 +67,7 @@ template <typename T, int D, int V = D>
 
   // Read the query and 0 the output accumulator
   for (int i = 0; i < qk_per_thread; i++) {
-    q[i] = static_cast<U>(scale) * queries[i];
+    q[i] = scale * static_cast<U>(queries[i]);
   }
   for (int i = 0; i < v_per_thread; i++) {
     o[i] = 0;
@@ -81,7 +81,7 @@ template <typename T, int D, int V = D>
     if (!has_mask || mask[0]) {
       // Read the key
       for (int j = 0; j < qk_per_thread; j++) {
-        k[j] = keys[j];
+        k[j] = static_cast<U>(keys[j]);
       }
 
       // Compute the i-th score
@@ -101,7 +101,7 @@ template <typename T, int D, int V = D>
 
       // Update the output accumulator
       for (int j = 0; j < v_per_thread; j++) {
-        o[j] = o[j] * factor + exp_score * values[j];
+        o[j] = o[j] * factor + exp_score * static_cast<U>(values[j]);
       }
     }
 
@@ -130,7 +130,8 @@ template <typename T, int D, int V = D>
   for (int i = 0; i < v_per_thread; i++) {
     outputs[simd_lid * BD + simd_gid] = o[i];
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    o[i] = simd_sum(outputs[simd_gid * BD + simd_lid] * factor) / sum_exp_score;
+    const U safe_sum = (sum_exp_score == 0 ? 1e-6f : sum_exp_score);
+    o[i] = simd_sum(outputs[simd_gid * BD + simd_lid] * factor) / safe_sum;
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
@@ -209,13 +210,13 @@ template <typename T, int D, int V = D>
 
   // Read the query and 0 the output accumulator
   for (int i = 0; i < qk_per_thread; i++) {
-    q[i] = static_cast<U>(scale) * queries[i];
+    q[i] = scale * static_cast<U>(queries[i]);
   }
   for (int i = 0; i < v_per_thread; i++) {
     o[i] = 0;
   }
 
-  U max_score = -1e9;
+  U max_score = -INFINITY;
   U sum_exp_score = 0;
 
   // For each key
@@ -223,7 +224,7 @@ template <typename T, int D, int V = D>
     if (!has_mask || mask[0]) {
       // Read the key
       for (int i = 0; i < qk_per_thread; i++) {
-        k[i] = keys[i];
+        k[i] = static_cast<U>(keys[i]);
       }
 
       // Compute the i-th score
@@ -243,7 +244,7 @@ template <typename T, int D, int V = D>
 
       // Update the output accumulator
       for (int i = 0; i < v_per_thread; i++) {
-        o[i] = o[i] * factor + exp_score * values[i];
+        o[i] = o[i] * factor + exp_score * static_cast<U>(values[i]);
       }
     }
 
@@ -338,7 +339,8 @@ template <typename T, int D>
   for (int i = 0; i < elem_per_thread; i++) {
     outputs[simd_lid * BD + simd_gid] = o[i];
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    o[i] = simd_sum(outputs[simd_gid * BD + simd_lid] * factor) / sum_exp_score;
+    const U safe_sum = (sum_exp_score == 0 ? 1e-6f : sum_exp_score);
+    o[i] = simd_sum(outputs[simd_gid * BD + simd_lid] * factor) / safe_sum;
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
@@ -373,15 +375,14 @@ kernel void attention(
     uint3 local_pos [[thread_position_in_threadgroup]]) {
   // 1. Compute a full linear thread id from the 3D local id.
   const int THREADGROUP_DIM_X = 32;
-  const int THREADGROUP_DIM_Y = WM;
-  const int THREADGROUP_DIM_Z = WN;
+  constexpr int THREADGROUP_DIM_Y = WM;
+  constexpr int THREADGROUP_DIM_Z = WN;
   const int threads_in_group =
       THREADGROUP_DIM_X * THREADGROUP_DIM_Y * THREADGROUP_DIM_Z;
   int tid = local_pos.x + local_pos.y * THREADGROUP_DIM_X +
       local_pos.z * (THREADGROUP_DIM_X * THREADGROUP_DIM_Y);
 
   // 2. Compute the effective number of Q (query) rows for this tile.
-  //    Each tile is meant to be of size BQ, except possibly the last tile.
   const int query_seq_length = qL;
   int start_q = group_pos.x * BQ;
   int tile_rows =
@@ -403,14 +404,12 @@ kernel void attention(
   const device T* V_ptr = V + batch * V_strides.x + kv_head * V_strides.y;
 
   // 4. Declare Threadgroup (Shared) Memory for tiles.
-  //    qTile is allocated at full capacity (BQ * BD) but only the first
-  //    tile_rows*BD elements will be used when tile_rows < BQ.
+  // qTile covers BQ rows (each of length BD), kTile and vTile cover BK rows.
   threadgroup T qTile[BQ * BD];
   threadgroup T kTile[BK * BD];
   threadgroup T vTile[BK * BD];
 
   // 5. Load Q from global memory into threadgroup memory & apply scaling.
-  //    Only load the valid elements: tile_rows * BD.
   int tile_q_elements = tile_rows * BD;
   for (int i = tid; i < tile_q_elements; i += threads_in_group) {
     int row = i / BD;
@@ -420,10 +419,9 @@ kernel void attention(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   // 6. Initialize accumulation buffers for output and softmax reduction.
-  //    Only initialize the valid rows.
-  float oAcc[BQ * BD]; // only first tile_q_elements are used
-  float row_max[BQ]; // only indices [0, tile_rows) are used
-  float row_sum[BQ]; // only indices [0, tile_rows) are used
+  float oAcc[BQ * BD]; // Only first tile_q_elements are used
+  float row_max[BQ]; // For each valid query row
+  float row_sum[BQ]; // For each valid query row
   for (int i = 0; i < tile_rows; i++) {
     row_max[i] = -FLT_MAX;
     row_sum[i] = 0.0f;
@@ -438,6 +436,7 @@ kernel void attention(
     int total_kv_elements = BK * BD;
 
     // --- Load K and V tiles into threadgroup memory.
+    // For positions that are out-of-bound (padded) set K to -INFINITY.
     for (int i = tid; i < total_kv_elements; i += threads_in_group) {
       int row = i / BD;
       int col = i % BD;
@@ -445,20 +444,25 @@ kernel void attention(
         kTile[i] = K_ptr[(kv_base + row) * K_strides.z + col];
         vTile[i] = V_ptr[(kv_base + row) * V_strides.z + col];
       } else {
-        kTile[i] = 0;
+        // For invalid keys, assign a very negative value so that exp(-inf)=0
+        kTile[i] = static_cast<T>(-INFINITY);
         vTile[i] = 0;
       }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // 8. Compute the score matrix S = Q x (K)^T for this KV tile.
-    //    S is only computed for tile_rows (valid query rows).
-    float S[BQ * BK]; // Only the first tile_rows * BK entries are used.
+    float S[BQ * BK];
     for (int i = 0; i < tile_rows; i++) {
       for (int j = 0; j < BK; j++) {
         float dot = 0.0f;
-        for (int d = 0; d < BD; d++) {
-          dot += qTile[i * BD + d] * kTile[j * BD + d];
+        // Only compute dot product if this tile row corresponds to a valid key.
+        if ((kv_base + j) < kL) {
+          for (int d = 0; d < BD; d++) {
+            dot += qTile[i * BD + d] * kTile[j * BD + d];
+          }
+        } else {
+          dot = -INFINITY;
         }
         S[i * BK + j] = dot;
       }
@@ -480,7 +484,7 @@ kernel void attention(
       for (int d = 0; d < BD; d++) {
         oAcc[i * BD + d] *= factor;
       }
-      // Exponentiate and accumulate for the softmax denominator.
+      // Exponentiate the scores and accumulate the sums.
       float exp_sum = 0.0f;
       for (int j = 0; j < BK; j++) {
         float s_val = exp(S[i * BK + j] - new_max);
@@ -503,7 +507,8 @@ kernel void attention(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   } // End of KV tile loop
 
-  // 11. Normalize the accumulated output and store results to global memory.
+  // 11. Normalize the accumulated output and store the results to global
+  // memory.
   threadgroup_barrier(mem_flags::mem_threadgroup);
   if (local_pos.x == 0 && local_pos.y == 0 && local_pos.z == 0) {
     for (int i = 0; i < tile_rows; i++) {

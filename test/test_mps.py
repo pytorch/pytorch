@@ -9251,6 +9251,71 @@ class TestSDPA(TestCaseMPS):
         # 5 MB different maximum allowed value(could be decreased even more)
         torch.testing.assert_close(memory_footprints[-1], memory_footprints[0], atol=5, rtol=1)
 
+    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("contiguous", [True, False])
+    @parametrize("head_dim", [64, 96, 128])  # 64, 96, 128 are for the fast kernel
+    def test_fast_vector_attention(self, dtype, contiguous, head_dim):
+        torch.manual_seed(1729)
+        batch = 1
+        NH = 2
+        q_len = 4 # <8 so that vector fast is eligible
+        s_len = 16 # smaller than 1024 so that we use the one–pass variant
+        if contiguous:
+            q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
+            k = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        else:
+            q = torch.randn(batch, NH, head_dim, q_len, dtype=dtype, device="mps").mT
+            k = torch.randn(batch, NH, head_dim, s_len, dtype=dtype, device="mps").mT
+        v = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+
+    @parametrize("dtype", [torch.float32])  # float16 underflows sometimes, which will lead to flaky tests
+    @parametrize("contiguous", [True, False])
+    def test_fast_vector_attention_2pass(self, dtype, contiguous):
+        torch.manual_seed(1729)
+        batch = 1
+        NH = 32
+        q_len = 8
+        s_len = 1024  # large enough to trigger the two–pass path
+        head_dim = 64  # supported head dimension for vector attention
+        if contiguous:
+            q = torch.rand(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
+            k = torch.rand(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        else:
+            k = torch.rand(batch, NH, head_dim, s_len, dtype=dtype, device="mps").mT
+            q = torch.rand(batch, NH, head_dim, q_len, dtype=dtype, device="mps").mT
+        v = torch.rand(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("contiguous", [True, False])
+    @parametrize("head_dim", [64, 80, 128])  # 64, 80, 128 are for the fast kernel
+    def test_fast_full_attention(self, dtype, contiguous, head_dim):
+        torch.manual_seed(1729)
+        batch = 1
+        NH = 2
+        q_len = 32 # threshold to trigger full fast attention path
+        s_len = 16
+        if contiguous:
+            q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
+            k = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        else:
+            q = torch.randn(batch, NH, head_dim, q_len, dtype=dtype, device="mps").mT
+            k = torch.randn(batch, NH, head_dim, s_len, dtype=dtype, device="mps").mT
+        v = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+        y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
         # Slicing with step
