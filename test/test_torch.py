@@ -8637,7 +8637,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(1 * x, (1, 2, 3))
         self.assertEqual(2 * x, (1, 2, 3, 1, 2, 3))
 
-    def test_Size_add_sequence(self):
+    def test_Size_concat_non_tuple_sequence(self):
+        # trying to add a non-tuple sequence to a Size should raise TypeError
         from collections.abc import Sequence
 
         class DummySequence(Sequence):
