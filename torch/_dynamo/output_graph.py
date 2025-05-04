@@ -66,6 +66,7 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch._C._dynamo import guards
 
 from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -157,6 +158,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
+RootGuardManager = guards.RootGuardManager
 
 @dataclass(frozen=True)
 class VariableTrackerCacheKey:
@@ -1502,8 +1504,12 @@ class OutputGraph(OutputGraphGuardsState):
                 sources = [a.source for a in self.graphargs]
                 for specialization in old_fake_mode.shape_env.backend_specializations:
                     source_index = sources.index(specialization.source)
+                    check_fn = guards.LAMBDA_GUARD(
+                        specialization.check_fn,
+                        [inspect.getsource(specialization.check_fn)]
+                    )
                     specialized_compiles.append((
-                        functools.partial(lambda idx, args: specialization.check_fn(args[idx]), source_index),
+                        functools.partial(lambda idx, args, check_fn=check_fn: check_fn(args[idx]), source_index),
                         self.call_user_compiler(gm, specialization=specialization)
                     ))
 
