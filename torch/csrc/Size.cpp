@@ -155,7 +155,7 @@ static PyObject* THPSize_add(PyObject* self, PyObject* other) {
     Py_RETURN_NOTIMPLEMENTED;
   }
 
-  THPObjectPtr result(PySequence_Concat(other, self));
+  THPObjectPtr result(PySequence_Concat(self, other));
   if (!result) {
     throw python_error();
   }
