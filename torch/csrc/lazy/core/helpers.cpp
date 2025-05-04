@@ -45,6 +45,7 @@ std::vector<int64_t> GetCanonicalDimensionIndices(
     c10::ArrayRef<int64_t> dimensions,
     int64_t rank) {
   std::vector<int64_t> canonical_dim_indices;
+  canonical_dim_indices.reserve(dimensions.size());
   for (int64_t dim : dimensions) {
     canonical_dim_indices.push_back(GetCanonicalDimensionIndex(dim, rank));
   }
@@ -131,8 +132,7 @@ std::vector<std::string> StrSplit(std::string_view text, char delim) {
   std::vector<std::string> tokens;
   while ((start = text.find_first_not_of(delim, end)) != std::string::npos) {
     end = text.find(delim, start);
-    auto token = text.substr(start, end - start);
-    tokens.emplace_back(token.begin(), token.end());
+    tokens.emplace_back(text.substr(start, end - start));
   }
   return tokens;
 }
