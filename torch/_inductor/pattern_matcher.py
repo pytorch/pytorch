@@ -62,6 +62,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.functional_tensor import dispatch_functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.graph_module import _get_attr
@@ -77,7 +78,6 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
-from torch._subclasses.functional_tensor import FunctionalTensorMode, FunctionalTensor, dispatch_functionalize
 
 
 log = logging.getLogger(__name__)

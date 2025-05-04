@@ -1,10 +1,10 @@
 # Owner(s): ["module: inductor"]
 import copy
+import functools
 import itertools
 import os
 import unittest
 from typing import Callable, Optional
-import functools
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -33,6 +33,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.library import register_fake
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
@@ -45,7 +46,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils import _pytree as pytree
-from torch.library import register_fake
 
 
 aten = torch.ops.aten
@@ -1702,9 +1702,7 @@ class TestPatternMatcher(TestCase):
             nonlocal count
             count = my_patterns.apply(graph)
 
-        def custom_backend(
-            graph: torch.fx.GraphModule, example_inputs
-        ):
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
             from torch._inductor import config
 
             current_config = config.shallow_copy_dict()
@@ -1730,6 +1728,7 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(f(inp.clone().detach()), f_replaced(inp.clone().detach()))
         self.assertEqual(count, 1)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
