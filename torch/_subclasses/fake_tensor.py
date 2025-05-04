@@ -24,6 +24,7 @@ import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
+from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
@@ -354,7 +355,7 @@ class FakeTensorConverter:
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
-        specialization = None,
+        specialization: Optional[BackendSpecialization] = None,
     ) -> FakeTensor:
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -409,7 +410,7 @@ class FakeTensorConverter:
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
-            specialization=specialization
+            specialization=specialization,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -2866,7 +2867,7 @@ class FakeTensorMode(TorchDispatchMode):
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
-        specialization = None,
+        specialization: Optional[BackendSpecialization] = None,
     ) -> FakeTensor:
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:

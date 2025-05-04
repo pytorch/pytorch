@@ -44,6 +44,7 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
@@ -66,7 +67,6 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch._C._dynamo import guards
 
 from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -159,6 +159,7 @@ graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 RootGuardManager = guards.RootGuardManager
+
 
 @dataclass(frozen=True)
 class VariableTrackerCacheKey:
@@ -1506,12 +1507,19 @@ class OutputGraph(OutputGraphGuardsState):
                     source_index = sources.index(specialization.source)
                     check_fn = guards.LAMBDA_GUARD(
                         specialization.check_fn,
-                        [inspect.getsource(specialization.check_fn)]
+                        [inspect.getsource(specialization.check_fn)],
                     )
-                    specialized_compiles.append((
-                        functools.partial(lambda idx, args, check_fn=check_fn: check_fn(args[idx]), source_index),
-                        self.call_user_compiler(gm, specialization=specialization)
-                    ))
+                    specialized_compiles.append(
+                        (
+                            functools.partial(
+                                lambda idx, args, check_fn=check_fn: check_fn(
+                                    args[idx]
+                                ),
+                                source_index,
+                            ),
+                            self.call_user_compiler(gm, specialization=specialization),
+                        )
+                    )
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -1543,11 +1551,13 @@ class OutputGraph(OutputGraphGuardsState):
             counters["stats"]["unique_graphs"] += 1
             # This is safe because we pre-process name to be unique
             if specialized_compiles:
+
                 def specialized_dispatch(*args, **kwargs):
                     for check_fn, specialized_compiled_fn in specialized_compiles:
                         if check_fn(args):
                             return specialized_compiled_fn(*args, **kwargs)
                     return compiled_fn(*args, **kwargs)
+
                 self.install_global_unsafe(name, specialized_dispatch)
             else:
                 self.install_global_unsafe(name, compiled_fn)
