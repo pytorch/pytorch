@@ -200,7 +200,6 @@ def log_lru_cache_stats(wrapped_f: functools._lru_cache_wrapper[object]) -> None
 SympyBoolean: TypeAlias = "sympy.logic.boolalg.Boolean"
 
 
-_P = ParamSpec("_P")
 _T = TypeVar("_T")
 _SympyT = TypeVar("_SympyT", sympy.Expr, SympyBoolean, sympy.Basic)
 
@@ -4068,7 +4067,7 @@ class ShapeEnv:
                 do_not_specialize_zero_one=config.backed_size_oblivious,
                 symbolic_context=symbolic_context,
             )
-            if isinstance(symbolic_context, StatelessSymbolicContext):
+            if isinstance(symbolic_context, StatelessSymbolicContext) and symbolic_context.backend_specializations:
                 for specialization in symbolic_context.backend_specializations[i]:
                     self.backend_specializations.add(
                         BackendSpecialization(
