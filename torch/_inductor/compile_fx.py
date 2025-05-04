@@ -1901,6 +1901,7 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                specialization=specialization,
             )
 
     # TODO: This probably shouldn't be a recursive call
@@ -1956,12 +1957,14 @@ def compile_fx(
                     fake_args,
                     inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
                     decompositions=decompositions,
+                    specialization=specialization
                 )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
         decompositions=decompositions,
+        specialization=specialization
     )
 
     if not graph_returns_tuple(model_):
