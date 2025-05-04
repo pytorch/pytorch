@@ -423,6 +423,40 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_dce(self):
+        @mark_compile_region
+        def gn(x):
+            x = torch.sin(x)
+            # should be dce'd
+            y = torch.cos(x)  # noqa: F841
+            return x
+
+        def fn(x):
+            return gn(x)
+
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.randn(4, requires_grad=False)
+        )
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[4]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', arg0_1);  repeated_subgraph0 = arg0_1 = None
+        getitem: "f32[4]" = invoke_subgraph[0];  invoke_subgraph = None
+        return (getitem,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]"):
+            sin: "f32[4]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+            return (sin,)
+""",
+            )
+
     def test_nonlocal_update(self):
         counter = 2
 
