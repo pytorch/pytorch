@@ -138,15 +138,6 @@ unsafe_marked_cacheable_functions: list[str] = []
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
-# The default layout constraint for custom operators.
-# This must be the name of one of the layout constraint tags
-# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
-# If the custom op does not have a layout constraint tag already
-# then we assume the following applies.
-custom_op_default_layout_constraint: Literal[
-    "needs_fixed_stride_order", "flexible_layout"
-] = "needs_fixed_stride_order"
-
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
 triton_kernel_default_layout_constraint: Literal[
@@ -340,6 +331,9 @@ reorder_for_compute_comm_overlap_passes: list[
     "sink_waits",
     "raise_comms",
 ]
+
+# Maximum number of positions to advance a given collective, unlimited by default
+reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
@@ -1004,6 +998,12 @@ class cpp:
     # computing resource. We set this default to False to avoid regressions. User and
     # enable this feature by their need.
     enable_concat_linear = False
+
+    # Whether to use decomposed tanh for cpu device
+    # Disable by default due to https://github.com/pytorch/pytorch/issues/148241
+    use_decompose_tanh = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_DECOMPOSE_TANH", "0") == "1"
+    )
 
 
 # config specific to codegen/triton.py
