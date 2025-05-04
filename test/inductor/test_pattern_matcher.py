@@ -1662,7 +1662,7 @@ class TestPatternMatcher(TestCase):
         def foo_inplace(x: torch.Tensor) -> None:
             x.add_(1)
 
-        # NOTE: only returning None is supported; the custom op cannot return `out`.
+        # NOTE: only returning None is supported; the custom op cannot return `out` because it's part of op input.
         @torch.library.custom_op("mylib::bar", mutates_args={"out"})
         def bar_out(x: torch.Tensor, out: torch.Tensor) -> None:
             out.copy_(x + 2)
@@ -1674,7 +1674,7 @@ class TestPatternMatcher(TestCase):
         @torch.library.custom_op("mylib::foobar_out", mutates_args={"out"})
         def foobar_out(x: torch.Tensor, out: torch.Tensor) -> None:
             x.add_(1)
-            out.copy_(x + 7)
+            out.copy_(x + 7)  # intentionally different from bar_out
 
         def mutable_ops_pattern(x, out):
             foo_inplace(x)
@@ -1699,7 +1699,7 @@ class TestPatternMatcher(TestCase):
         count = 0
 
         def custom_pass(graph: torch.fx.Graph):
-            global count
+            nonlocal count
             count = my_patterns.apply(graph)
 
         def custom_backend(

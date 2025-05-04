@@ -217,7 +217,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         ),
     )
     gm.graph.lint()
-    print(f"after post_grad_passes: gm: {gm}")
 
 
 def prepare_softmax_pattern(x, dim):
