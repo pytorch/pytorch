@@ -2093,6 +2093,7 @@ def fwd_only(
         decompositions = (
             get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
         )
+        # When true, apply auto_functionalize to the pattern to functionalize any mutable ops.
         if apply_auto_functionalize:
             fn = dispatch_functionalize(fn)
         gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
