@@ -13,7 +13,6 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
-from torch._inductor.utils import OrderedSet
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -184,19 +183,6 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph)
     fw_module.graph.eliminate_dead_code()
-
-    # Call DCE on the subgraphs
-    # TODO - Consider updating the eliminate_dead_code to work recursively.
-    seen_subgraphs: OrderedSet[str] = OrderedSet()
-    for nd in fw_module.graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.invoke_subgraph
-    ):
-        subgraph_name = nd.args[0].target
-        if subgraph_name not in seen_subgraphs:
-            seen_subgraphs.add(subgraph_name)
-            subgraph = getattr(fw_module, nd.args[0].target)
-            subgraph.graph.eliminate_dead_code()
-            subgraph.recompile()
     fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph)
