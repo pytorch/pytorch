@@ -257,8 +257,8 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 }
 
 static bool getDisableAddmmCudaLt() {
-    static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
-    if (env_value != nullptr && strcmp(env_value, "1") == 0) {
+    static const auto env_value = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
+    if (env_value == "1") {
       return true;
     }
     return false;
@@ -1415,17 +1415,17 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.n = args.n;
       params.k = args.k;
       params.a = args.mata->data_ptr();
-      params.a_scale_ptr = scale_a.data_ptr();
+      params.a_scale_ptr = args.scale_mata_ptr;
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
       params.b = args.matb->data_ptr();
-      params.b_scale_ptr = scale_b.data_ptr();
+      params.b_scale_ptr = args.scale_matb_ptr;
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
       params.bias_ptr = bias ? bias->data_ptr(): nullptr;
       params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
       params.c = args.result->data_ptr();
-      params.c_scale_ptr = scale_result ? scale_result->data_ptr() : nullptr;
+      params.c_scale_ptr = args.scale_result_ptr;
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
       params.use_fast_accum = use_fast_accum;

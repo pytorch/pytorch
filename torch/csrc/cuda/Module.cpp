@@ -1389,7 +1389,19 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
+      "_cuda_beginAllocateCurrentThreadToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        auto tid = std::this_thread::get_id();
+
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [=](cudaStream_t) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
+      });
+
+  m.def(
+      "_cuda_endAllocateToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
       });
@@ -1510,10 +1522,10 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
-    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(
+    auto cast_gen = THPGenerator_initDefaultGenerator(
         at::cuda::detail::getDefaultCUDAGenerator(i));
     // This reference is meant to be given away, so no need to incref here.
-    PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
+    PyTuple_SetItem(default_cuda_generators, i, cast_gen);
   }
   set_module_attr("default_generators", default_cuda_generators);
   bindGetDeviceProperties(m);
