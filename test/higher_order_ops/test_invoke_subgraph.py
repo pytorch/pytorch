@@ -390,6 +390,46 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_dropout_checks_joint_graph_inference(self):
+        # Checks that joint graph results in inductor seeds for just the inference graph
+        @mark_compile_region
+        def gn(x):
+            return torch.nn.functional.dropout(torch.sin(x), p=0.5)
+
+        def fn(x):
+            return gn(x)
+
+        backend = InductorAndRecordGraphs()
+        x = torch.randn(8, requires_grad=False)
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(
+                    backend.inductor_graphs[0].print_readable(print_output=False)
+                ),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[8]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', arg0_1);  repeated_subgraph0 = arg0_1 = None
+        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+        return (getitem,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]"):
+            inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
+            inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
+            inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
+
+            gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
+            sin: "f32[8]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  gt = sin = None
+            mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
+            return (mul_1,)
+""",
+            )
+
     def test_dedupe(self):
         @mark_compile_region
         def gn(x, y):
