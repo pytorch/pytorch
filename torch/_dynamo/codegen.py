@@ -18,11 +18,10 @@ import re
 import sys
 import types
 from collections import Counter
-from typing import Optional, TYPE_CHECKING, Union, Any
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
-from torch.fx.experimental.symbolic_shapes import BackendSpecialization
 
 from . import graph_break_hints, utils
 from .bytecode_transformation import (

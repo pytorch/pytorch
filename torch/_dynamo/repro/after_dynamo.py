@@ -125,7 +125,9 @@ class WrapBackendDebug:
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
+                    compiled_gm = compiler_fn(
+                        copy.deepcopy(gm), example_inputs, **kwargs
+                    )
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(

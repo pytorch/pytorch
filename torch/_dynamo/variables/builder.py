@@ -3064,7 +3064,9 @@ def _automatic_dynamic(
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
-        backend_specializations.append(getattr(e, "_backend_specializations", {}).get(i, []))
+        backend_specializations.append(
+            getattr(e, "_backend_specializations", {}).get(i, [])
+        )
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
