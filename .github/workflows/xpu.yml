@@ -30,7 +30,7 @@ jobs:
       sync-tag: linux-xpu-2025-0-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-2025.0-py3.9
-      docker-image-name: pytorch-linux-jammy-xpu-2025.0-py3
+      docker-image-name: ci-image:pytorch-linux-jammy-xpu-2025.0-py3
       runner: linux.12xlarge
       test-matrix: |
         { include: [
