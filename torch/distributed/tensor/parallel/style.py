@@ -424,6 +424,103 @@ class SequenceParallel(ParallelStyle):
         return tmpstr
 
 
+class ChannelParallel(ParallelStyle):
+    '''
+    Channel-wise parallelism for convolutional layers (Conv1d/2d/3d).
+    Shards the weight tensor on output channel (dim 0).
+    '''
+    def __init__(
+        self,
+        *,
+        input_layouts: Optional[Placement] = None,
+        output_layouts: Optional[Placement] = None,
+        use_local_output: bool = True,
+    ):
+        super().__init__()
+        self.input_layouts = (input_layouts or Replicate(),)
+        self.output_layouts = (output_layouts or Shard(1),)  # Output channel is dim 1 in output tensor
+        self.use_local_output = use_local_output
+    
+    @staticmethod
+    def _prepare_input_fn(
+        input_layouts, desired_input_layouts, mod, inputs, device_mesh
+    ):
+        input_tensor = inputs[0]
+        if not isinstance(input_tensor, DTensor):
+            input_tensor = DTensor.from_local(
+                input_tensor, device_mesh, input_layouts, run_check=False
+            )
+
+        if input_layouts != desired_input_layouts:
+            input_tensor = input_tensor.redistribute(
+                placements=desired_input_layouts, async_op=True
+            )
+        return input_tensor
+
+    def _partition_conv_fn(self, name, module, device_mesh):
+        # Shard weight on output channel (dim 0)
+        module.register_parameter(
+            "weight",
+            nn.Parameter(
+                distribute_tensor(
+                    module.weight,
+                    device_mesh,
+                    [Shard(0)],
+                    src_data_rank=self.src_data_rank,
+                )
+            ),
+        )
+        if getattr(module, "bias", None) is not None:
+            module.register_parameter(
+                "bias",
+                nn.Parameter(
+                    distribute_tensor(
+                        module.bias,
+                        device_mesh,
+                        [Shard(0)],  # Shard bias to match output channels
+                        src_data_rank=self.src_data_rank,
+                    )
+                ),
+            )
+
+    @staticmethod
+    def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
+        return outputs.to_local() if use_local_output else outputs
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+            partition_fn = self._partition_conv_fn
+            # For channel parallel, input is typically replicated
+            self.desired_input_layouts: tuple[Placement, ...] = (Replicate(),)
+        else:
+            raise NotImplementedError(
+                "ChannelParallel currently only supports nn.Conv1d, nn.Conv2d, nn.Conv3d!"
+            )
+
+        return distribute_module(
+            module,
+            device_mesh,
+            partition_fn,
+            partial(
+                self._prepare_input_fn, self.input_layouts, self.desired_input_layouts
+            ),
+            partial(
+                self._prepare_output_fn, self.output_layouts, self.use_local_output
+            ),
+        )
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
+
+
 class PrepareModuleInput(ParallelStyle):
     """
     Configure the nn.Module's inputs to convert the input tensors of the nn.Module to DTensors at runtime according to
