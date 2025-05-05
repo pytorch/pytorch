@@ -202,7 +202,10 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     // with a better implementation!
     return guard_bool(file, line);
   }
-  virtual bool expect_true(const char* file, int64_t line) {
+  virtual bool expect_true(
+    const char* file,
+    int64_t line,
+    const char* error_message = "") {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation!
     return guard_bool(file, line);

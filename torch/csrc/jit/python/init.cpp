@@ -1246,7 +1246,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "expect_true",
-          [](const c10::SymNode& a, const char* file, int64_t line) {
+          [](const c10::SymNode& a, const char* file, int64_t line, const char* error_message="") {
             return a->expect_true(file, line);
           })
       .def(

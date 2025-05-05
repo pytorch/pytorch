@@ -540,7 +540,7 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
-    def expect_true(self, file, line):
+    def expect_true(self, file, line, message=None):
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
         if (
@@ -555,7 +555,10 @@ class SymNode:
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
         return self.shape_env.defer_runtime_assert(
-            self.expr, f"{file}:{line}", fx_node=self.fx_node
+            self.expr,
+            msg=f"{file}:{line}",
+            info=message,
+            fx_node=self.fx_node,
         )
 
     def expect_size(self, file, line):

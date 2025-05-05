@@ -120,7 +120,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("guard_bool")(file, line).cast<bool>();
   }
 
-  bool expect_true(const char* file, int64_t line) override {
+  bool expect_true(
+    const char* file,
+    int64_t line,
+    const char* error_message = "") override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("expect_true")(file, line).cast<bool>();
   }
