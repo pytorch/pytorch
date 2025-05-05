@@ -9327,6 +9327,7 @@ class TestSDPA(TestCaseMPS):
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
+    @unittest.skip("Full attention fast kernel not implemented yet")
     @parametrize("dtype", [torch.float16, torch.float32])
     @parametrize("contiguous", [True, False])
     @parametrize("head_dim", [64, 80, 128])  # 64, 80, 128 are for the fast kernel

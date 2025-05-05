@@ -441,16 +441,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   bool sdpa_vector_supported_head_dim =
       (query_head_dim == value_head_dim) && (query_head_dim == 64 || query_head_dim == 96 || query_head_dim == 128);
 
-  bool sdpa_full_supported_head_dim =
-      (query_head_dim == value_head_dim) && (query_head_dim == 64 || query_head_dim == 80 || query_head_dim == 128);
-
-  // TODO Irakli this should be tuned to find the best perf
-  int threshold = 32;
   int query_seq_len = q_.size(2);
-  // Fast Full attention: when the sequence length is long enough,
-  // no mask is provided and the head dimensions are supported.
-  bool supports_sdpa_full = (query_seq_len >= threshold) && (!mask_.has_value()) && sdpa_full_supported_head_dim;
-
   // Fast vector attention: when the sequence length is very short,
   // the key sequence length is large,
   // the mask is boolean and head dims are supported
@@ -458,7 +449,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
       ((!mask_.has_value()) || (mask_.value().dtype() == at::kBool)) && sdpa_vector_supported_head_dim;
 
   // boolean to decide if we can use kernel paths
-  bool supports_fast_sdpa = !is_causal && (supports_sdpa_vector || supports_sdpa_full);
+  bool supports_fast_sdpa = !is_causal && supports_sdpa_vector;
 
   // if none of the fast paths apply, fall back to the generic mps graph solution
   if (!supports_fast_sdpa) {
@@ -466,33 +457,25 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   }
 
   // dispatch to the fast SDPA implementation
-  if (query_seq_len <= 8) {
-    auto is_contiguous_or_head_seq_transposed = [](const Tensor& t) -> bool {
-      if (t.is_contiguous())
-        return true;
-      auto sizes = t.sizes();
-      auto strides = t.strides();
-      return (strides[3] == 1) && (strides[2] == sizes[3] * sizes[1]) && (strides[1] == sizes[3]) &&
-          (strides[0] == strides[2] * sizes[2]);
-    };
+  auto is_contiguous_or_head_seq_transposed = [](const Tensor& t) -> bool {
+    if (t.is_contiguous())
+      return true;
+    auto sizes = t.sizes();
+    auto strides = t.strides();
+    return (strides[3] == 1) && (strides[2] == sizes[3] * sizes[1]) && (strides[1] == sizes[3]) &&
+        (strides[0] == strides[2] * sizes[2]);
+  };
 
-    Tensor q_contig = is_contiguous_or_head_seq_transposed(q_) ? q_ : q_.contiguous();
-    Tensor k_contig = k_.contiguous();
-    Tensor v_contig = v_.contiguous();
+  Tensor q_contig = is_contiguous_or_head_seq_transposed(q_) ? q_ : q_.contiguous();
+  Tensor k_contig = k_.contiguous();
+  Tensor v_contig = v_.contiguous();
 
-    // For short sequences, further differentiate based on key sequence length
-    if ((k_.size(2) >= 1024) || (k_.size(1) < q_.size(1) && k_.size(2) >= 4096)) {
-      return sdpa_vector_2pass_mps(
-          q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
-    } else {
-      return sdpa_vector_fast_mps(
-          q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
-    }
+  // for short sequences, differentiate based on key sequence length
+  if ((k_.size(2) >= 1024) || (k_.size(1) < q_.size(1) && k_.size(2) >= 4096)) {
+    return sdpa_vector_2pass_mps(
+        q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   } else {
-    Tensor q_contig = q_.contiguous();
-    Tensor k_contig = k_.contiguous();
-    Tensor v_contig = v_.contiguous();
-    return sdpa_full_attention_mps(
+    return sdpa_vector_fast_mps(
         q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
 }
