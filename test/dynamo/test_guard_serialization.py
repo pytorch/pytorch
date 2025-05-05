@@ -680,7 +680,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # we don't support BUILTIN_MATCH because it adds a FUNCTION_MATCH guard, and we don't
         # support that in serialization
         with self.assertRaisesRegex(
-            RuntimeError, "BUILTIN_MATCH guard cannot be serialized."
+            RuntimeError, "FUNCTION_MATCH guard cannot be serialized."
         ):
             self._test_serialization("BUILTIN_MATCH", fn, x)
 
