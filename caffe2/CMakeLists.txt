@@ -572,6 +572,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -975,6 +976,41 @@ elseif(USE_CUDA)
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+  endif()
+
+  # Use env var for these for now for prototyping purposes
+  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Enable NVSHMEM support")
+  set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
+
+  if(USE_NVSHMEM)
+    set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
+    set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
+
+    include_directories(${NVSHMEM_INCLUDE_DIR})
+
+    # Linking with nvshmem requires the source binary to be built with -rdc
+    # which is not viable for libtorch_cuda. So we isolate the linking of
+    # nvshmem in nvshmem_extension.
+    add_library(nvshmem_extension SHARED
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/nvshmem_extension.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/NVSHMEMSymmetricMemory.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
+    )
+    set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+    target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
+    target_link_libraries(nvshmem_extension PRIVATE
+        ${NVSHMEM_LIB_DIR}/libnvshmem.a
+        ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
+    )
+    target_link_libraries(nvshmem_extension PRIVATE mlx5)
+    target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
+    install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+    install(
+        FILES ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
+        DESTINATION lib
+    )
   endif()
   if(USE_UCC)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
@@ -1890,9 +1926,18 @@ if(BUILD_TEST)
   endif()
 
   if(USE_ROCM)
+    set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
-      add_executable(${test_name} "${test_src}")
+      if(WIN32 AND test_src MATCHES "^.*\.hip$")
+        # Solves bug with hip_add_executable propagating flags from the previous tests
+        set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
+        set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+        hip_add_executable(${test_name} "${test_src}")
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
+      else()
+        add_executable(${test_name} "${test_src}")
+      endif()
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
