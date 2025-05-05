@@ -8,7 +8,7 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=14
-RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel yum-utils gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
+RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel yum-utils
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
@@ -64,7 +64,7 @@ ADD ./common/install_libpng.sh install_libpng.sh
 RUN bash ./install_libpng.sh && rm install_libpng.sh
 
 FROM ${GPU_IMAGE} as common
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=14
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
@@ -87,7 +87,6 @@ RUN yum install -y \
         wget \
         which \
         xz \
-        gcc-toolset-${DEVTOOLSET_VERSION}-toolchain \
         glibc-langpack-en
 RUN yum install -y \
     https://repo.ius.io/ius-release-el7.rpm \
@@ -118,7 +117,7 @@ COPY --from=jni                /usr/local/include/jni.h              /usr/local/
 
 FROM common as cpu_final
 ARG BASE_CUDA_VERSION=11.8
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=14
 # Install Anaconda
 ADD ./common/install_conda_docker.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
