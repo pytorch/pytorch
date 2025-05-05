@@ -948,7 +948,7 @@ class DistributedTestBase(MultiProcessTestCase):
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
         torch.distributed.init_process_group(
-            backend=self.backend(device),
+            backend=c10d.get_default_backend_for_device(device),
             world_size=self.world_size,
             rank=self.rank,
             store=store
