@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 import contextlib
 import dataclasses
 import enum
@@ -9,11 +8,8 @@ import itertools
 import logging
 import math
 import operator
-import os
 import re
-import tempfile
 import typing
-from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -64,8 +60,6 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 if TYPE_CHECKING:
     from collections.abc import Iterator, MutableMapping, Sequence
 
-    from torch.fx import GraphModule
-
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
@@ -89,38 +83,6 @@ def data_type_logger(msg: str) -> None:
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-@dataclasses.dataclass
-class FileBackedGraphModule:
-    """
-    Output of FX wrapper codegen. Exposes the same methods as ModuleType, but these
-    map back to a GraphModule instead of Python source.
-    """
-
-    gm: GraphModule
-    compiled_fn: Callable[..., Any]
-
-    def __post_init__(self) -> None:
-        # Write the code to a file for compatibility with debugging utilities.
-        # The file is deleted upon program termination.
-        self.tempfile = tempfile.NamedTemporaryFile(
-            mode="w+", suffix=".py", delete=False
-        )
-        atexit.register(os.remove, self.tempfile.name)
-        with self.tempfile as f:
-            f.write(self.value)
-
-    @property
-    def __file__(self) -> str:
-        return self.tempfile.name
-
-    def call(self, args: list[Any]) -> Any:
-        return self.compiled_fn(*args)
-
-    @property
-    def value(self) -> str:
-        return self.gm.code
-
-
 class WorkspaceZeroMode(enum.Enum):
     UNINITIALIZED = 0
     ZERO_ON_CALL = 1  # kernel may leave workspace dirty
@@ -141,22 +103,8 @@ class WorkspaceZeroMode(enum.Enum):
         return WorkspaceZeroMode.UNINITIALIZED
 
 
-class CodegenSymbol(ABC):
-    """
-    An IR object possibly corresponding to a variable in the wrapper code.
-    """
-
-    @abstractmethod
-    def get_name(self) -> str:
-        pass
-
-    @abstractmethod
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
-        pass
-
-
 @ir_dataclass(frozen=True)
-class WorkspaceArg(CodegenSymbol):
+class WorkspaceArg:
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
@@ -219,9 +167,6 @@ class WorkspaceArg(CodegenSymbol):
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
-        return self.get_layout().get_example()
-
     def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
 
@@ -239,9 +184,6 @@ class WorkspaceArg(CodegenSymbol):
     get_output_spec = get_layout
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
-
-    def get_offset(self) -> sympy.Expr:
-        return sympy.S.Zero
 
     def get_size(self) -> list[sympy.Expr]:
         return [self.count]
