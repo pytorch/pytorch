@@ -73,6 +73,7 @@ from .triton_compat import (
     GPUTarget,
     HAS_WARP_SPEC,
     KernelInterface,
+    knobs,
     OutOfResources,
     PTXASError,
     triton,
@@ -1425,11 +1426,18 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
+        if knobs is None:
+            launch_enter = binary.__class__.launch_enter_hook
+            launch_exit = binary.__class__.launch_exit_hook
+        else:
+            launch_enter = knobs.runtime.launch_enter_hook
+            launch_exit = knobs.runtime.launch_exit_hook
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.__class__.launch_enter_hook,
-            "launch_exit_hook": binary.__class__.launch_exit_hook,
+            "launch_enter_hook": launch_enter,
+            "launch_exit_hook": launch_exit,
             "metadata": (
                 binary.packed_metadata
                 if hasattr(binary, "packed_metadata")
@@ -1480,7 +1488,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
             # we want to burn None in to the launch args with zero overhead.
             # See https://github.com/pytorch/pytorch/issues/123597
-            if binary.__class__.launch_enter_hook:
+            if launch_enter:
                 launch_metadata = f"bin.launch_metadata((grid_0, grid_1, grid_2), stream, {', '.join(call_args)})"
             else:
                 launch_metadata = "None"
