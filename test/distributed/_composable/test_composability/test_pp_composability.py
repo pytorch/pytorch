@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     runOnRocmArch,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
