@@ -617,6 +617,46 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_view_to_reshape(self):
+        @mark_compile_region
+        def gn(x):
+            x = torch.sin(x)
+            x = x.view(1, 8)
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8, requires_grad=False)
+
+        torch._dynamo.reset()
+        backend = InductorAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(
+                    backend.inductor_graphs[0].print_readable(print_output=False)
+                ),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[8]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', arg0_1);  repeated_subgraph0 = arg0_1 = None
+        getitem: "f32[1, 8]" = invoke_subgraph[0];  invoke_subgraph = None
+        return (getitem,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]"):
+            sin: "f32[8]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+
+            view: "f32[1, 8]" = torch.ops.aten.reshape.default(sin, [1, 8]);  sin = None
+
+            sin_1: "f32[1, 8]" = torch.ops.aten.sin.default(view);  view = None
+            return (sin_1,)
+""",
+            )
+
     def test_normalize_gm(self):
         @mark_compile_region
         def gn(x, y):
