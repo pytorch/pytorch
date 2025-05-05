@@ -55,11 +55,7 @@ if TYPE_CHECKING:
     # Import here to avoid cycle
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import (
-        BackendSpecialization,
-        ShapeEnv,
-        SymbolicContext,
-    )
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
@@ -280,24 +276,8 @@ class MetaTensorDescriber:
         return r
 
     def describe_tensor(
-        self,
-        t: torch.Tensor,
-        *,
-        recurse: bool = True,
-        trace: bool = False,
-        source: Optional[Source] = None,
-        specialization: Optional[BackendSpecialization] = None,
+        self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
     ) -> MetaTensorDesc:
-        if specialization:
-            if not t.is_contiguous():
-                raise RuntimeError(
-                    "Backend specializations are only supported for contiguous tensors."
-                )
-            shape = list(t.shape)
-            if specialization.source.base == source and specialization.source.idx:
-                shape[specialization.source.idx] = specialization.hint
-            t = torch.empty(shape, dtype=t.dtype, device=t.device)
-
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -895,7 +875,6 @@ class MetaConverter(Generic[_TensorT]):
         callback_: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
-        specialization: Optional[BackendSpecialization] = None,
     ) -> _TensorT:
         callback: _MetaTensorCallbackOptDevice = functools.partial(
             callback_, device=t.device
@@ -951,7 +930,6 @@ class MetaConverter(Generic[_TensorT]):
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
-            specialization: Optional[BackendSpecialization] = None,
         ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
             assert t.stride is not None
             if shape_env is not None:
@@ -980,7 +958,6 @@ class MetaConverter(Generic[_TensorT]):
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
-                        specialization=specialization,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
@@ -1700,9 +1677,7 @@ class MetaConverter(Generic[_TensorT]):
                         sizes,
                         strides,
                         storage_offset,
-                    ) = sym_sizes_strides_storage_offset(
-                        t, source, symbolic_context, specialization=specialization
-                    )
+                    ) = sym_sizes_strides_storage_offset(t, source, symbolic_context)
 
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
@@ -1869,7 +1844,6 @@ class MetaConverter(Generic[_TensorT]):
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace: bool = True,
-        specialization: Optional[BackendSpecialization] = None,
     ) -> _TensorT:
         callback_: _MetaTensorCallback[_TensorT]
         if callback is None:
@@ -1912,9 +1886,7 @@ class MetaConverter(Generic[_TensorT]):
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
-        t_desc = self.describer.describe_tensor(
-            t, trace=trace, source=source, specialization=specialization
-        )
+        t_desc = self.describer.describe_tensor(t, trace=trace)
 
         if trace:
             assert source is not None
@@ -1944,7 +1916,6 @@ class MetaConverter(Generic[_TensorT]):
                 callback_,
                 source,
                 symbolic_context,
-                specialization=specialization,
             )
 
         if type(t) is torch.nn.Parameter:
