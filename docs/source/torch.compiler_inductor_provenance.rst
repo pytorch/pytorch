@@ -3,23 +3,13 @@
 TorchInductor and AOTInductor Provenance Tracking
 =================================================
 
-**Author:** `Shangdi Yu <https://github.com/yushangdi>`__ and `Rachel Guo <https://github.com/YUNQIUGUO>`__
-
 This section describes how to use the provenance tracking feature for TorchInductor and AOTInductor in ``tlparse``.
 Some example screenshots of the provenance tracking tool are shown below.
 The tool visualizes the mapping between nodes in the input graph (panel 1), the post grad graph (panel 2), and the Inductor generated code (panel 3).
 
-.. raw:: html
-
-    <style>
-        .yellow {background-color:#FFFF00;}
-    </style>
-
-.. role:: yellow
-
 The **bolded** lines represent nodes/kernels covered by the current provenance tracing functionality.
 We currently cover triton kernels, cpp kernels, and combo kernels.
-The :yellow:`yellow highlighting` shows the provenance of the nodes/kernels.
+The yellow highlighting shows the provenance of the nodes/kernels.
 
 
 Example screenshot of the provenance tracking tool for TorchInductor:
