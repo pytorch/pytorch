@@ -163,7 +163,8 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
 }
 } // anonymous namespace
 
-#if !defined(USE_ROCM)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 TORCH_API void runJITCPPTests();
 #endif
 
