@@ -54,5 +54,3 @@ ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV PIP_BREAK_SYSTEM_PACKAGES=1  
 
-RUN chown -R vscode:vscode /opt/venv
-
