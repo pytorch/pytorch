@@ -794,8 +794,8 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, BaseException)
-            # GeneratorExit doesn't inherit from Exception
+            issubclass(fn, Exception)
+            # GeneratorExit doens't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
             or fn is GeneratorExit
@@ -804,7 +804,11 @@ class BuiltinVariable(VariableTracker):
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
             ):
-                if fn is AssertionError and not check_constant_args(args, kwargs):
+                if fn is AssertionError and not all(
+                    isinstance(x, variables.ConstantVariable)
+                    and isinstance(x.value, str)
+                    for x in args
+                ):
                     unimplemented_v2(
                         gb_type="assert with non-string message",
                         context=str(args),
@@ -897,8 +901,12 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
-                        raise_observed_exception(
-                            type(exc), tx, args=[ConstantVariable(a) for a in exc.args]
+                        unimplemented_v2(
+                            gb_type="constant fold exception",
+                            context=f"attempted to run function {fn} with arguments {args}",
+                            explanation="Encountered exception when attempting to constant fold.",
+                            hints=[*graph_break_hints.DYNAMO_BUG],
+                            from_exc=exc,
                         )
                     return VariableTracker.build(tx, res)
 
@@ -915,10 +923,12 @@ class BuiltinVariable(VariableTracker):
                                 },
                             )
                         except Exception as exc:
-                            raise_observed_exception(
-                                type(exc),
-                                tx,
-                                args=[ConstantVariable(a) for a in exc.args],
+                            unimplemented_v2(
+                                gb_type="constant fold exception",
+                                context=f"attempted to run function {fn} with arguments {args} {kwargs}",
+                                explanation="Encountered exception when attempting to constant fold.",
+                                hints=[*graph_break_hints.DYNAMO_BUG],
+                                from_exc=exc,
                             )
                         return VariableTracker.build(tx, res)
 
@@ -1307,7 +1317,7 @@ class BuiltinVariable(VariableTracker):
             if len(arg.args) == 0:
                 value = f"{arg.exc_type}"
             else:
-                value = ", ".join(str(a.as_python_constant()) for a in arg.args)
+                value = ", ".join(a.as_python_constant() for a in arg.args)
             return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
@@ -1980,6 +1990,7 @@ class BuiltinVariable(VariableTracker):
                     "assertNotWarns",
                     "assertWarnsRegex",
                     "assertDictEqual",
+                    "assertSequenceEqual",
                     "assertWarns",
                 )
             ):
