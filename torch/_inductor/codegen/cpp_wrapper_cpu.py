@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import functools
 import math
 import os
 import sys
 import textwrap
-from collections.abc import Sequence
 from itertools import count
-from typing import Callable, Optional, Protocol, Union
+from typing import Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -30,6 +31,12 @@ from .wrapper import (
     PythonWrapperCodegen,
     SymbolicCallArg,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ..graph import GraphLowering
 
 
 class HasWriteLine(Protocol):
@@ -1336,24 +1343,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
             self.writeline(f"int64_t {sym} = {cexpr(expr)};")
 
-    def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
-        expr = f"{kernel_name}_{tree.prefix}numel"
-        if suffix is not None:
-            expr += f"_{suffix}"
-        if (expr, V.graph) not in self.kernel_numel_expr:
+    def _generate_symbolic_call_arg_helper(
+        self, arg: SymbolicCallArg, graph: GraphLowering
+    ) -> None:
+        if (arg.inner, graph) not in self.kernel_numel_expr:
             # declare expr once in each graph (scope)
-            self.kernel_numel_expr.add((expr, V.graph))
-            self.writeline(f"int64_t {expr} = {cexpr(tree.numel)};")
+            self.kernel_numel_expr.add((arg.inner, graph))
+            self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
-            self.writeline(f"{expr} = {cexpr(tree.numel)};")
-        # We can get symbolic expressions here, like s0*64
-        # It is fine to have them here, but we need to handle them correctly as their own type
-        # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
-        # scalars as well.
-        # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
-        # constant now, need type info. I agree, this needs type info, and while this is not true type info
-        # it suffices as a type hint for the purposes of producing the correct code for this type.
-        return SymbolicCallArg(expr, tree.numel)
+            self.writeline(f"{cexpr(arg.inner_expr)};")
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
