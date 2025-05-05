@@ -1958,8 +1958,6 @@ coverage_ignore_functions = [
     # torch.utils.backend_registration
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",
-    # torch.utils.benchmark.examples.blas_compare_setup
-    "conda_run",
     # torch.utils.benchmark.examples.op_benchmark
     "assert_dicts_equal",
     # torch.utils.benchmark.op_fuzzers.spectral
@@ -3302,8 +3300,6 @@ coverage_ignore_classes = [
     "TorchVersion",
     # torch.types
     "SymInt",
-    # torch.utils.benchmark.examples.blas_compare_setup
-    "SubEnvSpec",
     # torch.utils.benchmark.examples.compare
     "FauxTorch",
     # torch.utils.benchmark.examples.spectral_ops_fuzz_test

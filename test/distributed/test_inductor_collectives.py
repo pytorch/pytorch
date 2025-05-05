@@ -712,7 +712,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             trs = self.get_world_trs()
 
-            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            compiled_fn = torch.compile(
+                example,
+                fullgraph=True,
+                dynamic=True,
+                backend="aot_eager_decomp_partition",
+            )
 
             if override_with_ac:
 
