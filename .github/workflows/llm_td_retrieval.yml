@@ -50,18 +50,13 @@ jobs:
           ref: v0.0.2
           path: llm-target-determinator
 
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: "3.9"
-
       - name: Install requirements
         shell: bash
         run: |
           set -euxo pipefail
-          ${CONDA_RUN} pip install -r llm-target-determinator/requirements.txt
+          python3 -m pip install -r llm-target-determinator/requirements.txt
           cd "${GITHUB_WORKSPACE}/codellama"
-          ${CONDA_RUN} pip install -e .
+          python3 -m pip install -e .
 
       - name: Fetch CodeLlama Checkpoint
         shell: bash
@@ -80,7 +75,7 @@ jobs:
           shell: bash
           command: |
             set -euxo pipefail
-            ${CONDA_RUN} python -m pip install awscli==1.29.40
+            python3 -m pip install awscli==1.29.40
             cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
             aws s3 cp "s3://target-determinator-assets/indexes/latest" . --recursive
 
@@ -94,7 +89,8 @@ jobs:
         run: |
           set -euxo pipefail
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator
-          ${CONDA_RUN} torchrun \
+          export PATH="$HOME/.local/bin:$PATH"
+          torchrun \
             --standalone \
             --nnodes=1 \
             --nproc-per-node=1 \
