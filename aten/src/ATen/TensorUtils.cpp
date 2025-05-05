@@ -336,6 +336,7 @@ inline static std::optional<ResultVec> computeStride_impl(
   if (oldshape.empty()) {
     return ResultVec(newshape.size(), 1);
   }
+  
 
   // NOTE: stride is arbitrary in the numel() == 0 case;
   // to match NumPy behavior we copy the strides if the size matches, otherwise
@@ -348,6 +349,61 @@ inline static std::optional<ResultVec> computeStride_impl(
     return toResult(oldstride);
   }
 
+
+  // same as the funciton bellow but wuth 
+  // TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
+  // TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) 
+  // always returning True. the idea is to test that doing that only can either has no effect or end up having 
+  // the output null, but does not change output or make a not null null. 
+  auto out_potential = [&]() -> std::optional<ResultVec> {
+    ResultVec newstride(newshape.size());
+    if (zero_numel) {
+      for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
+        if (view_d == (int64_t)(newshape.size() - 1)) {
+          newstride[view_d] = 1;
+        } else {
+          newstride[view_d] =
+            std::max<Numel>(newshape[view_d+1], Numel(1)) * newstride[view_d+1];
+        }
+      }
+      return newstride;
+    }
+  
+
+    int64_t view_d = (int64_t)newshape.size() - 1;
+    // stride for each subspace in the chunk
+    Numel chunk_base_stride = oldstride.back();
+    // numel in current chunk
+    Numel tensor_numel = 1;
+    Numel view_numel = 1;
+    // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE bellow will incrase the potential of the function returning  std::nullopt and falling back
+    // to a clone. note that at the point this function is called we have already known that the tensor is not contiguous.
+    for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
+      tensor_numel *= oldshape[tensor_d];
+      // if end of tensor size chunk, check view
+      if (true) {
+        while (view_d >= 0 &&
+              (TORCH_GUARD_OR_FALSE(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
+          newstride[view_d] = view_numel * chunk_base_stride;
+          view_numel *= newshape[view_d];
+          view_d--;
+        }
+        if (TORCH_GUARD_OR_TRUE(sym_ne(view_numel, tensor_numel))) {
+          return std::nullopt;
+        }
+        if (tensor_d > 0) {
+          chunk_base_stride = oldstride[tensor_d - 1];
+          tensor_numel = 1;
+          view_numel = 1;
+        }
+      }
+    }
+    if (view_d != -1) {
+      return std::nullopt;
+    }
+    return newstride;
+  };
+  auto res1 = out_potential(); 
   ResultVec newstride(newshape.size());
   if (zero_numel) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
@@ -361,20 +417,22 @@ inline static std::optional<ResultVec> computeStride_impl(
     return newstride;
   }
 
+
+
   int64_t view_d = (int64_t)newshape.size() - 1;
   // stride for each subspace in the chunk
   Numel chunk_base_stride = oldstride.back();
   // numel in current chunk
   Numel tensor_numel = 1;
   Numel view_numel = 1;
-  // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE bellow will incrase the potential of the function returning  std::nullopt and falling back 
+  // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE bellow will incrase the potential of the function returning  std::nullopt and falling back
   // to a clone. note that at the point this function is called we have already known that the tensor is not contiguous.
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
-    tensor_numel *= oldshape[tensor_d]; 
+    tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
-        (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
-        TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
+      (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
+      TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
       while (view_d >= 0 &&
             (TORCH_GUARD_OR_FALSE(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
@@ -382,6 +440,7 @@ inline static std::optional<ResultVec> computeStride_impl(
         view_d--;
       }
       if (TORCH_GUARD_OR_TRUE(sym_ne(view_numel, tensor_numel))) {
+        assert(res1 == std::nullopt);
         return std::nullopt;
       }
       if (tensor_d > 0) {
@@ -392,8 +451,11 @@ inline static std::optional<ResultVec> computeStride_impl(
     }
   }
   if (view_d != -1) {
+    assert(res1 == std::nullopt);
     return std::nullopt;
   }
+  assert(res1 == std::nullopt || res1 == newstride);
+
   return newstride;
 }
 
