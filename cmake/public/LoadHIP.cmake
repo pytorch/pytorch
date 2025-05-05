@@ -26,12 +26,6 @@ else()
   endif()
 endif()
 
-if(NOT DEFINED ENV{ROCM_INCLUDE_DIR})
-  set(ROCM_INCLUDE_DIR ${ROCM_PATH}/include)
-else()
-  set(ROCM_INCLUDE_DIR $ENV{ROCM_INCLUDE_DIR})
-endif()
-
 # MAGMA_HOME
 if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
