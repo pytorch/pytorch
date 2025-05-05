@@ -158,37 +158,17 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
         return None
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
-    # OpOverload with custom lowerings override tag-based layout constraints
-    if fn in lowerings:
-        _maybe_layout_constraints[fn] = None
+    return None
+
+
+def tag_to_layout_constraint(tag):
+    if tag == torch._C.Tag.needs_exact_strides:
+        return constrain_to_fake_tensors
+    if tag == torch._C.Tag.needs_fixed_stride_order:
+        return constrain_to_fx_strides
+    if tag == torch._C.Tag.flexible_layout:
         return None
-    # We lazily register tag-based layout constraints.
-
-    def handle_layout_constraint_tag(tag):
-        if tag is torch._C.Tag.needs_fixed_stride_order:
-            _maybe_layout_constraints[fn] = constrain_to_fx_strides
-            return _maybe_layout_constraints[fn]
-        elif tag is torch._C.Tag.flexible_layout:
-            _maybe_layout_constraints[fn] = None
-            return None
-        else:
-            raise AssertionError(f"Unknown layout constraint tag: {tag}")
-
-    tag = get_layout_constraint_tag(fn)
-    return handle_layout_constraint_tag(tag)
-
-
-def get_layout_constraint_tag(fn):
-    tags_by_priority = [
-        torch._C.Tag.needs_fixed_stride_order,
-        torch._C.Tag.flexible_layout,
-    ]
-    for tag in tags_by_priority:
-        if tag in fn.tags:
-            return tag
-    if torch._library.utils.is_builtin(fn):
-        return torch._C.Tag.flexible_layout
-    return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    raise AssertionError(f"Unknown layout constraint tag: {tag}")
 
 
 def assert_nyi(cond, msg):
@@ -1150,13 +1130,14 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
-    old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
-    if old_size_product > 0 and not free_unbacked_symbols(new_size):
-        # maybe realize the input but skip for unbacked symints since it'll
-        # choke on the size hint.
-        x.mark_reuse(
-            V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
-        )
+    if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
+        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        if old_size_product > 0:
+            # maybe realize the input but skip for unbacked symints since it'll
+            # choke on the size hint.
+            x.mark_reuse(
+                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+            )
 
     x_loader = x.make_loader()
     return Pointwise.create(
@@ -3335,7 +3316,6 @@ def gather(x, dim, index, sparse_grad=False):
         # Empty index case. Return an empty array with the same shape
         return new_empty(x, index.get_size())
 
-    assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
@@ -6297,7 +6277,10 @@ def cummax(x, axis=None):
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (
+        x.make_loader(),
+        lambda idx: ops.index_expr(idx[axis], torch.int64),
+    )
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummax(x, dim=axis)
@@ -6317,7 +6300,10 @@ def cummin(x, axis=None):
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (
+        x.make_loader(),
+        lambda idx: ops.index_expr(idx[axis], torch.int64),
+    )
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummin(x, dim=axis)
@@ -6904,8 +6890,8 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
-def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
-    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))
 
 
