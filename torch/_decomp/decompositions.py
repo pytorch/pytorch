@@ -1255,9 +1255,9 @@ def embedding_dense_backward(
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad_output, accumulate=True).to(
-        result_dtype
-    )
+    return aten._unsafe_index_put(
+        grad_weight, [indices], grad_output, accumulate=True
+    ).to(result_dtype)
 
 
 def prod(x: list[int]):
