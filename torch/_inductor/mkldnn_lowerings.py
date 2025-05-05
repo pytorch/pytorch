@@ -42,7 +42,10 @@ def create_int8_compensation(
 ]:
     x_w_scale: Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]] = None
     use_int8_fast_compensation_path = all(
-        isinstance(item, ir.TensorBox) and item.get_name() in V.graph.constants
+        isinstance(item, ir.TensorBox)
+        and item.get_name() in V.graph.constants
+        and hasattr(item.data, "data")
+        and isinstance(item.data.data, ir.ConstantBuffer)
         for item in [x_scale, x_zp, w_scale]
     )
     if use_int8_fast_compensation_path:
