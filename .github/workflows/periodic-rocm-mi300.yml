@@ -56,7 +56,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi300.4", owners: ["module:rocm", "oncall:distributed"] },
