@@ -114,7 +114,7 @@ jobs:
           use-gha: true
 
       - name: Setup macOS
-        uses: ./.github/actions/set-macos
+        uses: ./.github/actions/setup-macos
         with:
           python-version: ${{ inputs.python-version }}
 
