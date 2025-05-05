@@ -28,8 +28,7 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
       opt_device_type = at::getAccelerator(false);
     }
     if (opt_device_type.has_value()) {
-      return at::globalContext().getPinnedMemoryAllocator(
-          opt_device_type.value());
+      return at::globalContext().getPinnedMemoryAllocator(opt_device_type);
     } else {
       TORCH_CHECK(
           false, "Need to provide pin_memory allocator to use pin memory.")
@@ -160,7 +159,7 @@ SymInt computeStorageNbytes(
   // of the last element according to stride
   SymInt size = 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_eq(0))) {
+    if (TORCH_STATICALLY_KNOWN_TRUE(sizes[i].sym_eq(0))) {
       return 0;
     }
 

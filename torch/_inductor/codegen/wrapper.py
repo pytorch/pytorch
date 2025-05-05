@@ -2644,7 +2644,7 @@ class PythonWrapperCodegen(CodeGen):
         if (
             name in V.graph.removed_buffers
             or name in self.allocated
-            or isinstance(buffer, ir.DonatedBuffer)
+            or isinstance(buffer, (ir.DonatedBuffer, ir.SubgraphBuffer))
         ):
             return
         self.allocated.add(name)
@@ -2927,6 +2927,10 @@ class PythonWrapperCodegen(CodeGen):
         )
 
         self.writeline(f"{subgraph.graph.name}_args = [{outer_input_names}]")
+
+        # Since the buffers are already put into the args list, we can free the
+        # buffers here.
+        V.graph.scheduler.free_buffers()
 
         # Call the subgraph launcher function
         self.writeline(

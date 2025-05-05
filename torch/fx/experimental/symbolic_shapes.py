@@ -6880,7 +6880,8 @@ class ShapeEnv:
         ):
             return orig_expr
 
-        # Don't track this one
+        # Don't track this one. (Because this cache is inside this function the
+        # cache only lasts for the invocation of this function call)
         @functools.lru_cache(None)
         def compute_concrete_val() -> sympy.Basic:
             if hint is None:
@@ -7085,7 +7086,7 @@ class ShapeEnv:
                                 insts, frame.f_lasti, key=lambda x: x.offset
                             )
                         else:
-                            # For Pyhton <= 3.10, instructions are always 2 bytes.
+                            # For Python <= 3.10, instructions are always 2 bytes.
                             cur = frame.f_lasti // 2
 
                         if sys.version_info >= (3, 13):
