@@ -1195,7 +1195,7 @@
     CompositeExplicitAutograd: binary_cross_entropy_with_logits
   autogen: binary_cross_entropy_with_logits.out
 
-- func: bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor
+- func: bincount(Tensor self, Tensor? weights=None, SymInt minlength=0) -> Tensor
   variants: function, method
   dispatch:
     CPU: _bincount_cpu
@@ -2172,8 +2172,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: div_out
-    MPS: div_out_mps
+    CPU, CUDA, MPS: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
   tags: pointwise
 
@@ -2198,8 +2197,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: div_out_mode
-    MPS: div_out_mode_mps
+    CPU, CUDA, MPS: div_out_mode
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
   tags: pointwise
 
@@ -3279,20 +3277,20 @@
 
 - func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
+- func: kthvalue(Tensor self, SymInt k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: kthvalue
 
-- func: kthvalue.values(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: kthvalue.values(Tensor self, SymInt k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
 
-- func: kthvalue.dimname(Tensor self, int k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+- func: kthvalue.dimname(Tensor self, SymInt k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: kthvalue.dimname_out(Tensor self, int k, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: kthvalue.dimname_out(Tensor self, SymInt k, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: layer_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
   dispatch:
@@ -4277,8 +4275,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: mul_out
-    MPS: mul_out_mps
+    CPU, CUDA, MPS: mul_out
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: mul_out_sparse_csr
@@ -9774,8 +9771,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lerp_Scalar
-    MPS: lerp_Scalar_mps
+    CPU, CUDA, MPS: lerp_Scalar
   tags: pointwise
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
