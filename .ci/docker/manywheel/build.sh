@@ -32,13 +32,13 @@ case ${image} in
     manylinux2_28-builder:cpu)
         TARGET=cpu_final
         GPU_IMAGE=amd64/almalinux:8
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11"
+        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=14"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinux2_28_aarch64-builder:cpu-aarch64)
         TARGET=final
         GPU_IMAGE=arm64v8/almalinux:8
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11 --build-arg NINJA_VERSION=1.12.1"
+        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=14 --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinuxcxx11-abi-builder:cpu-cxx11-abi)
@@ -56,13 +56,13 @@ case ${image} in
     manylinux2_28-builder:cuda*)
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
-        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
+        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=14"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinuxaarch64-builder:cuda*)
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
-        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
+        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=14"
         MANY_LINUX_VERSION="aarch64"
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
