@@ -296,6 +296,9 @@ _broadcast_rank0_decision = False
 # "all" - no filtering, everything saved for backward.
 saved_tensors_hooks_filtering_mode = "donated"
 
+# Enable handling of debug torch._functorch.aot_autograd.graph_saved_tensors_hooks ctx.
+saved_tensors_hooks_only_compile_ctx = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

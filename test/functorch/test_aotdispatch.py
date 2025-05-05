@@ -7168,25 +7168,28 @@ metadata incorrectly.
         aot_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
         ctx = torch.autograd.graph.saved_tensors_hooks
         # Check precedence of aot_ctx
-        with ctx(
-            *saved_tensors_hooks_to_gm(
-                pack_fp8_with_scale, unpack_fp8_with_scale, None, None
-            )
+        with patch(
+            "torch._functorch.config.saved_tensors_hooks_only_compile_ctx", True
         ):
-            with aot_ctx(
+            with ctx(
                 *saved_tensors_hooks_to_gm(
-                    pack_fp8_with_scale_and_log,
-                    unpack_fp8_with_scale_and_log,
-                    None,
-                    None,
+                    pack_fp8_with_scale, unpack_fp8_with_scale, None, None
                 )
             ):
-                _reset_logged()
-                inps = m_inp_fn()
-                torch.compile(m, backend="aot_eager", fullgraph=True)(
-                    *inps
-                ).sum().backward()
-                self.assertTrue(logged_shapes)
+                with aot_ctx(
+                    *saved_tensors_hooks_to_gm(
+                        pack_fp8_with_scale_and_log,
+                        unpack_fp8_with_scale_and_log,
+                        None,
+                        None,
+                    )
+                ):
+                    _reset_logged()
+                    inps = m_inp_fn()
+                    torch.compile(m, backend="aot_eager", fullgraph=True)(
+                        *inps
+                    ).sum().backward()
+                    self.assertTrue(logged_shapes)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
