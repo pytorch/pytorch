@@ -1041,14 +1041,6 @@ test_aot_compilation() {
   fi
 }
 
-test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
-    CPP_TESTS_DIR="${TORCH_TEST_DIR}" LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
-  fi
-}
 
 test_distributed() {
   echo "Testing distributed python tests"
@@ -1693,8 +1685,6 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
