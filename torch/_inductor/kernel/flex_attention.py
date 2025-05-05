@@ -1330,9 +1330,8 @@ def flex_attention(
             ("n", torch.int32),
         ]
     ]
-    subgraph_buffer = build_subgraph_buffer(
-        placeholder_inps + list(score_mod_other_buffers), subgraph
-    )
+    subgraph_inps = placeholder_inps + list(score_mod_other_buffers)
+    subgraph_buffer = build_subgraph_buffer(subgraph_inps, subgraph)
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -1346,6 +1345,7 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    subgraph_outs = get_subgraph_buffers(subgraph_buffer, mask_graph_buffer)
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -1360,7 +1360,7 @@ def flex_attention(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
     if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
-        return create_flex_decoding_kernel(
+        out, logsumexp = create_flex_decoding_kernel(
             query,
             key,
             value,
@@ -1372,6 +1372,12 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
+
+        # need subgraph inputs and outputs to analyze all symints
+        # used in flex attention
+        out.data.data.subgraph_inps = subgraph_inps
+        out.data.data.subgraph_outs = subgraph_outs
+        return (out, logsumexp)
 
     (
         query,
@@ -1570,22 +1576,36 @@ def flex_attention(
         6: create_num_blocks_fake_generator(full_kv_indices),
         7: create_indices_fake,
     }
-    return (
-        autotune_select_algorithm(
-            "flex_attention",
-            choices,
-            # Need to filter out symbols since there is an invariant
-            # that all input_nodes are of type IRNode
-            [
-                x
-                for x in inputs_for_autotuning
-                if isinstance(x, torch._inductor.ir.IRNode)
-            ],
-            layout,
-            input_gen_fns=input_gen_fns,
-        ),
-        logsumexp,
+
+    out = autotune_select_algorithm(
+        "flex_attention",
+        choices,
+        # Need to filter out symbols since there is an invariant
+        # that all input_nodes are of type IRNode
+        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        layout,
+        input_gen_fns=input_gen_fns,
     )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    out.data.data.subgraph_inps = subgraph_inps
+    out.data.data.subgraph_outs = subgraph_outs
+    breakpoint()
+    return (out, logsumexp)
+
+
+def get_subgraph_buffers(
+    subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
+) -> list[Optional[ComputedBuffer]]:
+    subgraph_buffer = (
+        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
+    )
+    mask_graph_buffer = (
+        mask_graph_buffer
+        if isinstance(mask_graph_buffer, Sequence)
+        else [mask_graph_buffer]
+    )
+    return [*subgraph_buffer, *mask_graph_buffer]
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------
