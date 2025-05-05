@@ -352,7 +352,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
         quot = f"{a} / {b}"
-        if a.dtype.is_floating_point or b.dtype.is_floating_point:
+        if (a.dtype is not None and a.dtype.is_floating_point) or (
+            b.dtype is not None and b.dtype.is_floating_point
+        ):
             return f"metal::trunc({quot})"
         return quot
 
