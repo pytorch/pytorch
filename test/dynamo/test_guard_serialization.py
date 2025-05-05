@@ -5,6 +5,7 @@ import importlib
 import pickle
 import sys
 import types
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import torch
@@ -256,11 +257,11 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         assert self._frame_state is not None
 
         # Set f_locals from regenerated kwargs to handle exhausted input iterators
-        # NB: This is super janky and might cause problems
+        # NB: This is super janky and might cause unforeseen problems
         if kwarg_gen_fn is not None:
             kwargs = kwarg_gen_fn()
             for key in self._frame_state.f_locals.keys():
-                if key in kwargs:
+                if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
         def guard_filter_fn(guards):
