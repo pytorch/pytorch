@@ -1806,7 +1806,7 @@ class Graph:
         # Call DCE on the subgraphs
         if self.owning_module is not None:
             subgraph_names: OrderedSet[str] = OrderedSet()
-            for node in sorted(self.find_nodes(op="get_attr")):
+            for node in self.find_nodes(op="get_attr"):
                 attr_name = node.target
                 if "." not in attr_name and attr_name not in subgraph_names:
                     sub_mod = getattr(self.owning_module, attr_name)
