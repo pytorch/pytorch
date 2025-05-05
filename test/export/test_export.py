@@ -1302,7 +1302,8 @@ graph():
     def test_cond_branches_return_constant_int(self):
         class M(torch.nn.Module):
             def forward(self, x):
-                return torch.cond(x.sum() > 3, lambda: 0, lambda: 1, tuple())
+                idx = torch.cond(x.sum() > 3, lambda: 0, lambda: 1, tuple())
+                return x[idx]
 
         args = (torch.randn(3, 3),)
         m = M()
