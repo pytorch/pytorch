@@ -9258,8 +9258,8 @@ class TestSDPA(TestCaseMPS):
         torch.manual_seed(1729)
         batch = 1
         NH = 2
-        q_len = 4 # <8 so that vector fast is eligible
-        s_len = 16 # smaller than 1024 so that we use the one–pass variant
+        q_len = 4  # <8 so that vector fast is eligible
+        s_len = 16  # smaller than 1024 so that we use the one–pass variant
         if contiguous:
             q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
             k = torch.randn(batch, NH, s_len, head_dim, dtype=dtype, device="mps")
@@ -9301,7 +9301,7 @@ class TestSDPA(TestCaseMPS):
         torch.manual_seed(1729)
         batch = 1
         NH = 2
-        q_len = 32 # threshold to trigger full fast attention path
+        q_len = 32  # threshold to trigger full fast attention path
         s_len = 16
         if contiguous:
             q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")

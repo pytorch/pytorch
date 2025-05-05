@@ -23,7 +23,6 @@ template <typename T, int D, int V = D>
     const constant int& mask_q_seq_stride [[buffer(13)]],
     const constant int& mask_head_stride [[buffer(14)]],
     const constant bool& has_mask [[buffer(15)]],
-    const constant bool& query_transposed [[buffer(16)]],
     uint3 tid [[threadgroup_position_in_grid]],
     uint3 tpg [[threadgroups_per_grid]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -163,7 +162,6 @@ template <typename T, int D, int V = D>
     const constant int& mask_q_seq_stride [[buffer(15)]],
     const constant int& mask_head_stride [[buffer(16)]],
     const constant bool& has_mask [[buffer(17)]],
-    const constant bool& query_transposed [[buffer(18)]],
     uint3 tid [[threadgroup_position_in_grid]],
     uint3 tpg [[threadgroups_per_grid]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -191,7 +189,7 @@ template <typename T, int D, int V = D>
   const int head_idx = tid.x;
   const int q_seq_idx = tid.y;
   const int o_offset = head_idx * tpg.y + q_seq_idx;
-  const int q_offset = query_transposed ? o_offset : o_offset;
+  const int q_offset = o_offset;
   const int kv_head_idx = head_idx / gqa_factor;
 
   queries += q_offset * D + simd_lid * qk_per_thread;
@@ -318,7 +316,6 @@ template <typename T, int D>
   const int head_idx = tid.x;
   const int q_seq_idx = tid.y;
   const int hq_offset = head_idx * tpg.y + q_seq_idx;
-  const int n_heads = tpg.x;
   partials +=
       hq_offset * blocks * D + simd_gid * D + simd_lid * elem_per_thread;
   sums += hq_offset * blocks;
@@ -358,19 +355,15 @@ kernel void attention(
     const device T* K [[buffer(1)]],
     const device T* V [[buffer(2)]],
     device T* O [[buffer(3)]],
-    const device int& B [[buffer(4)]],
-    const device int& H [[buffer(5)]],
-    const device int& D [[buffer(6)]],
-    const device int& qL [[buffer(7)]],
-    const device int& kL [[buffer(8)]],
-    const device int& gqa_factor [[buffer(9)]],
-    const device float& scale [[buffer(10)]],
-    const device int& NQ [[buffer(11)]],
-    const device int& NK [[buffer(12)]],
-    const device int3& Q_strides [[buffer(13)]],
-    const device int3& K_strides [[buffer(14)]],
-    const device int3& V_strides [[buffer(15)]],
-    const device int3& O_strides [[buffer(16)]],
+    const device int& qL [[buffer(4)]],
+    const device int& kL [[buffer(5)]],
+    const device int& gqa_factor [[buffer(6)]],
+    const device float& scale [[buffer(7)]],
+    const device int& NK [[buffer(8)]],
+    const device int3& Q_strides [[buffer(9)]],
+    const device int3& K_strides [[buffer(10)]],
+    const device int3& V_strides [[buffer(11)]],
+    const device int3& O_strides [[buffer(12)]],
     uint3 group_pos [[threadgroup_position_in_grid]],
     uint3 local_pos [[thread_position_in_threadgroup]]) {
   // 1. Compute a full linear thread id from the 3D local id.
@@ -540,7 +533,6 @@ kernel void attention(
       const constant int& mask_q_seq_stride [[buffer(13)]],  \
       const constant int& mask_head_stride [[buffer(14)]],   \
       const constant bool& has_mask [[buffer(15)]],          \
-      const constant bool& query_transposed [[buffer(16)]],  \
       uint3 tid [[threadgroup_position_in_grid]],            \
       uint3 tpg [[threadgroups_per_grid]],                   \
       uint simd_gid [[simdgroup_index_in_threadgroup]],      \
@@ -568,7 +560,6 @@ kernel void attention(
       const constant int& mask_q_seq_stride [[buffer(15)]],       \
       const constant int& mask_head_stride [[buffer(16)]],        \
       const constant bool& has_mask [[buffer(17)]],               \
-      const constant bool& query_transposed [[buffer(18)]],       \
       uint3 tid [[threadgroup_position_in_grid]],                 \
       uint3 tpg [[threadgroups_per_grid]],                        \
       uint simd_gid [[simdgroup_index_in_threadgroup]],           \
@@ -612,19 +603,15 @@ INSTANTIATE_SDPA_VECTOR_HEADS(bfloat);
       const device DTYPE* K [[buffer(1)]],                               \
       const device DTYPE* V [[buffer(2)]],                               \
       device DTYPE* O [[buffer(3)]],                                     \
-      const device int& B [[buffer(4)]],                                 \
-      const device int& H [[buffer(5)]],                                 \
-      const device int& D [[buffer(6)]],                                 \
-      const device int& qL [[buffer(7)]],                                \
-      const device int& kL [[buffer(8)]],                                \
-      const device int& gqa_factor [[buffer(9)]],                        \
-      const device float& scale [[buffer(10)]],                          \
-      const device int& NQ [[buffer(11)]],                               \
-      const device int& NK [[buffer(12)]],                               \
-      const device int3& Q_strides [[buffer(13)]],                       \
-      const device int3& K_strides [[buffer(14)]],                       \
-      const device int3& V_strides [[buffer(15)]],                       \
-      const device int3& O_strides [[buffer(16)]],                       \
+      const device int& qL [[buffer(4)]],                                \
+      const device int& kL [[buffer(5)]],                                \
+      const device int& gqa_factor [[buffer(6)]],                        \
+      const device float& scale [[buffer(7)]],                           \
+      const device int& NK [[buffer(8)]],                                \
+      const device int3& Q_strides [[buffer(9)]],                        \
+      const device int3& K_strides [[buffer(10)]],                       \
+      const device int3& V_strides [[buffer(11)]],                       \
+      const device int3& O_strides [[buffer(12)]],                       \
       uint3 group_pos [[threadgroup_position_in_grid]],                  \
       uint3 local_pos [[thread_position_in_threadgroup]]);
 

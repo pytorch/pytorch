@@ -183,11 +183,10 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
       auto group_dims = MTLSizeMake(1024, 1, 1);
       auto grid_dims = MTLSizeMake(batchSize * num_head, q_.size(2), 1);
       bool has_mask = mask_.has_value();
-      bool query_transposed = q_.is_contiguous();
 
-      const std::string pipelineKey =
+      const std::string kname =
           fmt::format("sdpa_vector_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
-      auto attentionPSO = lib.getPipelineStateForFunc(pipelineKey);
+      auto attentionPSO = lib.getPipelineStateForFunc(kname);
       [computeEncoder setComputePipelineState:attentionPSO];
       mtl_setArgs(computeEncoder,
                   q_,
@@ -210,7 +209,7 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
         auto head_stride = (nd >= 3 && mask_.value().size(nd - 3) > 1) ? mask_.value().stride(nd - 3) : 0;
         mtl_setArgs<12>(computeEncoder, kv_seq_stride, q_seq_stride, head_stride);
       }
-      mtl_setArgs<15>(computeEncoder, has_mask, query_transposed);
+      mtl_setArgs<15>(computeEncoder, has_mask);
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -258,8 +257,7 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
 
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
   bool has_mask = mask_.has_value();
-  bool query_transposed = !q_.is_contiguous();
-  std::string kname =
+  const std::string kname =
       fmt::format("sdpa_vector_2pass_1_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
 
   auto& lib = MetalShaderLibrary::getBundledLibrary();
@@ -270,9 +268,9 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
       MTLSize group_dims = MTLSizeMake(8 * SIMD_SIZE, 1, 1);
       MTLSize grid_dims = MTLSizeMake(B, seq_len_q, blocks);
 
-      auto pipeline = lib.getPipelineStateForFunc(kname);
+      auto attentionPSO = lib.getPipelineStateForFunc(kname);
       auto computeEncoder = mpsStream->commandEncoder();
-      [computeEncoder setComputePipelineState:pipeline];
+      [computeEncoder setComputePipelineState:attentionPSO];
 
       mtl_setArgs(computeEncoder,
                   q_,
@@ -297,20 +295,17 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
         int32_t head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
         mtl_setArgs<13>(computeEncoder, mask, kv_seq_stride, q_seq_stride, head_stride);
       }
-      mtl_setArgs<17>(computeEncoder, has_mask, query_transposed);
+      mtl_setArgs<17>(computeEncoder, has_mask);
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
-  });
-
-  kname = "sdpa_vector_2pass_2_";
-  kname += scalarToMetalTypeString(q_);
-  kname += "_" + std::to_string(v_.size(-1));
+  }); ////
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      auto pipeline2 = lib.getPipelineStateForFunc(kname);
-      [computeEncoder setComputePipelineState:pipeline2];
+      auto attentionPSO = lib.getPipelineStateForFunc("sdpa_vector_2pass_2_" + scalarToMetalTypeString(q_) + "_" +
+                                                      std::to_string(v_.size(-1)));
+      [computeEncoder setComputePipelineState:attentionPSO];
 
       mtl_setArgs(computeEncoder, intermediate, sums, maxs, out);
 
@@ -398,14 +393,10 @@ static inline std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q
                   k_,
                   v_,
                   out,
-                  static_cast<int>(batchSize),
-                  static_cast<int>(num_heads),
-                  static_cast<int>(headSize),
                   static_cast<int>(qL),
                   static_cast<int>(kL),
                   gqa_factor,
                   scale_factor,
-                  NQ,
                   NK,
                   std::array<uint32_t, 3>{static_cast<uint32_t>(q_batch_stride),
                                           static_cast<uint32_t>(q_head_stride),
