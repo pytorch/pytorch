@@ -396,14 +396,10 @@ def _unlift_graph(
 def _get_subgraph_names(
     gm: GraphModule, skip_invoke_subgraph: bool = False
 ) -> Generator[str, None, None]:
-    # Hops, e.g. invoke_subgraph, can use the same subgraph, so dedupe them.
     subgraph_names: OrderedSet[str] = OrderedSet()
-    for node in sorted(gm.graph.find_nodes(op="get_attr")):
-        attr_name = node.target
-        if "." not in attr_name and attr_name not in subgraph_names:
-            attr = getattr(gm, attr_name)
-            if isinstance(attr, torch.fx.GraphModule):
-                subgraph_names.add(attr_name)
+    for child_name, child_mod in gm.named_children():
+        if isinstance(child_mod, torch.fx.GraphModule):
+            subgraph_names.add(child_name)
 
     if skip_invoke_subgraph:
         for node in sorted(
