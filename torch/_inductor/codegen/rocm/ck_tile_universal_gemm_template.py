@@ -93,8 +93,13 @@ class CKTileGemmOperation:
 
 
 @functools.lru_cache(None)
-def _default_ops_list():
-    return [
+def ops():
+    """
+    Generate the supported instance dataclasses
+    """
+    import itertools
+
+    compute_v3_instances = [
         CKTileGemmOperation(
             layout_a=layout_a,
             layout_b=layout_b,
@@ -114,7 +119,85 @@ def _default_ops_list():
             m_is_padded=m_is_padded,
             n_is_padded=n_is_padded,
             k_is_padded=k_is_padded,
-            pipeline=pipeline,
+            pipeline="CompV3",
+            scheduler="Intrawave",
+            epilogue=epilogue,
+        )
+        for (layout_a, layout_b, layout_c) in [
+            ("Row", "Row", "Row"),
+            ("Row", "Col", "Row"),
+        ]
+        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
+        for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
+        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
+        for m_is_padded in ["true", "false"]
+        for n_is_padded in ["true", "false"]
+        for k_is_padded in ["true", "false"]
+        for epilogue in ["Default", "CShuffle"]
+    ]
+
+    compute_v4_instances = [
+        CKTileGemmOperation(
+            layout_a=layout_a,
+            layout_b=layout_b,
+            layout_c=layout_c,
+            datatype_a=datatype_a,
+            datatype_b=datatype_b,
+            datatype_c=datatype_c,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_k=warp_k,
+            warp_tile_m=warp_tile_m,
+            warp_tile_n=warp_tile_n,
+            warp_tile_k=warp_tile_k,
+            m_is_padded=m_is_padded,
+            n_is_padded=n_is_padded,
+            k_is_padded=k_is_padded,
+            pipeline="CompV4",
+            scheduler="Intrawave",
+            epilogue=epilogue,
+        )
+        for (layout_a, layout_b, layout_c) in [
+            ("Row", "Row", "Row"),
+            ("Row", "Col", "Row"),
+        ]
+        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (tile_m, tile_n, tile_k) in [
+            (256, 256, 32)
+        ]  # half the tile size since it has double buffering
+        for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
+        for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
+        for m_is_padded in ["true", "false"]
+        for n_is_padded in ["true", "false"]
+        for k_is_padded in ["true", "false"]
+        for epilogue in ["Default", "CShuffle"]
+    ]
+
+    mem_instances = [
+        CKTileGemmOperation(
+            layout_a=layout_a,
+            layout_b=layout_b,
+            layout_c=layout_c,
+            datatype_a=datatype_a,
+            datatype_b=datatype_b,
+            datatype_c=datatype_c,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_k=warp_k,
+            warp_tile_m=warp_tile_m,
+            warp_tile_n=warp_tile_n,
+            warp_tile_k=warp_tile_k,
+            m_is_padded=m_is_padded,
+            n_is_padded=n_is_padded,
+            k_is_padded=k_is_padded,
+            pipeline="Mem",
             scheduler=scheduler,
             epilogue=epilogue,
         )
@@ -129,14 +212,11 @@ def _default_ops_list():
         for m_is_padded in ["true", "false"]
         for n_is_padded in ["true", "false"]
         for k_is_padded in ["true", "false"]
-        for (pipeline, scheduler) in [
-            ("CompV3", "Intrawave"),
-            ("CompV4", "Intrawave"),
-            ("Mem", "Intrawave"),
-            ("Mem", "Interwave"),
-        ]
+        for scheduler in ["Intrawave", "Interwave"]
         for epilogue in ["Default", "CShuffle"]
     ]
+
+    return itertools.chain(compute_v3_instances, compute_v4_instances, mem_instances)
 
 
 class CKTileGemmTemplate(CKTileTemplate):
@@ -622,10 +702,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         An instance may invalidate the GEMM configuration at runtime.
         Such instances will be assigned +inf runtime by the autotune process.
         """
-        unfiltered_instances = _default_ops_list()
-        filtered_instances = list(
-            filter(lambda op: self.filter_op(op), unfiltered_instances)
-        )
+        filtered_instances = list(filter(self.filter_op, ops()))
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
