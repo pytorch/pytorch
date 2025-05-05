@@ -1623,6 +1623,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
     writer.write(ncclTrace);
+    LOG(INFO) << logPrefix() << "Flight Recorder trace successfully dumped.";
     return true;
   }
   return false;
@@ -3057,6 +3058,21 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
   TORCH_INTERNAL_ASSERT(
       it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
   return it->second;
+}
+
+int64_t ProcessGroupNCCL::getCommPtr() {
+  // Get the collective communicator on the current CUDA device.
+  auto device = at::Device(at::kCUDA, at::cuda::current_device());
+  std::string deviceKey = getKeyFromDevice(device);
+  auto ncclComm = getNCCLComm(deviceKey);
+
+  // ncclComm is a nullptr if the communicator does not exist.
+  ncclComm_t comm = nullptr;
+  if (ncclComm != nullptr) {
+    comm = ncclComm->getNcclComm();
+  }
+  const int64_t commPtr = reinterpret_cast<int64_t>(comm);
+  return commPtr;
 }
 
 std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
@@ -5058,6 +5074,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     const AllToAllOptions& opts) {
   int64_t input_total_numel = 0;
   int64_t output_total_numel = 0;
+  // considering uneven all2all bw calculation
+  // use split sizes field to record tensor list sizes
+  std::vector<int64_t> inSplitSizes;
+  std::vector<int64_t> outSplitSizes;
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
@@ -5069,6 +5089,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
         "Tensors must be on the same device")
     input_total_numel += inputTensors[r].numel();
     output_total_numel += outputTensors[r].numel();
+    inSplitSizes.push_back(inputTensors[r].numel());
+    outSplitSizes.push_back(outputTensors[r].numel());
   }
 
   RECORD_PARAM_COMMS_DATA(
@@ -5083,8 +5105,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       input_total_numel, // inNelems
       output_total_numel, // outNelems
       inputTensors.front().scalar_type(), // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>(), // outSplitSizes
+      inSplitSizes, // inSplitSizes
+      outSplitSizes, // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
       this->getSize()); // worldSize
