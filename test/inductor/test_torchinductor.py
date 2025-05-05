@@ -10466,6 +10466,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(x_ref, x_test)
 
     @requires_gpu()
+    @skip_if_not_triton
     def test_inductor_multiple_specializations(self):
         @torch.compile(
             options={

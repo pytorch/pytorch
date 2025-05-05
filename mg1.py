@@ -30,10 +30,10 @@ for m in [2, 4, 8, 16]:
             0,
             backend_specializations=[
                 # hint, specialization
-                # (2, lambda x0: x0 == 2),
-                # (4, lambda x0: x0 == 4),
-                # (8, lambda x0: x0 == 8),
-                # (16, lambda x0: x0 == 16),
+                (2, lambda x0: x0 == 2),
+                (4, lambda x0: x0 == 4),
+                (8, lambda x0: x0 == 8),
+                (16, lambda x0: x0 == 16),
             ],
         )
         torch._dynamo.decorators.mark_dynamic(
