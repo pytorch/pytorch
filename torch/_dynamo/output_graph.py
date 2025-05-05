@@ -1505,10 +1505,17 @@ class OutputGraph(OutputGraphGuardsState):
                 sources = [a.source for a in self.graphargs]
                 for specialization in old_fake_mode.shape_env.backend_specializations:
                     source_index = sources.index(specialization.source)
+                    check_fn_source = inspect.getsource(specialization.check_fn).strip()
                     check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
                         specialization.check_fn,
-                        [inspect.getsource(specialization.check_fn)],
+                        [check_fn_source],
                     )
+
+                    log.debug(
+                        "Compiling backend specialized graph with specialization=%s",
+                        check_fn_source,
+                    )
+
                     specialized_compiles.append(
                         (
                             functools.partial(
