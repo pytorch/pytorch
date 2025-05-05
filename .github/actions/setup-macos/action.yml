@@ -1,0 +1,26 @@
+name: Setup macOS
+description: Set up macOS environment
+
+inputs:
+  python-version:
+    required: true
+    type: string
+    description: The Python version to use for the environment.
+
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        # Install system dependencies
+        # TODO: We should pin these versions
+        brew install pkgconf
+    
+    # TODO: We should find a way to install libuv (not from conda)
+
+    - name: Setup python + dependencies
+      uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+      with:
+        python-version: ${{ inputs.python-version }}
+        pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
