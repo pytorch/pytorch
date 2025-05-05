@@ -1781,8 +1781,6 @@ class Graph:
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
-        from torch._inductor.utils import OrderedSet
-
         self.lint()
 
         impure_random = True
@@ -1805,15 +1803,10 @@ class Graph:
 
         # Call DCE on the subgraphs
         if self.owning_module is not None:
-            subgraph_names: OrderedSet[str] = OrderedSet()
-            for node in self.find_nodes(op="get_attr"):
-                attr_name = node.target
-                if "." not in attr_name and attr_name not in subgraph_names:
-                    sub_mod = getattr(self.owning_module, attr_name)
-                    if isinstance(sub_mod, torch.fx.GraphModule):
-                        subgraph_names.add(attr_name)
-                        changed |= sub_mod.graph.eliminate_dead_code()
-                        sub_mod.recompile()
+            for child_module in self.owning_module.children():
+                if isinstance(child_module, torch.fx.GraphModule):
+                    changed |= child_module.graph.eliminate_dead_code()
+                    child_module.recompile()
 
         return changed
 
