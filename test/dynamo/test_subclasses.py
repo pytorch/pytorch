@@ -769,7 +769,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim
 
-        msg = "Currently only support accessing overridden attributes that are functions or properties, but got <class 'int'>"
+        msg = "`torch.compile` only support tracing certain types of overriden tensor subclass attributes"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
