@@ -1,5 +1,13 @@
 #include <cstdlib>
+#if __has_include(<filesystem>)
 #include <filesystem>
+namespace filesystem = std::filesystem;
+#elif __has_include(<experimental/filesystem>)
+#include <experimental/filesystem>
+namespace filesystem = std::experimental::filesystem;
+#else
+#error "Neither <filesystem> nor <experimental/filesystem> is available."
+#endif
 #include <sstream>
 #include <string>
 #include <utility>
@@ -38,7 +46,7 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
     }
     auto index_at = line.find_last_of('=');
     auto pass_name = line.substr(0, index_at);
-    pass_name = std::filesystem::path(pass_name).replace_extension().string();
+    pass_name = filesystem::path(pass_name).replace_extension().string();
     auto opt_limit = parseOptLimit(line.substr(index_at + 1));
     passes_to_opt_limits.emplace(std::move(pass_name), opt_limit);
   }
@@ -55,7 +63,7 @@ bool opt_limit(const char* pass_name) {
 
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
       parseJITOptLimitOption(opt_limit.value());
-  std::string pass = std::filesystem::path(pass_name).stem().string();
+  std::string pass = filesystem::path(pass_name).stem().string();
 
   auto opt_limit_it = passes_to_opt_limits.find(pass);
   if (opt_limit_it == passes_to_opt_limits.end()) {
