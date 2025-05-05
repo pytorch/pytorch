@@ -869,6 +869,27 @@ class QLinearDynamicFp16 final {
     }
     return output;
   }
+
+  static at::Tensor meta(
+      at::Tensor input,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
+    // We make a strong guarantee that models using these operators will have
+    // the same numerics across different machines. Therefore, we do not provide
+    // a fallback path and rather fail loudly if we cannot run FBGEMM.
+    TORCH_CHECK(
+      fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+    
+    auto unpacked_weight = std::get<0>(packed_weight->unpack());
+    TORCH_CHECK(
+      unpacked_weight.dim() == 2,
+      "The dimension of weight tensor should be equal to 2");
+
+  auto out_channel = unpacked_weight.sym_sizes().vec()[0];
+  auto out_sizes = input.sym_sizes().vec();
+  out_sizes[out_sizes.size() - 1] = out_channel;
+
+  return at::empty_symint(out_sizes, input.options());
+  }
 #else // USE_FBGEMM
   static at::Tensor run(
       at::Tensor /* input */,
@@ -1047,6 +1068,12 @@ TORCH_LIBRARY_IMPL(quantized, Meta, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16_unpacked_weight"),
       TORCH_FN(QLinearUnpackedDynamicFp16::meta));
+  m.impl(
+    TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"),
+    TORCH_FN(QLinearDynamicFp16<false>::meta));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_fp16"),
+      TORCH_FN(QLinearDynamicFp16<true>::meta));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {

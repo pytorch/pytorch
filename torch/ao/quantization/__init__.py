@@ -232,3 +232,23 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
 
     def calculate_qparams(self):  # type:ignore[override]
         return self.derive_qparams_fn(self.obs_or_fqs)
+
+
+	
+if "fbgemm" in torch.backends.quantized.supported_engines:
+
+    @torch._library.register_fake_class("quantized::LinearPackedParamsBase")
+    class _FakeLinearPackedParamsBase:
+        def __init__(self, weight: torch.Tensor, bias: Optional[torch.Tensor] = None):
+            self._weight = weight
+            self._bias = bias
+
+        @classmethod
+        def __obj_unflatten__(cls, flat_obj):
+            return cls(**dict(flat_obj))
+
+        def weight(self):
+            return self._weight
+
+        def bias(self):
+            return self._bias
