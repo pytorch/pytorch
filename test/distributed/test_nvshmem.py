@@ -90,6 +90,53 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         )
         torch.testing.assert_close(out, expected)
 
+    @skipIfRocm
+    def test_nvshmem_all_to_all_vdev(self) -> None:
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of elements for a peer is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (self.world_size,), device=self.device)
+        inp_numel = inp_splits.sum().item()
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        dist.all_to_all_single(out_splits, inp_splits)
+        out_numel = out_splits.sum().item()
+        # Align up to make it bigger
+        align = 16
+        out_numel_max = (out_numel + align - 1) // align * align
+
+        inp = symm_mem.empty(inp_numel, dtype=dtype, device=self.device).fill_(
+            self.rank
+        )
+        out = symm_mem.empty(out_numel_max, dtype=dtype, device=self.device).fill_(-1)
+        in_out_splits = symm_mem.empty(
+            (3, self.world_size), dtype=torch.int64, device=self.device
+        )
+        # Row 0 is input splits
+        in_out_splits[0].copy_(inp_splits)
+
+        torch.ops.symm_mem.nvshmem_all_to_all_vdev(inp, out, in_out_splits, group_name)
+
+        # Check input splits (row 0) -- should not change
+        torch.testing.assert_close(in_out_splits[0], inp_splits)
+
+        # Check output splits (row 1)
+        torch.testing.assert_close(in_out_splits[1], out_splits)
+
+        # Check output offsets (row 2)
+        out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
+        # output offsets from `nvshmem_all_to_all_vdev` is exclusive scan
+        self.assertEqual(in_out_splits[2][0], 0)
+        torch.testing.assert_close(in_out_splits[2][1:], out_offsets[:-1])
+
+        # Check data
+        expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+        dist.all_to_all_single(expected, inp, out_splits.tolist(), inp_splits.tolist())
+        torch.testing.assert_close(out[:out_numel], expected)
+
 
 if __name__ == "__main__":
     if not device_module.is_available():
