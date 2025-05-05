@@ -27,6 +27,64 @@ struct exp_functor {
   }
 };
 
+struct sin_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::sin(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::sin(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // sin(x+yi)=sin(x)cosh(y)+icos(x)sinh(y);
+    auto sin_x = precise::sin(x.x);
+    auto cosh_y = precise::cosh(x.y);
+    auto cos_x = precise::cos(x.x);
+    auto sinh_y = precise::sinh(x.y);
+    return T(sin_x * cosh_y, cos_x * sinh_y);
+  }
+};
+
+struct cos_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::cos(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::cos(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // cos(x+yi)=cos(x)cosh(y)-isin(x)sinh(y);
+    auto sin_x = precise::sin(x.x);
+    auto cosh_y = precise::cosh(x.y);
+    auto cos_x = precise::cos(x.x);
+    auto sinh_y = precise::sinh(x.y);
+    return T(cos_x * cosh_y, -1 * sin_x * sinh_y);
+  }
+};
+
+struct tan_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(precise::tan(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return precise::tan(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // tan(x+yi)=(tan(x) + itanh(y)) / (1 - i(tan(x) * tanh(y)))
+    auto tan_x = precise::sin(x.x);
+    auto tanh_y = precise::cosh(x.y);
+    return complex_div(T(tan_x, tanh_y), T(1, -1 * tan_x * tanh_y));
+  }
+};
+
 struct tanh_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -95,7 +153,10 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
-  REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0)
+  REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(sin, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(cos, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(tan, DTYPE1, DTYPE0)
 
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
@@ -113,7 +174,10 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2); \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2)
+  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2); \
+  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);
 INSTANTIATE_UNARY_KERNELS_VEC2(float);

@@ -1832,8 +1832,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: cos_out
-    MPS: cos_out_mps
+    CPU, CUDA, MPS: cos_out
   tags: pointwise
 
 - func: cosh(Tensor self) -> Tensor
@@ -5391,8 +5390,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: sin_out
-    MPS: sin_out_mps
+    CPU, CUDA, MPS: sin_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr_out
     SparseCPU, SparseCUDA: sin_sparse_out
   tags: pointwise
@@ -6048,8 +6046,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: tan_out
-    MPS: tan_out_mps
+    CPU, CUDA, MPS: tan_out
     SparseCPU, SparseCUDA: tan_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: tan_sparse_csr_out
   tags: pointwise
