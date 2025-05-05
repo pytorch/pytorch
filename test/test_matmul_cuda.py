@@ -55,8 +55,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, _floatx_unpacked_to_f32, ceil_div, to_blocked
 
 _IS_SM8X = False
+_IS_SM10X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
+    _IS_SM10X = torch.cuda.get_device_capability(0)[0] == 10
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -1013,7 +1015,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
+    @unittest.skipIf(not SM89OrLater or _IS_SM10X, "rowwise implementation is currently sm89-sm90 specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
@@ -1118,7 +1120,7 @@ class TestFP8Matmul(TestCase):
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
+    @unittest.skipIf(not SM89OrLater or _IS_SM10X, "rowwise implementation is currently sm89-sm90 specific")
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)
