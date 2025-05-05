@@ -374,7 +374,7 @@ kernel void attention(
     uint3 group_pos [[threadgroup_position_in_grid]],
     uint3 local_pos [[thread_position_in_threadgroup]]) {
   // 1. Compute a full linear thread id from the 3D local id.
-  const int THREADGROUP_DIM_X = 32;
+  constexpr int THREADGROUP_DIM_X = 32;
   constexpr int THREADGROUP_DIM_Y = WM;
   constexpr int THREADGROUP_DIM_Z = WN;
   const int threads_in_group =
