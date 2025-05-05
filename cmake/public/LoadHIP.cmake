@@ -85,7 +85,7 @@ if(HIP_FOUND)
       HINTS ${rocm_core_INCLUDE_DIR}/rocm-core /usr/include)
   else() # Win32
     find_file(ROCM_VERSION_HEADER_PATH NAMES hip_version.h
-      HINTS ${hip_INCLUDE_DIR}/hip /usr/include)
+      HINTS ${hip_INCLUDE_DIR}/hip)
   endif()
   get_filename_component(ROCM_HEADER_NAME ${ROCM_VERSION_HEADER_PATH} NAME)
 
