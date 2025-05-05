@@ -1207,14 +1207,9 @@ def view_to_reshape(gm):
     ):
         nd.target = torch.ops.aten.reshape.default
 
-    subgraph_names: OrderedSet[str] = OrderedSet()
-    for node in sorted(gm.graph.find_nodes(op="get_attr")):
-        attr_name = node.target
-        if "." not in attr_name and attr_name not in subgraph_names:
-            sub_mod = getattr(gm, attr_name)
-            if isinstance(sub_mod, torch.fx.GraphModule):
-                subgraph_names.add(attr_name)
-                view_to_reshape(sub_mod)
+    for child_mod in gm.children():
+        if isinstance(child_mod, torch.fx.GraphModule):
+            view_to_reshape(child_mod)
 
 
 def should_prefer_unfused_addmm(match):
