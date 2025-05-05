@@ -15,6 +15,7 @@ from importlib import import_module
 import torch
 import torch._prims as prims
 import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -252,6 +253,122 @@ class TestCommon(TestCase):
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
+                )
+
+    def test_reduction_tag_coverage(self):
+        reduction_op_names = [
+            op.name for op in op_db if isinstance(op, ReductionOpInfo)
+        ]
+        reduction_op_names = [
+            op_name
+            for op_name in reduction_op_names
+            if not op_name.startswith("masked.")
+        ]
+        reduction_op_names = [
+            op_name.replace(".", "_") for op_name in reduction_op_names
+        ]  # Fix linalg.vector_norm
+
+        # Additional reduction operators
+        reduction_op_names += [
+            "norm",
+            "max",
+            "min",
+            "aminmax",
+            "logsumexp",
+            "special_logsumexp",
+            "std_mean",
+            "var_mean",
+        ]
+
+        binary_overloads = ["max.other", "max.out", "min.other", "min.out"]
+
+        # These are registered in register_prim_ops.cpp or register_special_ops.cpp
+        # and have no entries in native_functions.yaml, so we can't annotate them with the reduction tag
+        manually_registered_overloads = [
+            "sum.int",
+            "sum.float",
+            "sum.bool",
+            "sum.complex",
+            "any.int",
+            "any.float",
+            "any.bool",
+            "any.str",
+            "all.int",
+            "all.float",
+            "all.bool",
+        ]
+
+        for op_name in aten:
+            overloadpacket = getattr(aten, op_name)
+
+            for overload_name in overloadpacket.overloads():
+                name = f"{op_name}.{overload_name}"
+                if name in manually_registered_overloads:
+                    continue
+
+                overload = getattr(overloadpacket, overload_name)
+
+                if name in binary_overloads:
+                    self.assertTrue(
+                        torch.Tag.reduction not in overload.tags,
+                        f"The binary overload {name} is not a reduction operator",
+                    )
+                    continue
+
+                # tags are not propagated to generated overload,
+                # and there's no way of specifying them
+                if torch.Tag.generated in overload.tags:
+                    continue
+
+                self.assertEqual(
+                    op_name in reduction_op_names,
+                    torch.Tag.reduction in overload.tags,
+                    f"Bad reduction tag for overload {name}",
+                )
+
+    def test_view_tag_coverage(self):
+        # These operators have the inferred property is_view according to their declaration in native_functions.yaml
+        # but they are not pure view operators since they create a copy under certain conditions
+        not_view_operators = ["to", "copy"]
+
+        # These are registered in register_prim_ops.cpp or register_special_ops.cpp
+        # they are not registered to CompositeExplicitAutograd and hence should not carry the view tag.
+        manually_registered_overloads = [
+            "select.t",
+            "numpy_T.a",
+            "split.default",
+            "matrix_H.a",
+            "mT.a",
+            "mH.a",
+        ]
+
+        inner_operators = ["_nested_view_from_buffer", "_reshape_alias"]
+
+        expect_no_view_tag = (
+            not_view_operators + manually_registered_overloads + inner_operators
+        )
+
+        for op_name in aten:
+            overloadpacket = getattr(aten, op_name)
+
+            for overload_name in overloadpacket.overloads():
+                name = f"{op_name}.{overload_name}"
+                overload = getattr(overloadpacket, overload_name)
+
+                if op_name in expect_no_view_tag or name in expect_no_view_tag:
+                    self.assertTrue(
+                        torch.Tag.view not in overload.tags,
+                        f"Overload {name} has the view tag although it shouldn't",
+                    )
+                    continue
+
+                self.assertEqual(
+                    torch.Tag.view in overload.tags,
+                    overload.is_view
+                    and not overload.has_kernel_for_dispatch_key(
+                        DispatchKey.CompositeImplicitAutograd
+                    ),
+                    f"Bad view tag for overload {name}",
                 )
 
     def test_pointwise_tag_coverage(self):
