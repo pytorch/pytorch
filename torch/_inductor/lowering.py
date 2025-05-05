@@ -6277,7 +6277,10 @@ def cummax(x, axis=None):
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (
+        x.make_loader(),
+        lambda idx: ops.index_expr(idx[axis], torch.int64),
+    )
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummax(x, dim=axis)
@@ -6297,7 +6300,10 @@ def cummin(x, axis=None):
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
+    kwargs["inner_fns"] = (
+        x.make_loader(),
+        lambda idx: ops.index_expr(idx[axis], torch.int64),
+    )
     values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)  # type: ignore[arg-type]
     if values is None:
         return fallback_cummin(x, dim=axis)
