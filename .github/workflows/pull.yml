@@ -9,6 +9,8 @@ on:
       - main
       - release/*
       - landchecks/*
+    tags:
+      - ciflow/pull/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
@@ -385,9 +387,6 @@ jobs:
     name: linux-focal-cpu-py3.10-gcc11-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     needs: get-label-type
-    permissions:
-      id-token: write
-      contents: read
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-bazel-test
