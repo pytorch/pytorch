@@ -52,6 +52,7 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
+    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
@@ -135,9 +136,11 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
-        "einops.einops.rearrange",
     )
-    SAFE_NON_TORCH_FUNCTIONS = ("einops.einops.repeat",)
+    SAFE_NON_TORCH_FUNCTIONS = (
+        "einops.einops.rearrange",
+        "einops.einops.repeat",
+    )
 
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
@@ -510,6 +513,9 @@ class AOTAutogradCacheEntry:
 
     guards_expr: Optional[str]
 
+    # # Used by compiled autograd
+    cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo]
+
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
@@ -655,7 +661,7 @@ class AOTAutogradCacheEntry:
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                None,  # lazy_backward_info
+                self.cached_lazy_backward_info,
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
