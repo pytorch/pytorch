@@ -1436,6 +1436,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         launcher.n_regs = self.kernel.n_regs  # type: ignore[attr-defined]
         launcher.n_spills = self.kernel.n_spills  # type: ignore[attr-defined]
         launcher.shared = self.kernel.shared  # type: ignore[attr-defined]
+        launcher.cache_hash = triton_hash_to_path_key(self.kernel.hash) # type: ignore[attr-defined]
         launcher.store_cubin = False  # type: ignore[attr-defined]
         launcher._is_static = True  # type: ignore[attr-defined]
         return launcher
