@@ -7,8 +7,8 @@
 #include <ATen/ceil_div.h>
 
 namespace at::native {
-template <int Alignment>
-__global__ void vectorized_gather_kernel(char * out, char * inp, int64_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
+template <int Alignment, typename index_t>
+__global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
     int64_t ind = idx[blockIdx.x];
     if (allow_neg_indices) {
         ind = (ind < 0) ? ind + ind_dim_size : ind;
@@ -22,8 +22,8 @@ __global__ void vectorized_gather_kernel(char * out, char * inp, int64_t * idx, 
 
 
 
-template <int64_t Alignment>
-void vectorized_gather_kernel_launch(char * out, char * inp, int64_t * idx, int num_ind,
+template <int64_t Alignment, typename index_t>
+void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int num_ind,
                                      int64_t slice_size_in_bytes, int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes, bool allow_neg_indices){
 
   constexpr int64_t max_num_threads=256;
@@ -32,13 +32,15 @@ void vectorized_gather_kernel_launch(char * out, char * inp, int64_t * idx, int 
       static_cast<int64_t>(C10_WARP_SIZE));
   dim3 grid = {static_cast<uint32_t>(num_ind), static_cast<uint32_t>(at::ceil_div(slice_size_in_bytes, max_num_threads * Alignment)), 1};
   auto block = std::min(max_num_threads, num_threads);
-  vectorized_gather_kernel<Alignment><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
+  vectorized_gather_kernel<Alignment, index_t><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(out, inp, idx, num_ind, slice_size_in_bytes,
   ind_dim_size, inp_stride_bytes, out_stride_bytes, allow_neg_indices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // explicit template instantiation
-template void vectorized_gather_kernel_launch<16>(char * out, char * inp, int64_t * idx, int num_ind, int64_t slice_size_in_bytes,
+template void vectorized_gather_kernel_launch<16, int64_t>(char * out, char * inp, int64_t * idx, int num_ind, int64_t slice_size_in_bytes,
+int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes, bool allow_neg_indices);
+template void vectorized_gather_kernel_launch<16, int32_t>(char * out, char * inp, int32_t * idx, int num_ind, int64_t slice_size_in_bytes,
 int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes, bool allow_neg_indices);
 
 }
