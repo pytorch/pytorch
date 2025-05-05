@@ -1028,20 +1028,18 @@ def _try_get_metadata_from_dynamo(
     seen_sources = set()
 
     aot_autograd_arg_pos_to_source = []
-    static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
-    for i, name in enumerate(param_keys):
+    for name in param_keys:
         assert name in param_name_to_source, f"{name} not found."
         source = param_name_to_source[name]
         assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
-        static_input_indices.append(i)
-
     # Collect the dynamo graph inputs
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
+    static_input_indices = []
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
@@ -1050,22 +1048,16 @@ def _try_get_metadata_from_dynamo(
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name() if source else str(source)
 
-        # input[i] in dynamo is now:
-        # input[i + len(extra_params)] in AOT,
-        # where extra_params are the params/buffers that dynamo baked into the
-        # OutputGraph
-        actual_pos = pos + len(param_keys)
-
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
             "_dynamo_static_input_type", None
         ):
             static_inputs_log.debug(
-                "Adding static input pos %s for source %s", actual_pos, source_name
+                "Adding static input pos %s for source %s", pos, source_name
             )
-            static_input_indices.append(actual_pos)
+            static_input_indices.append(pos)
         else:
             static_inputs_log.debug(
-                "Non-static input pos %s for source %s", actual_pos, source_name
+                "Non-static input pos %s for source %s", pos, source_name
             )
 
     assert full_args_num == len(aot_autograd_arg_pos_to_source)
@@ -1715,3 +1707,44 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
 
 compiled_function = aot_function
 compiled_module = aot_module
+
+import threading
+from collections import deque
+
+
+_TLS = threading.local()
+_TLS.saved_tensors_hooks_stack = deque()
+
+
+def graph_saved_tensors_hooks_top() -> (
+    Optional[tuple[torch.fx.GraphModule, torch.fx.GraphModule]]
+):
+    stack = _TLS.saved_tensors_hooks_stack
+    if not stack:
+        return None
+
+    return stack[-1]
+
+
+# Separate contextmanager to be able to debug applying
+# compiled saved tensors hooks **only** to compiled regions and do not apply
+# to eager execution.
+# Example:
+# with torch._functorch.aot_autograd.graph_saved_tensors_hooks(pack_gm, unpack_gm):
+#     ....
+class graph_saved_tensors_hooks:
+    def __init__(
+        self,
+        pack_hook: torch.fx.GraphModule,
+        unpack_hook: torch.fx.GraphModule,
+    ) -> None:
+        assert isinstance(pack_hook, torch.fx.GraphModule)
+        assert isinstance(unpack_hook, torch.fx.GraphModule)
+        self.pack_hook = pack_hook
+        self.unpack_hook = unpack_hook
+
+    def __enter__(self) -> None:
+        _TLS.saved_tensors_hooks_stack.append((self.pack_hook, self.unpack_hook))
+
+    def __exit__(self, *args: object) -> None:
+        _TLS.saved_tensors_hooks_stack.pop()

@@ -47,6 +47,7 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
+from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
@@ -4055,6 +4056,142 @@ def forward(self, tangents_1):
         tensor = torch.rand(10)
         foo(tensor, tensor[1:-1], 2, 2)
 
+    @parametrize("use_autograd", [False, True])
+    def test_mark_outputs_dynamic(self, use_autograd: bool):
+        counters.clear()
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn2(z):
+            return z * 2
+
+        # 1. static
+        x = torch.randn(10, 10, requires_grad=use_autograd)
+        y = torch.randn(10, 10, requires_grad=use_autograd)
+        out = fn(x, y)
+        self.assertFalse(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        out2 = fn2(out)
+        self.assertFalse(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertEqual(counters["aot_autograd"]["total"], 2)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20)
+        y = torch.randn(20, 20)
+        out = fn(x, y)
+        self.assertTrue(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        out2 = fn2(out)
+        self.assertTrue(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertEqual(counters["aot_autograd"]["total"], 2)
+        counters.clear()
+        torch._dynamo.reset()
+
+    def test_mark_activations_dynamic(self):
+        counters.clear()
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            out = torch.matmul(x, y)
+            out2 = torch.matmul(out, y)
+            out3 = torch.matmul(out2, y)
+            return torch.matmul(out3, y)
+
+        def make_assert_pack(dynamic):
+            def pack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return pack
+
+        def make_assert_unpack(dynamic):
+            def unpack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return unpack
+
+        # 1. static
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(False), make_assert_unpack(False)
+        ):
+            fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20, requires_grad=True)
+        y = torch.randn(20, 20, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(True), make_assert_unpack(True)
+        ):
+            fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+        torch._dynamo.reset()
+
+    def test_mark_activations_dynamic_with_nested(self):
+        # The flattened tensors of the nested tensor aren't
+        # marked as activations, but they add some offset
+        # to the fw_outs. This test ensures that we handle
+        # that offset properly.
+        counters.clear()
+        torch._dynamo.reset()
+
+        def make_assert_pack(dynamic):
+            def pack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return pack
+
+        def make_assert_unpack(dynamic):
+            def unpack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return unpack
+
+        # 1. static
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y, nt):
+            out = torch.matmul(x, y)
+            return out.sum() + nt.clone()
+
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(False), make_assert_unpack(False)
+        ):
+            fn(x, y, nt)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20, requires_grad=True)
+        y = torch.randn(20, 20, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(True), make_assert_unpack(True)
+        ):
+            fn(x, y, nt)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+        torch._dynamo.reset()
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -6759,12 +6896,11 @@ metadata incorrectly.
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
-    @patch("torch._functorch.config.saved_tensors_hooks_no_filtering", True)
-    @parametrize("saved_tensors_hooks_no_filtering", [False, True])
-    def test_saved_tensors_hooks_base(self, saved_tensors_hooks_no_filtering):
+    @parametrize("saved_tensors_hooks_filtering_mode", ["donated", "no_static", "all"])
+    def test_saved_tensors_hooks_base(self, saved_tensors_hooks_filtering_mode):
         with patch(
-            "torch._functorch.config.saved_tensors_hooks_no_filtering",
-            saved_tensors_hooks_no_filtering,
+            "torch._functorch.config.saved_tensors_hooks_filtering_mode",
+            saved_tensors_hooks_filtering_mode,
         ):
             # y argument is expected to test saving of int tensor,
             # to check filtering functionality to not apply hooks for e.g. is_floating_point
@@ -6911,7 +7047,6 @@ metadata incorrectly.
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
-    @patch("torch._functorch.config.saved_tensors_hooks_no_filtering", True)
     def test_saved_tensors_hooks_params(self):
         lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
         logged_shapes = []
@@ -6934,11 +7069,11 @@ metadata incorrectly.
             )
         lib.impl("log", log_meta, "Meta")
 
-        def pack_fp8_with_scale_and_shape_log(x):
+        def pack_fp8_with_scale_and_log(x):
             torch.ops._test_aotdispatch_lib.log(x)
             return _pack_fp8_with_scale_wrap(x)
 
-        def unpack_fp8_with_scale_and_shape_log(packed):
+        def unpack_fp8_with_scale_and_log(packed):
             return _unpack_fp8_with_scale_wrap(packed)
 
         def m_inp_fn():
@@ -6989,8 +7124,8 @@ metadata incorrectly.
                 [
                     (
                         (
-                            pack_fp8_with_scale_and_shape_log,
-                            unpack_fp8_with_scale_and_shape_log,
+                            pack_fp8_with_scale_and_log,
+                            unpack_fp8_with_scale_and_log,
                         ),
                         True,
                     )
@@ -6999,15 +7134,30 @@ metadata incorrectly.
                 backend="aot_eager",
             )
 
-        with patch("torch._functorch.config.saved_tensors_hooks_no_filtering", False):
+        with patch(
+            "torch._functorch.config.saved_tensors_hooks_filtering_mode", "donated"
+        ):
             _reset_logged()
             _test_m()
-            # Check that hooks were not applied to Parameters and Inputs
+            # Check that hooks were not applied to Parameters
+            # parameters excluded
             self.assertFalse([2, 2] in logged_shapes)
             self.assertTrue([2, 2, 2] in logged_shapes)
+            # input excluded
             self.assertFalse(torch.float64 in logged_dtypes)
 
-        with patch("torch._functorch.config.saved_tensors_hooks_no_filtering", True):
+        with patch(
+            "torch._functorch.config.saved_tensors_hooks_filtering_mode", "no_static"
+        ):
+            _reset_logged()
+            _test_m()
+            # Check that hooks were not applied to Parameters
+            # parameters excluded
+            self.assertFalse([2, 2] in logged_shapes)
+            self.assertTrue([2, 2, 2] in logged_shapes)
+            self.assertTrue(torch.float64 in logged_dtypes)
+
+        with patch("torch._functorch.config.saved_tensors_hooks_filtering_mode", "all"):
             _reset_logged()
             _test_m()
             # Check that hooks were applied to all saved tensors
@@ -7015,8 +7165,32 @@ metadata incorrectly.
             self.assertTrue([2, 2, 2] in logged_shapes)
             self.assertTrue(torch.float64 in logged_dtypes)
 
+        aot_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
+        ctx = torch.autograd.graph.saved_tensors_hooks
+        # Check precedence of aot_ctx
+        with ctx(
+            *saved_tensors_hooks_to_gm(
+                pack_fp8_with_scale, unpack_fp8_with_scale, None, None
+            )
+        ):
+            with aot_ctx(
+                *saved_tensors_hooks_to_gm(
+                    pack_fp8_with_scale_and_log,
+                    unpack_fp8_with_scale_and_log,
+                    None,
+                    None,
+                )
+            ):
+                _reset_logged()
+                inps = m_inp_fn()
+                torch.compile(m, backend="aot_eager", fullgraph=True)(
+                    *inps
+                ).sum().backward()
+                self.assertTrue(logged_shapes)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
     def test_saved_tensors_hooks_recompile(self):
         ctx = torch.autograd.graph.saved_tensors_hooks
 
@@ -7062,11 +7236,6 @@ metadata incorrectly.
                 x = x + 1
                 x = 2 * x
                 x = AF.apply(x)
-                return x
-
-            def simple_fn(x):
-                x = x + 1
-                x = SAF.apply(x)
                 return x
 
             device = torch.device("cuda:0")
@@ -7118,7 +7287,7 @@ metadata incorrectly.
         )
 
     @torch._functorch.config.patch(donated_buffer=True)
-    @torch._functorch.config.patch(saved_tensors_hooks_no_filtering=True)
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
     def test_saved_tensors_hooks_donated_buffers(self):
         pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
             pack_fp8,
