@@ -505,6 +505,7 @@ def mutated_args_kwargs(schema: _C.FunctionSchema) -> tuple[list[int], list[str]
 
 tags_by_priority = [
     _C.Tag.needs_exact_strides,
+    _C.Tag.needs_contiguous_strides,
     _C.Tag.needs_fixed_stride_order,
     _C.Tag.flexible_layout,
 ]
