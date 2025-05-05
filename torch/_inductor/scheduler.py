@@ -2057,6 +2057,9 @@ class Scheduler:
         # in codegen we only use buf0, never buf1
         self.mutation_renames: dict[str, str] = {}
 
+        for node in self.nodes:
+            print(f"node: {node}, node.debug_str(): {node.debug_str()}")
+
         # Must run first to correctly set dependencies, before all other passes that rely on
         # reading from .read_writes.reads or .unmet_dependencies
         self.nodes = comms.decide_global_ordering_of_comms(

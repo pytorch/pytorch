@@ -13,25 +13,22 @@ class Model(torch.nn.Module):
 
     def __init__(self):
         super(Model, self).__init__()
-        # self.pad = torch.nn.ReflectionPad3d(1)  # this fails
-        # self.pad = torch.nn.ReplicationPad3d(1)  # this also fails
-        self.pad = torch.nn.CircularPad3d(1)  # this works
-        # self.pad = torch.nn.ZeroPad3d(1)  # this works
-        self.dist = torch.nn.PairwiseDistance(p=2)
+        self.pad = torch.nn.ReflectionPad1d(1)  # this fails
+        # self.pad = torch.nn.ReplicationPad1d(1)  # this also fails
+        # self.pad = torch.nn.CircularPad1d(1)  # this works
+        # self.pad = torch.nn.ZeroPad1d(1)  # this works
 
     def forward(self, x):
         x = self.pad(x)
         x = x.view(x.size(0), -1)
-        x = torch.chunk(x, 2, dim=1)
-        # x = self.dist(x[0], x[1])
-        # return x
-        return torch.sum(x[0] - x[1])
+        # x = torch.chunk(x, 2, dim=1)
+        return x[0] - x[1]
 
 
 model = Model().eval().cuda()
 
 
-x = torch.randn(2, 3, 4, 4, 4).cuda()
+x = torch.randn(1, 3, 4).cuda()
 
 inputs = [x]
 
