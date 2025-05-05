@@ -4227,12 +4227,15 @@ class Scheduler:
 
             # WeakDep is fake dependency on unused buffer. It should not appear
             # in partition_input_names for inputs that are actually read or written.
-            partition_input_names = OrderedSet(
-                [
-                    x.name
-                    for x in read_writes.reads | read_writes.writes
-                    if not isinstance(x, WeakDep)
-                ]
+            partition_input_names = (
+                OrderedSet(
+                    [
+                        x.name
+                        for x in read_writes.reads | read_writes.writes
+                        if not isinstance(x, WeakDep)
+                    ]
+                )
+                - output_names
             )
 
             buffer_names_to_free: OrderedSet[str] = OrderedSet()
