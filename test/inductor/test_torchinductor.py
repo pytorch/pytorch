@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
-from triton.testing import do_bench
 
 import numpy as np
 
@@ -10468,6 +10467,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_gpu()
     @skip_if_not_triton
     def test_inductor_multiple_specializations(self):
+        from triton.testing import do_bench
+
         @torch.compile(
             options={
                 "max_autotune": True,
@@ -10501,7 +10502,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         dynamic = do_bench(lambda: inductor_matmul(dynamic_a, b))
         torch._dynamo.reset()
-        dynamic_specialized = do_bench(lambda: inductor_matmul(dynamic_specialized_a, b))
+        dynamic_specialized = do_bench(
+            lambda: inductor_matmul(dynamic_specialized_a, b)
+        )
         self.assertGreaterEqual(dynamic, dynamic_specialized)
 
     @requires_gpu()
