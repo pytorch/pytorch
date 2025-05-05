@@ -1410,9 +1410,10 @@ class CommonTemplate:
             )
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
-            self.assertEqual(
-                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 9
-            )
+            if config.cpp_wrapper:
+                self.assertEqual(code.count("view_dtype"), 3)
+            else:
+                self.assertEqual(code.count("aten.view"), 9)
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
