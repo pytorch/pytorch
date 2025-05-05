@@ -137,6 +137,44 @@ TORCH_IMPL_FUNC(topk_out_mps)
   }
 }
 
+#include <chrono>
+
+static void cat_out_mps_new(std::vector<Tensor>& inputs, int64_t dimension, const Tensor& out) {
+    using namespace mps;
+    id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+    auto device = MPSDevice::getInstance()->device();
+    MPSStream* mpsStream = getCurrentMPSStream();
+    auto computeEncoder = mpsStream->commandEncoder();
+    auto mpsdimension = out.dim() - dimension - 1;
+
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+      @autoreleasepool {
+        mpsStream->endKernelCoalescing();
+        id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+        auto outNDArray = getMPSNDArray(out, out.sizes(), out.strides());
+        int offset_index = 0;
+        for(int i = 0; i < inputs.size(); ++i) {
+            auto& tensor = inputs[i];
+            auto ndarray = getMPSNDArray(tensor, tensor.sizes(), tensor.strides());
+
+            auto length = tensor.size(dimension);
+            auto desc = outNDArray.descriptor;
+            [desc sliceDimension:mpsdimension withSubrange:{.start=static_cast<NSUInteger>(offset_index), .length=static_cast<NSUInteger>(length)}];
+            offset_index+=length;
+            auto slice_out = [outNDArray arrayViewWithDescriptor:desc];
+
+            auto identity = [[MPSNDArrayIdentity alloc] initWithDevice:device];
+
+            [identity encodeToCommandEncoder:computeEncoder
+                               commandBuffer:commandBuffer
+                                sourceArrays:@[ndarray]
+                            destinationArray:slice_out];
+ 
+        }
+      }
+  });
+}
+
 TORCH_IMPL_FUNC(cat_out_mps)
 (const ITensorListRef& inputs,
  int64_t dimension,
@@ -151,6 +189,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
   if (out.numel() == 0) {
     return;
   }
+
   auto materialized_inputs = inputs.materialize();
   auto out_dtype = at::native::result_type(inputs);
 
@@ -246,6 +285,14 @@ TORCH_IMPL_FUNC(cat_out_mps)
     return;
   }
 
+  //auto t1 = std::chrono::high_resolution_clock::now();
+  cat_out_mps_new(input_tensors, dimension, out);
+
+  //auto t2 = std::chrono::high_resolution_clock::now();
+  //auto duration = std::chrono::duration_cast<std::chrono::microseconds>( t2 - t1 ).count();
+  //std::cout<<"Took: "<<duration<<" us"<<std::endl;
+  return;
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     std::vector<MPSGraphTensor*> inputTensors_;
@@ -318,7 +365,9 @@ TORCH_IMPL_FUNC(cat_out_mps)
     for (auto& inputPlaceholder : inputPlaceholders) {
       feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
     }
+
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+
   }
 }
 
