@@ -340,7 +340,7 @@ if __name__ == "__main__":
         torch.xpu.set_device(src_device)
         with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.xpu.current_device(), 1)
-        self.assertEqual(torch.xpu.set_device(), src_device)
+        self.assertEqual(torch.xpu.current_device(), src_device)
 
     def test_stream_context_manager(self):
         prev_stream = torch.xpu.current_stream()
