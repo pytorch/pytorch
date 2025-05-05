@@ -15,10 +15,6 @@ from torch.testing._internal.common_utils import (
 )
 
 __TestCase = CPythonTestCase
-# if TEST_WITH_TORCHDYNAMO:
-#     __TestCase = CPythonTestCase
-# else:
-#     __TestCase = unittest.TestCase
 
 # redirect import statements
 import sys
