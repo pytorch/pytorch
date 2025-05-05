@@ -102,7 +102,7 @@ according to the documentation, or if you need a deterministic implementation
 of an operation that does not have one, please submit an issue:
 `<https://github.com/pytorch/pytorch/issues?q=label:%22module:%20determinism%22>`_
 
-For example, running the nondeterministic CUDA implementation of :meth:`torch.Tensor.index_add_`
+For example, running the deterministic CUDA implementation of :meth:`torch.Tensor.index_add_`
 will throw an error::
 
     >>> import torch
