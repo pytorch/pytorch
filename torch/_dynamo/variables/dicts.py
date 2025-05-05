@@ -23,7 +23,6 @@ None values for efficiency and code reuse.
 import collections
 import functools
 import inspect
-import operator
 import types
 from collections.abc import Hashable as py_Hashable
 from typing import Optional, TYPE_CHECKING
@@ -54,21 +53,6 @@ if TYPE_CHECKING:
 # [Adding a new supported class within the keys of ConstDictVarialble]
 # - Add its tracker type to is_hashable
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
-
-
-def raise_args_mismatch(tx, name):
-    raise_observed_exception(
-        TypeError,
-        tx,
-        args=[
-            ConstantVariable(
-                f"wrong number of arguments for {name}() call"
-                # f"{name}() takes {len(tx.input.args)} positional arguments"
-                # f"{name}() takes {len(tx.input.args)} positional arguments
-                # but {len(tx.input.args) + len(tx.input.kwargs)} were given"
-            )
-        ],
-    )
 
 
 def was_instancecheck_override(obj):
@@ -109,7 +93,6 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
-                variables.FrozensetVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
                 variables.SkipFunctionVariable,
@@ -144,12 +127,7 @@ class ConstDictVariable(VariableTracker):
             # TODO Temorarily remove to figure out what keys are we breaking on
             # and add proper support for them
             if not is_hashable(vt):
-                from torch._dynamo.symbolic_convert import InstructionTranslator
-
-                tx = InstructionTranslator.current_tx()
-                msg = ConstantVariable.create("unhashable type")
-                raise_observed_exception(TypeError, tx, args=[msg])
-                # unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
+                unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
             self.vt = vt
 
         @property
@@ -429,11 +407,6 @@ class ConstDictVariable(VariableTracker):
 
         arg_hashable = args and is_hashable(args[0])
 
-        def raise_unhashable(arg):
-            raise_observed_exception(
-                TypeError, tx, args=[ConstantVariable(f"unhashable type: {type(arg)}")]
-            )
-
         if name == "__init__":
             temp_dict_vt = variables.BuiltinVariable(dict).call_dict(
                 tx, *args, **kwargs
@@ -477,10 +450,7 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
-        elif name == "__setitem__" and self.is_mutable():
-            if not arg_hashable:
-                raise_unhashable(args[0])
-
+        elif name == "__setitem__" and arg_hashable and self.is_mutable():
             self.install_dict_keys_match_guard()
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
@@ -551,9 +521,6 @@ class ConstDictVariable(VariableTracker):
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
-            if not arg_hashable:
-                raise_unhashable(args[0])
-
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
             return ConstantVariable.create(contains)
@@ -583,13 +550,10 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__or__":
             assert len(args) == 1
-            # TODO(guilherme): self and args[0] should have the same type(?)
             if not isinstance(args[0], ConstDictVariable):
-                msg = (
-                    f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
-                    f"and '{args[0].python_type().__name__}'"
+                raise TypeError(
+                    f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
 
             self.install_dict_keys_match_guard()
             new_dict_vt = self.clone(
@@ -778,29 +742,17 @@ class SetVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        # We forward the calls to the dictionary model
-        if name == "__init__":
-            temp_set_vt = variables.BuiltinVariable(set).call_set(tx, *args, *kwargs)
-            tx.output.side_effects.mutation(self)
-            self.items.clear()
-            self.items.update(temp_set_vt.items)
-            return ConstantVariable.create(None)
-        elif name == "add":
+        # We foward the calls to the dictionary model
+        if name == "add":
             assert not kwargs
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
+            assert len(args) == 1
             name = "__setitem__"
             args = (args[0], SetVariable._default_value())
         elif name == "pop":
             assert not kwargs
             assert not args
             # Choose an item at random and pop it via the Dict.pop method
-            try:
-                result = self.set_items.pop().vt
-            except KeyError as e:
-                raise_observed_exception(
-                    KeyError, tx, args=list(map(ConstantVariable.create, e.args))
-                )
+            result = self.set_items.pop().vt
             super().call_method(tx, name, (result,), kwargs)
             return result
         elif name == "isdisjoint":
@@ -811,53 +763,33 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, args[0]], {})
         elif name == "intersection":
             assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_intersection
-            ).call_function(tx, [self, *args], {})
-        elif name == "intersection_update":
-            assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_intersection_update
-            ).call_function(tx, [self, *args], {})
+            ).call_function(tx, [self, args[0]], {})
         elif name == "union":
             assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
-                tx, [self, *args], {}
+                tx, [self, args[0]], {}
             )
         elif name == "difference":
             assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_difference
-            ).call_function(tx, [self, *args], {})
-        elif name == "difference_update":
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "update" and len(args) == 1 and self.is_mutable():
             assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_difference_update
-            ).call_function(tx, [self, *args], {})
-        elif name == "symmetric_difference":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
-            assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference
-            ).call_function(tx, [self, *args], {})
-        elif name == "symmetric_difference_update":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
-            assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference_update
-            ).call_function(tx, [self, *args], {})
-        elif name == "update" and self.is_mutable():
-            assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_update).call_function(
-                tx, [self, *args], {}
+                tx, [self, args[0]], {}
             )
         elif name == "remove":
             assert not kwargs
             assert len(args) == 1
             if args[0] not in self:
-                raise_observed_exception(KeyError, tx, args=args)
+                unimplemented("key does not exist")
             return super().call_method(tx, "pop", args, kwargs)
         elif name == "discard":
             assert not kwargs
@@ -866,15 +798,6 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
-        elif name in ("issubset", "issuperset"):
-            op = {
-                "issubset": operator.le,
-                "issuperset": operator.ge,
-            }
-            other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
-            return variables.BuiltinVariable(op.get(name)).call_function(
-                tx, [self, other], {}
-            )
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
@@ -911,7 +834,7 @@ class FrozensetVariable(SetVariable):
         return frozenset
 
     def as_python_constant(self):
-        return frozenset({k.vt.as_python_constant() for k in self.set_items})
+        return {k.vt.as_python_constant() for k in self.set_items}
 
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.foreach([x.vt for x in self.set_items])
@@ -933,16 +856,6 @@ class FrozensetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
-        elif name == "__init__":
-            return ConstantVariable.create(None)
-        elif name in (
-            "copy",
-            "difference",
-            "intersection",
-            "symmetric_difference",
-        ):
-            r = super().call_method(tx, name, args, kwargs)
-            return FrozensetVariable(r.items, source=self.source)
         return super().call_method(tx, name, args, kwargs)
 
 
