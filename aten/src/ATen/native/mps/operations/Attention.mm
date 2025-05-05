@@ -161,17 +161,17 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                                                               bool unsqueezed) {
   const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   using namespace mps;
-  int64_t batchSize = q_.size(0);
-  int64_t num_head = q_.size(1);
-  int64_t qSize = q_.size(2);
-  int64_t headSize = q_.size(3);
-  int64_t maxSeqLength = k_.size(2);
-  int N = k_.size(2);
-  int B = q_.size(0) * q_.size(1);
-  size_t k_head_stride = k_.stride(1);
-  size_t k_seq_stride = k_.stride(2);
-  size_t v_head_stride = v_.stride(1);
-  size_t v_seq_stride = v_.stride(2);
+  uint batchSize = q_.size(0);
+  uint num_head = q_.size(1);
+  uint qSize = q_.size(2);
+  uint headSize = q_.size(3);
+  uint maxSeqLength = k_.size(2);
+  uint N = k_.size(2);
+  uint B = q_.size(0) * q_.size(1);
+  uint k_head_stride = k_.stride(1);
+  uint k_seq_stride = k_.stride(2);
+  uint v_head_stride = v_.stride(1);
+  uint v_seq_stride = v_.stride(2);
 
   auto out = at::empty({batchSize, num_head, qSize, headSize}, q_.options());
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, q_.options());
@@ -195,21 +195,19 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   out,
                   1,
                   N,
-                  k_head_stride,
-                  k_seq_stride,
-                  v_head_stride,
-                  v_seq_stride,
+                  std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
+                  std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
-        mtl_setArgs<11>(computeEncoder, mask_.value());
         int nd = mask_.value().dim();
-        auto kv_seq_stride = (nd >= 1 && mask_.value().size(nd - 1) > 1) ? mask_.value().stride(nd - 1) : 0;
-        auto q_seq_stride = (nd >= 2 && mask_.value().size(nd - 2) > 1) ? mask_.value().stride(nd - 2) : 0;
-        auto head_stride = (nd >= 3 && mask_.value().size(nd - 3) > 1) ? mask_.value().stride(nd - 3) : 0;
-        mtl_setArgs<12>(computeEncoder, kv_seq_stride, q_seq_stride, head_stride);
+        uint kv_seq_stride = (nd >= 1 && mask_.value().size(nd - 1) > 1) ? mask_.value().stride(nd - 1) : 0;
+        uint q_seq_stride = (nd >= 2 && mask_.value().size(nd - 2) > 1) ? mask_.value().stride(nd - 2) : 0;
+        uint head_stride = (nd >= 3 && mask_.value().size(nd - 3) > 1) ? mask_.value().stride(nd - 3) : 0;
+        mtl_setArgs<9>(
+            computeEncoder, mask_.value(), std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<15>(computeEncoder, has_mask);
+      mtl_setArgs<11>(computeEncoder, has_mask);
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -236,19 +234,19 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                                                                const Tensor& orig_query,
                                                                bool unsqueezed) {
   using namespace mps;
-  int64_t batchSize = q_.size(0);
-  int64_t num_heads = q_.size(1);
-  int64_t seq_len_q = q_.size(2);
-  int64_t headSize = q_.size(3);
-  int N = k_.size(2);
-  const int blocks = 32;
-  int B = batchSize * num_heads;
-  int64_t gqa_factor = q_.size(1) / k_.size(1);
+  uint batchSize = q_.size(0);
+  uint num_heads = q_.size(1);
+  uint seq_len_q = q_.size(2);
+  uint headSize = q_.size(3);
+  uint N = k_.size(2);
+  const uint blocks = 32;
+  uint B = batchSize * num_heads;
+  uint gqa_factor = q_.size(1) / k_.size(1);
 
-  size_t k_head_stride = k_.stride(1);
-  size_t k_seq_stride = k_.stride(2);
-  size_t v_head_stride = v_.stride(1);
-  size_t v_seq_stride = v_.stride(2);
+  uint k_head_stride = k_.stride(1);
+  uint k_seq_stride = k_.stride(2);
+  uint v_head_stride = v_.stride(1);
+  uint v_seq_stride = v_.stride(2);
 
   auto out = at::empty({batchSize, num_heads, seq_len_q, headSize}, q_.options());
   auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, headSize}, q_.options());
@@ -257,21 +255,23 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
 
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
   bool has_mask = mask_.has_value();
-  const std::string kname =
-      fmt::format("sdpa_vector_2pass_1_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
 
   auto& lib = MetalShaderLibrary::getBundledLibrary();
   MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
+      const std::string kname_pass1 =
+          fmt::format("sdpa_vector_2pass_1_{}_{}_{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1));
+      const std::string kname_pass2 =
+          fmt::format("sdpa_vector_2pass_2_{}_{}", scalarToMetalTypeString(q_), v_.size(-1));
+      auto sdpa_vector_pass1PSO = lib.getPipelineStateForFunc(kname_pass1);
+      auto sdpa_vector_pass2PSO = lib.getPipelineStateForFunc(kname_pass2);
       MTLSize group_dims = MTLSizeMake(8 * SIMD_SIZE, 1, 1);
       MTLSize grid_dims = MTLSizeMake(B, seq_len_q, blocks);
-
-      auto attentionPSO = lib.getPipelineStateForFunc(kname);
       auto computeEncoder = mpsStream->commandEncoder();
-      [computeEncoder setComputePipelineState:attentionPSO];
 
+      [computeEncoder setComputePipelineState:sdpa_vector_pass1PSO];
       mtl_setArgs(computeEncoder,
                   q_,
                   k_,
@@ -281,37 +281,24 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   maxs,
                   gqa_factor,
                   N,
-                  k_head_stride,
-                  k_seq_stride,
-                  v_head_stride,
-                  v_seq_stride,
+                  std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
+                  std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
         Tensor mask = mask_.value();
         int nd = mask.dim();
-        int32_t kv_seq_stride = (nd >= 1 && mask.size(nd - 1) > 1) ? mask.stride(nd - 1) : 0;
-        int32_t q_seq_stride = (nd >= 2 && mask.size(nd - 2) > 1) ? mask.stride(nd - 2) : 0;
-        int32_t head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
-        mtl_setArgs<13>(computeEncoder, mask, kv_seq_stride, q_seq_stride, head_stride);
+        uint kv_seq_stride = (nd >= 1 && mask.size(nd - 1) > 1) ? mask.stride(nd - 1) : 0;
+        uint q_seq_stride = (nd >= 2 && mask.size(nd - 2) > 1) ? mask.stride(nd - 2) : 0;
+        uint head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
+        mtl_setArgs<11>(computeEncoder, mask, std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
       }
-      mtl_setArgs<17>(computeEncoder, has_mask);
+      mtl_setArgs<13>(computeEncoder, has_mask);
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
-    }
-  }); ////
-
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      auto computeEncoder = mpsStream->commandEncoder();
-      auto attentionPSO = lib.getPipelineStateForFunc("sdpa_vector_2pass_2_" + scalarToMetalTypeString(q_) + "_" +
-                                                      std::to_string(v_.size(-1)));
-      [computeEncoder setComputePipelineState:attentionPSO];
-
+      // 2nd pass
+      [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
       mtl_setArgs(computeEncoder, intermediate, sums, maxs, out);
-
-      MTLSize group_dims = MTLSizeMake(1024, 1, 1);
-      MTLSize grid_dims = MTLSizeMake(B, seq_len_q, 1);
-      [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
+      [computeEncoder dispatchThreadgroups:MTLSizeMake(B, seq_len_q, 1) threadsPerThreadgroup:MTLSizeMake(1024, 1, 1)];
     }
   });
 
@@ -338,17 +325,17 @@ static inline std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q
   int64_t kL = k_.size(2);
   int64_t headSize = q_.size(3);
 
-  size_t q_batch_stride = q_.stride(0);
-  size_t q_head_stride = q_.stride(1);
-  size_t q_seq_stride = q_.stride(2);
+  auto q_batch_stride = q_.stride(0);
+  auto q_head_stride = q_.stride(1);
+  auto q_seq_stride = q_.stride(2);
 
-  size_t k_batch_stride = k_.stride(0);
-  size_t k_head_stride = k_.stride(1);
-  size_t k_seq_stride = k_.stride(2);
+  auto k_batch_stride = k_.stride(0);
+  auto k_head_stride = k_.stride(1);
+  auto k_seq_stride = k_.stride(2);
 
-  size_t v_batch_stride = v_.stride(0);
-  size_t v_head_stride = v_.stride(1);
-  size_t v_seq_stride = v_.stride(2);
+  auto v_batch_stride = v_.stride(0);
+  auto v_head_stride = v_.stride(1);
+  auto v_seq_stride = v_.stride(2);
 
   int mask_batch_stride = 0;
   int mask_head_stride = 0;
@@ -370,14 +357,14 @@ static inline std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q
   constexpr uint wm = 4;
   constexpr uint wn = 1;
   constexpr uint bq = 32;
-  uint bd = headSize;
-  uint bk = (bd < 128 ? 32 : 16);
-  uint gqa_factor = static_cast<int>(q_.size(1) / k_.size(1));
+  auto bd = headSize;
+  auto bk = (bd < 128 ? 32 : 16);
+  auto gqa_factor = static_cast<int>(q_.size(1) / k_.size(1));
 
-  const int NQ = (qL + bq - 1) / bq;
-  const int NK = (kL + bk - 1) / bk;
+  const auto NQ = (qL + bq - 1) / bq;
+  const auto NK = (kL + bk - 1) / bk;
 
-  std::string base_name =
+  std::string kname =
       fmt::format("attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}", scalarToMetalTypeString(q_), bq, bk, bd, wm, wn);
 
   auto& lib = MetalShaderLibrary::getBundledLibrary();
@@ -386,7 +373,7 @@ static inline std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q
   dispatch_sync_with_rethrow(mpsStream->queue(), ^{
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      auto attentionPSO = lib.getPipelineStateForFunc(base_name);
+      auto attentionPSO = lib.getPipelineStateForFunc(kname);
       [computeEncoder setComputePipelineState:attentionPSO];
       mtl_setArgs(computeEncoder,
                   q_,
@@ -504,7 +491,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   } else {
     Tensor q_contig = q_.contiguous();
     Tensor k_contig = k_.contiguous();
-    Tensor v_contig = v_.contiguous(); ////
+    Tensor v_contig = v_.contiguous();
     return sdpa_full_attention_mps(
         q_contig, k_contig, v_contig, mask_, dropout_p, is_causal, dropout_mask, scale, query, unsqueezed);
   }
