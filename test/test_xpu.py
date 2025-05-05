@@ -334,7 +334,7 @@ if __name__ == "__main__":
         self.assertEqual(torch.xpu.current_device(), prev_device)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
-    def test_device_context_manager_with_set_device(self):
+    def test_multi_device_context_manager(self):
         src_device = 0
         dst_device = 1
         torch.xpu.set_device(src_device)
