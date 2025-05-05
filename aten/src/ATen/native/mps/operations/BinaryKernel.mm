@@ -85,6 +85,7 @@ static void fmax_mps_kernel(TensorIteratorBase& iter) {
     at::maximum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
 }
+
 static void fmin_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     lib.exec_binary_kernel(iter, "fmin");
@@ -160,6 +161,22 @@ static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& w
   lib.exec_binary_kernel(iter, "lerp_alpha", weight);
 }
 
+static void mul_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "mul");
+}
+
+static void div_true_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "div_true");
+}
+
+static void div_floor_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "div_floor");
+}
+
+static void div_trunc_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "div_trunc");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -175,4 +192,8 @@ REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
+REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
+REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
+REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
+REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
 } // namespace at::native
