@@ -373,6 +373,8 @@ def autograd_cache_key(
 
 
 TOut = TypeVar("TOut", bound=OutputCode)
+
+
 class InductorOutput(Generic[TOut], ABC):
     """
     Class representing a single inductor output
@@ -403,7 +405,6 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
         self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
     ) -> CompiledFxGraph:
         constants = CompiledFxGraphConstants()
-        # TODO: do all
         graph, cache_info = FxGraphCache.cache_hit_post_compile(result, {}, constants)
         torch._logging.trace_structured(
             "artifact",
@@ -413,7 +414,9 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
-        return result
+        if graph is None:
+            raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
+        return graph
 
 
 @dataclass
@@ -515,9 +518,6 @@ class GenericCompiledBackward(InductorOutput[TOut]):
     backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
 
-    def _is_backward(self) -> bool:
-        return True
-
 
 @dataclass
 class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoadable):
@@ -525,7 +525,11 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
     Cacheable entry for a forward function
     """
 
+    def _is_backward(self) -> bool:
+        return True
 
+
+# Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
 class BundledCompiledForward(CompiledFxGraphLoadable):
     pass
 
@@ -543,7 +547,18 @@ TBackward = TypeVar("TBackward", bound=GenericCompiledBackward)
 
 @dataclass
 class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
-    """A single entry into the cache."""
+    """A single entry into the cache, genericized by Forward and Backward types.
+
+    A TForward is always an InductorOutput of some sort, which represents the
+    forward graph of the compile.
+    A TBackward is an InductorOutput + metadata about the backward, useful for specific
+    backward-only wrappers. This type is encapsulated by GenericCompiledBackward.
+
+    Each AOTAutogradCacheEntry is essentially parameterized by 1. the method of loading
+    from the cache (either Bundled or UnBundled), and 2. The type of the output. For now,
+    the only type of output we support is Python Wrapper output, i.e. OutputCode.CompiledFxGraph,
+    but the same technique works for C++ wrapper code; we'd just add an extra InductorOutput type.
+    """
 
     # Forward and Backward info
     compiled_fw: TForward
