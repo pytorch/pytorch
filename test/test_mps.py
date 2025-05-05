@@ -3373,10 +3373,9 @@ class TestMPS(TestCaseMPS):
 
     def test_div_bugs(self):
         for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
-            if dtype != torch.int64:
-                x = torch.tensor(list(range(1, 11)), device='mps', dtype=dtype)
-                y = torch.div(x, 101, rounding_mode=mode)
-                self.assertEqual(y.sum(), 0)
+            x = torch.tensor(list(range(1, 11)), device='mps', dtype=dtype)
+            y = torch.div(x, 101, rounding_mode=mode)
+            self.assertEqual(y.sum(), 0)
 
     # See https://github.com/pytorch/pytorch/issues/82663
     def test_bool_expand(self):
@@ -9234,6 +9233,23 @@ class TestSDPA(TestCaseMPS):
             )
         self._compare_tensors(y.cpu(), y_ref)
 
+    @serialTest
+    def test_sdpa_fp32_no_memory_leak(self):
+        def get_mps_memory_usage():
+            return (torch.mps.current_allocated_memory() / (1024 * 1024),
+                    torch.mps.driver_allocated_memory() / (1024 * 1024))
+
+        batch_size, seq_len, num_heads, head_dim = 4, 128, 8, 64
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="mps", dtype=torch.float32)
+        memory_footprints = []
+        for i in range(100):
+            output = F.scaled_dot_product_attention(query, key, value)
+            current_mem, driver_mem = get_mps_memory_usage()
+            memory_footprints.append((current_mem, driver_mem))
+        # 5 MB different maximum allowed value(could be decreased even more)
+        torch.testing.assert_close(memory_footprints[-1], memory_footprints[0], atol=5, rtol=1)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
