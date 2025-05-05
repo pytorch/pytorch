@@ -132,7 +132,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
       "can't convert ",
       c10::str(tensor.layout()).c_str(),
       " layout tensor to numpy. ",
-      "Use Tensor.dense() first.");
+      "Use Tensor.to_dense() first.");
 
   if (!force) {
     TORCH_CHECK_TYPE(
