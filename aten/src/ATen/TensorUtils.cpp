@@ -336,6 +336,7 @@ inline static std::optional<ResultVec> computeStride_impl(
   if (oldshape.empty()) {
     return ResultVec(newshape.size(), 1);
   }
+  
 
   // NOTE: stride is arbitrary in the numel() == 0 case;
   // to match NumPy behavior we copy the strides if the size matches, otherwise
