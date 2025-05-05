@@ -840,7 +840,9 @@ class BaseSchedulerNode:
             # there is a chance to continue execution successfully. Otherwise, it would fail with
             # ZeroDivisionError below.
             if gpu_memory_bandwidth <= 0:
-                raise ValueError(f"gpu_memory_bandwidth cannot be <= 0, but got {gpu_memory_bandwidth}")
+                raise ValueError(
+                    f"gpu_memory_bandwidth cannot be <= 0, but got {gpu_memory_bandwidth}"
+                )
             if gpu_flops <= 0:
                 raise ValueError(f"gpu_flops cannot be <= 0, but got {gpu_flops}")
         except Exception:
