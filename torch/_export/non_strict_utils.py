@@ -143,9 +143,11 @@ def fakify(
             constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
-    symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=dynamic_sizes,
-        constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+    symbolic_context: StatelessSymbolicContext = (  # make mypy happy
+        StatelessSymbolicContext(
+            dynamic_sizes=dynamic_sizes,
+            constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+        )
     )
     t_id = id(t)
     assert mode.shape_env is not None

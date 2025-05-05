@@ -44,6 +44,7 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
@@ -156,6 +157,8 @@ graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
+
+RootGuardManager = guards.RootGuardManager
 
 
 @dataclass(frozen=True)
@@ -1496,8 +1499,34 @@ class OutputGraph(OutputGraphGuardsState):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+            specialized_compiles = []
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm)
+                sources = [a.source for a in self.graphargs]
+                for specialization in old_fake_mode.shape_env.backend_specializations:
+                    source_index = sources.index(specialization.source)
+                    check_fn_source = inspect.getsource(specialization.check_fn).strip()
+                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
+                        specialization.check_fn,
+                        [check_fn_source],
+                    )
+
+                    log.debug(
+                        "Compiling backend specialized graph with specialization=%s",
+                        check_fn_source,
+                    )
+
+                    specialized_compiles.append(
+                        (
+                            functools.partial(
+                                lambda idx, args, check_fn=check_fn: check_fn(
+                                    args[idx]
+                                ),
+                                source_index,
+                            ),
+                            self.call_user_compiler(gm, specialization=specialization),
+                        )
+                    )
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -1528,7 +1557,18 @@ class OutputGraph(OutputGraphGuardsState):
 
             counters["stats"]["unique_graphs"] += 1
             # This is safe because we pre-process name to be unique
-            self.install_global_unsafe(name, compiled_fn)
+            if specialized_compiles:
+
+                @torch._dynamo.disable(reason="do not trace Dynamo-compiled graph")
+                def specialized_dispatch(*args, **kwargs):
+                    for check_fn, specialized_compiled_fn in specialized_compiles:
+                        if check_fn(args):
+                            return specialized_compiled_fn(*args, **kwargs)
+                    return compiled_fn(*args, **kwargs)
+
+                self.install_global_unsafe(name, specialized_dispatch)
+            else:
+                self.install_global_unsafe(name, compiled_fn)
 
             cg = PyCodegen(tx)
             cg.make_call_generated_code(name)
@@ -1542,16 +1582,16 @@ class OutputGraph(OutputGraphGuardsState):
     def graphargs(self) -> list[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
-    def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+    def call_user_compiler(self, gm: fx.GraphModule, **kwargs) -> CompiledFn:
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
-            return self._call_user_compiler(gm)
+            return self._call_user_compiler(gm, **kwargs)
 
-    def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+    def _call_user_compiler(self, gm: fx.GraphModule, **kwargs) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []
@@ -1581,7 +1621,7 @@ class OutputGraph(OutputGraphGuardsState):
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            compiled_fn = compiler_fn(gm, self.example_inputs())
+            compiled_fn = compiler_fn(gm, self.example_inputs(), **kwargs)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except (TensorifyScalarRestartAnalysis, ShortenTraceback):

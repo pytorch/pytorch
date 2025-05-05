@@ -540,13 +540,14 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
-    def expect_true(self, file, line):
+    def expect_true(self, file, line, dont_guard=False):
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
         if (
             self.has_hint()
             and not free_unbacked_symbols(self.expr)
             and not self.shape_env.prefer_deferred_runtime_asserts_over_guards
+            and not dont_guard
         ):
             # OK to generate guards
             return self.guard_bool(file, line)
