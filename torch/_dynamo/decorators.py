@@ -552,7 +552,14 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None, backend_specializations=None):
+def mark_dynamic(
+    t: torch.Tensor,
+    index: Union[int, list[int], tuple[int, ...]],
+    *,
+    min: Optional[int] = None,
+    max: Optional[int] = None,
+    backend_specializations: Optional[list[tuple[int, Callable[[int], bool]]]] = None,
+) -> None:
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -575,6 +582,18 @@ def mark_dynamic(t, index, *, min=None, max=None, backend_specializations=None):
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
+    5) If backend specializations is passed in, we will perform a single generic Dynamo trace followed by
+    multiple specialized compilations in addition to a single generic compilation. At runtime, we will dispatch
+    to a specialized compiled region if the input matches the specialization criteria. For example:
+
+        mark_dynamic(..., backend_specializations=[(
+            16, # hint value
+            lambda x: x == 16 # specialization predicate
+        )])
+
+    This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 16
+    at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
+    2-8x speedups depending on the specific specialization and model architecture.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
