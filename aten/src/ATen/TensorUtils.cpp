@@ -382,7 +382,7 @@ inline static std::optional<ResultVec> computeStride_impl(
       tensor_numel *= oldshape[tensor_d];
       // if end of tensor size chunk, check view
       if (true) {
-        while (view_d >= 0 &&( TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
+        while (view_d >= 0) {
           newstride[view_d] = view_numel * chunk_base_stride;
           view_numel *= newshape[view_d];
           view_d--;
