@@ -1618,11 +1618,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
                     )
 
-        if combine_result.python_type() != list:
-            unimplemented(
-                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
-            )
-
         check_meta_consistency_vt(
             [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
             combine_result.unpack_var_sequence(tx),
