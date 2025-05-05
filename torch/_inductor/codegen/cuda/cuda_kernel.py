@@ -563,6 +563,7 @@ class CUDATemplateCaller(ChoiceCaller):
             tuple[CUDATemplateKernel, functools.partial[str]],
         ],
         bmreq: CUDABenchmarkRequest,
+        supports_epilogue_fusion: bool,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
             dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
@@ -573,6 +574,7 @@ class CUDATemplateCaller(ChoiceCaller):
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
+        self.supports_epilogue_fusion = supports_epilogue_fusion
         self.template = template
         self.info_kwargs = info_kwargs
 
@@ -629,6 +631,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 workspace_size=self.bmreq.workspace_size,
+                supports_epilogue_fusion=self.supports_epilogue_fusion,
                 template=self.template,
             )
         )

@@ -187,7 +187,6 @@ class CUDACPPScheduling(BaseScheduling):
         - bool: True if the given node can be fused with the epilogue, False otherwise.
 
         """
-
         why = WhyNoFuseNames(cuda_template_buffer.get_name(), node_to_fuse.get_name())
 
         ir_node_to_fuse = node_to_fuse.node
@@ -226,6 +225,9 @@ differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
             return False
         elif not config.epilogue_fusion:
             why("epilogue fusion is not enabled")
+            return False
+        elif not cuda_template_buffer.supports_epilogue_fusion:
+            why("epilogue fusion is only supported for TMA-enabled gemm ops")
             return False
 
         try:

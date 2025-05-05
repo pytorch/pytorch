@@ -826,9 +826,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         ):
             return None
 
-        if not self._has_tma_epilogue(op):
-            return None
-
         # Filter ops by alignment.
         if not self._alignment_match(op):
             log.debug(
@@ -989,7 +986,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             All inputs and their corresponding buffer addresses and names take precedence over previously
             passed inputs to the template at construction time. However, they should be layout compatible.
         """
-
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
@@ -1037,6 +1033,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             # This might have been set to void during filtering, when the assumption was still that there's no C
             # operand
             op.C.element = op.A.element
+
+            assert op.C.element == op.D.element, (
+                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            )
 
         argument_template, epilogue_template = self._get_template_args(op)
         should_swap_xw: bool = False
@@ -1219,6 +1219,10 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             result = epilogue_schedule_str.lower().startswith("tma")
         return result
 
+    @staticmethod
+    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+        return CUTLASS3xGemmTemplate._has_tma_epilogue(op)
+
     def _are_inputs_layout_compatible(self, layouts: list[Layout]) -> bool:
         """
         Evaluates whether input layouts are compatible for General Matrix Multiply (GEMM).
@@ -1354,9 +1358,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             # bias dtype
             op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(
                 Bias.get_layout().dtype
-            )
-            assert op.C.element == op.D.element, (
-                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
             )
 
             # Bias layout

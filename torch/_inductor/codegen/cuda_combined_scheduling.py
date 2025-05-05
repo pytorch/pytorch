@@ -60,6 +60,10 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> bool:
         if self._cuda_cpp_scheduling.can_fuse_vertical(node1, node2):
             return True
+        elif self._cuda_cpp_scheduling.is_cuda_cpp_template(
+            node1
+        ) or self._cuda_cpp_scheduling.is_cuda_cpp_template(node2):
+            return False
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
     def can_fuse_horizontal(
