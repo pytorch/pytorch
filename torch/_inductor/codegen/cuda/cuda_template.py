@@ -124,8 +124,8 @@ class CUDATemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: CUDATemplateBuffer,
-            epilogue_nodes: Optional[list[IRNode]] = None,
-        ):
+            epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
+        ) -> tuple[CUDATemplateKernel, functools.partial[str]]:
             kernel = CUDATemplateKernel(
                 kernel_name="KERNEL_NAME",
                 runtime_arg_info=self.get_runtime_arg_info(),
