@@ -84,7 +84,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-rocm-py3_10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_rocm", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi300.2" },
@@ -117,4 +117,6 @@ jobs:
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
     secrets: inherit
