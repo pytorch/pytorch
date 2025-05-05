@@ -1559,6 +1559,7 @@ class OutputGraph(OutputGraphGuardsState):
             # This is safe because we pre-process name to be unique
             if specialized_compiles:
 
+                @torch._dynamo.disable(reason="do not trace Dynamo-compiled graph")
                 def specialized_dispatch(*args, **kwargs):
                     for check_fn, specialized_compiled_fn in specialized_compiles:
                         if check_fn(args):
