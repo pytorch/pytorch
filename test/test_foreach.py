@@ -86,6 +86,7 @@ class ForeachFuncWrapper:
         ):
             with torch.profiler.profile() as p:
                 actual = self.func(*inputs, **kwargs)
+            torch.cuda.synchronize()
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
             assert mta_called == (expect_fastpath and (not zero_size)), (
