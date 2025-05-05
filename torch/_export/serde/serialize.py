@@ -2418,11 +2418,13 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             def _deserialize_hop_with_single_return(serialized_node, fx_node):
                 meta_val: list[Any] = []
+                arg = None
                 if serialized_node.outputs[0].type == "as_tensor":
                     arg = serialized_node.outputs[0].as_tensor
                 elif isinstance(serialized_node.outputs[0].value, (SymIntArgument, SymBoolArgument, SymFloatArgument)):
                     arg = serialized_node.outputs[0].value
                 deserialized_metadata = self.deserialize_metadata(serialized_node.metadata)
+                assert arg is not None
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
                 self.serialized_name_to_node[fx_node.name] = fx_node
