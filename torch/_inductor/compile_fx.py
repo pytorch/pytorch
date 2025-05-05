@@ -1295,6 +1295,10 @@ class _InProcessFxCompile(FxCompile):
                     inputs_to_check=inputs_to_check,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
+
+                # We are going to start code generating runtime asserts, so make sure
+                # you don't start adding new ones in the lowering process
+                graph.freeze_runtime_asserts()
                 with V.set_graph_handler(graph):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
@@ -1326,10 +1330,6 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
-                        # We are going to start code generating runtime asserts, so make sure
-                        # you don't start adding new ones in the lowering process
-                        graph.freeze_runtime_asserts()
-
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 

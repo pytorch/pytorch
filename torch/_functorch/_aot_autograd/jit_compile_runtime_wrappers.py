@@ -537,9 +537,9 @@ def run_joint_graph_passes_on_hops(
             and node.target is invoke_subgraph
             and isinstance(node.args[1], str)
         ):
-            if node.args[1].startswith("___forward"):
+            if node.args[1].startswith("fw"):
                 fw_hop_nodes.append(node)
-            elif node.args[1].startswith("___backward"):
+            elif node.args[1].startswith("bw"):
                 bw_hop_nodes.append(node)
 
     if not bw_hop_nodes:
@@ -554,7 +554,7 @@ def run_joint_graph_passes_on_hops(
     bw_to_fw_hop_node = dict(zip(list(reversed(bw_hop_nodes)), fw_hop_nodes))
 
     for node in bw_hop_nodes:
-        identifier = node.args[1].replace("___backward", "")
+        identifier = node.args[1].removeprefix("bw")
 
         # If partitioning already done for this identifier, skip. This saves
         # redundant joint graph passes for same subgraphs.
@@ -650,7 +650,7 @@ def run_joint_graph_passes_on_hops(
     already_added_new_hop_mods = set()
 
     def add_new_hop_gm(new_subgraph_mod, name):
-        new_subgraph_attr_name = f"{name}_post_graph"
+        new_subgraph_attr_name = f"partitioned_{name}"
         if new_subgraph_attr_name in already_added_new_hop_mods:
             return new_subgraph_attr_name
 
@@ -668,7 +668,7 @@ def run_joint_graph_passes_on_hops(
         new_call_function_node.meta["val"] = tuple(out_example_vals)
 
     for bw_node in reversed(bw_hop_nodes):
-        identifier = bw_node.args[1].replace("___backward", "")
+        identifier = bw_node.args[1].removeprefix("bw")
 
         # Make changes to the corresponding fw and bw node pair simultaneously.
         # The removes the need of any bookkeeping.
@@ -695,9 +695,7 @@ def run_joint_graph_passes_on_hops(
 
         # Insert the new_fw_hop_gm into the joint_gm
         with joint_gm.graph.inserting_after(fw_node):
-            new_fw_mod_attr_name = add_new_hop_gm(
-                new_fw_hop_gm, f"___forward{identifier}"
-            )
+            new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
             new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
 
         # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
