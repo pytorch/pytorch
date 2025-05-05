@@ -113,12 +113,10 @@ jobs:
         with:
           use-gha: true
 
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+      - name: Setup macOS
+        uses: ./.github/actions/set-macos
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Parse ref
         id: parse-ref
