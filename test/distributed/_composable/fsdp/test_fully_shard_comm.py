@@ -445,13 +445,12 @@ class TestFullyShardCommunication(FSDPTest):
 
     def _test_set_reshard_after_forward_by_communication_count(
         self,
-        device,
         set_reshard_after_forward: bool,
         recurse: bool,
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
-        model = Transformer(model_args).to(device)
+        model = Transformer(model_args).to(device_type)
         fully_shard_fn = functools.partial(
             fully_shard, reshard_after_forward=not set_reshard_after_forward
         )
