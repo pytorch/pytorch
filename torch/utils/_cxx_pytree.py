@@ -17,29 +17,10 @@ import sys
 import types
 from collections.abc import Iterable, Mapping
 from typing import Any, Callable, Optional, overload, TypeVar, Union
-from typing_extensions import deprecated, Self, TypeIs
-
-import optree
-
-from torch._vendor.packaging.version import Version
-
-
-# Keep the version in sync with torch.utils._cxx_pytree!
-if Version(optree.__version__) < Version("0.13.0"):  # type: ignore[attr-defined]
-    raise ImportError(
-        "torch.utils._cxx_pytree depends on optree, which is an optional dependency "
-        "of PyTorch. To use it, please upgrade your optree package to >= 0.13.0"
-    )
-
-del Version
-
-
-from optree import (  # noqa: F401  # direct import for type annotations
-    PyTreeSpec as PyTreeSpec,
-    PyTreeSpec as TreeSpec,
-)
+from typing_extensions import deprecated, Self, TypeAlias, TypeIs
 
 import torch.utils._pytree as python_pytree
+from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
     is_namedtuple as is_namedtuple,
     is_namedtuple_class as is_namedtuple_class,
@@ -49,6 +30,20 @@ from torch.utils._pytree import (
     is_structseq_instance as is_structseq_instance,
     KeyEntry as KeyEntry,
 )
+
+
+# Do not try to import `optree` package if the static version check already fails.
+if not python_pytree._cxx_pytree_dynamo_traceable:
+    raise ImportError(
+        f"{__name__} depends on `optree>={python_pytree._optree_minimum_version}`, "
+        "which is an optional dependency of PyTorch. "
+        "To use it, please upgrade your optree package via "
+        "`python3 -m pip install --upgrade optree`"
+    )
+
+
+import optree
+from optree import PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
@@ -93,6 +88,9 @@ __all__ = [
 ]
 
 
+# In-tree installation may have VCS-based versioning. Update the previous static version.
+python_pytree._optree_version = _TorchVersion(optree.__version__)  # type: ignore[attr-defined]
+
 __TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
 __TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
 
@@ -102,6 +100,8 @@ S = TypeVar("S")
 U = TypeVar("U")
 R = TypeVar("R")
 
+
+TreeSpec: TypeAlias = PyTreeSpec
 
 Context = Any
 PyTree = Any
