@@ -52,6 +52,7 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
+    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
@@ -130,11 +131,15 @@ def check_node_safe(node: Node):
     SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional")
     SAFE_TORCH_FUNCTIONS = (
         "torch.Size",
+        "torch.Tensor",
         "torch.sym_int",
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
+    )
+    SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
+        "einops.einops.repeat",
     )
 
     def is_public_torch_api(target):
@@ -163,7 +168,7 @@ def check_node_safe(node: Node):
             or function_name in torch._inductor.config.unsafe_marked_cacheable_functions
         )
 
-    def is_torch_function(target):
+    def is_cacheable_function(target):
         if isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
             return True
         if is_public_torch_api(target):
@@ -177,6 +182,9 @@ def check_node_safe(node: Node):
             return True
         if is_safe_torch_function(target):
             return True
+        function_name = f"{target.__module__}.{target.__name__}"
+        if function_name in SAFE_NON_TORCH_FUNCTIONS:
+            return True
         return False
 
     def is_tensor(target):
@@ -185,9 +193,7 @@ def check_node_safe(node: Node):
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
-        # We support only torch.* functions for now
-        # We can probably add an allowlist of safe non-torch implementations as well
-        if not is_torch_function(node.target):
+        if not is_cacheable_function(node.target):
             module = getattr(node.target, "__module__", None)
             name = getattr(node.target, "__name__", None)
             raise BypassAOTAutogradCache(
@@ -507,6 +513,9 @@ class AOTAutogradCacheEntry:
 
     guards_expr: Optional[str]
 
+    # # Used by compiled autograd
+    cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo]
+
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
@@ -652,7 +661,7 @@ class AOTAutogradCacheEntry:
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                None,  # lazy_backward_info
+                self.cached_lazy_backward_info,
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
