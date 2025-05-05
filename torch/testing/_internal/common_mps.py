@@ -49,6 +49,7 @@ if torch.backends.mps.is_available():
             "diagonal",
             "diagonal_copy",
             "diagonal_scatter",
+            "divno_rounding_mode",
             "dsplit",
             "empty",
             "empty_permuted",
@@ -91,6 +92,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv_transpose2d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.padcircular",
+            "nn.functional.softsign",
             "nn.functional.tanhshrink",
             "nn.functional.unfold",
             "nonzero",
@@ -132,6 +134,7 @@ if torch.backends.mps.is_available():
             "tensor_split",
             "transpose",
             "transpose_copy",
+            "true_divide",
             "T",
             "unbind",
             "unbind_copy",
@@ -184,7 +187,6 @@ if torch.backends.mps.is_available():
             "count_nonzero",
             "diff",
             "div",
-            "divno_rounding_mode",
             "dot",
             "dstack",
             "einsum",
@@ -252,7 +254,6 @@ if torch.backends.mps.is_available():
             "nn.functional.pixel_shuffle",
             "nn.functional.pixel_unshuffle",
             "nn.functional.rms_norm",
-            "nn.functional.softsign",
             "pinverse",
             "prod",
             "reciprocal",
@@ -276,15 +277,12 @@ if torch.backends.mps.is_available():
             "trapezoid",
             "tril",
             "triu",
-            "true_divide",
             "vstack",
             "where",
             "byte",
         }
         # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
         MACOS_BEFORE_13_3_XFAILLIST = {
-            # float16 seems horribly wrong on MacOS13
-            "floor_divide": [torch.float16],
             # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
             "tan": [torch.float32],
             "cdist": [torch.float32],
@@ -594,7 +592,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             # trunc_tensor not working properly for float16 and bfloat16
-            "divtrunc_rounding": [torch.float16, torch.bfloat16],
             "fmod": [torch.float16],
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
@@ -933,7 +930,6 @@ if torch.backends.mps.is_available():
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
             # trunc_tensor not working properly for float16
-            "divtrunc_rounding": [torch.float16],
             "fmod": [torch.float16],
             # round not working properly for float16
             "round": [torch.float16],
