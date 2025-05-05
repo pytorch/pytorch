@@ -1776,9 +1776,6 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        # don't support this in serialization because it uses unsupported FUNCTION_MATCH
-        if self.serialization_mode == "save":
-            raise RuntimeError("BUILTIN_MATCH guard cannot be serialized.")
         return self.FUNCTION_MATCH(guard)
 
     def PYMODULE_MATCH(self, guard: Guard):
