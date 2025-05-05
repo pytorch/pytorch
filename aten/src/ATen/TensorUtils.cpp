@@ -367,10 +367,10 @@ inline static std::optional<ResultVec> computeStride_impl(
   // numel in current chunk
   Numel tensor_numel = 1;
   Numel view_numel = 1;
-  // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE bellow will incrase the potential of the function returning  std::nullopt and falling back 
-  // to a clone. note that at the point this function is called we have already known that the tensor is not contiguous.
+  // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE bellow could result in returning std::nullopt which have an effect of falling
+  // back to a clone when unbacked presented. But it will not result in returning a different results, or wrong results.
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
-    tensor_numel *= oldshape[tensor_d]; 
+    tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
         (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&

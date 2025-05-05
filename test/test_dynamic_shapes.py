@@ -3033,6 +3033,21 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([100]), torch.tensor([1]))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_non_contigious_reshape(self):
+        # reshape u0 -> (u1*u1)
+        @torch.compile(fullgraph=True, dynamic=False)
+        def func1(x, y):  
+            t = torch.reshape(x, (y.item(),y.item()))
+            return t
+
+        # create a non-contigious tensor with unbackes size u0.
+        x = torch.arange(8)
+        x = x.as_strided((4,), (2,))
+        print(x)
+        # reshape 4 -> 2*2
+        print(func1(x, torch.tensor([2])))
+
 
 if __name__ == "__main__":
     run_tests()
