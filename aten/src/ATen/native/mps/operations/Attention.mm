@@ -256,7 +256,6 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
   bool has_mask = mask_.has_value();
 
-  auto& lib = MetalShaderLibrary::getBundledLibrary();
   MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -367,7 +366,6 @@ static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
   std::string kname =
       fmt::format("attention_{}_bq{}_bk{}_bd{}_wm{}_wn{}", scalarToMetalTypeString(q_), bq, bk, bd, wm, wn);
 
-  auto& lib = MetalShaderLibrary::getBundledLibrary();
   MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^{
