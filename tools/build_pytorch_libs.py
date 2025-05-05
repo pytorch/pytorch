@@ -99,7 +99,16 @@ def checkout_nccl() -> None:
     nccl_basedir = os.path.join(third_party_path, "nccl")
     if not os.path.exists(nccl_basedir):
         subprocess.check_call(
-            ["git", "clone", "--depth", "1", "--branch", release_tag, "https://github.com/NVIDIA/nccl.git", "nccl"],
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                release_tag,
+                "https://github.com/NVIDIA/nccl.git",
+                "nccl",
+            ],
             cwd=third_party_path,
         )
 
