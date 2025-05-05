@@ -3,7 +3,7 @@
 import copy
 import unittest
 from re import escape
-from typing import Any, List
+from typing import Any, List, Optional
 
 import torch
 import torch._dynamo as torchdynamo
@@ -245,6 +245,7 @@ class TestUnflatten(TestCase):
                     input_spec: TreeSpec,
                     input_args: List[Any],
                     metadata: dict[str, Any],
+                    obj: Optional[Any] = None,
                 ) -> List[Any]:
                     while len(input_args) > 2:
                         input_args.pop(-1)
