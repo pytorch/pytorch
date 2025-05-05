@@ -15,6 +15,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -542,6 +543,7 @@ class CommonTemplate:
             (False, 0),  # We can't infer that the load is a power of 2.
         ],
     )
+    @skipIfXpu(msg="Remove this after Intel triton issue #4000 resolved.")
     def test_dynamic_shapes_reduction(self, with_tiling: bool, num_block_pointers: int):
         """
         Test a reduction kernel with dynamic shapes.
