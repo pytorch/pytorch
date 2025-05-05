@@ -838,7 +838,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   }
 
   // TODO: If gloo has version, we also need to log gloo version into FR.
-  FlightRecorder::get()->record_pg_ranks(
+  FlightRecorder<c10::Event>::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
   init();
 }
@@ -890,7 +890,7 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
     AsyncWork::execute(work);
     // TODO: Need to find a way to calculate the difference of duration of two
     // c10d::Event
-    FlightRecorder::get()->retire_id(work->trace_id_, false);
+    FlightRecorder<c10::Event>::get()->retire_id(work->trace_id_, false);
     lock.lock();
     workInProgress_[workerIndex].reset();
   }
@@ -910,7 +910,7 @@ void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   workQueue_.push_back(std::move(work));
   lock.unlock();
   // using c10d::FlightRecorder;
-  work->trace_id_ = FlightRecorder::get()->record(
+  work->trace_id_ = FlightRecorder<c10::Event>::get()->record(
       local_id_,
       std::make_tuple(pg_uid_, pg_desc_),
       collectiveCounter_,
