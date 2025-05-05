@@ -23,11 +23,24 @@ from torch.utils._mode_utils import no_dispatch
 _SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
 
 
+def _ops_filter_safe(name: str) -> bool:
+    """
+    An ops filter which allows pickle-safe ops. Pickle-safe ops are built-in
+    ones where it will be possible to unpickle on any machine which has PyTorch.
+    """
+    # TODO: This list is pretty pessimistic right now. What's the full list?
+    return name.startswith(
+        (
+            "torch.ops.aten",
+            "torch.ops.fbgemm",
+        )
+    )
+
+
 class Options:
-    # If False then only well-known operators will be allowed. If other
-    # operators appear in the graph then attempting to pickle will raise a
-    # BypassFxGraphCache exception.
-    allow_all_ops: bool = False
+    # A filter for which ops will cause the pickler to raise a
+    # BypassFxGraphCache exception. If None then all ops are allowed.
+    ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
 
 
 class GraphPickler(pickle.Pickler):
@@ -345,7 +358,10 @@ class _GraphModulePickleData:
 
 class _NodePickleData:
     def __init__(
-        self, node: torch.fx.Node, mapping: dict[torch.fx.Node, "_NodePickleData"], options: Options
+        self,
+        node: torch.fx.Node,
+        mapping: dict[torch.fx.Node, "_NodePickleData"],
+        options: Options,
     ) -> None:
         self.args = pytree.tree_map_only(torch.fx.Node, lambda n: mapping[n], node.args)
         self.kwargs = pytree.tree_map_only(
@@ -416,9 +432,7 @@ class _OpPickleData:
         ],
         options: Options,
     ) -> "_OpPickleData":
-        if not options.allow_all_ops and not name.startswith(
-            ("torch.ops.aten", "torch.ops.fbgemm")
-        ):  # TODO: What's the full list?
+        if (ops_filter := options.ops_filter) and not ops_filter(name):
             from torch._inductor.codecache import BypassFxGraphCache
 
             raise BypassFxGraphCache(f"Unable to pickle non-standard op: {name}")
