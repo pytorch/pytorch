@@ -4224,9 +4224,15 @@ class Scheduler:
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
-            partition_input_names = (
-                OrderedSet([x.name for x in read_writes.reads | read_writes.writes])
-                - output_names
+
+            # WeakDep is fake dependency on unused buffer. It should not appear
+            # in partition_input_names for inputs that are actually read or written.
+            partition_input_names = OrderedSet(
+                [
+                    x.name
+                    for x in read_writes.reads | read_writes.writes
+                    if not isinstance(x, WeakDep)
+                ]
             )
 
             buffer_names_to_free: OrderedSet[str] = OrderedSet()
