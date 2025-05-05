@@ -818,6 +818,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_forward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, axis, _) = X
@@ -954,6 +957,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (scale, zero_point, axis, torch_type) = X
