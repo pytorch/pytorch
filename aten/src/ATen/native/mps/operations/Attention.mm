@@ -40,16 +40,16 @@ static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
 }
 
 // general version
-static inline std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
-                                                          const Tensor& key,
-                                                          const Tensor& value,
-                                                          const std::optional<Tensor>& attn_mask,
-                                                          double dropout_p,
-                                                          bool is_causal,
-                                                          const std::optional<Tensor>& dropout_mask,
-                                                          std::optional<double> scale,
-                                                          const Tensor& orig_query,
-                                                          bool unsqueezed) {
+static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
+                                                   const Tensor& key,
+                                                   const Tensor& value,
+                                                   const std::optional<Tensor>& attn_mask,
+                                                   double dropout_p,
+                                                   bool is_causal,
+                                                   const std::optional<Tensor>& dropout_mask,
+                                                   std::optional<double> scale,
+                                                   const Tensor& orig_query,
+                                                   bool unsqueezed) {
   using namespace mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -149,16 +149,16 @@ static inline std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
 }
 
 // Vector mode (One–pass variant)
-static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
-                                                              const Tensor& k_,
-                                                              const Tensor& v_,
-                                                              const std::optional<Tensor>& mask_,
-                                                              double dropout_p,
-                                                              bool is_causal,
-                                                              const std::optional<Tensor>& dropout_mask,
-                                                              std::optional<double> scale,
-                                                              const Tensor& orig_query,
-                                                              bool unsqueezed) {
+static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
+                                                       const Tensor& k_,
+                                                       const Tensor& v_,
+                                                       const std::optional<Tensor>& mask_,
+                                                       double dropout_p,
+                                                       bool is_causal,
+                                                       const std::optional<Tensor>& dropout_mask,
+                                                       std::optional<double> scale,
+                                                       const Tensor& orig_query,
+                                                       bool unsqueezed) {
   const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   using namespace mps;
   uint batchSize = q_.size(0);
@@ -223,16 +223,16 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
 }
 
 // Vector mode (Two–pass variant)
-static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
-                                                               const Tensor& k_,
-                                                               const Tensor& v_,
-                                                               const std::optional<Tensor>& mask_,
-                                                               double dropout_p,
-                                                               bool is_causal,
-                                                               const std::optional<Tensor>& dropout_mask,
-                                                               std::optional<double> scale,
-                                                               const Tensor& orig_query,
-                                                               bool unsqueezed) {
+static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
+                                                        const Tensor& k_,
+                                                        const Tensor& v_,
+                                                        const std::optional<Tensor>& mask_,
+                                                        double dropout_p,
+                                                        bool is_causal,
+                                                        const std::optional<Tensor>& dropout_mask,
+                                                        std::optional<double> scale,
+                                                        const Tensor& orig_query,
+                                                        bool unsqueezed) {
   using namespace mps;
   uint batchSize = q_.size(0);
   uint num_heads = q_.size(1);
@@ -307,16 +307,16 @@ static inline std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
 }
 
 // Implementation 3: Full attention mode
-static inline std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
-                                                                 const Tensor& k_,
-                                                                 const Tensor& v_,
-                                                                 const std::optional<Tensor>& mask_,
-                                                                 double dropout_p,
-                                                                 bool is_causal,
-                                                                 const std::optional<Tensor>& dropout_mask,
-                                                                 std::optional<double> scale,
-                                                                 const Tensor& orig_query,
-                                                                 bool unsqueezed) {
+static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
+                                                          const Tensor& k_,
+                                                          const Tensor& v_,
+                                                          const std::optional<Tensor>& mask_,
+                                                          double dropout_p,
+                                                          bool is_causal,
+                                                          const std::optional<Tensor>& dropout_mask,
+                                                          std::optional<double> scale,
+                                                          const Tensor& orig_query,
+                                                          bool unsqueezed) {
   using namespace mps;
 
   int64_t batchSize = q_.size(0);
