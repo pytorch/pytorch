@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import enum
+import functools
 import logging
 import re
 import time
@@ -621,6 +622,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return cutlass_lib.LayoutType.RowMajor
 
     @staticmethod
+    @functools.lru_cache(32)
     def layout_match(
         torch_layout: ir.Layout,
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined] # noqa: F821
@@ -913,16 +915,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     filter_res = self.filter_op(op)
                     if (
                         filter_res is not None
-                        and filter_res.configuration_name() != op.configuration_name()
-                    ):
-                        log.debug(
-                            "Detected change in configuration name. Original "
-                            "name: %s, filtered configuration name: %s",
-                            op.configuration_name(),
-                            filter_res.configuration_name(),
-                        )
-                    if (
-                        filter_res is not None
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
@@ -1124,6 +1116,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
+    @functools.lru_cache(1)
     def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
@@ -1200,7 +1193,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         if len(layouts) == 3:
             C_layout = layouts[2]
-            C_size = [int(i) for i in C_layout.size]
+            C_size = [V.graph.sizevars.size_hint(i) for i in C_layout.size]
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims
