@@ -177,9 +177,25 @@ torchbench_setup_macos() {
   checkout_install_torchbench
 }
 
-conda_benchmark_deps() {
-  conda install -y astunparse numpy scipy ninja pyyaml setuptools cmake typing-extensions requests protobuf numba cython scikit-learn
-  conda install -y -c conda-forge librosa
+install_benchmark_deps() {
+  # TODO: We should probably update this to use the latest version of numpy
+  #       but it appears as though torchbench itself installs 1.22.3 by default
+  #       and this is causing issues with the build.
+  pip_install \
+    astunparse==1.6.3 \
+    numpy==1.22.3 \
+    scipy==1.10.1 \
+    ninja==1.11.1.4 \
+    pyyaml==6.0 \
+    setuptools==72.1.0 \
+    cmake==3.22.* \
+    typing-extensions==4.11.0 \
+    requests==2.32.3 \
+    protobuf==3.20.2 \
+    numba==0.56.0 \
+    cython==3.0.12 \
+    scikit-learn==1.6.1 \
+    librosa>=0.6.2
 }
 
 
@@ -187,7 +203,7 @@ test_torchbench_perf() {
   print_cmake_info
 
   echo "Launching torchbench setup"
-  conda_benchmark_deps
+  install_benchmark_deps
   torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -214,7 +230,7 @@ test_torchbench_smoketest() {
   print_cmake_info
 
   echo "Launching torchbench setup"
-  conda_benchmark_deps
+  install_benchmark_deps
   # shellcheck disable=SC2119,SC2120
   torchbench_setup_macos
 
@@ -263,7 +279,7 @@ test_hf_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  conda_benchmark_deps
+  install_benchmark_deps
   torchbench_setup_macos
 
   echo "Launching HuggingFace training perf run"
@@ -279,7 +295,7 @@ test_timm_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  conda_benchmark_deps
+  install_benchmark_deps
   torchbench_setup_macos
 
   echo "Launching timm training perf run"
