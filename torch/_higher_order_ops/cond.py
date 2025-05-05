@@ -103,8 +103,8 @@ def cond(
           scope that is being traced. The true branch and false branch must
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape. Int
-          output is also allowed. We'll turn the output into a symint and make
-          the output dynamic.
+          output is also allowed. We'll make the output dynamic by turning it
+          into a symint.
 
         operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
           true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
