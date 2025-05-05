@@ -475,12 +475,35 @@ void bf16_gemv_trans(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
   return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
+
+float fp16_dot(
+  const int64_t n,
+  const at::Half* x,
+  const int64_t incx,
+  const at::Half* y,
+  const int64_t incy) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && incy == 1);
+  return fp16_dot_with_fp32_arith(x, y, n);
+}
+
+float bf16_dot(
+  const int64_t n,
+  const at::BFloat16* x,
+  const int64_t incx,
+  const at::BFloat16* y,
+  const int64_t incy) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && incy == 1);
+  return bf16_dot_with_fp32_arith(x, y, n);
+}
+
 #endif // !defined(C10_MOBILE)
 } // namespace CPU_CAPABILITY
 
 #if !defined(C10_MOBILE)
 REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans)
 REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans)
+REGISTER_DISPATCH(fp16_dot_stub, &fp16_dot)
+REGISTER_DISPATCH(bf16_dot_stub, &bf16_dot)
 #endif //!defined(C10_MOBILE)
 
 } // namespace at::native
