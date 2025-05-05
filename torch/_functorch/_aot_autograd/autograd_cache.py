@@ -390,6 +390,36 @@ class InductorOutput(Generic[TOut], ABC):
 
 
 @dataclass
+class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
+    """
+    A full compiled fx graph that doesn't need to lookup the FxGraphCache
+    to run
+    """
+
+    result: CompiledFxGraph
+
+    def load(self, example_inputs) -> CompiledFxGraph:
+        return self.result
+
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        constants = CompiledFxGraphConstants()
+        graph, cache_info = FxGraphCache.cache_hit_post_compile(result, {}, constants)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_bundled_cache_hit",  # always a hit
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(cache_info),
+        )
+        if graph is None:
+            raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
+        return graph
+
+
+@dataclass
 class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_cache_info: tuple[str, list[str]]
     fx_graph_guard_expr: Optional[str]
@@ -497,6 +527,18 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
 
     def _is_backward(self) -> bool:
         return True
+
+
+# Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
+class BundledCompiledForward(CompiledFxGraphLoadable):
+    pass
+
+
+@dataclass
+class BundledCompiledBackward(
+    GenericCompiledBackward[CompiledFxGraph], CompiledFxGraphLoadable
+):
+    pass
 
 
 TForward = TypeVar("TForward", bound=InductorOutput)
@@ -737,6 +779,15 @@ class AOTAutogradCacheEntry(
     """
     Regular AOTAutogradCacheEntry: saves the forward/backward FxGraphCache keys
     and looks them up in FxGraphCache on load
+    """
+
+
+class BundledAOTAutogradCacheEntry(
+    GenericAOTAutogradCacheEntry[BundledCompiledForward, BundledCompiledBackward]
+):
+    """
+    AOTAutogradCacheEntry where we save the entire CompiledFxGraph instead
+    of relying on cache keys from FxGraphCache
     """
 
 
