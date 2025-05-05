@@ -844,9 +844,11 @@ def _compile_fx_inner(
             assert mb_compiled_graph is None
             log.debug(
                 "FX cache bypass reason: %s",
-                cache_info.get("cache_bypass_reason", "unknown")
-                if cache_info is not None
-                else "FX cache disabled or key generation failed",
+                (
+                    cache_info.get("cache_bypass_reason", "unknown")
+                    if cache_info is not None
+                    else "FX cache disabled or key generation failed"
+                ),
             )
             mb_compiled_graph = fx_codegen_and_compile(
                 gm, example_inputs, inputs_to_check, **graph_kwargs
@@ -1167,8 +1169,15 @@ class _InProcessFxCompile(FxCompile):
                         colored=True,
                     ),
                 )
+
+                # We're printing the graph to be used as a cache key - so a
+                # printer which is a little less readable but faster is
+                # appropriate.
                 inductor_post_grad_graph_str = gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
+                    print_output=False,
+                    include_stride=True,
+                    include_device=True,
+                    fast_sympy_print=True,
                 )
                 trace_structured(
                     "inductor_post_grad_graph",
@@ -1268,12 +1277,12 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_wrapper_code=const_wrapper_code.value
-                    if const_wrapper_code
-                    else None,
-                    const_kernel_code=const_kernel_code.value
-                    if const_kernel_code
-                    else None,
+                    const_wrapper_code=(
+                        const_wrapper_code.value if const_wrapper_code else None
+                    ),
+                    const_kernel_code=(
+                        const_kernel_code.value if const_kernel_code else None
+                    ),
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )
