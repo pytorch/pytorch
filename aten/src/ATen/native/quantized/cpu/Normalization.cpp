@@ -21,6 +21,7 @@ namespace at::native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
+DEFINE_DISPATCH(qbatch_norm_cpu_stub);
 
 namespace {
 void compute_fused_params(
@@ -377,27 +378,6 @@ Tensor q_batch_norm_impl(
   return qy;
 }
 
-} // namespace
-
-Tensor quantized_batch_norm(
-    const Tensor& qx, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
-    const Tensor& mean /* optional */,
-    const Tensor& var /* optional */,
-    double eps,
-    double output_scale,
-    int64_t output_zero_point) {
-  return q_batch_norm_impl<false>(
-      qx,
-      weight_opt,
-      bias_opt,
-      mean,
-      var,
-      eps,
-      output_scale,
-      output_zero_point);
-}
-
-DEFINE_DISPATCH(qbatch_norm_cpu_stub);
 Tensor int8_batch_norm2d_cpu_impl(
     const Tensor& qx,
     double qx_scale,
@@ -475,6 +455,26 @@ Tensor int8_batch_norm2d_cpu_impl(
       beta,
       qy);
   return qy;
+}
+
+} // namespace
+
+Tensor quantized_batch_norm(
+    const Tensor& qx, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& mean /* optional */,
+    const Tensor& var /* optional */,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+  return q_batch_norm_impl<false>(
+      qx,
+      weight_opt,
+      bias_opt,
+      mean,
+      var,
+      eps,
+      output_scale,
+      output_zero_point);
 }
 
 
