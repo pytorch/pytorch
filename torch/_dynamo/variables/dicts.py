@@ -144,11 +144,12 @@ class ConstDictVariable(VariableTracker):
             # TODO Temorarily remove to figure out what keys are we breaking on
             # and add proper support for them
             if not is_hashable(vt):
-                # from torch._dynamo.symbolic_convert import InstructionTranslator
-                # tx = InstructionTranslator.current_tx()
-                # msg = ConstantVariable.create("unhashable type")
-                # raise_observed_exception(TypeError, tx, args=[msg])
-                unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
+                from torch._dynamo.symbolic_convert import InstructionTranslator
+
+                tx = InstructionTranslator.current_tx()
+                msg = ConstantVariable.create("unhashable type")
+                raise_observed_exception(TypeError, tx, args=[msg])
+                # unimplemented(f"Dict key of type {type(vt)}. Key: {vt}")
             self.vt = vt
 
         @property
@@ -455,18 +456,18 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             return DictItemsVariable(self)
         elif name == "keys":
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             if len(args):
                 raise_observed_exception(TypeError, tx)
             assert not (args or kwargs)

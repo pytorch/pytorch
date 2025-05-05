@@ -101,8 +101,10 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
-      # disable monitor in perf tests for more investigation
+      # disable monitor in perf tests
       disable-monitor: true
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
     secrets: inherit
 
 
@@ -117,6 +119,8 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
-      # disable monitor in perf tests for more investigation
+      # disable monitor in perf tests
       disable-monitor: true
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
     secrets: inherit
