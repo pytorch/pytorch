@@ -878,7 +878,7 @@ def maybe_inline_graph_saved_tensors_hooks(
         structured_logs,
     )
     maybe_log_graph(
-        fw_module,
+        bw_module,
         "Backward graph pre saved_tensors_hooks inlining",
         aot_config,
         lambda: "aot_backward_graph_pre_saved_tensors_hooks",
@@ -903,7 +903,6 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_out_n = fw_g.output_node()
     fw_outs = fw_out_n.args[0]  # type: ignore[var-annotated]
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
-    fw_outs_saved_tensors_unchanged = []  # type: ignore[var-annotated]
     fw_outs_packed_tensors = []  # type: ignore[var-annotated]
     fw_outs_packed_syms = []  # type: ignore[var-annotated]
 
@@ -936,7 +935,7 @@ def maybe_inline_graph_saved_tensors_hooks(
         ]
         allow_set = {fw_outs_saved_for_bw[i].name for i in fw_donated_idxs}
     elif mode == "no_static":
-        fw_g_inputs = bw_g.find_nodes(op="placeholder")
+        fw_g_inputs = fw_g.find_nodes(op="placeholder")
         exclude_set = {fw_g_inputs[i].name for i in static_input_indices}
 
     if (allow_set is not None) and (not allow_set):
@@ -945,12 +944,18 @@ def maybe_inline_graph_saved_tensors_hooks(
         # Do not do anything in this case
         return
 
+    if aot_config.enable_log:
+        structured_logs.append(f"fw_outs_saved_for_bw:{fw_outs_saved_for_bw}")
+        structured_logs.append(f"mode:{mode}")
+        structured_logs.append(f"allow_set:{allow_set}")
+        structured_logs.append(f"exclude_set:{exclude_set}")
+
     for saved in fw_outs_saved_for_bw:
         if ((allow_set is not None) and (saved.name not in allow_set)) or (
             (exclude_set is not None) and (saved.name in exclude_set)
         ):
             if isinstance(saved.meta["val"], torch.Tensor):
-                fw_outs_saved_tensors_unchanged.append(saved)
+                fw_outs_packed_tensors.append(saved)
             continue
 
         val = saved.meta["val"]
@@ -1091,12 +1096,8 @@ def maybe_inline_graph_saved_tensors_hooks(
                     # Saved tensor inputs between them will be removed.
                     with bw_g.inserting_before(
                         bw_g_inputs[0]
-                    ) if is_sym else bw_g.inserting_before(
-                        bw_g_inputs[num_saved_for_bw]
-                    ):
+                    ) if is_sym else bw_g.inserting_before(bw_g_input):
                         new_n = bw_g.placeholder(new_node_name)
-                        if new_n.name != new_node_name:
-                            breakpoint()
                         assert new_n.name == new_node_name
                     new_n.meta["val"] = val
                     env[unp_in_n] = new_n
@@ -1149,7 +1150,6 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_new_outs = pytree.tree_leaves(
         (
             fw_outs[:num_inner_fwd_outputs],
-            fw_outs_saved_tensors_unchanged,
             fw_outs_packed_tensors,
             fw_outs_packed_syms,
             symint_outs_saved_for_bw,
@@ -1159,7 +1159,7 @@ def maybe_inline_graph_saved_tensors_hooks(
 
     # Assert that saved tensors and symints in forward outputs are aligned with backward inputs
     _fw_n = num_inner_fwd_outputs
-    _fw_num_t = len(fw_outs_saved_tensors_unchanged) + len(fw_outs_packed_tensors)
+    _fw_num_t = len(fw_outs_packed_tensors)
     _fw_num_s = len(fw_outs_packed_syms) + len(symint_outs_saved_for_bw)
     fw_outs_saved_tensors = fw_new_outs[_fw_n : _fw_n + _fw_num_t]
     fw_outs_saved_syms = fw_new_outs[_fw_n + _fw_num_t :]
@@ -1172,15 +1172,10 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_s_names = [n.name for n in fw_outs_saved_syms]
     bw_s_names = [n.name for n in bw_ins_saved_syms]
 
-    assert fw_t_names == bw_t_names
-    assert fw_s_names == bw_s_names
+    def _log_structured_logs():
+        if not aot_config.enable_log:
+            return
 
-    fw_g.lint()
-    bw_g.lint()
-    fw_module.recompile()
-    bw_module.recompile()
-
-    if aot_config.enable_log:
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -1189,6 +1184,41 @@ def maybe_inline_graph_saved_tensors_hooks(
             },
             payload_fn=lambda: "\n".join(structured_logs),
         )
+
+    if aot_config.enable_log:
+        structured_logs.append(
+            f"fw_outs[:num_inner_fwd_outputs]:{fw_outs[:num_inner_fwd_outputs]}"
+        )
+        structured_logs.append(f"fw_outs_packed_tensors:{fw_outs_packed_tensors}")
+        structured_logs.append(f"fw_t_names:{fw_t_names}")
+        structured_logs.append(f"bw_t_names:{bw_t_names}")
+        structured_logs.append(f"fw_s_names:{fw_s_names}")
+        structured_logs.append(f"bw_s_names:{bw_s_names}")
+        structured_logs.append(f"\nfw_g_pre_assert:{fw_g}")
+        structured_logs.append(f"\nbw_g_pre_assert:{bw_g}")
+        maybe_log_graph(
+            fw_module,
+            "Forward graph after transform pre-assert",
+            aot_config,
+            lambda: "aot_forward_graph_pre_assert_saved_tensors_hooks",
+            structured_logs,
+        )
+        maybe_log_graph(
+            bw_module,
+            "Backward graph after transform pre-assert",
+            aot_config,
+            lambda: "aot_backward_graph_pre_assert_saved_tensors_hooks",
+            structured_logs,
+        )
+        _log_structured_logs()
+
+    assert fw_t_names == bw_t_names
+    assert fw_s_names == bw_s_names
+
+    fw_g.lint()
+    bw_g.lint()
+    fw_module.recompile()
+    bw_module.recompile()
 
 
 def aot_dispatch_autograd(

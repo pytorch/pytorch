@@ -503,9 +503,6 @@ def get_cuda_generator_meta_val(device_idx: int):
 
 
 def top_saved_tensors_hooks():
-    if torch._functorch.config.saved_tensors_hooks_only_compile_ctx:
-        return torch._functorch.aot_autograd.graph_saved_tensors_hooks_top()
-
     return torch._C._autograd._top_saved_tensors_default_hooks(True)
 
 

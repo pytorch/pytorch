@@ -7165,32 +7165,6 @@ metadata incorrectly.
             self.assertTrue([2, 2, 2] in logged_shapes)
             self.assertTrue(torch.float64 in logged_dtypes)
 
-        aot_ctx = torch._functorch.aot_autograd.graph_saved_tensors_hooks
-        ctx = torch.autograd.graph.saved_tensors_hooks
-        # Check precedence of aot_ctx
-        with patch(
-            "torch._functorch.config.saved_tensors_hooks_only_compile_ctx", True
-        ):
-            with ctx(
-                *saved_tensors_hooks_to_gm(
-                    pack_fp8_with_scale, unpack_fp8_with_scale, None, None
-                )
-            ):
-                with aot_ctx(
-                    *saved_tensors_hooks_to_gm(
-                        pack_fp8_with_scale_and_log,
-                        unpack_fp8_with_scale_and_log,
-                        None,
-                        None,
-                    )
-                ):
-                    _reset_logged()
-                    inps = m_inp_fn()
-                    torch.compile(m, backend="aot_eager", fullgraph=True)(
-                        *inps
-                    ).sum().backward()
-                    self.assertTrue(logged_shapes)
-
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
