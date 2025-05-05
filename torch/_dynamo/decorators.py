@@ -552,14 +552,7 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(
-    t: torch.Tensor,
-    index: Union[int, list[int], tuple[int, ...]],
-    *,
-    min: Optional[int] = None,
-    max: Optional[int] = None,
-    backend_specializations: Optional[list[tuple[int, Callable[[int], bool]]]] = None,
-) -> None:
+def mark_dynamic(t, index, *, min=None, max=None, backend_specializations=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
