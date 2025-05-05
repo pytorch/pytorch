@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
@@ -52,9 +53,13 @@ inline std::ostream& _str(std::ostream& ss) {
 
 template <typename T>
 inline std::ostream& _str(std::ostream& ss, const T& t) {
-  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-  ss << t;
-  return ss;
+  if constexpr (std::is_enum_v<T>) {
+    return _str(ss, static_cast<typename std::underlying_type<T>::type>(t));
+  } else {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+    ss << t;
+    return ss;
+  }
 }
 
 template <typename T>

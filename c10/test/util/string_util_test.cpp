@@ -133,4 +133,12 @@ TEST(tryToTest, Double) {
   EXPECT_FALSE(c10::tryToNumber<double>(nullptr).has_value());
 }
 } // namespace test_try_to
+
+namespace test_str_enum {
+TEST(StringUtilTest, testStrEnum) {
+  enum class Foo {Bar = 1, Baz = 2};
+  EXPECT_EQ(c10::str(Foo::Baz, Foo::Bar), "21");
+}
+} // namespace test_str_enum
+
 } // namespace
