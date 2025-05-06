@@ -65,23 +65,17 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         self,
         subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
         identifier: Optional[str],
-        operands: Union[
-            list[Union[torch.Tensor, int, torch.SymInt]],
-            tuple[Union[torch.Tensor, int, torch.SymInt]],
-        ],
+        *operands,
     ):
         assert identifier is None or isinstance(
             identifier, str
         ), "identifier must be a None or a string"
 
-        assert isinstance(
-            operands, (list, tuple)
-        ), f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
         ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
 
-        return super().__call__(subgraph, identifier, operands)
+        return super().__call__(subgraph, identifier, *operands)
 
 
 invoke_subgraph = InvokeSubgraphHOP()
@@ -261,7 +255,7 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
             return fw_graph, bw_graph, output_metadata
 
 
-def get_output_metadata(subgraph, operands):
+def get_output_metadata(subgraph, *operands):
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             # args are functional tensors, generate some example tensors
@@ -383,8 +377,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
                 subgraph,
-                f"___forward_{identifier}",
-                operands,
+                f"fw_{identifier}",
+                *operands,
             )
 
         # Check that None is at expected indexes.
@@ -399,6 +393,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx,
         *grad_outs,
     ):
+        from torch._dynamo.utils import dynamo_timed
+
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
@@ -418,6 +414,23 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 filtered_grad_outs.append(o)
         filtered_grad_outs = tuple(filtered_grad_outs)
 
+        # Important note - Even though the forward graph can be same for
+        # different invoke_subgraphs, the backward graph can be different
+        # because the tangent strides can be different. So, here we cache on
+        # tangent_metadata in addition to identifier
+        from torch._guards import detect_fake_mode
+        from torch._subclasses._fake_tensor_utils import _CacheKeyState
+        from torch._subclasses.fake_tensor import extract_tensor_metadata
+
+        fake_mode = detect_fake_mode(primals + filtered_grad_outs)
+        state = _CacheKeyState(fake_mode.shape_env)
+
+        tangent_metadata: list[object] = []
+        for tangent in filtered_grad_outs:
+            metadata = extract_tensor_metadata(tangent)
+            metadata._flatten_into(tangent_metadata, fake_mode, state)
+        tangent_metadata = tuple(tangent_metadata)
+
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
         # returns (*grads_and_fw_outs). To get the grads, we use the num_fw_outs
         # to extract the grads.
@@ -425,44 +438,41 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
         # Check if we have already traced the bwd subgraph.
         bw_graph = None
+        suffix = None
         invoke_subgraph_cache = get_invoke_subgraph_cache()
+        cache_hit = False
         if invoke_subgraph_cache:
-            bw_graph = invoke_subgraph_cache.get_lazy_bwd_entry(identifier)
+            bw_graph, suffix = invoke_subgraph_cache.get_lazy_bwd_entry(
+                identifier, tangent_metadata
+            )
+            cache_hit = bw_graph is not None
 
         if bw_graph is None:
-            bw_graph = trace_joint_graph_as_bwd(
-                subgraph,
-                len(primals),
-                primals_and_tangents,
-                ctx._fw_include_key_set,
-                ctx._fw_exclude_key_set,
+            assert suffix is None
+            with dynamo_timed(
+                "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
+            ):
+                bw_graph = trace_joint_graph_as_bwd(
+                    subgraph,
+                    len(primals),
+                    primals_and_tangents,
+                    ctx._fw_include_key_set,
+                    ctx._fw_exclude_key_set,
+                )
+
+        if invoke_subgraph_cache and not cache_hit:
+            suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
+                identifier, tangent_metadata, bw_graph
             )
 
-        if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_lazy_bwd_entry(identifier, bw_graph)
-
         grads = invoke_subgraph(
-            bw_graph, f"___backward_{identifier}", primals_and_tangents
+            bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
         )[: -output_metadata.num_fw_outs]
         return None, None, None, *grads
 
 
-@invoke_subgraph.py_impl(DispatchKey.Autograd)
-def _(subgraph, identifier, operands):
-    if not torch.is_grad_enabled():
-        with torch._C._AutoDispatchBelowAutograd():
-            return invoke_subgraph(subgraph, identifier, operands)
-
-    # A shortcut for the case where all inputs don't require gradient,
-    # we skip tracing the forward and backward graph.
-    if pytree.tree_all_only(
-        torch.Tensor,
-        lambda t: not t.requires_grad,  # type: ignore[union-attr]
-        operands,
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return invoke_subgraph(subgraph, identifier, operands)
-
+@invoke_subgraph.py_autograd_impl
+def _(subgraph, identifier, *operands):
     # Check if we have already traced the subgraph.
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:
@@ -471,7 +481,7 @@ def _(subgraph, identifier, operands):
         ):
             return saved_autograd_fn(*operands)
 
-    output_metadata = get_output_metadata(subgraph, operands)
+    output_metadata = get_output_metadata(subgraph, *operands)
 
     def autograd_fn_callable(*args):
         return InvokeSubgraphAutogradOp.apply(
@@ -486,7 +496,7 @@ def _(subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
-def _(subgraph, identifier, operands):
+def _(subgraph, identifier, *operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
@@ -495,25 +505,28 @@ def _(subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_functionalize_impl
-def _(ctx, subgraph, identifier, operands):
+def _(ctx, subgraph, identifier, *operands):
     unwrapped_operands = ctx.unwrap_tensors(operands)
     with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
-        out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
+        out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
     return ctx.wrap_tensors(out)
 
 
 # Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
 @register_fake(invoke_subgraph)
-def _(subgraph, identifier, operands):
-    return subgraph(*operands)
+def _(subgraph, identifier, *operands):
+    from torch._dynamo.utils import dynamo_timed
+
+    with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
-def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
+def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # Check if we have already traced the subgraph.
     graph = None
     invoke_subgraph_cache = get_invoke_subgraph_cache()
@@ -521,7 +534,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
         graph = invoke_subgraph_cache.get_proxy_dispatch_entry(identifier)
 
     if graph is None:
-        graph = reenter_make_fx(subgraph)(*operands)
+        from torch._dynamo.utils import dynamo_timed
+
+        with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
+            graph = reenter_make_fx(subgraph)(*operands)
 
         from torch._guards import detect_fake_mode
 
@@ -540,13 +556,13 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
-    node_args = (graph, identifier, operands)
+    node_args = (graph, identifier, *operands)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[union-attr]
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )
 
-    example_out = invoke_subgraph(graph, identifier, operands)
+    example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
