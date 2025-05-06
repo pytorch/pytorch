@@ -761,6 +761,16 @@ class MultiOutputLine(WrapperLine):
         )
 
 
+@dataclasses.dataclass
+class SymbolicCallArgLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    arg: SymbolicCallArg
+    graph: GraphLowering
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._generate_symbolic_call_arg_helper(self.arg, self.graph)
+
+
 BufferName = str
 Line = Union[MemoryPlanningLine, LineContext]
 
