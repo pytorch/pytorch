@@ -2470,7 +2470,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
-    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA, name_fn=lambda x: x.name)
     @parametrize("compile_mode", ["eager"])
     @parametrize(
         "permute_order",
