@@ -9,6 +9,16 @@ using Block = HostBlock<XPUStream>;
 
 struct XPUCachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<XPUStream, XPUEvent> {
+  bool is_pinned(const void* ptr) const override {
+    if (!at::xpu::is_available()) {
+      return false;
+    }
+
+    return sycl::usm::alloc::host ==
+        sycl::get_pointer_type(ptr, c10::xpu::get_device_context());
+  }
+
+ private:
   /* These following functions are runtime-related. */
   void allocate_host_memory(size_t size, void** ptr) override {
     *ptr = sycl::aligned_alloc_host(
