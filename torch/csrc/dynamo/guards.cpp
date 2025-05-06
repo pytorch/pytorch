@@ -2904,7 +2904,7 @@ class RootGuardManager : public GuardManager {
         at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
-          false, tmp_debug_info.verbose_code_parts, num_guards_executed);
+            false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
