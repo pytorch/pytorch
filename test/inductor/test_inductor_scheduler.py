@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -44,9 +44,9 @@ def cT(device, dtype):
 class TestScheduler(TestCase):
     @dtypes(torch.float, torch.double)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    def test_flop_counter_op(self, device, dtype):
+    @parametrize("options", [{"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}, {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}])
+    def test_flop_counter_op(self, device, dtype, options):
         T = cT(device, dtype)
-
         def composite(x, y, z):
             tmp = torch.mm(x + 10, y / 12)
             return torch.mm(tmp, z)
@@ -62,7 +62,7 @@ class TestScheduler(TestCase):
             (composite_relu, [T(5, 4), T(4, 3)], {}),
         ]
         for op, example_inputs, kwargs in test_cases:
-            comp = torch.compile(op)
+            comp = torch.compile(op, options=options)
             with FlopCounterMode() as mode:
                 comp(*example_inputs, **kwargs)
             gm = make_fx(op)(*example_inputs, **kwargs)
