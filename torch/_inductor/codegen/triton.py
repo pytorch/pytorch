@@ -104,6 +104,7 @@ if TYPE_CHECKING:
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 
     from ..ir import IRNode
+    from .common import ShapeType
     from .simd_kernel_features import SIMDKernelFeatures
 
     _T = TypeVar("_T")
@@ -208,6 +209,7 @@ class IndexingOptions:
     expand_str: Optional[str]
     _has_rindex: bool
     index: sympy.Expr
+    expand_shape: Optional[Sequence[Union[int, str]]]
 
     def has_mask(self) -> bool:
         return bool(self.mask_vars)
@@ -745,8 +747,14 @@ def low_precision_fp_var(var: Union[CSEVariable, Any]) -> bool:
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any], dtype: torch.dtype) -> None:
-        super().__init__(name, bounds, dtype)
+    def __init__(
+        self,
+        name: str,
+        bounds: ValueRanges[Any],
+        dtype: torch.dtype,
+        shape: Optional[ShapeType] = None,
+    ) -> None:
+        super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars = OrderedSet[str]()
         assert dtype is not None, "TritonCSEVariable must have dtype"
@@ -1370,6 +1378,7 @@ class TritonKernelOverrides(TritonOverrides):
                 indexing.index_str,
                 bounds=get_bounds_index_expr(expr),
                 dtype=dtype,
+                shape=[],
             )
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
@@ -1379,6 +1388,7 @@ class TritonKernelOverrides(TritonOverrides):
                 V.kernel.compute,
                 cls.to_dtype(var, dtype),
                 dtype=upcast_compute_type(dtype),
+                shape=var.shape,
             )
         else:
             # TODO: we are not always consistent in enforcing that the output of the index expr printing
@@ -1397,6 +1407,7 @@ class TritonKernelOverrides(TritonOverrides):
                     V.kernel.compute,
                     cls.to_dtype(var, index_dtype),
                     dtype=index_dtype,
+                    shape=var.shape,
                 )
 
         var.mask_vars = indexing.mask_vars
@@ -1409,6 +1420,7 @@ class TritonKernelOverrides(TritonOverrides):
                 V.kernel.compute,
                 f"{mask}.to(tl.int1)",
                 dtype=torch.bool,
+                shape=mask.shape,
             )
 
         nodes = body.graph.find_nodes(op="output")
@@ -1439,6 +1451,7 @@ class TritonKernelOverrides(TritonOverrides):
                 f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
                 bounds=ValueRanges.wrap(other),
                 dtype=result.dtype,
+                shape=result.shape,
             )
             ret = ops.where(new_mask, result, other)
         else:
@@ -1460,8 +1473,8 @@ class TritonKernelOverrides(TritonOverrides):
         if cse_val := V.kernel.cse.try_get(cache_key):
             return cse_val
 
-        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
-        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype, shape=x.shape)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32, shape=x.shape)
         V.kernel.compute.writeline(
             f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
         )
@@ -2018,9 +2031,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return options
 
         expand_str = None
+        expand_shape = None
         index_str = self.index_to_str(index)
         if isinstance(index, sympy.Integer):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            expand_shape = None if copy_shape else self.dense_size_list()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
                 mask_vars = OrderedSet(["xmask"])
@@ -2028,10 +2043,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 mask_vars = OrderedSet()
             if self._load_mask:
                 mask_vars.add(self._load_mask)
-            return IndexingOptions(index_str, mask_vars, expand_str, has_rindex, index)
+            return IndexingOptions(
+                index_str,
+                mask_vars,
+                expand_str,
+                has_rindex,
+                index,
+                expand_shape=expand_shape,
+            )
 
         if need_dense and not have_dense:
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            expand_shape = None if copy_shape else self.dense_size_list()
             index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
@@ -2046,7 +2069,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self.filter_masks(mask_vars)
 
-        return IndexingOptions(index_str, mask_vars, expand_str, has_rindex, index)
+        return IndexingOptions(
+            index_str,
+            mask_vars,
+            expand_str,
+            has_rindex,
+            index,
+            expand_shape=expand_shape,
+        )
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
@@ -2231,6 +2261,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             cachemod = ", cache_modifier='.cg'"
 
         append_broadcast = None
+        shape = None
         dtype = V.graph.get_dtype(name)
 
         if should_unwrap_unspec_arg(name):
@@ -2247,11 +2278,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 line = indexing.codegen_broadcast_and_reshape(
                     line, indexing.block_shape, indexing.final_shape, True
                 )
+                shape = indexing.final_shape
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
+                shape = None
             else:
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
+                shape = indexing.expand_shape
 
             if (
                 dtype in (torch.float16, torch.bfloat16)
@@ -2267,7 +2301,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        result_var = self.cse.generate(load_buffer, make_line(line), dtype=dtype)
+        result_var = self.cse.generate(
+            load_buffer, make_line(line), dtype=dtype, shape=shape
+        )
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
@@ -2275,7 +2311,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
-            result_var = self.cse.generate(load_buffer, line, dtype=dtype)
+            result_var = self.cse.generate(
+                load_buffer, line, dtype=dtype, shape=indexing.expand_shape
+            )
             if indexing.mask_vars:
                 if dtype.is_floating_point:
                     zero = "0.0"
@@ -2287,7 +2325,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     constant_repr(self._load_other) if self._load_other else zero
                 )
                 line = f"tl.where({indexing.mask_str}, {result_var}, {other_val})"
-                result_var = self.cse.generate(load_buffer, line, dtype=dtype)
+                result_var = self.cse.generate(
+                    load_buffer, line, dtype=dtype, shape=result_var.shape
+                )
 
         if not self.inside_reduction or (not indexing.has_rmask() and not has_rindex):
             self.outside_loop_vars.add(result_var)
@@ -2392,6 +2432,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"{sorter_indices}, "
             ")",
             dtype=indexing_dtype,  # type: ignore[attr-defined]
+            shape=values.shape,
         )
 
         return result
@@ -2405,7 +2446,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
         return f"{value}[{', '.join(sizes)}]"
 
-    def reduction_collapse_dims(self, buffer, value: str, dtype: torch.dtype) -> str:
+    def reduction_resize_and_shape(self, value: CSEVariable) -> tuple[str, ShapeType]:
+        ndims = self.triton_tensor_ndim()
+        if ndims == 1:
+            return f"triton_helpers.promote_to_tensor({value})", value.shape
+
+        nreduce = self.num_reduction_dims
+        sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
+        new_shape = (
+            (*value.shape[: (ndims - nreduce)], *[1] * nreduce)
+            if value.shape is not None
+            else None
+        )
+        return f"{value}[{', '.join(sizes)}]", new_shape
+
+    def reduction_collapse_dims(
+        self, buffer, value: CSEVariable, dtype: torch.dtype
+    ) -> CSEVariable:
         """
         Reshape to RBLOCK, collapsing all reduction dims.
         """
@@ -2416,10 +2473,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         target_ndim = self.triton_tensor_ndim() - self.num_reduction_dims
         initial_shape = self.dense_size_list()
         target_shape = initial_shape[:target_ndim] + ["RBLOCK"]
-        return str(
-            self.cse.generate(
-                buffer, triton_reshape(value, initial_shape, target_shape), dtype=dtype
-            )
+        return self.cse.generate(
+            buffer,
+            triton_reshape(str(value), initial_shape, target_shape),
+            dtype=dtype,
+            shape=target_shape,
         )
 
     def reduction(
@@ -2470,6 +2528,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.compute,
                 f"tl.broadcast_to({v}, {dense_size_str})",
                 dtype=v.dtype,
+                shape=self.dense_size_list(),
             ),
             value,
         )
@@ -2479,9 +2538,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         def final_reduction(
             buffer,
-            value: str,
-            result_type: Optional[str],
-        ) -> str:
+            value: CSEVariable,
+            result_type: Optional[torch.dtype],
+        ) -> CSEVariable:
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
@@ -2490,24 +2549,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             value = self.reduction_collapse_dims(buffer, value, dtype)
             if reduction_type in ("max", "min"):
-                value = self.reduction_resize(
+                result = self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
             else:
-                value = self.reduction_resize(
+                result = self.reduction_resize(
                     f"{module}.{reduction_type}({value}, {dim})"
                 )
 
             if result_type is not None:
-                value = f"{value}.to({result_type})"
+                result = f"{result}.to({self.dtype_to_str(result_type)})"
+            else:
+                result_type = value.dtype
 
-            return value
+            return self.cse.generate(
+                buffer, result, dtype=result_type, shape=value.shape
+            )
 
         def final_reduction_define(
             buffer,
-            result_var: str,
-            value: str,
-            result_type: Optional[str],
+            result_var: CSEVariable,
+            value: CSEVariable,
+            result_type: Optional[torch.dtype],
         ) -> None:
             """
             Generate a reduction and assign it to an existing variable.
@@ -2531,7 +2594,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         acc_type = triton_acc_type(src_dtype)
         torch_acc_type = upcast_acc_dtype(src_dtype)
-        result_var: Any = self.cse.newvar(dtype=torch_acc_type)
+        result_shape = list(self.dense_size_list())
+        del result_shape[dim]
+        result_var: Any = self.cse.newvar(dtype=torch_acc_type, shape=result_shape)
         result_var.mask_vars = OrderedSet(
             var for var in masks if not prefix_is_reduction(var[0])
         )
@@ -2548,7 +2613,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             def _mask_value(value, default) -> CSEVariable:
                 return self.cse.generate(
-                    self.compute, where_cond(value, default), dtype=value.dtype
+                    self.compute,
+                    where_cond(value, default),
+                    dtype=value.dtype,
+                    shape=value.shape,
                 )
 
             masked_value: Union[CSEVariable, Sequence[CSEVariable]]
@@ -2562,12 +2630,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in ("argmax", "argmin"):
+                assert isinstance(masked_value, CSEVariable)
                 accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
                         dtype=accumulator_dtype,
+                        shape=masked_value.shape,
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
@@ -2590,8 +2660,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert isinstance(masked_value, Sequence)
                 (mean, m2, weight) = masked_value
                 result_var = tuple(
-                    self.cse.generate(self.compute, value, dtype=dtype)
-                    for value in self._welford(
+                    self.cse.generate(self.compute, value, dtype=dtype, shape=shape)
+                    for value, shape in self._welford(
                         self.compute, mean, m2, weight, dim, dtype
                     )
                 )
@@ -2601,13 +2671,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_var = self.prepare_softmax_twopass_fallback(dtype, value)
             else:
                 assert isinstance(masked_value, CSEVariable)
-                result_var = self.cse.generate(
-                    self.compute,
-                    final_reduction(self.compute, str(masked_value), None),
-                    dtype=masked_value.dtype,
+                result_var = final_reduction(
+                    self.compute, masked_value, masked_value.dtype
                 )
         else:
-            accumulator = self.cse.namedvar(f"_{result_var}", dtype=torch_acc_type)
+            accumulator = self.cse.namedvar(
+                f"_{result_var}", dtype=torch_acc_type, shape=self.dense_size_list()
+            )
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
             if not isinstance(default, tuple):
@@ -2674,7 +2744,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # reduce. Similar to the final reduction for coopereative
                 # reduction
                 result_max = result_var
-                result_sum = self.cse.newvar(dtype=dtype)
+                result_sum = self.cse.newvar(dtype=dtype, shape=result_max.shape)
 
                 result_var = self.online_softmax_reduce_final_reduction(
                     self.post_loop_combine,
@@ -2699,18 +2769,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     # to
                     #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
                     # which is needed because tl.reduce doesn't support tl.int1
-                    accumulator_casted_str = f"{accumulator}.to(tl.int8)"
-                    result_type = triton_compute_type(dtype)
-                    final_reduction_define(
+                    accumulator = self.cse.generate(
                         self.post_loop_combine,
-                        str(result_var),
-                        accumulator_casted_str,
-                        result_type,
+                        f"{accumulator}.to(tl.int8)",
+                        dtype=torch.int8,
+                        shape=accumulator.shape,
                     )
-                else:
-                    final_reduction_define(
-                        self.post_loop_combine, str(result_var), str(accumulator), None
-                    )
+
+                final_reduction_define(
+                    self.post_loop_combine, result_var, accumulator, None
+                )
 
         if self.cooperative_reduction:
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -2776,9 +2844,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 peers = self.codegen_cooperative_reduction_peer_combine(
                     result_var, upcast_acc_dtype(src_dtype), default
                 )
-                final_reduction_define(
-                    self.post_loop_store, str(result_var), peers, None
-                )
+                final_reduction_define(self.post_loop_store, result_var, peers, None)
             exit_stack.close()
 
         self.cse.reduction_cache[cache_key] = result_var
@@ -2838,11 +2904,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for value in (mean, m2, weight)
         )
         welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
-        welford_results = [str(self.cse.newvar(dtype=dtype)) for _ in range(3)]
-        buffer.writeline(f"{', '.join(welford_results)} = {welford}")
 
-        result_values = tuple(self.reduction_resize(value) for value in welford_results)
-        return result_values
+        def reduced_shape(shape):
+            result = list(shape)
+            del result[dim]
+            return tuple(result)
+
+        welford_results = [
+            self.cse.newvar(dtype=dtype, shape=reduced_shape(value.shape))
+            for value in (mean, m2, weight)
+        ]
+        buffer.writeline(f"{', '.join([str(r) for r in welford_results])} = {welford}")
+
+        return tuple(
+            self.reduction_resize_and_shape(value) for value in welford_results
+        )
 
     def welford_reduce(
         self, result_var, reduction_type, value, where_cond, acc_type, dtype
@@ -2850,9 +2926,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """Helper to codegen a welford reduction"""
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
-        accumulator = f"{result_var}_mean"
-        accumulator_m2 = f"{result_var}_m2"
-        accumulator_weight = f"{result_var}_weight"
+        accumulator = TritonCSEVariable(
+            f"{result_var}_mean",
+            shape=self.dense_size_list(),
+            dtype=acc_type,
+            bounds=ValueRanges.unknown(),
+        )
+        accumulator_m2 = TritonCSEVariable(
+            f"{result_var}_m2",
+            shape=self.dense_size_list(),
+            dtype=acc_type,
+            bounds=ValueRanges.unknown(),
+        )
+        accumulator_weight = TritonCSEVariable(
+            f"{result_var}_weight",
+            shape=self.dense_size_list(),
+            dtype=acc_type,
+            bounds=ValueRanges.unknown(),
+        )
         self.body.writeline(
             f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
         )
@@ -2889,13 +2980,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
         )
         result_mean = result_var
-        result_m2 = self.cse.newvar(dtype=dtype)
-        result_weight = self.cse.newvar(dtype=dtype)
         return self.welford_reduce_final_reduction(
             self.post_loop_combine,
             result_mean,
-            result_m2,
-            result_weight,
+            None,
+            None,
             accumulator,
             accumulator_m2,
             accumulator_weight,
@@ -2916,12 +3005,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         dtype,
     ):
         """Helper to codegen call to triton_helpers.welford"""
-        values = self._welford(buffer, mean, m2, weight, dim, dtype)
+        values = list(self._welford(buffer, mean, m2, weight, dim, dtype))
+
         result_exprs = [result_mean, result_m2, result_weight]
-        for result_expr, value in zip(result_exprs, values):
+        for i, (result_expr, (value, shape)) in enumerate(zip(result_exprs, values)):
+            if result_expr is None:
+                result_expr = self.cse.newvar(dtype=dtype, shape=shape)
+                result_exprs[i] = result_expr
             buffer.splice(f"{result_expr} = {value}")
 
-        return result_mean, result_m2, result_weight
+        return tuple(result_exprs)
 
     def online_softmax_reduce_final_reduction(
         self, buffer, result_max, result_sum, peer_max, peer_sum, dim, dtype
@@ -2940,7 +3033,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_cooperative_reduction_peer_combine(
         self, result_var, dtype, default_val
-    ):
+    ) -> CSEVariable:
         """
         Generate code to save a [XBLOCK, RSPLIT] temporary workspace, where each thread block writes a different
         column.  After the barrier, every thread block loads the completed value so that it can compute the final
@@ -2959,11 +3052,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """,
             strip=True,
         )
+        peers = self.create_cse_var(
+            f"{result_var}_peers",
+            shape=["XBLOCK", "RSPLIT"],
+            dtype=dtype,
+            bounds=ValueRanges.unknown(),
+        )
         self.post_loop_store.writeline(
-            f"{result_var}_peers = tl.load({result_var}_ws + (xindex * RSPLIT + rsplit_arange), "
+            f"{peers} = tl.load({result_var}_ws + (xindex * RSPLIT + rsplit_arange), "
             f"rsplit_mask, eviction_policy='evict_first', other=triton_helpers.if_mask(rsplit_mask, {constant_repr(default_val)}))"
         )
-        return f"{result_var}_peers"
+        return peers
 
     def store_reduction(
         self,
@@ -3030,7 +3129,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         helper_name = "_triton_helper_fn"
 
         from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+        from torch._inductor.shape_propagation import ShapePropagationOpsHandler
 
+        shape_handler = ShapePropagationOpsHandler()
         dtype_handler = DtypePropagationOpsHandler()
 
         class CSEProxy(DefaultHandler):
@@ -3045,10 +3146,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     name,
                 )(*args, **kwargs)
 
+                output_shape = getattr(
+                    shape_handler,
+                    name,
+                )(*args, **kwargs)
+
                 return cse.generate(
                     helper,
                     getattr(overrides, name)(*args, **kwargs),
                     dtype=output_dtype,
+                    shape=output_shape,
                 )
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
@@ -3066,6 +3173,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ],
         values: tuple[CSEVariable, ...],
     ) -> tuple[CSEVariable, ...]:
+        """
+        Perform an associative scan on 'values'.
+        """
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -3086,25 +3196,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.compute,
                 f"{value}.to({triton_compute_type(dtype)})",
                 dtype=dtype,
+                shape=value.shape,
             )
             value = self.cse.generate(
                 self.compute,
                 f"tl.broadcast_to({value_dtype}, {self.dense_size_str()})",
                 dtype=dtype,
+                shape=self.dense_size_list(),
             )
             broadcasted_values.append(value)
 
             acc_type = triton_acc_type(dtype)
 
             if not self.persistent_reduction:
-                accumulator = self.cse.newvar(dtype=dtype)
                 reduced_size = self.dense_size_list()
                 reduced_size[-1] = "1"
-                reduced_size = f"[{', '.join(reduced_size)}]"
+                accumulator = self.cse.newvar(dtype=dtype, shape=reduced_size)
+                reduced_size_str = f"[{', '.join(reduced_size)}]"
 
                 default = "float('nan')" if dtype.is_floating_point else "-1"
                 self.body.writeline(
-                    f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
+                    f"{accumulator} = tl.full({reduced_size_str}, {default}, {acc_type})"
                 )
 
                 accumulators.append(accumulator)
@@ -3117,7 +3229,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
             if all(self.cse.contains(cache_key) for cache_key in cache_keys):
                 return [self.cse.get(cache_key) for cache_key in cache_keys]
-            result_vars = [self.cse.newvar(dtype=_dtype) for _dtype in dtypes]
+            result_vars = [
+                self.cse.newvar(dtype=dtype, shape=value.shape)
+                for (dtype, value) in zip(dtypes, values)
+            ]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
             )
@@ -3138,10 +3253,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # tl.reduce doesn't work for non-commutative operators, so instead
             # of repeating the scan op as a reduction, we use sum to select the
             # last scan value
+            def _partial_scan_shape(var):
+                if var.shape is None:
+                    return None
+                else:
+                    shape = list(var.shape)
+                    shape[-1] = "1"
+                    return shape
+
             partial_reduce_vars = [
                 cse_compute(
                     f"triton_helpers.select_one(({partial_scan_var}), rbase == (RBLOCK - 1), dim=-1, keep_dims=True)",
                     dtype=upcast_compute_type(partial_scan_var.dtype),
+                    shape=_partial_scan_shape(partial_scan_var),
                 )
                 for partial_scan_var in partial_scan_vars
             ]
@@ -3151,6 +3275,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 cse_compute(
                     f"tl.where(roffset > 0, {full_scan}, {partial_scan})",
                     dtype=partial_scan.dtype,
+                    shape=partial_scan.shape,
                 )
                 for full_scan, partial_scan in zip(full_scan_vars, partial_scan_vars)
             ]
@@ -3193,7 +3318,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         assert len(dtypes) == len(values)
         broadcasted_values = [
             cse_compute(
-                f"tl.broadcast_to({value}, {self.dense_size_str()})", dtype=dtypes[i]
+                f"tl.broadcast_to({value}, {self.dense_size_str()})",
+                dtype=dtypes[i],
+                shape=self.dense_size_list(),
             )
             for i, value in enumerate(values)
         ]
@@ -3201,11 +3328,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def csv(values):
             return " ".join(f"{value}," for value in values)
 
-        def cse_multiple(line, n, masks, dtypes):
+        def cse_multiple(line, broadcasted_values, masks, dtypes):
+            n = len(broadcasted_values)
             cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
             if all(self.cse.contains(cache_key) for cache_key in cache_keys):
                 return [self.cse.get(cache_key) for cache_key in cache_keys]
-            result_vars = [self.cse.newvar(dtype=dtypes[i]) for i in range(n)]  # type: ignore[attr-defined]
+            result_vars = [
+                self.cse.newvar(dtype=dtype, shape=value.shape)
+                for dtype, value in zip(dtypes, broadcasted_values)
+            ]  # type: ignore[attr-defined]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
             )
@@ -3223,7 +3354,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
                 f" {rnumel}, {dim}, stable={stable}, descending={descending})"
             )
-            result_vars = cse_multiple(line, len(values), masks, dtypes)
+            result_vars = cse_multiple(line, broadcasted_values, masks, dtypes)
         else:
             raise AssertionError("Unhandled sort")
 
