@@ -1903,3 +1903,15 @@ def skipPRIVATEUSE1(fn):
 #  This should probably enumerate all available device type test base classes.
 def get_all_device_types() -> List[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
+
+if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
+    e4m3_type = torch.float8_e4m3fnuz
+    e5m2_type = torch.float8_e5m2fnuz
+    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
+    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
+else:
+    e4m3_type = torch.float8_e4m3fn
+    e5m2_type = torch.float8_e5m2
+    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
+
