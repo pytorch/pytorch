@@ -85,9 +85,6 @@ elif [[ "$image" == *linter* ]]; then
   DOCKERFILE="linter/Dockerfile"
 fi
 
-# CMake 3.18 is needed to support CUDA17 language variant
-CMAKE_VERSION=3.18.5
-
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
 _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 if [[ "$image" == *rocm* ]]; then
@@ -422,9 +419,6 @@ case "$tag" in
     if [[ "$image" == *glibc* ]]; then
       extract_version_from_image_name glibc GLIBC_VERSION
     fi
-    if [[ "$image" == *cmake* ]]; then
-      extract_version_from_image_name cmake CMAKE_VERSION
-    fi
   ;;
 esac
 
@@ -465,7 +459,6 @@ docker build \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
        --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
-       --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
