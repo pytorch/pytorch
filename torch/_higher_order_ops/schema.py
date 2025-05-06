@@ -222,7 +222,11 @@ def find_hop_schema(
                 assert isinstance(node.target, str)
                 return getattr(gm, node.target)
             else:
-                return node.meta["example_value"]
+                return (
+                    node.meta["example_value"]
+                    if "example_value" in node.meta
+                    else node.meta["val"]
+                )
 
         fake_args, fake_kwargs = pytree.tree_map_only(
             torch.fx.Node,
