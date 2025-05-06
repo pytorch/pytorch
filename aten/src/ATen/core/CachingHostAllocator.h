@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
 #include <c10/core/thread_pool.h>
