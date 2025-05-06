@@ -3157,13 +3157,6 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    def _dynamo_test_key(self):
-        return f"{self.__class__.__name__}.{self._testMethodName}"
-
-    def compile_fn(self, fn, backend, nopython):
-        # Allows subclasses to control compilation
-        return torch._dynamo.optimize(backend, nopython=nopython)(fn)
-
     def _run_custom(self, result=None):
         using_unittest = isinstance(result, unittest.TestResult)
 
@@ -3239,16 +3232,16 @@ class TestCase(expecttest.TestCase):
 
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
             if TEST_WITH_AOT_EAGER:
-                super_run = self.compile_fn(super_run, "aot_eager_decomp_partition", nopython)
+                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
-                    super_run = self.compile_fn(super_run, "inductor", nopython)
+                    super_run = torch._dynamo.optimize("inductor")(super_run)
                 else:
                     # Assume eager-generated GraphModules will not error out.
                     # If we do, this is probably a Dynamo bug!
-                    super_run = self.compile_fn(super_run, "eager_noexcept", nopython)
+                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
 
-                key = self._dynamo_test_key()
+                key = f"{self.__class__.__name__}.{self._testMethodName}"
 
                 def expect_failure(f, file_name):
                     @wraps(f)
