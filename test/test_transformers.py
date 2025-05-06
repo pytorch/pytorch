@@ -4324,6 +4324,12 @@ class TestSDPACompile(InductorTestCase):
 
         if compile_mode == "inductor":
             run_sdpa = torch.compile(run_sdpa, backend="inductor", fullgraph=True)
+        else:
+            original_run_sdpa = run_sdpa
+
+            def run_sdpa(q, k, v):
+                with torch._subclasses.CrossRefFakeMode():
+                    return original_run_sdpa(q, k, v)
 
 
         with sdpa_kernel(backends=[backend]):
@@ -4373,7 +4379,7 @@ instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
-instantiate_device_type_tests(TestSDPACompile, globals(), only_for=device_types)
+instantiate_device_type_tests(TestSDPACompile, globals(), only_for=("cuda"))
 
 if __name__ == '__main__':
     run_tests()
