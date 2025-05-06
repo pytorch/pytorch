@@ -107,7 +107,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
@@ -119,7 +118,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -132,7 +130,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -145,7 +142,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -158,7 +154,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks)
@@ -170,7 +165,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -183,7 +177,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -196,7 +189,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -209,35 +201,30 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     VISION=yes
-    CONDA_CMAKE=yes
     ONNX=yes
     ;;
   pytorch-linux-focal-py3.9-clang10)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-py3.11-clang10)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=10
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-py3.9-gcc9)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-rocm-n-1-py3)
@@ -246,7 +233,6 @@ case "$tag" in
     VISION=yes
     ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -259,7 +245,6 @@ case "$tag" in
     VISION=yes
     ROCM_VERSION=6.4
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -272,7 +257,6 @@ case "$tag" in
     VISION=yes
     XPU_VERSION=0.5
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-xpu-2025.0-py3)
@@ -281,7 +265,6 @@ case "$tag" in
     VISION=yes
     XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
     pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
@@ -289,7 +272,6 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
@@ -306,19 +288,16 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=12
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang15-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=15
-    CONDA_CMAKE=yes
     VISION=yes
     ;;
   pytorch-linux-jammy-py3-clang18-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
-    CONDA_CMAKE=yes
     VISION=yes
     ;;
   pytorch-linux-jammy-py3.9-gcc11)
@@ -326,7 +305,6 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
     UNINSTALL_DILL=yes
@@ -334,14 +312,12 @@ case "$tag" in
   pytorch-linux-jammy-py3-clang12-executorch)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
-    CONDA_CMAKE=yes
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
-    CONDA_CMAKE=yes
     HALIDE=yes
     TRITON=yes
     ;;
@@ -349,7 +325,6 @@ case "$tag" in
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
-    CONDA_CMAKE=yes
     TRITON_CPU=yes
     ;;
   pytorch-linux-focal-linter)
@@ -369,7 +344,6 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
-    CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -379,7 +353,6 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
-    CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -402,8 +375,7 @@ case "$tag" in
       TRITON=yes
       # To ensure that any ROCm config will build using conda cmake
       # and thus have LAPACK/MKL enabled
-      CONDA_CMAKE=yes
-    fi
+      fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
     fi
