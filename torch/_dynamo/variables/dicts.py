@@ -772,7 +772,12 @@ class SetVariable(ConstDictVariable):
             assert not kwargs
             assert not args
             # Choose an item at random and pop it via the Dict.pop method
-            result = self.set_items.pop().vt
+            try:
+                result = self.set_items.pop().vt
+            except KeyError as e:
+                raise_observed_exception(
+                    KeyError, tx, args=list(map(ConstantVariable.create, e.args))
+                )
             super().call_method(tx, name, (result,), kwargs)
             return result
         elif name == "isdisjoint":
@@ -793,9 +798,8 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, *args], {})
         elif name == "union":
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
-                tx, [self, args[0]], {}
+                tx, [self, *args], {}
             )
         elif name == "difference":
             assert not kwargs
@@ -821,8 +825,10 @@ class SetVariable(ConstDictVariable):
             return variables.UserFunctionVariable(
                 polyfills.set_symmetric_difference_update
             ).call_function(tx, [self, *args], {})
+        elif name == "update" and self.is_mutable():
+            assert not kwargs
             return variables.UserFunctionVariable(polyfills.set_update).call_function(
-                tx, [self, args[0]], {}
+                tx, [self, *args], {}
             )
         elif name == "remove":
             assert not kwargs
