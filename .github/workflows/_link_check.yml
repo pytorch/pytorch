@@ -1,5 +1,3 @@
-name: Link Checks
-
 on:
   workflow_call:
     inputs:
