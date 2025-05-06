@@ -34,7 +34,7 @@ def device_count() -> int:
             If there is no available accelerators, return 0.
 
     .. note:: This API delegates to the device-specific version of `device_count`.
-        On CUDA, this API will NOT posion fork if NVML discovery succeeds.
+        On CUDA, this API will NOT poison fork if NVML discovery succeeds.
         Otherwise, it will. For more details, see :ref:`multiprocessing-poison-fork-note`.
     """
     acc = current_accelerator()
@@ -166,7 +166,7 @@ def set_stream(stream: torch.Stream) -> None:
     torch._C._accelerator_setStream(stream)
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: _device_t = None, /) -> None:
     r"""Wait for all kernels in all streams on the given device to complete.
 
     Args:
@@ -217,7 +217,7 @@ class device_index:
         ...     pass
     """
 
-    def __init__(self, device: Optional[int]) -> None:
+    def __init__(self, device: Optional[int], /) -> None:
         self.idx = device
         self.prev_idx = -1
 
