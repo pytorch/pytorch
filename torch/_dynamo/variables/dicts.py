@@ -818,6 +818,15 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
+        elif name in ("issubset", "issuperset"):
+            op = {
+                "issubset": operator.le,
+                "issuperset": operator.ge,
+            }
+            other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
+            return variables.BuiltinVariable(op.get(name)).call_function(
+                tx, [self, other], {}
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
