@@ -1122,7 +1122,7 @@ class OutputGraph(OutputGraphGuardsState):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for value in stack_values:
-            value.realize()
+            variables.LazyVariableTracker.realize_all(value)
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -2634,7 +2634,7 @@ class SubgraphTracer(fx.Tracer):
         self, example_value: Union[torch.SymInt, torch.Tensor], src: Optional[Source]
     ):
         # The before arg is for inserting symints in the sizes/strides of a tensor
-        # before the tensor. This odering ensures that when we look at the tensor's
+        # before the tensor. This ordering ensures that when we look at the tensor's
         # symbols, they're already lifted/tracked. E.g. this assumption is used
         # in insert_deferred_runtime_asserts.
         def _lift_symbols_in_symint(
