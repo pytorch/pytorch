@@ -91,7 +91,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   return compressed_tensor;
 }
 
-std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
+std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
@@ -100,7 +100,7 @@ std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
     bool transpose_result,
     int alg_id,
     int split_k,
-    bool split_k_one_kernel,
+    int split_k_mode,
     bool search_alg_id) {
   if (!handle_initialized) {
     TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
@@ -351,14 +351,15 @@ std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
         &split_k,
         sizeof(split_k)));
 
-    splitKMode = split_k_one_kernel ? CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL
-                                    : CUSPARSELT_SPLIT_K_MODE_TWO_KERNELS;
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
-        &handle,
-        &alg_sel,
-        CUSPARSELT_MATMUL_SPLIT_K_MODE,
-        &splitKMode,
-        sizeof(splitKMode)));
+    if (split_k_mode > 0) {
+      splitKMode = static_cast<cusparseLtSplitKMode_t>(split_k_mode);
+      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
+          &handle,
+          &alg_sel,
+          CUSPARSELT_MATMUL_SPLIT_K_MODE,
+          &splitKMode,
+          sizeof(splitKMode)));
+    }
   }
 
   // set tensor_alpha_mode and alpha pointer for matmul
@@ -465,7 +466,7 @@ std::tuple<at::Tensor, int64_t, int64_t, bool, int64_t> _cslt_sparse_mm_impl(
       res,
       alg_id,
       split_k,
-      splitKMode == CUSPARSELT_SPLIT_K_MODE_ONE_KERNEL,
+      static_cast<int64_t>(splitKMode),
       max_alg_id};
 }
 
@@ -478,7 +479,7 @@ at::Tensor _cslt_sparse_mm(
     bool transpose_result,
     int64_t alg_id,
     int64_t split_k,
-    bool split_k_one_kernel) {
+    int64_t split_k_mode) {
   auto result = _cslt_sparse_mm_impl(
       compressed_A,
       dense_B,
@@ -488,7 +489,7 @@ at::Tensor _cslt_sparse_mm(
       transpose_result,
       (int)alg_id,
       (int)split_k,
-      split_k_one_kernel,
+      (int)split_k_mode,
       false);
   return std::get<0>(result);
 }
@@ -504,7 +505,7 @@ int64_t _cslt_sparse_mm_search(
       "torch._cslt_sparse_mm_search is deprecated and will be removed in a future PyTorch release. Please use torch._C._cusparselt.mm_search instead.");
   int alg_id_int = 0;
   int split_k = 1;
-  bool split_k_one_kernel = true;
+  int split_k_mode = -1;
   auto result = _cslt_sparse_mm_impl(
       compressed_A,
       dense_B,
@@ -514,7 +515,7 @@ int64_t _cslt_sparse_mm_search(
       transpose_result,
       alg_id_int,
       split_k,
-      split_k_one_kernel,
+      split_k_mode,
       true);
   return (int64_t)std::get<1>(result);
 }
@@ -538,7 +539,7 @@ at::Tensor _cslt_sparse_mm(
     bool transpose_result,
     int64_t alg_id,
     int64_t split_k,
-    bool split_k_one_kernel) {
+    int64_t split_k_mode) {
   TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
 
