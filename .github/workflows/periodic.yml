@@ -56,7 +56,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
           { config: "nogpu_AVX512", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -87,7 +87,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
+      docker-image-name: ci-image:pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -114,7 +114,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
+      docker-image-name: ci-image:pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       build-with-debug: true
       test-matrix: |
         { include: [
@@ -147,7 +147,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.4", owners: ["module:rocm", "oncall:distributed"] },
@@ -178,7 +178,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3-gcc11-slow-gradcheck
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
