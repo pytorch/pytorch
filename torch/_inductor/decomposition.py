@@ -362,6 +362,10 @@ def cat(
     tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
+    def all_tensors_same_dtype(tensors: list[torch.Tensor]) -> bool:
+        # pessimistically avoid dtype promotion mistakes
+        return all(t.dtype == tensors[0].dtype for t in tensors)
+
     def non_empty_tensor(x: torch.Tensor) -> bool:
         # For better or worse, this is a valid cat:
         #
@@ -389,7 +393,7 @@ def cat(
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
-    if len(filtered_tensors) == 1:
+    if len(filtered_tensors) == 1 and all_tensors_same_dtype(tensors):
         return filtered_tensors[0].clone()
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
