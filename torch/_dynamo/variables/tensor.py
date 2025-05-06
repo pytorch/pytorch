@@ -391,7 +391,6 @@ class TensorVariable(VariableTracker):
         )
 
     def call_obj_hasattr(self, tx: "InstructionTranslator", name):
-        from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
         try:
@@ -400,7 +399,7 @@ class TensorVariable(VariableTracker):
             )
             # in the event that TensorVariable returns NotImplemented
             # BuiltinVariable.call_getattr returns GetAttrVariable
-            ret_val = not isinstance(var, GetAttrVariable)
+            ret_val = True
         except AttributeError:
             ret_val = False
 
