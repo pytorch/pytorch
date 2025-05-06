@@ -12,6 +12,7 @@ from typing import (
     cast,
     TypeVar,
     Union,
+    Optional,
 )
 from collections.abc import Iterator, Sequence
 
@@ -19,7 +20,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel import (
@@ -32,6 +32,7 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_CUDA,
+    TEST_XPU
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -52,6 +53,10 @@ elif TEST_HPU:
     DEVICE_TYPE = "hpu"
     PG_BACKEND = "hccl"
     DEVICE_COUNT = _get_device_module("hpu").device_count()
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
+    PG_BACKEND = "xccl"
+    DEVICE_COUNT = _get_device_module("xpu").device_count()
 else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
@@ -59,7 +64,7 @@ else:
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if TEST_CUDA and DEVICE_COUNT > 1:
+if (TEST_CUDA or TEST_XPU) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
@@ -320,8 +325,16 @@ class DTensorTestBase(MultiProcessTestCase):
         return NUM_DEVICES
 
     @property
+    def device_type(self) -> str:
+        # if enough GPU we can use GPU, otherwise we fallback to CPU
+        if not (TEST_CUDA or TEST_XPU) or torch.accelerator.device_count() < self.world_size:
+            return "cpu"
+        else:
+            return DEVICE_TYPE
+
+    @property
     def backend(self) -> str:
-        backend = "nccl" if TEST_CUDA else "hccl" if TEST_HPU else "gloo"
+        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
@@ -331,13 +344,13 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl", "xccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
-        if "nccl" in self.backend:
+        if "nccl" in self.backend or "xccl" in self.backend:
             # set device for nccl pg for collectives
-            torch.cuda.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
         # For nccl backend, bind the device to the process if device_id is not None
@@ -351,13 +364,15 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id=device_id,
         )
 
-    def destroy_pg(self) -> None:
+    def destroy_pg(self, device_id: Optional[int] = None) -> None:
         # Wait for all ranks to reach here before starting shutdown.
         # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
         # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
         # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
         #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
-        dist.barrier()
+        if device_id is None:
+            device_id = torch.cuda.current_device() if self.device_type == "cuda" else self.rank
+        dist.barrier(device_ids=[device_id])
         dist.destroy_process_group()
 
     def setUp(self) -> None:
@@ -390,11 +405,6 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
         def wrapper(
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
-            # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not TEST_CUDA or torch.cuda.device_count() < self.world_size:
-                self.device_type = "cpu"
-            else:
-                self.device_type = DEVICE_TYPE
 
             self.init_pg(eager_init)
 

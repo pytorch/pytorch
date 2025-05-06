@@ -132,7 +132,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
       "can't convert ",
       c10::str(tensor.layout()).c_str(),
       " layout tensor to numpy. ",
-      "Use Tensor.dense() first.");
+      "Use Tensor.to_dense() first.");
 
   if (!force) {
     TORCH_CHECK_TYPE(
@@ -507,7 +507,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
 // Mutated only once (during module init); behaves as an immutable variable
 // thereafter.
-bool numpy_with_dlpack_deleter_bug_installed = false;
+static bool numpy_with_dlpack_deleter_bug_installed = false;
 
 // NumPy implemented support for Dlpack capsules in version 1.22.0. However, the
 // initial implementation did not correctly handle the invocation of

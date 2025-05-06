@@ -49,7 +49,7 @@ def generate_example_rst(example_case: ExportCase):
     # Generate contents of the .rst file
     title = f"{example_case.name}"
     doc_contents = f"""{title}
-{'^' * (len(title))}
+{"^" * (len(title))}
 
 .. note::
 
@@ -117,7 +117,7 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
         module_contents = "\n\n".join(v)
         support_contents += f"""
 {support_level}
-{'-' * (len(support_level))}
+{"-" * (len(support_level))}
 
 {module_contents}
 """

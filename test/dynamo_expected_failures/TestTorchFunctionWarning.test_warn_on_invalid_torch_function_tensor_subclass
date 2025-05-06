@@ -1,0 +1,3 @@
+Dynamo cannot query properties of the tensor subclass object when wrapping it
+into a VT, because it has a `__torch_function__` that only allows limited
+torch ops.
