@@ -396,44 +396,25 @@ def _unlift_graph(
 def _get_subgraph_names(
     gm: GraphModule, skip_invoke_subgraph: bool = False
 ) -> Generator[str, None, None]:
-    # invoke_subgraph can call the same subgraph multiple times, so this set
-    # ensures that we don't run redundant passes.
-    seen_invoke_subgraph_names: OrderedSet[str] = OrderedSet()
-    for node in sorted(
-        itertools.chain(
-            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
-            gm.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.while_loop
-            ),
-            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.scan),
-            gm.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.invoke_subgraph
-            ),
-        )
-    ):
-        if node.target == torch.ops.higher_order.cond:
-            true_subgraph_name = node.args[1].name
-            false_subgraph_name = node.args[2].name
-            yield true_subgraph_name
-            yield false_subgraph_name
-        elif node.target == torch.ops.higher_order.while_loop:
-            cond_subgraph_name = node.args[0].name
-            body_subgraph_name = node.args[1].name
-            yield cond_subgraph_name
-            yield body_subgraph_name
-        elif node.target == torch.ops.higher_order.scan:
-            combine_subgraph_name = node.args[0].name
-            yield combine_subgraph_name
-        elif (
-            not skip_invoke_subgraph
-            and node.target == torch.ops.higher_order.invoke_subgraph
+    all_subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in gm.graph.find_nodes(op="get_attr")
+    )
+    fx_subgraph_names: OrderedSet[str] = OrderedSet()
+    for child_name, child_module in gm.named_children():
+        # Sometimes an owning_module can have unused children. Skip them
+        # by checking them from get_attr node targets.
+        if child_name in all_subgraph_names and isinstance(
+            child_module, torch.fx.GraphModule
         ):
-            get_attr_node = node.args[0]
-            assert get_attr_node.op == "get_attr"
-            subgraph_name = get_attr_node.target
-            if subgraph_name not in seen_invoke_subgraph_names:
-                seen_invoke_subgraph_names.add(subgraph_name)
-                yield subgraph_name
+            fx_subgraph_names.add(child_name)
+
+    if skip_invoke_subgraph:
+        for node in gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            fx_subgraph_names.discard(node.args[0].target)
+
+    yield from fx_subgraph_names
 
 
 def _recursive_pre_grad_passes(

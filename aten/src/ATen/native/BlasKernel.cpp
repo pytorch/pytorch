@@ -131,6 +131,15 @@ static float fp16_dot(
   return fp16_dot_stub(kCPU, n, x, incx, y, incy);
 }
 
+static float bf16_dot(
+  const int64_t n,
+  const BFloat16* x,
+  const int64_t incx,
+  const BFloat16* y,
+  const int64_t incy) {
+  return bf16_dot_stub(kCPU, n, x, incx, y, incy);
+}
+
 #endif // !defined(C10_MOBILE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
@@ -395,16 +404,6 @@ void gemv_fast_path<at::BFloat16>(
     y,
     *incy);
 }
-
-static float bf16_dot(
-  const int64_t n,
-  const BFloat16* x,
-  const int64_t incx,
-  const BFloat16* y,
-  const int64_t incy) {
-  return bf16_dot_stub(kCPU, n, x, incx, y, incy);
-}
-
 #if !defined(__aarch64__)
 // Currently, only fp16_gemv_trans is built for non-aarch64.
 template <>
