@@ -16,7 +16,8 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Generic, Optional, TypeVar, Union
+from typing_extensions import override
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
@@ -28,15 +29,15 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config
 from torch._inductor.codecache import (
-    _ident,
-    add_ephemeral_timeout_increase_for_distributed,
     BypassFxGraphCache,
-    create_cache,
-    extract_tensor_metadata_for_cache_key,
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     GuardedCache,
+    _ident,
+    add_ephemeral_timeout_increase_for_distributed,
+    create_cache,
+    extract_tensor_metadata_for_cache_key,
     sha256_hash,
     write_atomic,
 )
@@ -49,7 +50,11 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
 from torch.fx.experimental.symbolic_shapes import hint_int
 from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
@@ -59,9 +64,9 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
-    post_compile,
     RuntimeWrapper,
     SubclassMeta,
+    post_compile,
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
 
@@ -380,12 +385,10 @@ class InductorOutput(Generic[TOut], ABC):
     """
 
     @abstractmethod
-    def load(self, example_inputs) -> TOut:
-        ...
+    def load(self, example_inputs) -> TOut: ...
 
     @abstractmethod
-    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut:
-        ...
+    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut: ...
 
 
 @dataclass
@@ -766,6 +769,13 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
             setattr(gm, field, value)
 
 
+@CacheArtifactFactory.register
+class AOTAutogradCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self):
+        AOTAutogradCache._write_to_local_cache(self.key, self.content)
+
+
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
@@ -840,9 +850,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                entry: Optional[
-                    GenericAOTAutogradCacheEntry
-                ] = AOTAutogradCache._lookup(cache_key, local, remote, args)
+                entry: Optional[GenericAOTAutogradCacheEntry] = (
+                    AOTAutogradCache._lookup(cache_key, local, remote, args)
+                )
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
@@ -1014,7 +1024,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 counters["aot_autograd"]["autograd_cache_guard_miss"] += 1
             if pickled_content is not None:
                 CacheArtifactManager.record_artifact(
-                    CacheArtifactType.AOT_AUTOGRAD, key, pickled_content
+                    AOTAutogradCacheArtifact.type(), key, pickled_content
                 )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
@@ -1043,7 +1053,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AOT_AUTOGRAD, key, content
+                AOTAutogradCacheArtifact.type(), key, content
             )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
@@ -1064,9 +1074,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             return None
 
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6

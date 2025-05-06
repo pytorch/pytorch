@@ -10,17 +10,21 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._functorch._aot_autograd
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.pgo import PGOCacheArtifact
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
     AOTAutogradCache,
-    autograd_cache_key,
+    AOTAutogradCacheArtifact,
     BypassAOTAutogradCache,
+    autograd_cache_key,
     sanitize_gm_for_cache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
+from torch._inductor.codecache import InductorCacheArtifact
+from torch._inductor.runtime.autotune_cache import AutotuneCacheArtifact
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -28,7 +32,7 @@ from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -119,10 +123,12 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         autotune_expect = 2 if device == GPU_TYPE else 0
 
-        self.assertEqual(len(cache_info.inductor_artifacts), 2)
-        self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
-        self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
-        self.assertEqual(len(cache_info.pgo_artifacts), 0)
+        self.assertEqual(len(cache_info.artifacts[InductorCacheArtifact.type()]), 2)
+        self.assertEqual(
+            len(cache_info.artifacts[AutotuneCacheArtifact.type()]), autotune_expect
+        )
+        self.assertEqual(len(cache_info.artifacts[AOTAutogradCacheArtifact.type()]), 1)
+        self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 0)
 
         self._clear_all_caches()
 
@@ -153,10 +159,14 @@ class AOTAutogradCacheTests(InductorTestCase):
         with fresh_inductor_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
-            self.assertEqual(len(cache_info.inductor_artifacts), 2)
-            self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
-            self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
-            self.assertEqual(len(cache_info.pgo_artifacts), 0)
+            self.assertEqual(len(cache_info.artifacts[InductorCacheArtifact.type()]), 2)
+            self.assertEqual(
+                len(cache_info.artifacts[AutotuneCacheArtifact.type()]), autotune_expect
+            )
+            self.assertEqual(
+                len(cache_info.artifacts[AOTAutogradCacheArtifact.type()]), 1
+            )
+            self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 0)
 
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)

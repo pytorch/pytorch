@@ -6,21 +6,26 @@ import logging
 import os
 import os.path
 import re
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 from typing_extensions import override
 
 import torch
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
 from torch.utils._triton import has_triton_package
 
 from ..remote_cache import (
-    create_cache,
     JsonDataTy,
     RemoteCache,
     RemoteCacheBackend,
     RemoteCacheJsonSerde,
+    create_cache,
 )
-from .triton_compat import Config, HAS_WARP_SPEC
+from .triton_compat import HAS_WARP_SPEC, Config
 
 
 if TYPE_CHECKING:
@@ -57,6 +62,24 @@ def inductor_meta_from_config() -> _InductorMetaTy:
         "is_fbcode": config.is_fbcode(),
         "is_hip": is_hip,
     }
+
+
+@CacheArtifactFactory.register
+class AutotuneCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self) -> None:
+        autotune_cache = _LocalAutotuneCacheBackend()
+        key = os.path.join(cache_dir(), self.key)
+        autotune_cache._put(key, self.content)
+
+    @override
+    @staticmethod
+    def encode(content: JsonDataTy) -> bytes:
+        assert not isinstance(content, bytes)
+        serde = RemoteCacheJsonSerde()
+        content_bytes = serde.encode(content)
+        assert isinstance(content_bytes, bytes)
+        return content_bytes
 
 
 @dataclasses.dataclass
@@ -240,7 +263,7 @@ class AutotuneCache:
             AutotuneCacheBundler.put(key, data)
             autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, autotune_artifact_key, data
+                AutotuneCacheArtifact.type(), autotune_artifact_key, data
             )
 
             if log.isEnabledFor(logging.DEBUG):
@@ -563,7 +586,7 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
             AutotuneCacheBundler.put(key, result)
             autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, autotune_artifact_key, result
+                AutotuneCacheArtifact.type(), autotune_artifact_key, result
             )
         return result
 
