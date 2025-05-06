@@ -27,6 +27,15 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  link-check:
+    name: Link checks
+    needs: get-label-type
+    uses: ./.github/workflows/_link_check.yml
+    with:
+      runner: ${{ needs.get-label-type.outputs.label-type }}
+      ref:    ${{ github.sha }}
+    secrets: inherit
+
   docs-build:
     name: docs build
     uses: ./.github/workflows/_linux-build.yml

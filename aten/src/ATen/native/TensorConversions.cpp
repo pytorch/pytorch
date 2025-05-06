@@ -1014,14 +1014,20 @@ static Tensor _batch_tile_tensor(
 static Tensor _mask_to_indices(const Tensor& mask) {
   // This function returns a vector of the indices at which given
   // boolean mask is True. Here at::nonzero performs test (time/mem).
-  TORCH_CHECK(
-      mask.dim() == 1, "Currently _mask_to_indices only supports 1-d masks.");
-  TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mask.dim() == 1, "_mask_to_indices only supports 1-d masks.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
   return at::native::flatten(at::nonzero(mask));
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     Tensor not_zero_mask) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      not_zero_mask.dim() == 2,
+      "_not_zero_mask_to_col_row_indices only supports 2-d masks.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      not_zero_mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
   auto nz = not_zero_mask.nonzero();
   return {nz.select(1, 1), nz.select(1, 0)};
 }
@@ -1693,7 +1699,7 @@ static Tensor sparse_compressed_to_flipped(
 
   // Step 4:
   // Convert the COO indices to the CSC/BSC indices and form the output.
-  // We need to sort COO indices along the "tranposed" dim to satisfy the
+  // We need to sort COO indices along the "transposed" dim to satisfy the
   // invariant of sorted plain indices.
   // Hash coo indices by converting 2d indices to linear offsets with
   // more "weight" (aka stride) placed on the "transposed" dimension.

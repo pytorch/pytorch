@@ -162,7 +162,7 @@ class SuperVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -680,7 +680,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -801,7 +801,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -863,7 +863,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -966,7 +966,7 @@ class GetAttrVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1066,7 +1066,7 @@ class MethodWrapperVariable(VariableTracker):
                     tx, wrapper_name, [self_obj, *args], kwargs
                 )
 
-        super().call_function(tx, args, kwargs)
+        return super().call_function(tx, args, kwargs)
 
     def is_python_constant(self):
         return True
@@ -1139,7 +1139,7 @@ class TypingVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -1316,7 +1316,7 @@ class NumpyVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -1469,7 +1469,7 @@ class LoggingLoggerVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
@@ -1511,7 +1511,7 @@ class ConstantLikeVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1692,7 +1692,7 @@ class RandomVariable(VariableTracker):
 
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],

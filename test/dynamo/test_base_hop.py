@@ -93,7 +93,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
-            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, *, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
         )
 
     def test_schema_gen_pytree_in_out(self):
@@ -121,7 +121,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(schemas), 1)
         self.assertExpectedInline(
             str(schemas[0]),
-            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
     def test_schema_gen_single_return_with_mutation(self):
