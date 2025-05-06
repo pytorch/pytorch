@@ -14828,7 +14828,7 @@
 - func: to_padded_tensor(Tensor self, float padding, SymInt[]? output_size=None) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
+    NestedTensorCPU, NestedTensorHPU: NestedTensor_to_padded_tensor_generic
     NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
   autogen: to_padded_tensor.out
 
