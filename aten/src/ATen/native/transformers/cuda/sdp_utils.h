@@ -14,4 +14,10 @@ C10_EXPORT bool can_use_flash_attention(sdp_params const& params, bool debug);
 C10_EXPORT bool can_use_mem_efficient_attention(sdp_params const& params, bool debug);
 C10_EXPORT bool can_use_cudnn_attention(sdp_params const& params, bool debug);
 
+// Create output tensor with strides matching query layout
+at::Tensor create_output_with_matching_layout(
+    const at::Tensor& query,
+    at::IntArrayRef output_shape,
+    at::TensorOptions options);
+
 } // namespace sdp

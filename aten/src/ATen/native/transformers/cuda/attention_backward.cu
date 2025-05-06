@@ -380,9 +380,9 @@ _efficient_attention_backward(
     grad_k = chunk.select(2, 1);
     grad_v = chunk.select(2, 2);
   } else {
-    grad_q = at::empty(query.sizes(), query.options());
-    grad_k = at::empty(key.sizes(), key.options());
-    grad_v = at::empty(value.sizes(), value.options());
+    grad_q = at::empty_like(query);
+    grad_k = at::empty_like(key);
+    grad_v = at::empty_like(value);
   }
 
   if (bias_requires_grad) {
@@ -668,10 +668,11 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.gQ_strideH, grad_q.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gK_strideH, grad_k.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gV_strideH, grad_v.stride(2));
-    p.gQKV_strideM_multiplier = shared_storage_dqdkdv ? 3 : 1;
-    TORCH_INTERNAL_ASSERT(p.gQ_strideM() == grad_q.stride(1));
-    TORCH_INTERNAL_ASSERT(p.gK_strideM() == grad_k.stride(1));
-    TORCH_INTERNAL_ASSERT(p.gV_strideM() == grad_v.stride(1));
+
+    p.gQKV_strideM_multiplier = 1;
+    ASSIGN_CHECK_OVERFLOW(p.gQ_strideM, grad_q.stride(1));
+    ASSIGN_CHECK_OVERFLOW(p.gK_strideM, grad_k.stride(1));
+    ASSIGN_CHECK_OVERFLOW(p.gV_strideM, grad_v.stride(1));
 
     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
