@@ -612,10 +612,25 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         )
         count += 1
 
-    # adding zendnn op-replacement here (checks will be taken care of later)
-    from .zendnn_optimize import optimize
+    import warnings
 
-    graph = optimize(graph)
+    # Check for ZenDNN availability and user configuration
+    if torch._C.has_zendnn:  # type: ignore[attr-defined]
+        # Apply ZenDNN optimization if explicitly enabled or if auto-enabled on AMD CPU with AVX512
+        if config.enable_zendnn or (
+            config.enable_zendnn is None
+            and torch._C._cpu._is_amd_cpu()
+            and torch._C._cpu._is_avx512_supported()
+        ):
+            from .zendnn_optimize import optimize
+
+            graph = optimize(graph)
+            count += 1
+    elif config.enable_zendnn:
+        warnings.warn(
+            "ZenDNN optimizations requested but torch is not built with ZenDNN support. "
+            "Rebuild torch with USE_ZENDNN=1 to enable ZenDNN optimizations."
+        )
 
     if count:
         stable_topological_sort(graph.graph)
