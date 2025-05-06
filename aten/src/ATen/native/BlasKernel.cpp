@@ -90,6 +90,8 @@ namespace at::native {
 #if !defined(C10_MOBILE)
 DEFINE_DISPATCH(fp16_gemv_trans_stub);
 DEFINE_DISPATCH(bf16_gemv_trans_stub);
+DEFINE_DISPATCH(fp16_dot_stub);
+DEFINE_DISPATCH(bf16_dot_stub);
 #endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
@@ -118,6 +120,24 @@ void fp16_gemv_trans(
     Half* y,
     const int incy) {
   fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+}
+
+static float fp16_dot(
+  const int64_t n,
+  const Half* x,
+  const int64_t incx,
+  const Half* y,
+  const int64_t incy) {
+  return fp16_dot_stub(kCPU, n, x, incx, y, incy);
+}
+
+static float bf16_dot(
+  const int64_t n,
+  const BFloat16* x,
+  const int64_t incx,
+  const BFloat16* y,
+  const int64_t incy) {
+  return bf16_dot_stub(kCPU, n, x, incx, y, incy);
 }
 
 #endif // !defined(C10_MOBILE)
@@ -695,6 +715,34 @@ c10::complex<float> dot_impl(int64_t n, const c10::complex<float>* x, int64_t in
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
+template <>
+Half dot_impl(int64_t n, const Half* x, int64_t incx, const Half* y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+#if !defined(C10_MOBILE)
+  if (incx == 1 && incy == 1) {
+    return blas_impl::fp16_dot(n, x, incx, y, incy);
+  }
+#endif // !defined(C10_MOBILE)
+  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<float>{});
+}
+
+template <>
+BFloat16 dot_impl(int64_t n, const BFloat16* x, int64_t incx, const BFloat16* y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+#if !defined(C10_MOBILE)
+  if (incx == 1 && incy == 1) {
+    return blas_impl::bf16_dot(n, x, incx, y, incy);
+  }
+#endif // !defined(C10_MOBILE)
+  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<float>{});
+}
+
 namespace {
 template <typename scalar_t>
 struct vdot_op {
@@ -721,7 +769,7 @@ scalar_t vdot_impl(int64_t n, const scalar_t* x, int64_t incx, const scalar_t* y
 #endif
 }
 
-// Skip reinstantiating the explicitly specialized types `float` and `double`.
+// Skip reinstantiating the explicitly specialized types `float`, `double`, `half` & `bfloat16`.
 #define INSTANTIATE_DOT_IMPL(scalar_t)  \
   template scalar_t dot_impl<scalar_t>( \
       int64_t n, const scalar_t * x, int64_t incx, const scalar_t * y, int64_t incy);
@@ -730,8 +778,6 @@ INSTANTIATE_DOT_IMPL(int8_t)
 INSTANTIATE_DOT_IMPL(int16_t)
 INSTANTIATE_DOT_IMPL(int)
 INSTANTIATE_DOT_IMPL(int64_t)
-INSTANTIATE_DOT_IMPL(c10::Half)
-INSTANTIATE_DOT_IMPL(c10::BFloat16)
 
 #define INSTANTIATE_VDOT_IMPL(scalar_t)  \
   template scalar_t vdot_impl<scalar_t>( \
