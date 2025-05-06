@@ -430,7 +430,7 @@ Tensor& set_storage_meta__symint(
       size, stride, storage_offset);
 
   // Matches maybe_resize_storage_cpu no-numel behavior
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(result.sym_numel().sym_ne(0))) {
+  if (TORCH_GUARD_OR_TRUE(result.sym_numel().sym_ne(0))) {
     // maybe_resize_storage_cpu can handle no storage exists at all but
     // that should never be the case here
     TORCH_INTERNAL_ASSERT(storage);
@@ -453,9 +453,7 @@ Tensor& set_storage_meta__symint(
     //
     // The old behavior was to unconditionally set_nbytes, but I think not
     // setting it is more safe.
-    if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(
-            new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+    if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() && new_size_bytes>storage.sym_nbytes()) {
       storage.set_nbytes(std::move(new_size_bytes));
     }
   }
@@ -2028,9 +2026,12 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
         !at::isTensorSubclassLike(self)) {
       return self._reshape_alias_symint(shape, stride.value());
     } else {
+        // in case of unbacked we just call as_strided since its simpler and have higher probability of not hitting data dependent errors.
+      // return  self.as_strided_symint(sizes, stride.value());
       return self.view_symint(shape);
     }
   }
+
   return at::_unsafe_view_symint(
       self.clone(at::MemoryFormat::Contiguous), shape);
 }

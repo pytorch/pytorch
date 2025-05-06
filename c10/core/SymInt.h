@@ -47,6 +47,14 @@ class C10_API SymInt {
   SymInt() : data_(0) {}
   SymInt(SymNode n);
 
+  std::string to_string() const{
+    if (is_heap_allocated()) {
+      return toSymNodeImplUnowned()->str();
+    } else {
+      return std::to_string(as_int_unchecked());
+    }
+  }
+
   // unchecked c-tor accepting raw `data_`
   // One appropriate use for this is when you are constructing a symint
   // in a situation where you know it is non-negative (or, if it is negative,

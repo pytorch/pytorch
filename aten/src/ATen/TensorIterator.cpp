@@ -1613,7 +1613,7 @@ void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef 
       // after TensorIterator builder, waiting until we actually want
       // to do the computation.  That would also remove the necessity
       // for the is_meta_ test.
-      TORCH_INTERNAL_ASSERT(op.original_tensor_base().is_same(t));
+      TORCH_INTERNAL_ASSERT(op.original_tensor_base().is_same(t));_
       TORCH_INTERNAL_ASSERT(!op.tensor_base().is_same(t));
       OptionalTensorRef tensor(op.tensor());
       at::native::resize_output(*tensor, sizes);
