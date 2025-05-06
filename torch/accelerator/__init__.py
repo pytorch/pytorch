@@ -225,6 +225,6 @@ class device_index:
         if self.idx is not None:
             self.prev_idx = torch._C._accelerator_exchangeDevice(self.idx)
 
-    def __exit__(self, *exec_info: Any) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         if self.idx is not None:
             torch._C._accelerator_maybeExchangeDevice(self.prev_idx)
