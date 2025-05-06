@@ -108,22 +108,22 @@ properly in order to ensure that the new :class:`Function` works properly with
 the autograd engine.
 
 - :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` should be
-  used to save any tensors for the backward pass (as opposed to
+  used to save any tensors needed for the backward pass (as opposed to
   directly on ``ctx``). You cannot use ``save_for_backward`` for non-tensors;
   you should store those directly on ``ctx``.
 
-  Saving tensors on ``save_for_backward`` allows the engine to clear
-  them during the backward pass as soon as the backward of the
-  ``autograd.Function`` completes. (If a tensor were stored directly on ``ctx``
-  it will unnecessarily be kept alive for the lifetime of the autograd graph,
-  usually this is until the end of the iteration.) Using ``save_for_backward``
-  is also important for avoiding certain reference cycles, (e.g., since the tensor
-  output of the ``autograd.Function`` would itself keeps a reference to the ctx).
-  Saving via ``save_for_backward`` is also important for composition with
+  Saving tensors via ``save_for_backward`` allows the autograd engine to clear
+  them as soon as the backward computation of the ``autograd.Function`` completes.
+  (If a tensor is stored directly on ``ctx``
+  it will unnecessarily remain alive for the lifetime of the autograd graph --
+  typically until the end of the iteration.) Using ``save_for_backward``
+  also helps avoid certain reference cycles, (e.g., since the tensor
+  output of the ``autograd.Function`` itself keeps a reference to the ctx).
+  Saving via ``save_for_backward`` is also important for compatibility with
   features like activation checkpointing and offloading that rely on
   :class:`torch.autograd.graph.saved_tensors_hooks`.
 
-  tensors that are neither input nor output are saved for backward your
+  If tensors that are neither inputs nor outputs are saved for backward your
   :class:`~Function` may not support double backward (see step 3).
 - :meth:`~torch.autograd.function.FunctionCtx.mark_dirty` must be used to
   mark any input that is modified inplace by the forward function.
