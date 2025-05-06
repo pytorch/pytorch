@@ -1989,11 +1989,11 @@ class BuiltinVariable(VariableTracker):
                 )
             ):
                 unimplemented_v2(
-                    gb_type="Failed to trace unittest method",
+                    gb_type="Failed to trace builtin operator",
                     context=f"function: unittest.TestCase.{name}",
-                    explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
+                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
                     hints=[
-                        f"Avoid calling `TestCase.{name}`. "
+                        f"Avoid calling builtin `{name}`. "
                         "Please report an issue to PyTorch.",
                     ],
                 )
