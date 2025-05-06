@@ -33,7 +33,7 @@ jobs:
     uses: ./.github/workflows/_link_check.yml
     with:
       runner: ${{ needs.get-label-type.outputs.label-type }}
-      ref:    ${{ github.sha }}
+      ref: ${{ github.sha }}
     secrets: inherit
 
   docs-build:
