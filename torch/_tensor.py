@@ -1115,6 +1115,21 @@ class Tensor(torch._C.TensorBase):
             _C.TensorBase.pow_
         )
 
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __rpow__(self, other):
+            return torch.pow(other, self)
+
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __floordiv__(self, other):
+            return torch.floor_divide(self, other)
+
+        @_handle_torch_function_and_wrap_type_error_to_not_implemented
+        def __rfloordiv__(self, other):
+            return torch.floor_divide(other, self)
+
+    # For some reason, moving these functions into the `not TYPE_CHECKING`
+    # block makes `mypy` resolve int % Tensor to a int, which is worse
+    # than resolving to `Any`.
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
         return torch.remainder(other, self)
@@ -1127,20 +1142,6 @@ class Tensor(torch._C.TensorBase):
             # requires gradients to a python number. It is ok for formatting.
             return self.detach().item().__format__(format_spec)
         return object.__format__(self, format_spec)
-
-    if not TYPE_CHECKING:
-
-        @_handle_torch_function_and_wrap_type_error_to_not_implemented
-        def __rpow__(self, other):
-            return torch.pow(other, self)
-
-        @_handle_torch_function_and_wrap_type_error_to_not_implemented
-        def __floordiv__(self, other):
-            return torch.floor_divide(self, other)
-
-        @_handle_torch_function_and_wrap_type_error_to_not_implemented
-        def __rfloordiv__(self, other):
-            return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):
