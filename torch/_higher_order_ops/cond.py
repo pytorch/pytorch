@@ -429,7 +429,7 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
     merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        merged_outs.append(_merge_tensors(true_out, false_out, mode))
+        merged_outs.append(_merge_output(true_out, false_out, mode))
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
@@ -451,8 +451,10 @@ def check_tensor_meta_match(
         )
 
 
-def _merge_tensors(
-    a: Optional[torch.Tensor], b: Optional[torch.Tensor], mode: FakeTensorMode
+def _merge_output(
+    a: Optional[Union[torch.Tensor, int]],
+    b: Optional[Union[torch.Tensor, int]],
+    mode: FakeTensorMode,
 ):
     from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
 
@@ -475,6 +477,8 @@ def _merge_tensors(
         )
 
     if type(a) is int and type(b) is int:
+        if a == b:
+            return a
         assert mode.shape_env is not None
         merged_out = mode.shape_env.create_unbacked_symint()
         mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
