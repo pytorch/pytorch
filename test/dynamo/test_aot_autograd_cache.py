@@ -106,8 +106,8 @@ def _unpack_fp8_with_scale_wrap(x):
         return x
 
     dtype, scale, x_fp8 = x
-    y = x_fp8.to(dtype) / scale
-    return y
+    y = x_fp8.to(torch.float32) / scale
+    return y.to(dtype)
 
 
 @instantiate_parametrized_tests
