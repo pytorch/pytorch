@@ -103,6 +103,26 @@ struct tanh_functor {
   }
 };
 
+struct exp2_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(::precise::pow(2, x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return ::precise::pow(2, static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // based on https://mathworld.wolfram.com/ComplexExponentiation.html
+    auto coef = ::precise::pow(4, x.x / 2);
+    auto ln = ::precise::log(4);
+    auto real = ::precise::cos(0.5 * x.y * ln);
+    auto imag = ::precise::sin(0.5 * x.y * ln);
+    return T(coef * real, coef * imag);
+  }
+};
+
 struct sqrt_functor {
   template <typename T>
   inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
@@ -151,6 +171,7 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1) \
   REGISTER_UNARY_OP(erfinv, DTYPE1, DTYPE0);       \
   REGISTER_UNARY_OP(exp, DTYPE1, DTYPE0);          \
+  REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
@@ -172,6 +193,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
 
 #define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)  \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2); \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2); \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2); \
   REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2); \
