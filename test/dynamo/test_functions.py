@@ -1796,7 +1796,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a + b
         else:
             y = a - b
-        return x, y
+        if "shoes" in set1:
+            z = a + b
+        else:
+            z = a - b
+        return x, y, z
+
+    @parametrize("fn_name", ["add", "symmetric_difference", "symmetric_difference_update"])
+    def test_set_raise_TypeError(self, fn_name):
+        @make_test
+        def fn(a, b):
+            set1 = {"apple", "banana", "cherry"}
+            try:
+                getattr(set1, fn_name)()
+            except TypeError:
+                return a + b
+            return a - b
+        fn(self)
+
 
     @parametrize("_type", [set, frozenset])
     def test_set_union(self, _type):
