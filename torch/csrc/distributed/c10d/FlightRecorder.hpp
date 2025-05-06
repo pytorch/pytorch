@@ -12,7 +12,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
-#include <c10/util/WaitCounter.h>
 #include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
