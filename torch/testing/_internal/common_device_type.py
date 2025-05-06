@@ -1577,7 +1577,7 @@ class dtypesIfCUDA(dtypes):
         super().__init__(*args, device_type="cuda")
 
 
-# Overrides specified dtypes on CUDA.
+# Overrides specified dtypes on Intel GPU.
 class dtypesIfXPU(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type="xpu")
