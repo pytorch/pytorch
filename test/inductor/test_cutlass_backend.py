@@ -865,8 +865,8 @@ class TestCutlassBackend(TestCase):
             f"('cuda', 'torch.float16', {k}, {n}, {n}, 1, 0)]"
         ]["high"]
         cutlass_kernels_count = 0
-        for kernel, time in high.items():
-            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+        for kernel, duration in high.items():
+            if kernel.startswith("cutlass_gemm") and not math.isinf(duration):
                 cutlass_kernels_count += 1
         assert cutlass_kernels_count > 0
 
