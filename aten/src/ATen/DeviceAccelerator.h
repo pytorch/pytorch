@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 
@@ -71,6 +72,35 @@ TORCH_API c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index);
 // context if the context for device_index is not initialized. Return the
 // original device index that was active before the change.
 TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
+
+TORCH_API inline void emptyCache() {
+  const auto device_type = getAccelerator(true).value();
+  if (at::GetDeviceAllocator(device_type)->initialized()) {
+    at::GetDeviceAllocator(device_type)->empty_cache();
+  }
+}
+
+TORCH_API inline std::optional<at::CachingDeviceAllocator::DeviceStats> get_device_stats() {
+  const auto device_type = getAccelerator(true).value();
+  if (at::GetDeviceAllocator(device_type)->initialized()) {
+    at::GetDeviceAllocator(device_type)->get_device_stats();
+  }
+  return std::nullopt;
+}
+
+TORCH_API inline void reset_accumulated_stats() {
+  const auto device_type = getAccelerator(true).value();
+  if (at::GetDeviceAllocator(device_type)->initialized()) {
+    at::GetDeviceAllocator(device_type)->reset_accumulated_stats();
+  }
+}
+
+TORCH_API inline void reset_peak_stats() {
+  const auto device_type = getAccelerator(true).value();
+  if (at::GetDeviceAllocator(device_type)->initialized()) {
+    at::GetDeviceAllocator(device_type)->reset_peak_stats();
+  }
+}
 
 } // namespace at::accelerator
 
