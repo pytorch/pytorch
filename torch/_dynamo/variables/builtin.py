@@ -1526,7 +1526,7 @@ class BuiltinVariable(VariableTracker):
                     if (
                         getattr(obj, "source", False)
                         and isinstance(obj, ConstDictVariable)
-                        and not istype(obj, (SetVariable, FrozensetVariable))
+                        and not istype(obj, SetVariable)
                     ):
                         tx.output.guard_on_key_order.add(obj.source)
 
@@ -1677,7 +1677,7 @@ class BuiltinVariable(VariableTracker):
             return SetVariable([], mutation_type=ValueMutationNew())
         assert len(args) == 1
         arg = args[0]
-        if istype(arg, variables.SetVariable):
+        if isinstance(arg, variables.SetVariable):
             return arg.clone(mutation_type=ValueMutationNew())
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
@@ -1707,13 +1707,10 @@ class BuiltinVariable(VariableTracker):
             return FrozensetVariable([])
         assert len(args) == 1
         arg = args[0]
-        if istype(arg, variables.FrozensetVariable):
+        if isinstance(arg, variables.FrozensetVariable):
             return FrozensetVariable([x.vt for x in arg.set_items])
         elif arg.has_unpack_var_sequence(tx):
             items = arg.unpack_var_sequence(tx)
-            return FrozensetVariable(items)
-        elif arg.has_force_unpack_var_sequence(tx):
-            items = arg.force_unpack_var_sequence(tx)
             return FrozensetVariable(items)
         unimplemented_v2(
             gb_type="failed to construct builtin frozenset()",
@@ -1807,9 +1804,6 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
-
-        if isinstance(arg, variables.UserDefinedExceptionClassVariable):
-            return ConstantVariable.create(isinstance(arg_type, isinstance_type))
 
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, type) or callable(
