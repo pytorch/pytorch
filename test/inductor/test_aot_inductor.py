@@ -1128,6 +1128,8 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @skipIfRocmArch(NAVI32_ARCH)
+    # SDPA is not supported on navi32 arch
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     def test_fallback_kernel_with_symexpr_output(self):
         if self.device != GPU_TYPE:
@@ -3390,6 +3392,8 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocmArch(NAVI32_ARCH)
+    # SDPA is not supported on navi32 arch
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
