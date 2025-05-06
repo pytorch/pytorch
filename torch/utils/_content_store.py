@@ -93,11 +93,11 @@ def hash_storage_kernel(x):
 # SHA-1 if stable_hash=True, otherwise it will consistent for a single
 # process run but not necessarily across processes.
 def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) -> str:
-    import torch._dynamo
     from torch._dynamo.utils import is_compile_supported
 
     device_type = storage.device.type
-    if stable_hash or not is_compile_supported(device_type):
+    # FIXME: MPS does not yet support some of the ops required for hashing
+    if stable_hash or not is_compile_supported(device_type) or device_type == "mps":
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
         # necessary

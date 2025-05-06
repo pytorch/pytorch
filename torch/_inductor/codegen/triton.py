@@ -5,6 +5,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import math
@@ -32,6 +33,7 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
+from ..exc import TritonMissing
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -4090,6 +4092,20 @@ class TritonScheduling(SIMDScheduling):
                 [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
             )
         return cls.backend_features
+
+    @classmethod
+    def raise_if_unavailable(
+        cls, device: Union[str, torch.device, None] = None
+    ) -> None:
+        if not has_triton_package():
+            raise TritonMissing(inspect.currentframe())
+
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        if device is None:
+            device = torch.get_default_device()
+
+        get_interface_for_device(device).raise_if_triton_unavailable(device)
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code

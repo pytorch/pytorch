@@ -45,8 +45,15 @@ class CUDACombinedScheduling(BaseScheduling):
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
 
-    def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
-        return self._triton_scheduling.get_backend_features(device)
+    @classmethod
+    def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
+        return TritonScheduling.get_backend_features(device)
+
+    @classmethod
+    def raise_if_unavailable(
+        cls, device: Union[str, torch.device, None] = None
+    ) -> None:
+        TritonScheduling.raise_if_unavailable(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
