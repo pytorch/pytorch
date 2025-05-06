@@ -1585,11 +1585,10 @@ class CppGemmTemplate(CppTemplate):
                 options["K"],
                 options["micro_gemm"],
             ):
-                return self._template_from_string(SMALL_M_GEMM_TEMPLATE).render(
-                    **options
-                )
+                template_str = SMALL_M_GEMM_TEMPLATE
             else:
-                return self._template_from_string(GEMM_TEMPLATE).render(**options)
+                template_str = GEMM_TEMPLATE
+            return self._template_from_string(template_str).render(**options)
 
     def codegen_blocks(
         self,
@@ -1622,17 +1621,13 @@ class CppGemmTemplate(CppTemplate):
             W=W,
             is_woq_int4=self.is_woq_int4(),
         )
-        if not is_dynamic_M and self.is_int8_woq_gemm_small_m_dim(
-            X, W, N, K, micro_gemm
+        template_str = GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK
+        if not (
+            not is_dynamic_M
+            and self.is_int8_woq_gemm_small_m_dim(X, W, N, K, micro_gemm)
         ):
-            return self._template_from_string(
-                GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK
-            ).render(options)
-        else:
-            return self._template_from_string(
-                GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK
-                + GEMM_TEMPLATE_INIT_BLOCKING_EXTENDED
-            ).render(options)
+            template_str += GEMM_TEMPLATE_INIT_BLOCKING_EXTENDED
+        return self._template_from_string(template_str).render(options)
 
     def codegen_microkernel_def(self):
         return self._template_from_string(GEMM_TEMPLATE_MICROKERNEL_DEF).render(
