@@ -200,6 +200,24 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
         return SubclassWithSubclassInnerTensor(a, extra, outer_size, outer_stride)
 
 
+# defines a custom __eq__() / __hash__() to be registered as a pytree constant type
+class CustomConstantType:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    def __eq__(self, other):
+        # custom eq ignores b
+        return self.a == other.a
+
+    def __hash__(self):
+        # custom hash ignores b
+        return hash(self.a)
+
+
+pytree.register_constant(CustomConstantType)
+
+
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
     def _tracefunc(self, frame, event, arg):
         if event != "call":
@@ -504,6 +522,39 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         check_with_meta({"foo": 6, "bar": "hello"}, False)
         # different "bar"
         check_with_meta({"foo": 5, "bar": "world"}, False)
+
+    def test_equals_match(self):
+        def fn(x, y):
+            # CustomConstantType is registered as a pytree constant so this should
+            # result in an EQUALS_MATCH guard.
+            if x in y:
+                return torch.zeros(3)
+            return torch.ones(3)
+
+        x = CustomConstantType(4, 5)
+        y = [CustomConstantType(2, 3), CustomConstantType(4, 5)]
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        # custom __eq__ says that CustomConstantType(4, 5) == CustomConstantType(4, 9)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": CustomConstantType(4, 5),
+                "y": [CustomConstantType(2, 3), CustomConstantType(4, 9)],
+            },
+            True,
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "y": []}, False)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": x,
+                "y": [CustomConstantType(2, 3), CustomConstantType(6, 7)],
+            },
+            False,
+        )
 
     def test_dict_version(self):
         def fn(x):
