@@ -1949,7 +1949,7 @@ def create_micro_gemm(
                     alpha,
                     num_threads,
                     dynamic_M=dynamic_M,
-                    q_group_size=q_group_size
+                    q_group_size=q_group_size,
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
@@ -1960,7 +1960,8 @@ def create_micro_gemm(
                     and input_dtype == torch.bfloat16
                     and input2_dtype in [torch.int8, torch.uint8]
                 ):
-                    # For WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
+                    # For WoQ GEMM, AMX micro-kernel may not perform well if m < block_m.
+                    # Exception: for dynamic shapes, we consider using the AMX micro-kernel.
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC
