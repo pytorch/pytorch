@@ -83,6 +83,15 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_9-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
+  link-check:
+    name: Link checks
+    needs: get-label-type
+    uses: ./.github/workflows/_link_check.yml
+    with:
+      runner: ${{ needs.get-label-type.outputs.label-type }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
+
   linux-docs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
