@@ -1112,9 +1112,11 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[8, 8]"):
+        clone: "f32[8, 8]" = torch.ops.aten.clone.default(tangents_1);  tangents_1 = None
+
         partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
 
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', tangents_1, tangents_1);  partitioned_bw_subgraph_0_0 = tangents_1 = None
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', clone, clone);  partitioned_bw_subgraph_0_0 = clone = None
         getitem_3: "f32[8, 8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
         return (getitem_3,)
 
