@@ -674,6 +674,7 @@ class AutogradFunctionVariable(VariableTracker):
                     hints=[
                         "Remove the custom `vjp` method if possible.",
                         "Use standard `backward` instead if applicable.",
+                        *graph_break_hints.SUPPORTABLE,
                     ],
                 )
 
