@@ -1926,9 +1926,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask_slidewindow_mod(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (q_idx <= kv_idx + window_size)
 
-        mask1 = create_block_mask(causal_mask, 1, None, 512, 512, _compile=False)
+        mask1 = create_block_mask(
+            causal_mask, 1, None, 512, 512, _compile=False, device=device
+        )
         mask2 = create_block_mask(
-            causal_mask_slidewindow_mod, 1, None, 512, 512, _compile=False
+            causal_mask_slidewindow_mod,
+            1,
+            None,
+            512,
+            512,
+            _compile=False,
+            device=device,
         )
 
         def f(q, k, v):
@@ -2585,7 +2593,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    def test_eager_backward_strides(self):
+    def test_eager_backward_strides(self, device):
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2607,8 +2615,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 x = torch.nn.attention.flex_attention.flex_attention(q, k, v)
                 return x
 
-        model = Repro().cuda()
-        x = torch.randn((1, 512, 256), device="cuda", requires_grad=True)
+        model = Repro().to(device)
+        x = torch.randn((1, 512, 256), device=device, requires_grad=True)
         out = torch.compile(model, backend="aot_eager", fullgraph=True)(x)
         out.backward(torch.ones_like(out))
 
@@ -2689,7 +2697,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             requires_grad=True,
         )
 
-        block_mask = create_block_mask(mask, None, None, 4096, 4096)
+        block_mask = create_block_mask(mask, None, None, 4096, 4096, device=device)
         # Compile 1st version with q/k/v(seqlen=4096) and block_mask(seqlen=4096)
         torch.compile(flex_attention, dynamic=True, fullgraph=True)(
             make_tensor(), make_tensor(), make_tensor(), block_mask=block_mask
@@ -2698,7 +2706,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor2 = functools.partial(
             torch.randn,
             (4, 4, 2048, 64),
-            device="cuda",
+            device=device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -2715,7 +2723,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         k.grad = None
         v.grad = None
 
-        block_mask2 = create_block_mask(mask, None, None, 2048, 2048)
+        block_mask2 = create_block_mask(mask, None, None, 2048, 2048, device=device)
         # Reuse the 1st version with q/k/v(seqlen=2048) and block_mask(seqlen=2048)
         out2 = torch.compile(flex_attention, dynamic=True, fullgraph=True)(
             q, k, v, block_mask=block_mask2
@@ -2821,11 +2829,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    def test_strided_backwards(self):
+    def test_strided_backwards(self, device):
         shape = (1, 2, 4096, 64)
-        Q = torch.randn(shape, requires_grad=True, device="cuda")
-        K = torch.randn(shape, requires_grad=True, device="cuda")
-        V = torch.randn(shape, requires_grad=True, device="cuda")
+        Q = torch.randn(shape, requires_grad=True, device=device)
+        K = torch.randn(shape, requires_grad=True, device=device)
+        V = torch.randn(shape, requires_grad=True, device=device)
         func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
 
         K_sliced = K[:, :, :-128]
@@ -3076,7 +3084,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 64),
-            device="cuda",
+            device=device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -3147,7 +3155,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             return score_mod
 
-        m = Attention().cuda().eval().to(dtype)
+        m = Attention().to(device).eval().to(dtype)
         m = torch.compile(m, mode="default", fullgraph=False)
 
         q = torch.randn(B, H, N, D, device=device, dtype=dtype)
@@ -3217,10 +3225,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return causal_mask & window_mask
 
         sliding_window_causal = torch.nn.attention.flex_attention.create_block_mask(
-            sliding_window_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+            sliding_window_causal,
+            B=None,
+            H=None,
+            Q_LEN=N_CTX,
+            KV_LEN=N_CTX,
+            device=device,
         )
         global_causal = torch.nn.attention.flex_attention.create_block_mask(
-            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX
+            global_causal, B=None, H=None, Q_LEN=N_CTX, KV_LEN=N_CTX, device=device
         )
 
         local_attn = functools.partial(
@@ -3268,10 +3281,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_mixed_device_error_message(self, device):
         # Create tensors on different devices
         cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
-        cuda_tensor = torch.randn(2, 2, 128, 16, device=device)
+        gpu_tensor = torch.randn(2, 2, 128, 16, device=device)
 
         # Use different devices for query, key, and value
-        query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
+        query, key, value = cpu_tensor, gpu_tensor, cpu_tensor
 
         expected_error_message = (
             "Expected query, key, and value to have the same device type, "
@@ -3285,8 +3298,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_captured_wrong_device_error_message(self, device):
-        means = torch.randn(64, 3).cuda()
-        length_scales = torch.logspace(0.001, 0.1, 8)
+        means = torch.randn(64, 3, device=device)
+        length_scales = torch.logspace(0.001, 0.1, 8, device="cpu")
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3306,8 +3319,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     def test_cant_lower_error_message(self, device):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(64, 256).cuda()
-        length_scales = torch.logspace(0.001, 0.1, 8).cuda()
+        means = torch.randn(64, 256, device=device)
+        length_scales = torch.logspace(0.001, 0.1, 8, device=device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3327,8 +3340,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     def test_reduction_unrolled(self, device):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(S, 3).to(device)
-        length_scales = torch.logspace(0.001, 0.1, H).to(device)
+        means = torch.randn(S, 3, device=device)
+        length_scales = torch.logspace(0.001, 0.1, H, device=device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3338,7 +3351,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             inv_dist = torch.exp(-dist / scale)
             return inv_dist * score
 
-        self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device)
+        self.run_test(euclidean_dist_pos_embed, torch.bfloat16, device=device)
 
     @supported_platform
     @skip_on_cpu
@@ -3349,7 +3362,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         expected_error_message = (
             "ValueError: Q and KV block size must be divisible by BLOCK_M and BLOCK_N."
         )
-        block_mask = create_block_mask(noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96)
+        block_mask = create_block_mask(
+            noop_mask, 1, 8, 128, 128, BLOCK_SIZE=96, device=device
+        )
 
         with self.assertRaisesRegex(RuntimeError, expected_error_message):
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
@@ -3416,6 +3431,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     H=None,
                     Q_LEN=max_time,
                     KV_LEN=max_time,
+                    device=device,
                 )
 
                 x = torch.compile(
@@ -3428,7 +3444,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return x
 
-        model = Model(128).cuda()
+        model = Model(128).to(device)
         B, F, T = 16, 256, 12
         for _ in range(5):
             x = torch.randn(B, T, F, device=device)
@@ -3599,7 +3615,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return y.transpose(1, 2).contiguous().view(B, T, C)
 
-        model = SimpleAttention().cuda()
+        model = SimpleAttention().to(device)
         model.compile(mode="default", dynamic=True)
         sequence_len = 256
 
@@ -3607,7 +3623,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
             # Create dense mask
-            rand_mask = torch.randint(0, 2, (batch_shape, sequence_len)).cuda().bool()
+            rand_mask = torch.randint(
+                0, 2, (batch_shape, sequence_len), device=device
+            ).bool()
             block_mask = torch.compile(create_block_mask, dynamic=True)(
                 B=batch_shape,
                 BLOCK_SIZE=128,
@@ -3619,7 +3637,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
             # Run forward pass
-            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            x = torch.randn(batch_shape, sequence_len, 512, device=device)
             model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
@@ -3647,7 +3665,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     block_mask=block_mask,
                 )
 
-        model = SimpleAttention().cuda()
+        model = SimpleAttention().to(device)
         from torch._dynamo.testing import EagerAndRecordGraphs
 
         backend = EagerAndRecordGraphs()
@@ -3656,7 +3674,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
-            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            x = torch.randn(batch_shape, sequence_len, 512, device=device)
             model(x)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
@@ -3683,7 +3701,7 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 128, 128)
+        block_mask = create_block_mask(causal_mask, 1, 1, 128, 128, device=device)
 
         func = torch.compile(flex_attention, backend=cnt, fullgraph=True)
         out = func(query, key, value, _squared, block_mask=block_mask)
@@ -3743,13 +3761,10 @@ class GraphModule(torch.nn.Module):
         out.sum().backward()
 
         joint_graph = normalize_gm(aot_graphs[1].print_readable(print_output=False))
-
-        self.assertExpectedInline(
-            joint_graph,
-            """\
+        expected_joint_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
@@ -3766,7 +3781,6 @@ class GraphModule(torch.nn.Module):
 
     class joint_graph0(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
-            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
@@ -3774,9 +3788,15 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
-            return full
-""",  # noqa: B950
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            return full_default
+""".replace(  # noqa: B950
+            "GPU_TYPE", torch.device(device).type
+        )
+
+        self.assertExpectedInline(
+            joint_graph,
+            expected_joint_graph,
         )
 
     @supported_platform
@@ -3826,7 +3846,7 @@ class GraphModule(torch.nn.Module):
         flex_attention(q, k, v)
 
         # compiled cpu support for small embedding size
-        q, k, v = [torch.randn(2, 2, 128, 8, device="cpu") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 8, device=device) for _ in range(3)]
         flex_attention(q, k, v)
 
         # compiled gpu kernel does not support small embedding size
@@ -3898,7 +3918,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 4, 2, 2048, 2048, device=device)
         self.assertEqual(block_mask.shape, (4, 2, 2048, 2048))
         self.assertEqual(block_mask[0].shape, (2, 2048, 2048))
         self.assertEqual(block_mask[0, 0].shape, (2048, 2048))
@@ -3909,7 +3929,7 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
 
         offset = torch.arange(8, device=device)
-        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 8, 1, 2048, 2048, device=device)
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
@@ -3926,7 +3946,7 @@ class TestBlockMask(InductorTestCase):
             Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
         block_mask = create_block_mask(
-            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE
+            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE, device=device
         )
 
         self.assertEqual(block_mask.BLOCK_SIZE, (Q_BLOCK_SIZE, KV_BLOCK_SIZE))
@@ -3939,7 +3959,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512)
+        block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device=device)
         assert block_mask.kv_num_blocks.shape == (4, 2, 4)
         assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
@@ -3991,16 +4011,17 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_block_mask_device_change(self, device):
+        device = torch.device(device)
         offset = torch.zeros(8, device=device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512)
-        assert block_mask.kv_indices.is_cuda
-        assert block_mask.kv_num_blocks.is_cuda
-        assert block_mask.q_indices.is_cuda
-        assert block_mask.q_num_blocks.is_cuda
+        block_mask = create_block_mask(causal_mask, 1, 1, 512, 512, device=device)
+        assert block_mask.kv_indices.device.type == device.type
+        assert block_mask.kv_num_blocks.device.type == device.type
+        assert block_mask.q_indices.device.type == device.type
+        assert block_mask.q_num_blocks.device.type == device.type
 
         block_mask = block_mask.to("cpu")
         assert block_mask.kv_indices.is_cpu
@@ -4008,11 +4029,11 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.q_indices.is_cpu
         assert block_mask.q_num_blocks.is_cpu
 
-        block_mask = block_mask.to("cuda")
-        assert block_mask.kv_indices.is_cuda
-        assert block_mask.kv_num_blocks.is_cuda
-        assert block_mask.q_indices.is_cuda
-        assert block_mask.q_num_blocks.is_cuda
+        block_mask = block_mask.to(device)
+        assert block_mask.kv_indices.device.type == device.type
+        assert block_mask.kv_num_blocks.device.type == device.type
+        assert block_mask.q_indices.device.type == device.type
+        assert block_mask.q_num_blocks.device.type == device.type
 
     @supported_platform
     def test_compiling_create_block_mask(self, device):
@@ -4022,7 +4043,7 @@ class TestBlockMask(InductorTestCase):
             return (q >= kv) & (seq[q] == seq[kv])
 
         block_mask = torch.compile(create_block_mask, fullgraph=True)(
-            mask_mod, 1, 1, 512, 512
+            mask_mod, 1, 1, 512, 512, device=device
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
@@ -4034,21 +4055,27 @@ class TestBlockMask(InductorTestCase):
             return q >= kv
 
         torch._dynamo.reset()
-        block_mask = torch.compile(create_block_mask)(mask_mod, 2, 4, 1024, 1024)
+        block_mask = torch.compile(create_block_mask)(
+            mask_mod, 2, 4, 1024, 1024, device=device
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
 
         # automatic dynamic shapes triggered and recompilation.
-        block_mask = torch.compile(create_block_mask)(mask_mod, 4, 8, 2048, 2048)
+        block_mask = torch.compile(create_block_mask)(
+            mask_mod, 4, 8, 2048, 2048, device=device
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
         # no recompilation.
-        block_mask = torch.compile(create_block_mask)(mask_mod, 6, 16, 3072, 3072)
+        block_mask = torch.compile(create_block_mask)(
+            mask_mod, 6, 16, 3072, 3072, device=device
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
@@ -4059,7 +4086,7 @@ class TestBlockMask(InductorTestCase):
         def causal_mask(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
 
         def replace_non_printable(s):
             def replace(c):
@@ -4100,7 +4127,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def causal_offset_mask(b, h, q, kv):
             return (q + offset[b] * 128) >= kv
 
-        block_mask = create_block_mask(causal_offset_mask, 8, 1, 2048, 2048)
+        block_mask = create_block_mask(
+            causal_offset_mask, 8, 1, 2048, 2048, device=device
+        )
         str_block_mask = str(block_mask)
         self.assertTrue("sparsity=29.10" in str_block_mask)
 
@@ -4256,7 +4285,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
         # manually set q_num_blocks and q_indices to None
         block_mask.q_num_blocks = None
         block_mask.q_indices = None
@@ -4325,7 +4354,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 lengths[index] += 1
             return lengths
 
-        device = "cuda"
         max_seq_len, doc_count = 128, 4
         SEQ_LEN = max_seq_len
 
@@ -4355,7 +4383,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
         for i in range(5):
             lengths = generate_random_lengths(1024 + i, 5)
-            offsets = length_to_offsets(lengths, "cuda")
+            offsets = length_to_offsets(lengths, device)
             doc_ids = _offsets_to_doc_ids_tensor(offsets)
 
             def doc_mask_mod(b, h, q_idx, kv_idx):
@@ -4367,7 +4395,9 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v = (
                 torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
             )
-            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
+            block_mask = create_block_mask(
+                doc_mask_mod, None, None, 1024 + i, 1024 + i, device=device
+            )
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
     @supported_platform
@@ -4432,12 +4462,12 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
             return q, k, v
 
-        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024)
+        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024, device=device)
         flex_attention_call(*create_inputs(1024), block_mask=block_mask)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
-        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023)
+        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
@@ -4896,16 +4926,19 @@ supports_learnable_bias = unittest.skipUnless(
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
-        self.device = "cuda"
+        skipCPUIf(
+            LONG_COMPILATION_ON_CPU,
+            "skip UT for CPU due to long compilation time found in CI",
+        )
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
 
-    def _init_tensors(self, params: Params):
+    def _init_tensors(self, params: Params, device: str):
         make_tensor = functools.partial(
             torch.randn,
             (params.batch_size, params.num_heads, params.seq_length, params.head_dim),
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -4962,15 +4995,16 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
-    def test_relative_1d_bias(self, params, mode: str):
-        query, key, value = self._init_tensors(params)
+    def test_relative_1d_bias(self, device, params, mode: str):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             2 * params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -4995,15 +5029,16 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_absolute_2d_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_absolute_2d_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5028,16 +5063,17 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_head_specific_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_head_specific_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.num_heads,
             params.seq_length,
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5062,17 +5098,18 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_batch_head_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_batch_head_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.batch_size,
             params.num_heads,
             params.seq_length,
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5097,14 +5134,15 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_multiplicative_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_multiplicative_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5129,15 +5167,16 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_local_window_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_local_window_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         window_size = 8
         bias = torch.randn(
             2 * window_size + 1,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5163,14 +5202,15 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_global_tokens_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_global_tokens_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5195,21 +5235,22 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_weird_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_weird_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.batch_size,
             params.num_heads,
             4,
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
-        which_bias = torch.tensor(0, device=self.device)
+        which_bias = torch.tensor(0, device=device)
 
         def bias_func(score, b, h, q_idx, kv_idx):
             return score + bias[b, h, which_bias, q_idx]
@@ -5231,14 +5272,15 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_indirect_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_indirect_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5247,7 +5289,7 @@ class TestLearnableBiases(InductorTestCase):
             0,
             params.seq_length,
             (params.seq_length,),
-            device=self.device,
+            device=device,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
@@ -5270,15 +5312,16 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
-    def test_symmetric_bias(self, params, mode: str):
-        query, key, value = self._init_tensors(params)
+    def test_symmetric_bias(self, device, params, mode: str):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5307,15 +5350,16 @@ class TestLearnableBiases(InductorTestCase):
                 (query, key, value, bias),
             )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_flipped_indexed_bias(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_flipped_indexed_bias(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         bias = torch.randn(
             params.seq_length,
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5340,15 +5384,16 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
     @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
-    def test_head_specific_gate(self, params, mode: str):
-        query, key, value = self._init_tensors(params)
+    def test_head_specific_gate(self, device, params, mode: str):
+        query, key, value = self._init_tensors(params, device=device)
         gate_score = torch.randn(
             params.num_heads,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5373,21 +5418,22 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, gate_score),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_distinct_biases(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_distinct_biases(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         # Create two separate bias tensors
         bias1 = torch.randn(
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
         bias2 = torch.randn(
             params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,
         )
@@ -5421,11 +5467,12 @@ class TestLearnableBiases(InductorTestCase):
             ],
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_relative_1d_bias_only_grad(self, params):
-        query, key, value = self._init_tensors(params)
+    def test_relative_1d_bias_only_grad(self, device, params):
+        query, key, value = self._init_tensors(params, device=device)
         query = query.detach().requires_grad_(False)
         key = key.detach().requires_grad_(False)
         value = value.detach().requires_grad_(False)
@@ -5433,7 +5480,7 @@ class TestLearnableBiases(InductorTestCase):
         # Only bias requires gradients
         bias = torch.randn(
             2 * params.seq_length,
-            device=self.device,
+            device=device,
             dtype=params.dtype,
             requires_grad=True,  # Only bias needs gradients
         )
@@ -5457,10 +5504,11 @@ class TestLearnableBiases(InductorTestCase):
             out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
         )
 
-    def test_flex_attention_with_dynamic_max_autotune(self):
-        query = torch.randn(2, 16, 512, 64, device=self.device)
-        key = torch.randn(2, 16, 512, 64, device=self.device)
-        value = torch.randn(2, 16, 512, 64, device=self.device)
+    @skip_on_cpu
+    def test_flex_attention_with_dynamic_max_autotune(self, device):
+        query = torch.randn(2, 16, 512, 64, device=device)
+        key = torch.randn(2, 16, 512, 64, device=device)
+        value = torch.randn(2, 16, 512, 64, device=device)
         query.requires_grad = True
         key.requires_grad = True
         value.requires_grad = True
@@ -5474,7 +5522,9 @@ class TestLearnableBiases(InductorTestCase):
             return m >= n
 
         mask_shape = (1, 1, M, N)
-        block_mask = torch.compile(create_block_mask)(causal, *mask_shape, "cuda")
+        block_mask = torch.compile(create_block_mask)(
+            causal, *mask_shape, device=device
+        )
 
         compiled_sdpa = torch.compile(
             flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
@@ -5495,26 +5545,25 @@ class TestLearnableBiases(InductorTestCase):
             out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
         )
 
-    def test_inspect_bug(self):
+    @skip_on_cpu
+    def test_inspect_bug(self, device):
         # https://github.com/pytorch/pytorch/issues/139374
         def sliding_window(b, h, q_idx, kv_idx, val):
             return (q_idx - kv_idx).abs() < val
 
         sliding_window2 = functools.partial(
-            sliding_window, val=torch.randn((), device=self.device)
+            sliding_window, val=torch.randn((), device=device)
         )
         opt_fn = torch.compile(create_block_mask, fullgraph=True)
-        create_block_mask(sliding_window2, None, None, 1024, 1024)
+        create_block_mask(sliding_window2, None, None, 1024, 1024, device=device)
         # checks that the compile is working
-        opt_fn(sliding_window2, None, None, 1024, 1024)
+        opt_fn(sliding_window2, None, None, 1024, 1024, device=device)
 
     @supported_platform
-    def test_head_bias_req_grad(self):
-        device = self.device
+    @skip_on_cpu
+    def test_head_bias_req_grad(self, device):
         B, H, S, D = 1, 4, 256, 64
-        bias = torch.randn(
-            H, device=self.device, dtype=torch.float16, requires_grad=True
-        )
+        bias = torch.randn(H, device=device, dtype=torch.float16, requires_grad=True)
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
@@ -5545,8 +5594,8 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @supported_platform
-    def test_comparison_vs_sdpa_with_learnable_bias(self):
-        device = self.device
+    @skip_on_cpu
+    def test_comparison_vs_sdpa_with_learnable_bias(self, device):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
@@ -5759,8 +5808,7 @@ class TestLearnableBiases(InductorTestCase):
 instantiate_device_type_tests(TestFlexAttention, globals(), only_for=test_device)
 instantiate_device_type_tests(TestPagedAttention, globals(), only_for=test_device)
 instantiate_device_type_tests(TestBlockMask, globals(), only_for=("cuda",))
-
-common_utils.instantiate_parametrized_tests(TestLearnableBiases)
+instantiate_device_type_tests(TestLearnableBiases, globals(), only_for=test_device)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
