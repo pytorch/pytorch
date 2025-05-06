@@ -707,7 +707,6 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def fn(self):
         return self.value
 
-    @property
     def python_type(self):
         return self.value
 
