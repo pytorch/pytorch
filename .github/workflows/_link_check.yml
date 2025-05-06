@@ -25,12 +25,14 @@ jobs:
       script: |
         ./scripts/lint_urls.sh $(
           [ "${{ github.event_name }}" = "pull_request" ] \
-            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} \
           || [ "${{ github.event_name }}" = "push" ] \
-            && git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+            && git diff --name-only ${{ github.event.before }}...${{ github.sha }}
         ) || {
           echo
-          echo "URL lint failed. If this is a transient outage, you can bypass it by adding the \`skip-url-lint\` label to your PR."
+          echo "URL lint failed."
+          echo "If this is a transient outage, you can bypass it by adding the \`skip-url-lint\` label to your PR."
+          echo "Or add `@lint-ignore` somewhere on the same line as the URL you want to skip checking."
           exit 1
         }
 
@@ -48,7 +50,7 @@ jobs:
       script: |
         ./scripts/lint_xrefs.sh $(
           [ "${{ github.event_name }}" = "pull_request" ] \
-            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} \
           || [ "${{ github.event_name }}" = "push" ] \
-            && git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+            && git diff --name-only ${{ github.event.before }}...${{ github.sha }}
         )
