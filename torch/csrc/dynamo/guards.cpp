@@ -182,67 +182,66 @@ bool TensorCheck::check(
 }
 
 std::string TensorCheck::check_verbose(
-  const LocalState& state,
-  const at::Tensor& v,
-  const std::string& tensor_name) {
-
-std::stringstream fail_reason;
-std::string prefix = "tensor '" + tensor_name + "' ";
-if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
-  // return fmt::format("tensor dispatch key mismatch. expected {}, actual
-  // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
-  fail_reason << prefix
-              << "dispatch key set mismatch. expected "
-              << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
-              << ", actual " << state.apply(v.key_set()) << "; ";
-} else if (dtype_ != v.dtype().toScalarType()) {
-  // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
-  // dtype_, v.dtype().toScalarType());
-  fail_reason << prefix
-              << "dtype mismatch. expected " << dtype_ << ", actual "
-              << v.dtype().toScalarType() << "; ";
-} else if (device_index_ != v.device().index()) {
-  fail_reason << prefix
-              << "Tensor device index mismatch. Expected device index to be "
-              << device_index_ << ", actual " << v.device().index() << "; ";
-} else if (requires_grad_ != v.requires_grad()) {
-  // return fmt::format("tensor requires_grad mismatch. expected {}",
-  // requires_grad_);
-  fail_reason << prefix
-              << "requires_grad mismatch. expected requires_grad="
-              << requires_grad_ << "; ";
-}
-auto ndim = v.ndimension();
-if (ndim != dim_) {
-  // return fmt::format("tensor rank mismatch. expected {}, actual {}",
-  // sizes_.size(), ndim);
-  fail_reason << prefix
-              << "rank mismatch. expected " << dim_ << ", actual "
-              << ndim << "; ";
-}
-const auto& sizes = v.sym_sizes();
-for (auto i : c10::irange(dim_)) {
-  auto known_size = sizes_[i];
-  if (known_size.has_value() && (known_size.value() != sizes[i])) {
-    fail_reason << prefix
-                << "size mismatch at index " << i << ". expected "
-                << known_size.value() << ", actual " << sizes[i] << "; ";
+    const LocalState& state,
+    const at::Tensor& v,
+    const std::string& tensor_name) {
+  std::stringstream fail_reason;
+  fail_reason << "tensor '" << tensor_name << "' ";
+  if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
+    // return fmt::format("tensor dispatch key mismatch. expected {}, actual
+    // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
+    fail_reason << "dispatch key set mismatch. expected "
+                << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
+                << ", actual " << state.apply(v.key_set());
+    return fail_reason.str();
+  } else if (dtype_ != v.dtype().toScalarType()) {
+    // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
+    // dtype_, v.dtype().toScalarType());
+    fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
+                << v.dtype().toScalarType();
+    return fail_reason.str();
+  } else if (device_index_ != v.device().index()) {
+    fail_reason << "Tensor device index mismatch. Expected device index to be "
+                << device_index_ << ", actual " << v.device().index();
+    return fail_reason.str();
+  } else if (requires_grad_ != v.requires_grad()) {
+    // return fmt::format("tensor requires_grad mismatch. expected {}",
+    // requires_grad_);
+    fail_reason << "requires_grad mismatch. expected requires_grad="
+                << requires_grad_;
+    return fail_reason.str();
   }
-}
-const bool supports_stride =
-    !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
-if (supports_stride) {
-  const auto& strides = v.sym_strides();
-  for (auto i : c10::irange(dim_)) {
-    auto known_stride = strides_[i];
-    if (known_stride.has_value() && known_stride.value() != strides[i]) {
-      fail_reason << prefix
-                  << "stride mismatch at index " << i << ". expected "
-                  << known_stride.value() << ", actual " << strides[i] << "; ";
+  auto ndim = v.ndimension();
+  if (ndim != dim_) {
+    // return fmt::format("tensor rank mismatch. expected {}, actual {}",
+    // sizes_.size(), ndim);
+    fail_reason << "rank mismatch. expected " << sizes_.size() << ", actual "
+                << ndim;
+    return fail_reason.str();
+  }
+  const auto& sizes = v.sym_sizes();
+  for (auto i : c10::irange(ndim)) {
+    auto known_size = sizes_[i];
+    if (known_size.has_value() && (known_size.value() != sizes[i])) {
+      fail_reason << "size mismatch at index " << i << ". expected "
+                  << known_size.value() << ", actual " << sizes[i];
+      return fail_reason.str();
     }
   }
-}
-return fail_reason.str();
+  const bool supports_stride =
+      !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
+  if (supports_stride) {
+    const auto& strides = v.sym_strides();
+    for (auto i : c10::irange(ndim)) {
+      auto known_stride = strides_[i];
+      if (known_stride.has_value() && known_stride.value() != strides[i]) {
+        fail_reason << "stride mismatch at index " << i << ". expected "
+                    << known_stride.value() << ", actual " << strides[i];
+        return fail_reason.str();
+      }
+    }
+  }
+  return "";
 }
 
 namespace {
@@ -1087,11 +1086,6 @@ bool is_immutable_object(py::handle example_value) {
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
       (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
-}
-
-bool is_parameter(py::handle tensor) {
-  py::object parameter = py::module::import("torch.nn").attr("Parameter");
-  return py::isinstance(tensor, parameter);
 }
 
 /**
@@ -2623,24 +2617,21 @@ class GuardManager {
   GuardDebugInfo check_accessors_verbose_nopybind(
       PyObject* value,
       int& num_guards_executed) {
-    // Iterate over accessors
     bool guards_failed = false;
     py::list verbose_code_parts;
+    // Iterate over accessors
     for (const auto& accessor : _accessors) {
-
       const GuardDebugInfo& debug_info =
           accessor->check_verbose_nopybind(value);
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
         guards_failed = true;
         verbose_code_parts += debug_info.verbose_code_parts;
-        // return GuardDebugInfo(
-        //     false, debug_info.verbose_code_parts, num_guards_executed);
       }
     }
     if (guards_failed) {
       return GuardDebugInfo(
-            false, verbose_code_parts, num_guards_executed);
+        false, verbose_code_parts, num_guards_executed);
     }
 
     return GuardDebugInfo(true, num_guards_executed);
@@ -2876,6 +2867,8 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
+    // bool guards_failed = false;
+    // py::list verbose_code_parts;
     int num_guards_executed = 0;
 
     // Run leaf guards
@@ -2885,14 +2878,11 @@ class RootGuardManager : public GuardManager {
         GuardManager::check_leaf_guards_verbose_nopybind(
             value, num_guards_executed);
 
-    bool guards_failed = false;
-    py::list verbose_code_parts;
-
     if (!debug_info_leaf.result) {
       _reset_relational_guard_state();
-      guards_failed = true;
-      verbose_code_parts += debug_info_leaf.verbose_code_parts;
-      // return debug_info_leaf;
+      return debug_info_leaf;
+      // guards_failed = true;
+      // verbose_code_parts += debug_info_leaf.verbose_code_parts;
     }
 
     const at::impl::TorchFunctionDisabledState old_state =
@@ -2906,14 +2896,10 @@ class RootGuardManager : public GuardManager {
     if (!debug_info_accessors.result) {
       at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
-      guards_failed = true;
-      verbose_code_parts += debug_info_accessors.verbose_code_parts;
-      // return debug_info_accessors;
+      return debug_info_accessors;
     }
 
     // Iterate over epilogue leaf guards
-    // bool guards_failed = false;
-    // py::list verbose_code_parts;
     for (const auto& guard : _epilogue_lambda_guards) {
       const GuardDebugInfo& tmp_debug_info =
           guard->check_verbose_nopybind(value);
@@ -2921,17 +2907,16 @@ class RootGuardManager : public GuardManager {
       if (!tmp_debug_info.result) {
         at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
-        guards_failed = true;
-        verbose_code_parts += tmp_debug_info.verbose_code_parts;
-        // return GuardDebugInfo(
-        //     false, tmp_debug_info.verbose_code_parts, num_guards_executed);
+        return tmp_debug_info;
+        // guards_failed = true;
+        // verbose_code_parts += tmp_debug_info.verbose_code_parts;
       }
     }
-    if (guards_failed) {
-      return GuardDebugInfo(
-        false, verbose_code_parts, num_guards_executed
-      );
-    }
+    // if (guards_failed) {
+    //   return GuardDebugInfo(
+    //     false, verbose_code_parts, num_guards_executed
+    //   );
+    // }
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
@@ -3549,12 +3534,6 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
-      if (is_parameter(py::handle(value))) {
-        fail_reason += ". Guard failed on a parameter, consider using ";
-        fail_reason +=
-            "torch._dynamo.config.force_parameter_static_shapes = False ";
-        fail_reason += "to allow dynamism on parameters.";
-      }
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);

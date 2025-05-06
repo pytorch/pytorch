@@ -31,6 +31,7 @@ import io
 import logging
 import math
 import pickle
+import re
 import sys
 import textwrap
 import types
@@ -3216,6 +3217,37 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
+def _format_reasons_for_shape_guards(compile_id: CompileId, reasons: list[str], scope: dict[str, object]) -> str:
+    has_parameter = False
+    shape_sources = OrderedSet()
+    pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
+    for reason in reasons:
+        if (match := re.search(pattern, reason)) is not None:
+            name, size_orig, size_new = match.groups()
+            tensor = eval(name, scope)
+            size_orig, size_new = int(size_orig), int(size_new)
+            if size_orig >= 2 and size_new >= 2:  # these suggestions won't help for 0/1 specialization.
+                if isinstance(tensor, torch.nn.Parameter):
+                    has_parameter = True
+                shape_sources.add(name)
+
+    reason_str = strip_local_scope(f"{compile_id}: " + "; ".join(reasons[:1]))
+    if shape_sources:
+        reason_str += "\n"
+        if len(shape_sources) > 1:
+            reason_str += "Multiple size mismatches found. "
+        reason_str += (
+            f"The following environment variable would enable dynamic compilation to start, avoiding this recompile: "
+            + f"TORCH_COMPILE_DYNAMIC_SOURCES=\"{','.join(shape_sources)}\""
+        )
+    if has_parameter:
+        reason_str += (
+            "\nSize guard failed on a parameter, consider using torch._dynamo.config.force_parameter_static_shapes = False "
+            + "to allow dynamism on parameters."
+        )
+    return reason_str
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
@@ -3278,8 +3310,7 @@ def get_guard_fail_reason_helper(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons)
-    return strip_local_scope(reason_str)
+    return _format_reasons_for_shape_guards(compile_id, reasons, scope)
 
 
 def get_guard_fail_reason(
