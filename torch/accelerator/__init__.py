@@ -140,7 +140,7 @@ set_device_idx = deprecated(
 )(set_device_index)
 
 
-def current_stream(device: _device_t = None) -> torch.Stream:
+def current_stream(device: _device_t = None, /) -> torch.Stream:
     r"""Return the currently selected stream for a given device.
 
     Args:
