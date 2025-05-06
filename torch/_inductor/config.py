@@ -67,6 +67,9 @@ def prologue_fusion_enabled() -> bool:
         return True
 
 
+# Enable Zendnn optimizations
+enable_zendnn: Optional[bool] = get_tristate_env("TORCHINDUCTOR_ENABLE_ZENDNN")
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
