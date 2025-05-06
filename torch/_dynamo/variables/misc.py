@@ -939,7 +939,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 "to be initialized on the `autograd.Function` context object.",
                 hints=[
                     "Ensure that the `saved_tensors` attribute is properly "
-                    "initialized before calling `save_for_backward`.",
+                    "initialized before calling `save_for_backward`. "
+                    "`save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`.",
                 ],
             )
 
