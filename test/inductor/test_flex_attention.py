@@ -2937,12 +2937,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         out = func(query, key, value)
         grad_output = torch.randn_like(out)
-        out.backward(grad_output)
+
+        grad_query, grad_key, grad_value = torch.autograd.grad(
+            out, [query, key, value], grad_output
+        )
 
         for leaf, grad, name in [
-            (query, query.grad, "query"),
-            (key, key.grad, "key"),
-            (value, value.grad, "value"),
+            (query, grad_query, "query"),
+            (key, grad_key, "key"),
+            (value, grad_value, "value"),
         ]:
             input_stride_order = get_stride_order(grad.stride())
             orig_stride_order = get_stride_order(leaf.stride())

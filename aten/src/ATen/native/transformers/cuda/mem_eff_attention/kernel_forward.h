@@ -237,10 +237,12 @@ struct AttentionKernel {
         query_ptr += batch_id * q_strideB;
         key_ptr += batch_id * k_strideB;
         value_ptr += batch_id * v_strideB;
-        output_ptr += int64_t(batch_id * num_queries) * o_strideM;
+        output_ptr += batch_id * q_strideB;
+
+        // Reuse q_strides since we want to guarantee exact match w/ input
         if (output_accum_ptr != nullptr) {
           output_accum_ptr +=
-              int64_t(batch_id * num_queries) * (head_dim_value * num_heads);
+              int64_t(batch_id * q_strideB);
         }
         q_start = 0;
         k_start = 0;
@@ -252,15 +254,14 @@ struct AttentionKernel {
 
       value_ptr += k_start * v_strideM + head_id * v_strideH;
       output_ptr +=
-          int64_t(q_start + query_start) * o_strideM + head_id * head_dim_value;
+          int64_t(q_start + query_start) * o_strideM + head_id * q_strideH;
 
       if (kSupportsBias && attn_bias_ptr != nullptr) {
         attn_bias_ptr += (batch_id * bias_strideB) + (head_id * bias_strideH);
       }
       if (output_accum_ptr != nullptr) {
         output_accum_ptr +=
-            int64_t(q_start + query_start) * (head_dim_value * num_heads) +
-            head_id * head_dim_value;
+            int64_t(q_start + query_start) * q_strideM + head_id * q_strideH;
       } else {
         // Accumulate directly in the destination buffer (eg for f32)
         output_accum_ptr = (accum_t*)output_ptr;

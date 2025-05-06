@@ -680,19 +680,6 @@ struct AttentionBackwardKernel {
     unsigned long long dropout_batch_head_rng_offset = 0;
     float dropout_prob = 0.0f;
 
-    CUTLASS_HOST_DEVICE int32_t o_strideM() const {
-      return head_dim_value * num_heads;
-    }
-    CUTLASS_HOST_DEVICE int32_t gQ_strideM() const {
-      return gQKV_strideM_multiplier * num_heads * head_dim;
-    }
-    CUTLASS_HOST_DEVICE int32_t gK_strideM() const {
-      return gQKV_strideM_multiplier * num_heads * head_dim;
-    }
-    CUTLASS_HOST_DEVICE int32_t gV_strideM() const {
-      return gQKV_strideM_multiplier * num_heads * head_dim_value;
-    }
-
     // Everything below is only used in `advance_to_block`
     // and shouldn't use registers
     int64_t o_strideH = -1;
@@ -722,6 +709,11 @@ struct AttentionBackwardKernel {
     int64_t gK_strideH = 0;
     int64_t gV_strideH = 0;
     int64_t gB_strideH = 0;
+
+    int32_t o_strideM = 0;
+    int32_t gQ_strideM = 0;
+    int32_t gK_strideM = 0;
+    int32_t gV_strideM = 0;
 
     CUTLASS_HOST_DEVICE int16_t num_splits_key_device() const {
 #ifdef __CUDA_ARCH__
@@ -789,13 +781,13 @@ struct AttentionBackwardKernel {
         value_ptr += k_start * v_strideM;
         assert(bias_ptr == nullptr);
         assert(grad_bias_ptr == nullptr);
-        output_ptr += q_start * o_strideM();
+        output_ptr += q_start * o_strideM;
         grad_output_ptr += q_start * gO_strideM;
         delta_ptr += q_start;
 
-        grad_query_ptr += q_start * gQ_strideM();
-        grad_key_ptr += k_start * gK_strideM();
-        grad_value_ptr += k_start * gV_strideM();
+        grad_query_ptr += q_start * gQ_strideM;
+        grad_key_ptr += k_start * gK_strideM;
+        grad_value_ptr += k_start * gV_strideM;
       }
 
       query_ptr += batch_id * q_strideB + head_id * q_strideH;
@@ -1422,8 +1414,8 @@ struct AttentionBackwardKernel {
       if (!skipBoundsChecks && key >= p.num_keys) {
         continue;
       }
-      auto gv_ptr = p.grad_value_ptr + key * p.gV_strideM();
-      auto gk_ptr = p.grad_key_ptr + key * p.gK_strideM();
+      auto gv_ptr = p.grad_value_ptr + key * p.gV_strideM;
+      auto gk_ptr = p.grad_key_ptr + key * p.gK_strideM;
 
       for (int k = k_shift; k < p.head_dim_value; k += kThreadsPerKey) {
         gv_ptr[k] = scalar_t(0);
@@ -1788,8 +1780,8 @@ struct AttentionBackwardKernel {
           num_keys_in_block, p.head_dim_value - col, num_queries_in_block);
       auto createEpilogueIter = [&]() {
         return typename MatmulGradV::OutputTileIterator(
-            typename MatmulGradV::OutputTileIterator::Params{p.gV_strideM()},
-            p.grad_value_ptr + key_start * p.gV_strideM() + col,
+            typename MatmulGradV::OutputTileIterator::Params{p.gV_strideM},
+            p.grad_value_ptr + key_start * p.gV_strideM + col,
             {num_keys_in_block, p.head_dim_value - col},
             thread_id);
       };
@@ -2126,8 +2118,8 @@ struct AttentionBackwardKernel {
         // NOTE: We're not releasing the lock because no one is expected
         // to come after us (we're the last one to write)
         typename MatmulGradQ::OutputTileIterator output_it(
-            typename MatmulGradQ::OutputTileIterator::Params{p.gQ_strideM()},
-            p.grad_query_ptr + query_start * p.gQ_strideM() + col,
+            typename MatmulGradQ::OutputTileIterator::Params{p.gQ_strideM},
+            p.grad_query_ptr + query_start * p.gQ_strideM + col,
             {problem_size.m(), problem_size.n()},
             thread_id);
         // if `direct_store` is True, we store to gmem (`*gmem = accum`)
@@ -2168,8 +2160,8 @@ struct AttentionBackwardKernel {
           num_queries_in_block);
       auto createEpilogueIter = [&]() {
         return typename MatmulGradK::OutputTileIterator(
-            typename MatmulGradK::OutputTileIterator::Params{p.gK_strideM()},
-            p.grad_key_ptr + key_start * p.gK_strideM() + col,
+            typename MatmulGradK::OutputTileIterator::Params{p.gK_strideM},
+            p.grad_key_ptr + key_start * p.gK_strideM + col,
             {num_keys_in_block,
              false ? MatmulGradK::ThreadblockShape::kN : p.head_dim - col},
             thread_id);
@@ -2424,8 +2416,8 @@ struct AttentionBackwardKernel {
         : cutlass::fast_min(
               (int32_t)MatmulQK::Mma::Shape::kM, p.num_keys - key_start);
     typename MatmulGradV::OutputTileIterator outputV_it(
-        typename MatmulGradV::OutputTileIterator::Params{p.gV_strideM()},
-        p.grad_value_ptr + key_start * p.gV_strideM(),
+        typename MatmulGradV::OutputTileIterator::Params{p.gV_strideM},
+        p.grad_value_ptr + key_start * p.gV_strideM,
         {num_keys_in_block, p.head_dim_value},
         thread_id);
     accumulateInGmem<MatmulGradV>(
@@ -2437,8 +2429,8 @@ struct AttentionBackwardKernel {
         lane_id);
 
     typename MatmulGradK::OutputTileIterator outputK_it(
-        typename MatmulGradK::OutputTileIterator::Params{p.gK_strideM()},
-        p.grad_key_ptr + key_start * p.gK_strideM(),
+        typename MatmulGradK::OutputTileIterator::Params{p.gK_strideM},
+        p.grad_key_ptr + key_start * p.gK_strideM,
         {num_keys_in_block,
          false ? MatmulGradK::ThreadblockShape::kN : p.head_dim},
         thread_id);
@@ -2522,7 +2514,7 @@ struct AttentionBackwardKernel {
             laneFirstCol);
     const AccessType* __restrict__ output_ptr =
         reinterpret_cast<const AccessType*>(
-            p.output_ptr + (query_start + laneRow) * p.o_strideM() +
+            p.output_ptr + (query_start + laneRow) * p.o_strideM +
             laneFirstCol);
 
     static constexpr int64_t kMaxIters =

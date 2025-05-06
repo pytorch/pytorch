@@ -17,6 +17,13 @@
 #include <c10/util/Array.h>
 #include <c10/util/Exception.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
+
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
@@ -890,6 +897,38 @@ bool check_for_seq_len_1_nested_tensor(sdp_params const& params, bool debug) {
   }
 
   return true;
+}
+
+// Create output tensor with strides matching query layout
+at::Tensor create_output_with_matching_layout(
+  const at::Tensor& query,
+  at::IntArrayRef output_shape,
+  at::TensorOptions options
+) {
+// Get the "fill order" - an argsort on the strides of the query tensor
+const int dims = query.dim();
+std::vector<int64_t> fill_order(dims);
+std::iota(fill_order.begin(), fill_order.end(), 0);
+
+const auto query_strides = query.strides();
+std::stable_sort(
+    fill_order.begin(),
+    fill_order.end(),
+    [&query_strides](int64_t idx1, int64_t idx2) {
+      return query_strides[idx1] < query_strides[idx2];
+    });
+
+// Construct new strides that preserve the same layout ordering
+std::vector<int64_t> new_strides(dims);
+int64_t current_stride = 1;
+for (const int64_t dim_idx : fill_order) {
+  new_strides[dim_idx] = current_stride;
+  current_stride *= output_shape[dim_idx];
+}
+
+// Create tensor with the constructed strides
+return at::empty(output_shape, options)
+    .as_strided(output_shape, new_strides, 0);
 }
 
 } // namespace sdp
