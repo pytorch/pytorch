@@ -1353,7 +1353,6 @@ def flex_attention(
             ("n", torch.int32),
         ]
     ]
-
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
@@ -1384,7 +1383,7 @@ def flex_attention(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
     if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
-        out, logsumexp = create_flex_decoding_kernel(
+        return create_flex_decoding_kernel(
             query,
             key,
             value,
@@ -1396,7 +1395,6 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-        return (out, logsumexp)
 
     (
         query,
