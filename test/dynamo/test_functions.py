@@ -1843,12 +1843,41 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_set_difference(a, b):
         set1 = {"apple", "banana", "cherry"}
         set2 = {"google", "microsoft", "apple"}
-        difference_set = set1.difference(set2)
+        set3 = {"shoes", "flipflops", "sneakers"}
+        difference_set = set1.difference(set2, set3)
         if "apple" in difference_set:
             x = a + b
         else:
             x = a - b
         if "banana" in difference_set:
+            y = a + b
+        else:
+            y = a - b
+        if "shoes" in difference_set:
+            z = a + b
+        else:
+            z = a - b
+        return x, y, z
+
+    @make_test
+    def test_set_difference_update(a, b):
+        set1 = {"apple", "banana", "cherry"}
+        set2 = {"google", "microsoft", "apple"}
+        set3 = {"shoes", "flipflops", "sneakers"}
+        set1.difference_update(set2, set3)
+        if "apple" in set1:
+            x = a + b
+        else:
+            x = a - b
+        if "banana" in set1:
+            y = a + b
+        else:
+            y = a - b
+        if "shoes" in set1:
+            z = a + b
+        else:
+            z = a - b
+        return x, y, z
 
     @make_test
     def test_set_symmetric_difference(a, b):

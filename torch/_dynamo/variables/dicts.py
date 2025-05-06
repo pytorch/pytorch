@@ -795,12 +795,14 @@ class SetVariable(ConstDictVariable):
             )
         elif name == "difference":
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_difference
-            ).call_function(tx, [self, args[0]], {})
-        elif name == "update" and len(args) == 1 and self.is_mutable():
+            ).call_function(tx, [self, *args], {})
+        elif name == "difference_update":
             assert not kwargs
+            return variables.UserFunctionVariable(
+                polyfills.set_difference_update
+            ).call_function(tx, [self, *args], {})
         elif name == "symmetric_difference":
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
