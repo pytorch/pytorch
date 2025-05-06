@@ -93,7 +93,6 @@ RUN yum install -y \
         gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
         gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 
-RUN yum swap -y git git236-core
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
 # Override this behaviour by treating every folder as safe
