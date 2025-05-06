@@ -770,9 +770,8 @@ def _compile_fx_inner(
         if backend is not None
     )
 
-    with (
-        _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
-        dynamo_timed("_compile_fx_inner.ods_log", log_pt2_compile_event=True),
+    with dynamo_timed(
+        "fx_codegen_and_compile", log_pt2_compile_event=True, log_waitcounter=True
     ):
         use_cache = (
             not config.force_disable_caches
