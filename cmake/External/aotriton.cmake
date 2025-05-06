@@ -22,7 +22,8 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.9.2b_612896439f")
+  set(__AOTRITON_VER "0.9.2b")
+  set(__AOTRITON_VER_WITH_COMMIT "0.9.2b_612896439f")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.5
       )
@@ -89,7 +90,7 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_MANYLINUX_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_MANYLINUX)
     set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     string(CONCAT __AOTRITON_FILE "aotriton-"
-                                  "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
+                                  "${__AOTRITON_VER_WITH_COMMIT}-${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
