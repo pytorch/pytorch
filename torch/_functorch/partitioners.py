@@ -1780,8 +1780,14 @@ def choose_saved_values_set(
         ]
 
     recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes)
-    # sort first by name, to ensure determinism when multiple nodes have same size
-    recomputable_banned_nodes = sorted(recomputable_banned_nodes, key=lambda x: x.name)
+    must_save_nodes = [
+        i
+        for i in recomputable_banned_nodes
+        if i.meta.get("recompute", False) == CheckpointPolicy.MUST_SAVE
+    ]
+    recomputable_banned_nodes = [
+        i for i in recomputable_banned_nodes if i not in must_save_nodes
+    ]
 
     # default: runtime_optimized_saved_values
     # more aggressive: more_aggressive_saved_values
@@ -1791,7 +1797,7 @@ def choose_saved_values_set(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
     if len(all_recomputable_banned_nodes) == 0:
-        return node_info.inputs
+        return node_info.inputs + must_save_nodes
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]
@@ -1919,6 +1925,47 @@ def choose_saved_values_set(
     return get_saved_values_knapsack(
         memory_budget=memory_budget, node_info=node_info, joint_graph=joint_graph
     )[0]
+
+
+def _broadcast_rank0_decision(joint_graph, saved_values):
+    # use the same policy across different GPUs
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+    def has_collectives(joint_graph):
+        for node in joint_graph.nodes:
+            if isinstance(
+                node.target, torch._ops.OpOverload
+            ) and node.target.namespace in {"_c10d_functional", "c10d_functional"}:
+                return True
+        return False
+
+    def has_same_nodes(joint_graph):
+        # proxy to check if the graph is the same across different GPUs.
+        # We only consider the name and order of nodes. A more robust way
+        # would be to check the hash of the whole graph (disregarding input shapes),
+        # this is is a reasonable first-order approximation.
+        inputs = hash(tuple(x.name for x in joint_graph.nodes))
+        all_inputs = [None for _ in range(torch.distributed.get_world_size())]
+        with no_dispatch(), unset_fake_temporarily():
+            # TODO: maybe use a different process group?
+            torch.distributed.all_gather_object(all_inputs, inputs)
+        return all(all_inputs[0] == x for x in all_inputs)
+
+    if (
+        torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+        and torch.distributed.get_world_size() > 1
+        and has_collectives(joint_graph)
+        and has_same_nodes(joint_graph)
+    ):
+        with no_dispatch(), unset_fake_temporarily():
+            objects = [[x.name for x in saved_values]]
+            # TODO: maybe use a different process group for this
+            torch.distributed.broadcast_object_list(objects, src=0)
+            saved_values = objects[0]
+            name_to_node = get_name_to_node(joint_graph)
+            saved_values = [name_to_node[n] for n in saved_values]
+    return saved_values
 
 
 def min_cut_rematerialization_partition(
@@ -2059,6 +2106,8 @@ def min_cut_rematerialization_partition(
         node_info,
         memory_budget=memory_budget,
     )
+    if config._broadcast_rank0_decision:
+        saved_values = _broadcast_rank0_decision(joint_module, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))

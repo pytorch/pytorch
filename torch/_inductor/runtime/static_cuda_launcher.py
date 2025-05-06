@@ -2,7 +2,7 @@ import functools
 from typing import Any, Optional
 from typing_extensions import Unpack
 
-from .triton_compat import ASTSource, CompiledKernel
+from .triton_compat import ASTSource, CompiledKernel, knobs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -44,10 +44,15 @@ class StaticallyLaunchedCudaKernel:
         self.declared_constexprs = kernel.src.fn.constexprs
 
         self.hash = kernel.hash
-        if (
-            kernel.__class__.launch_enter_hook is not None
-            or kernel.__class__.launch_exit_hook is not None
-        ):
+
+        if knobs is None:
+            launch_enter = kernel.__class__.launch_enter_hook
+            launch_exit = kernel.__class__.launch_exit_hook
+        else:
+            launch_enter = knobs.runtime.launch_enter_hook
+            launch_exit = knobs.runtime.launch_exit_hook
+
+        if launch_enter is not None or launch_exit is not None:
             raise NotImplementedError(
                 "We don't support launch enter or launch exit hooks"
             )

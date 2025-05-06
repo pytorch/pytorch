@@ -176,6 +176,15 @@ test_dtypes = [
     torch.int32,
     torch.int64,
 ]
+
+test_int_dtypes = [
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+]
+
 if SM80OrLater or MACOS_VERSION >= 14.0:
     test_dtypes.append(torch.bfloat16)
 
@@ -2549,6 +2558,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
+    @skip_if_halide
+    @xfail_if_mps
+    def test_cummin(self):
+        def fn(x):
+            return x.cummin(0)
+
+        self.common(
+            fn, (torch.rand(16, 32),), check_lowp=not is_halide_backend(self.device)
+        )
+        self.common(fn, (torch.rand(1),), check_lowp=not is_halide_backend(self.device))
+        self.common(fn, (torch.rand(0),), check_lowp=not is_halide_backend(self.device))
+
     def test_cumsum(self):
         def fn(x):
             return x.cumsum(0), x.cumsum(1)
@@ -3183,7 +3204,6 @@ class CommonTemplate:
             (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8])),
         )
 
-    @xfail_if_mps  # 100% of results are wrong
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
     def test_div7(self):
         def fn(a, b):
@@ -5056,9 +5076,11 @@ class CommonTemplate:
 
         eager_version_counters_after = [
             # TODO: remove the + 1 after https://github.com/pytorch/pytorch/issues/120622 is fixed
-            buffer._version + 1
-            if k in ["m.running_mean", "m.running_var"]
-            else buffer._version
+            (
+                buffer._version + 1
+                if k in ["m.running_mean", "m.running_var"]
+                else buffer._version
+            )
             for k, buffer in model_for_eager.named_buffers()
         ]
 
@@ -6615,6 +6637,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     RuntimeError, r".*(not implemented|aoti_torch_).*"
                 ):
                     c_op(x, kernel_size=2, stride=2)
+
+    def test_replication_pad_errors_with_bool(self):
+        for dim in (1, 2, 3):
+
+            def fn(x):
+                x = torch.signbit(x)
+                x = eval(f"nn.ReplicationPad{dim}d(padding=1)")(x)
+                return x
+
+            c_fn = torch.compile(fn)
+            x = torch.randn([1] * (dim + 2))
+            with self.assertRaisesRegex(
+                RuntimeError, r".*(not implemented|aoti_torch_).*"
+            ):
+                c_fn(x)
 
     def test_log1p(self):
         def fn(x):
@@ -10487,7 +10524,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
-    @xfail_if_mps  # ps0 is not defined?
     def test_float_repr_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x):
@@ -11520,6 +11556,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
+    @requires_gpu()
+    @skip_if_gpu_halide
+    @skip_if_not_triton
+    def test_searchsorted_broadcast(self):
+        def fn(sorted_sequence, values):
+            return (
+                torch.searchsorted(
+                    sorted_sequence,
+                    values,
+                )
+                .unsqueeze(-1)
+                .expand(-1, 64)
+                .contiguous()
+            )
+
+        unsorted_sequence = torch.rand((32,))
+        sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
+        values = torch.rand((64,))
+
+        self.common(fn, (sorted_sequence, values), check_lowp=False)
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, sorted_sequence.cuda(), values.cuda())
+
+        # make sure that we did not fuse the broadcast and the bucketize,
+        # because bucketize is computationally expensive.
+        FileCheck().check("def triton").check("def triton").run(code[0])
+
     @parametrize("nd_tiling", (False, True))
     def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
@@ -11548,12 +11611,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (input, offsets), check_lowp=False)
 
-    def test_bucketize_int(self):
+    @parametrize(
+        "dtype_input, dtype_boundaries",
+        list(itertools.product(test_int_dtypes, test_int_dtypes)),
+    )
+    def test_bucketize_int(
+        self, dtype_input: torch.dtype, dtype_boundaries: torch.dtype
+    ):
         def fn(input, offsets, out_int32, right):
             return torch.bucketize(input, offsets, out_int32=out_int32, right=right)
 
-        input = torch.randint(0, 102, (64, 64))
-        offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
+        input = torch.randint(-(2**10), 2**10, (64, 64)).to(dtype_input)
+        offsets = (torch.arange(10, dtype=torch.int32) ** 2 - 512).to(dtype_boundaries)
 
         for out_int32 in [True, False]:
             for right in [True, False]:
@@ -11586,6 +11655,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    @requires_gpu()
+    @skip_if_gpu_halide
+    @skip_if_not_triton
+    def test_bucketize_broadcast(self):
+        def fn(input, boundaries):
+            return (
+                torch.bucketize(input, boundaries)
+                .unsqueeze(-1)
+                .expand(-1, -1, 64)
+                .contiguous()
+            )
+
+        inp = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (inp, boundaries), check_lowp=False)
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, inp.cuda(), boundaries.cuda())
+
+        # make sure that we did not fuse the broadcast and the bucketize,
+        # because bucketize is computationally expensive.
+        FileCheck().check("def triton").check("def triton").run(code[0])
 
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
@@ -14003,9 +14095,11 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_layer_norm_relu"
-                    if torch._dynamo.config.inline_inbuilt_nn_modules
-                    else "triton_poi_fused_LayerNorm_ReLU",
+                    (
+                        "triton_poi_fused_layer_norm_relu"
+                        if torch._dynamo.config.inline_inbuilt_nn_modules
+                        else "triton_poi_fused_LayerNorm_ReLU"
+                    ),
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
@@ -14541,6 +14635,20 @@ if RUN_GPU:
                 ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
                     code[0]
                 )
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_foreach_op(self):
+            def fn(a0, a1):
+                c = torch._foreach_abs([a0, a1])
+                return torch.mul(c[0], a0)
+
+            compiled_fn = torch.compile(fn)
+
+            a0 = torch.randn(2, 3, device=self.device)
+            a1 = torch.randn(2, 3, device=self.device)
+            eager_out = fn(a0, a1)
+            compiled_out = compiled_fn(a0, a1)
+            self.assertEqual(eager_out, compiled_out)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_multiple_functions(self):
