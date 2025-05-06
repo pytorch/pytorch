@@ -94,7 +94,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 fn.__closure__ or (),
                 [],  # TODO tf_mode_stack,
                 code_options,
-                lambda gm, *args, **kwargs: gm.forward,
+                torch._dynamo.lookup_backend("eager"),
                 one_graph=False,
                 export=False,
                 export_constraints=None,
@@ -313,6 +313,205 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             self._test_check_fn(ref, loaded, {"x": x, "y": y}, False)
         finally:
             op.__name__ = prev
+
+    def test_dual_level(self):
+        def fn(x):
+            with torch.autograd.forward_ad.dual_level():
+                return x + 1
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("DUAL_LEVEL", fn, x)
+
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with torch.autograd.forward_ad.dual_level():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_functorch_stack_match(self):
+        # Test when functorch stack is empty.
+        def fn(x):
+            return torch.func.jvp(torch.sin, (x,), (x,))
+
+        x = torch.randn(3, 4)
+        ref, loaded = self._test_serialization("FUNCTORCH_STACK_MATCH", fn, x)
+
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with torch._functorch.vmap.vmap_increment_nesting(2, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        def fn(x):
+            def g(x):
+                return torch.vmap(torch.func.grad(torch.sin))(x)
+
+            return torch.vmap(g)(x)
+
+        x = torch.randn(4, 5)
+        ref, loaded = self._test_serialization("FUNCTORCH_STACK_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Test when there are more than 0 functorch layers.
+        # Simulate the case where torch.compile is nested inside eager transforms.
+
+        # Case 1: vmap
+        def fn(x):
+            return x.sum()
+
+        ref = loaded = None
+
+        def run(x):
+            nonlocal ref, loaded
+            # Turn off automatic dynamic shape to so that functionalization
+            # doesn't produce extra SymInt to serialize.
+            with torch._dynamo.config.patch(automatic_dynamic_shapes=False):
+                ref, loaded = self._test_serialization("FUNCTORCH_STACK_MATCH", fn, x)
+            return fn(x)
+
+        torch.vmap(run)(x)
+
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 2: grad
+        x = torch.randn(3, 2)
+        ref = loaded = None
+        torch.func.grad(run)(x)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch._functorch.eager_transforms.grad_increment_nesting():
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 3: jvp + vmap
+        x = torch.randn(3, 4)
+        ref = loaded = None
+
+        def fn(x):
+            return torch.func.jvp(torch.sin, (x,), (x,))
+
+        torch.func.jvp(torch.vmap(run), (x,), (x,))
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.eager_transforms.jvp_increment_nesting():
+            with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+                self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            with torch._functorch.eager_transforms.jvp_increment_nesting():
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 4: functionalize
+        x = torch.randn(3, 2)
+        ref = loaded = None
+        torch.func.functionalize(run)(x)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        torch._C._functorch._func_increment_nesting(True)
+        try:
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch._C._functorch._func_decrement_nesting()
+
+        with torch._functorch.eager_transforms.jvp_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        # Case 5: vmap + grad
+        def fn(x):
+            return x.sum()
+
+        x = torch.randn(3, 2)
+        ref = loaded = None
+        torch.vmap(torch.func.grad(run))(x)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            with torch._functorch.eager_transforms.grad_increment_nesting():
+                self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.vmap.vmap_increment_nesting(1, "error"):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_duplicate_input(self):
+        def fn(x, x_):
+            return x + x_
+
+        x = torch.randn(3, 2)
+        with self.assertRaisesRegex(
+            RuntimeError, "DUPLICATE_INPUT guard cannot be serialized"
+        ):
+            self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+
+    def test_weakref_alive(self):
+        mod = torch.nn.Linear(10, 10, bias=False)
+        for p in mod.parameters():
+            p.grad = torch.rand_like(p)
+
+        opt = torch.optim.SGD(mod.parameters(), lr=0.1)
+
+        def fn():
+            params = []
+            opt._init_group(opt.param_groups[0], params, [], [])
+            return params[0].sum()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "WEAKREF_ALIVE guard cannot be serialized"
+        ):
+            with torch.set_grad_enabled(False):
+                self._test_serialization("WEAKREF_ALIVE", fn)
+
+    def test_mapping_keys_check(self):
+        def fn(mp):
+            return mp["a"] + 1
+
+        mp = types.MappingProxyType({"a": torch.randn(3, 2), "b": torch.randn(3, 2)})
+        ref, loaded = self._test_serialization("MAPPING_KEYS_CHECK", fn, mp)
+        self._test_check_fn(ref, loaded, {"mp": mp}, True)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "mp": types.MappingProxyType(
+                    {"b": torch.randn(3, 2), "a": torch.randn(3, 2)}
+                )
+            },
+            False,
+        )
+        self._test_check_fn(
+            ref, loaded, {"mp": types.MappingProxyType({"a": torch.randn(3, 2)})}, False
+        )
+
+    def test_dict_keys_match(self):
+        def fn(x):
+            ret = 1
+            for k in x:
+                ret += x[k]
+            return ret
+
+        x = {"a": torch.randn(3, 2), "b": torch.randn(3, 2)}
+        ref, loaded = self._test_serialization("DICT_KEYS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": {"b": torch.randn(3, 2), "a": torch.randn(3, 2)}},
+            False,
+        )
+        self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
 
 if __name__ == "__main__":
