@@ -56,21 +56,6 @@ if TYPE_CHECKING:
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
-def raise_args_mismatch(tx, name):
-    raise_observed_exception(
-        TypeError,
-        tx,
-        args=[
-            ConstantVariable(
-                f"wrong number of arguments for {name}() call"
-                # f"{name}() takes {len(tx.input.args)} positional arguments"
-                # f"{name}() takes {len(tx.input.args)} positional arguments
-                # but {len(tx.input.args) + len(tx.input.kwargs)} were given"
-            )
-        ],
-    )
-
-
 def was_instancecheck_override(obj):
     return type(obj).__dict__.get("__instancecheck__", False)
 
@@ -764,29 +749,17 @@ class SetVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        # We forward the calls to the dictionary model
-        if name == "__init__":
-            temp_set_vt = variables.BuiltinVariable(set).call_set(tx, *args, *kwargs)
-            tx.output.side_effects.mutation(self)
-            self.items.clear()
-            self.items.update(temp_set_vt.items)
-            return ConstantVariable.create(None)
-        elif name == "add":
+        # We foward the calls to the dictionary model
+        if name == "add":
             assert not kwargs
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
+            assert len(args) == 1
             name = "__setitem__"
             args = (args[0], SetVariable._default_value())
         elif name == "pop":
             assert not kwargs
             assert not args
             # Choose an item at random and pop it via the Dict.pop method
-            try:
-                result = self.set_items.pop().vt
-            except KeyError as e:
-                raise_observed_exception(
-                    KeyError, tx, args=list(map(ConstantVariable.create, e.args))
-                )
+            result = self.set_items.pop().vt
             super().call_method(tx, name, (result,), kwargs)
             return result
         elif name == "isdisjoint":
@@ -797,53 +770,33 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, args[0]], {})
         elif name == "intersection":
             assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_intersection
-            ).call_function(tx, [self, *args], {})
-        elif name == "intersection_update":
-            assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_intersection_update
-            ).call_function(tx, [self, *args], {})
+            ).call_function(tx, [self, args[0]], {})
         elif name == "union":
             assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
-                tx, [self, *args], {}
+                tx, [self, args[0]], {}
             )
         elif name == "difference":
             assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_difference
-            ).call_function(tx, [self, *args], {})
-        elif name == "difference_update":
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "update" and len(args) == 1 and self.is_mutable():
             assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_difference_update
-            ).call_function(tx, [self, *args], {})
-        elif name == "symmetric_difference":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
-            assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference
-            ).call_function(tx, [self, *args], {})
-        elif name == "symmetric_difference_update":
-            if len(args) != 1:
-                raise_args_mismatch(tx, name)
-            assert not kwargs
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference_update
-            ).call_function(tx, [self, *args], {})
-        elif name == "update" and self.is_mutable():
-            assert not kwargs
+            assert len(args) == 1
             return variables.UserFunctionVariable(polyfills.set_update).call_function(
-                tx, [self, *args], {}
+                tx, [self, args[0]], {}
             )
         elif name == "remove":
             assert not kwargs
             assert len(args) == 1
             if args[0] not in self:
-                raise_observed_exception(KeyError, tx, args=args)
+                unimplemented("key does not exist")
             return super().call_method(tx, "pop", args, kwargs)
         elif name == "discard":
             assert not kwargs
@@ -852,15 +805,6 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
-        elif name in ("issubset", "issuperset"):
-            op = {
-                "issubset": operator.le,
-                "issuperset": operator.ge,
-            }
-            other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
-            return variables.BuiltinVariable(op.get(name)).call_function(
-                tx, [self, other], {}
-            )
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):

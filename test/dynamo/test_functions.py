@@ -1671,6 +1671,33 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_issubset(a, b):
+        vals1 = {"a", "b", "c"}
+        vals2 = {"b", "c"}
+        vals3 = {"b", "e", "f"}
+        if vals2.issubset(vals1) and not vals2.issubset(vals3):
+            return a + b
+        return a - b
+
+    @make_test
+    def test_set_issuperset(a, b):
+        vals1 = {"a", "b", "c"}
+        vals2 = {"b", "c"}
+        vals3 = {"b", "e", "f"}
+        if vals1.issuperset(vals2) and not vals1.issuperset(vals3):
+            return a + b
+        return a - b
+
+    @make_test
+    def test_set_remove_raise_KeyError(a, b):
+        vals1 = {"a", "b", "c"}
+        try:
+            vals1.remove("x")
+        except KeyError:
+            return a + b
+        return a - b
+
+    @make_test
     def test_set_ctor_iterable(x):
         var = set(["apple", "banana", "cherry"])
         if isinstance(var, set):
@@ -1745,8 +1772,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_set_intersection(a, b):
         set1 = {"apple", "banana", "cherry"}
         set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "apple"}
-        intersection_set = set1.intersection(set2, set3)
+        intersection_set = set1.intersection(set2)
         if "apple" in intersection_set:
             x = a + b
         else:
@@ -1755,31 +1781,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a + b
         else:
             y = a - b
-        if "shoes" in intersection_set:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
+        return x, y
 
     @make_test
-    def test_set_intersection_update(a, b):
+    def test_set_union(a, b):
         set1 = {"apple", "banana", "cherry"}
         set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "apple"}
-        set1.intersection_update(set2, set3)
-        if "apple" in set1:
+        union_set = set1.union(set2)
+        if "apple" in union_set:
             x = a + b
         else:
             x = a - b
-        if "banana" in set1:
+        if "banana" in union_set:
             y = a + b
         else:
             y = a - b
-        if "shoes" in set1:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
+        return x, y
 
     @parametrize("_type", [set, frozenset])
     def test_set_union(self, _type):
@@ -1809,52 +1826,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_set_difference(a, b):
         set1 = {"apple", "banana", "cherry"}
         set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "sneakers"}
-        difference_set = set1.difference(set2, set3)
+        difference_set = set1.difference(set2)
         if "apple" in difference_set:
             x = a + b
         else:
             x = a - b
         if "banana" in difference_set:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in difference_set:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_difference_update(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        set3 = {"shoes", "flipflops", "sneakers"}
-        set1.difference_update(set2, set3)
-        if "apple" in set1:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in set1:
-            y = a + b
-        else:
-            y = a - b
-        if "shoes" in set1:
-            z = a + b
-        else:
-            z = a - b
-        return x, y, z
-
-    @make_test
-    def test_set_symmetric_difference(a, b):
-        set1 = {"apple", "banana", "cherry"}
-        set2 = {"google", "microsoft", "apple"}
-        symmetric_diff_set = set1.difference(set2)
-        if "apple" in symmetric_diff_set:
-            x = a + b
-        else:
-            x = a - b
-        if "banana" in symmetric_diff_set:
             y = a + b
         else:
             y = a - b
@@ -1900,6 +1877,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             x = a - b
         return x
+
+    @make_test
+    def test_set_pop_empty(a, b):
+        s = set()
+        try:
+            s.pop()
+        except KeyError:
+            return a + b
+        except Exception:
+            return a - b
 
     def test_set_to_frozenset(self):
         @make_test
@@ -5022,7 +5009,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(FunctionTests)
-instantiate_parametrized_tests(DefaultsTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -126,6 +126,7 @@ def set_intersection_update(set1, *others):
 
 
 def set_union(set1, *others):
+    # frozenset also uses this function
     union_set = set(set1.copy())
     for set2 in others:
         set_update(union_set, set2)
