@@ -902,6 +902,7 @@ def maybe_inline_graph_saved_tensors_hooks(
 
     fw_out_n = fw_g.output_node()
     fw_outs = fw_out_n.args[0]  # type: ignore[var-annotated]
+    fw_outs_inner_set = set(fw_outs[:num_inner_fwd_outputs])
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
     fw_outs_packed_tensors = []  # type: ignore[var-annotated]
     fw_outs_packed_syms = []  # type: ignore[var-annotated]
@@ -1019,7 +1020,9 @@ def maybe_inline_graph_saved_tensors_hooks(
                 fw_outs_bw_ins_node_names.append("")
                 continue
 
-            if _n.op == "placeholder":
+            # This happens when hook is noop and it is either user input or user output.
+            # Do not do anything with this node.
+            if _n.op == "placeholder" or _n in fw_outs_inner_set:
                 # This means the hook returned input primals unchanged
                 # Do not rename in this case.
                 n = _n
@@ -1040,7 +1043,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                     )
                 assert n.name == new_node_name
                 fw_outs_bw_ins_node_names.append(new_node_name)
-                n.meta = _n.meta
+                n.meta = copy.copy(_n.meta)
                 _n.replace_all_uses_with(n)
                 fw_g.erase_node(_n)
             if isinstance(n.meta["val"], torch.Tensor):
@@ -1076,9 +1079,12 @@ def maybe_inline_graph_saved_tensors_hooks(
 
         unpack_g_inputs = unpack_g.find_nodes(op="placeholder")
         env = {}
-        num_saved_for_bw = len(fw_outs_saved_for_bw)
-        for out_idx, (unp_in_n, val) in enumerate(
-            zip(unpack_g_inputs, pytree.tree_leaves(pack_out_val))
+        for out_idx, (unp_in_n, out_n, val) in enumerate(
+            zip(
+                unpack_g_inputs,
+                pytree.tree_leaves(fw_pack_out_args),
+                pytree.tree_leaves(pack_out_val),
+            )
         ):
             is_sym = isinstance(val, py_sym_types)
             if isinstance(val, torch.Tensor) or is_sym:
@@ -1099,7 +1105,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                     ) if is_sym else bw_g.inserting_before(bw_g_input):
                         new_n = bw_g.placeholder(new_node_name)
                         assert new_n.name == new_node_name
-                    new_n.meta["val"] = val
+                    new_n.meta = copy.copy(out_n.meta)
                     env[unp_in_n] = new_n
             else:
                 # Inline values of non-Tensor, non-SymScalars
