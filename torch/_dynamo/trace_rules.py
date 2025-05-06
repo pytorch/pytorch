@@ -3265,6 +3265,7 @@ if torch.distributed.is_available():
         # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
+        "torch.distributed.fb.simple_fsdp",
     }
     if not config.skip_fsdp_hooks:
         LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
