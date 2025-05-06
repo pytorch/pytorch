@@ -2611,9 +2611,9 @@ void q_batch_norm_cpu_kernel_impl(
       int64_t ch = 0;
 
 #if defined(CPU_CAPABILITY_AVX512)
+      __m512 vals_dq[num_vecs];
       for(; ch + lanes <= C; ch += lanes) {
         // load 64 values of input then dequantize them
-        __m512 vals_dq[num_vecs];
         load_convert_u8_to_f32_512bit(X_ptr + ch, vals_dq);
         for (const auto idx : c10::irange(num_vecs)) {
           vals_dq[idx] = _mm512_fmadd_ps(fake_scale, vals_dq[idx], scale_neg_zp_premul);
