@@ -1345,7 +1345,7 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-    subgraph_outs = get_subgraph_buffers(subgraph_buffer, mask_graph_buffer)
+    subgraph_outs = get_subgraph_outputs(subgraph_buffer, mask_graph_buffer)
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -1594,7 +1594,7 @@ def flex_attention(
     return (out, logsumexp)
 
 
-def get_subgraph_buffers(
+def get_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
 ) -> list[Optional[ComputedBuffer]]:
     subgraph_buffer = (
