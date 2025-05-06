@@ -55,6 +55,7 @@ except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 
 import torch._functorch.config
+from torch._export.utils import _disable_aten_to_metadata_assertions
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1427,13 +1428,14 @@ class AOTInductorModelCache:
             inductor_configs = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
-            ep = torch.export.export(
-                model,
-                example_args,
-                example_kwargs,
-                dynamic_shapes=dynamic_shapes,
-                strict=False,
-            )
+            with _disable_aten_to_metadata_assertions():
+                ep = torch.export.export(
+                    model,
+                    example_args,
+                    example_kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=False,
+                )
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
                     ep, inductor_configs=inductor_configs
