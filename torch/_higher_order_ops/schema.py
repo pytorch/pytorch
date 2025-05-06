@@ -58,6 +58,8 @@ class CTypeGen:
 
         if isinstance(obj, torch.fx.GraphModule):
             return torch._C.AnyType.get()
+        elif isinstance(obj, torch.SymInt):
+            return torch._C.SymIntType.get()
         return torch._C._jit_try_infer_type(obj).type()
 
 
