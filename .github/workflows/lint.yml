@@ -10,6 +10,8 @@ on:
       - main
       - release/*
       - landchecks/*
+    tags:
+      - ciflow/pull/*
   workflow_dispatch:
 
 permissions: read-all
@@ -207,7 +209,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python 3.9
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.9'
           architecture: x64
@@ -252,7 +254,7 @@ jobs:
           echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
       - name: Setup Old Python version
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: 3.8
           architecture: x64
@@ -262,7 +264,7 @@ jobs:
             **/requirements.txt
       - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64
@@ -280,6 +282,15 @@ jobs:
         run: |
           # All we need to see is that it passes
           python3 torch/utils/collect_env.py
+
+  link-check:
+    name: Link checks
+    needs: get-label-type
+    uses: ./.github/workflows/_link_check.yml
+    with:
+      runner: ${{ needs.get-label-type.outputs.label-type }}
+      ref:    ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    secrets: inherit
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

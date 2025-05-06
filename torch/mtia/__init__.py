@@ -197,6 +197,13 @@ def snapshot() -> dict[str, Any]:
     return torch._C._mtia_memorySnapshot()
 
 
+def attach_out_of_memory_observer(
+    observer: Callable[[int, int, int, int], None]
+) -> None:
+    r"""Attach an out-of-memory observer to MTIA memory allocator"""
+    torch._C._mtia_attachOutOfMemoryObserver(observer)
+
+
 def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
@@ -378,6 +385,7 @@ __all__ = [
     "get_device_capability",
     "record_memory_history",
     "snapshot",
+    "attach_out_of_memory_observer",
     "empty_cache",
     "set_device",
     "set_stream",

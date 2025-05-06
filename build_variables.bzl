@@ -695,6 +695,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
+    "torch/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
     "torch/csrc/distributed/c10d/NanCheck.cu",
@@ -789,7 +790,6 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
     "torch/csrc/cuda/shared/cusparselt.cpp",
-    "torch/csrc/cuda/Tensor.cpp",
 ]
 
 libtorch_python_xpu_sources = [
