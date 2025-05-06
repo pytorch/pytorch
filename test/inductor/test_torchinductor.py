@@ -8834,11 +8834,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def _(x):
             return torch.zeros(2, 2).t()
 
-        # The lowering for the custom op produces non-contiguous Tensor
-        from torch._inductor.lowering import empty_strided, register_lowering
-
         # custom op that needs contiguous inputs
-        @torch.library.custom_op("mylib::second_op", mutates_args={}, tags=[torch._C.Tag.needs_contiguous_strides])
+        @torch.library.custom_op(
+            "mylib::second_op",
+            mutates_args={},
+            tags=[torch._C.Tag.needs_contiguous_strides],
+        )
         def second_op(x: torch.Tensor) -> torch.Tensor:
             assert x.is_contiguous()
             return torch.ones(2, 2)
