@@ -895,6 +895,96 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
 
 
 @register_op_strategy(
+    aten._scaled_dot_product_fused_attention_overrideable.default,
+    schema_info=RuntimeSchemaInfo(6),
+)
+def scaled_dot_product_fused_attention_overrideable_strategy(
+    op_schema: OpSchema,
+) -> OpStrategy:
+    # NOTE: currently we only support some simple strategies to support tensor parallelism
+    mesh = op_schema.get_mesh_from_args()
+    return_debug_mask = len(op_schema.args_schema) >= 7 and op_schema.args_schema[6]
+    q_input_strategy = op_schema.args_schema[0]
+    assert isinstance(q_input_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+
+    has_attn_bias = (
+        len(op_schema.args_schema) >= 4 and op_schema.args_schema[3] is not None
+    )
+
+    single_mesh_dim_strategies: list[PlacementList] = []
+
+    # placement list stores placements of [outputs, inputs]
+    # in the spda case, we have 3 valid tensor outputs and 3 or 4 tensor inputs
+    # first we can always accept full replication for both inputs and outputs
+    all_replicate: PlacementList = [
+        # outputs
+        Replicate(),
+        Replicate(),
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        None,  # debug_attn_mask
+        # inputs
+        Replicate(),
+        Replicate(),
+        Replicate(),
+    ]
+    if has_attn_bias:
+        all_replicate.append(Replicate())  # attn_bias
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # second we can accept the sharding pattern of tensor parallelism, which
+    # shard on the num of head dim
+    qkv_sharding = Shard(1)  # num head dim
+    output_sharding = Shard(1)  # num head dim
+    logsumexp_sharding = Shard(1)  # num head dim
+
+    num_heads_dim_sharding: PlacementList = [
+        output_sharding,
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        None,  # debug_attn_mask
+        qkv_sharding,
+        qkv_sharding,
+        qkv_sharding,
+    ]
+    if has_attn_bias:
+        num_heads_dim_sharding.append(Shard(1))
+    single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Context Parallelism: shards on the sequence dim
+    single_mesh_dim_strategies.append(
+        [
+            Shard(2),  # output
+            Shard(2),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            None,  # philox_seed
+            None,  # philox_offset
+            None,  # debug_attn_mask
+            Shard(2),  # q
+            Shard(2),  # k
+            Shard(2),  # v
+        ]
+    )
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=9
+    )
+
+
+@register_op_strategy(
     aten._scaled_dot_product_fused_attention_overrideable_backward.default
 )
 def scaled_dot_product_fused_attention_overrideable_backward_strategy(
