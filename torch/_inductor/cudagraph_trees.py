@@ -1047,6 +1047,17 @@ class CUDAGraphNode:
             srcs[idx] = None  # type: ignore[call-overload]
         # Fails on empty lists
         if dst_tensors:
+            # Detect CUDA graph output reuse
+            for src in src_tensors:
+                if isinstance(src, torch.Tensor) and hasattr(src, "_is_graph_output") and src._is_graph_output:
+                    raise RuntimeError(
+                        "\n[torch.compile - CUDA Graphs Error] You are passing an output tensor from a previous CUDA graph run "
+                        "into a new invocation. This leads to memory aliasing and unsafe behavior.\n\n"
+                        "Suggested fixes:\n"
+                        "  • Clone the tensor before reuse: y = f(x); z = f(y.clone())\n"
+                        "  • Or call torch.compiler.cudagraph_mark_step_begin() between calls to f()\n\n"
+                        "More: https://pytorch.org/docs/stable/dynamo/troubleshooting.html#cuda-graph-reuse"
+                    )
             torch._foreach_copy_(dst_tensors, src_tensors)
 
     def check_static_inputs_are_stable(self, new_inputs: list[InputType]) -> None:
@@ -2213,7 +2224,13 @@ class CUDAGraphTreeManager:
         self.path_state = ExecutionState.RECORDING
         self.update_generation()
         torch.cuda.synchronize()
-        return node.run_first_inputs(new_inputs)
+    
+        # ✅ Add this block before return
+        outputs = node.run_first_inputs(new_inputs)
+        for out in outputs:
+            if isinstance(out, torch.Tensor):
+                out._is_graph_output = True
+        return outputs
 
     def execute_node(
         self, node: CUDAGraphNode, new_inputs: list[InputType]
