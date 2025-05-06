@@ -1590,7 +1590,7 @@ def flex_attention(
     # need subgraph inputs and outputs to analyze all symints used in flex attention
     out.data.data.subgraph_inps = subgraph_inps
     out.data.data.subgraph_outs = subgraph_outs
-    breakpoint()
+
     return (out, logsumexp)
 
 
