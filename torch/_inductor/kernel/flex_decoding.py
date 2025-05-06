@@ -20,6 +20,7 @@ from .flex_attention import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     get_bounded_indices_func,
+    get_fwd_subgraph_outputs,
     load_checked_2d,
     load_checked_block,
     maybe_realize,
@@ -602,6 +603,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
         inputs_for_flex_decoding,
         layout_acc,
         input_gen_fns=input_gen_fns,
+    )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    buf_ACC.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    buf_ACC.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        score_mod_subgraph, mask_mod_subgraph
     )
 
     # Reduction

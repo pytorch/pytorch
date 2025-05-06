@@ -255,6 +255,20 @@ def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> Subgraph
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
+def get_fwd_subgraph_outputs(
+    subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
+) -> list[Optional[ComputedBuffer]]:
+    subgraph_buffer = (
+        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
+    )
+    mask_graph_buffer = (
+        mask_graph_buffer
+        if isinstance(mask_graph_buffer, Sequence)
+        else [mask_graph_buffer]
+    )
+    return [*subgraph_buffer, *mask_graph_buffer]
+
+
 # Inner Triton functions shared by flex_attention & split-k decoding kernels.
 compute_next_offset_func = r"""
 @triton.jit
@@ -1222,6 +1236,15 @@ def lower_cpu(
         inputs_for_autotuning,
         layout,
     )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    res.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    res.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        subgraph_buffer, mask_graph_buffer
+    )
+
     return (res,)
 
 
@@ -1330,8 +1353,10 @@ def flex_attention(
             ("n", torch.int32),
         ]
     ]
-    subgraph_inps = placeholder_inps + list(score_mod_other_buffers)
-    subgraph_buffer = build_subgraph_buffer(subgraph_inps, subgraph)
+
+    subgraph_buffer = build_subgraph_buffer(
+        placeholder_inps + list(score_mod_other_buffers), subgraph
+    )
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -1345,7 +1370,6 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-    subgraph_outs = get_subgraph_outputs(subgraph_buffer, mask_graph_buffer)
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -1372,11 +1396,6 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-
-        # need subgraph inputs and outputs to analyze all symints
-        # used in flex attention
-        out.data.data.subgraph_inps = subgraph_inps
-        out.data.data.subgraph_outs = subgraph_outs
         return (out, logsumexp)
 
     (
@@ -1588,24 +1607,14 @@ def flex_attention(
     )
 
     # need subgraph inputs and outputs to analyze all symints used in flex attention
-    out.data.data.subgraph_inps = subgraph_inps
-    out.data.data.subgraph_outs = subgraph_outs
+    out.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    out.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        subgraph_buffer, mask_graph_buffer
+    )
 
     return (out, logsumexp)
-
-
-def get_subgraph_outputs(
-    subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
-) -> list[Optional[ComputedBuffer]]:
-    subgraph_buffer = (
-        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
-    )
-    mask_graph_buffer = (
-        mask_graph_buffer
-        if isinstance(mask_graph_buffer, Sequence)
-        else [mask_graph_buffer]
-    )
-    return [*subgraph_buffer, *mask_graph_buffer]
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------
@@ -2735,6 +2744,14 @@ def flex_attention_backward(*args, **kwargs):
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    broadcasted_grad_key.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    broadcasted_grad_key.data.data.subgraph_outs = get_bwd_subgraph_outputs(
+        fw_subgraph_buffer, mask_graph_buffer, joint_outputs
+    )
+
     if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
@@ -2748,3 +2765,26 @@ def flex_attention_backward(*args, **kwargs):
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
     return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+
+
+def get_bwd_subgraph_outputs(
+    subgraph_buffer: SubgraphResults,
+    mask_graph_buffer: SubgraphResults,
+    joint_outputs: JointOutputResult,
+) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
+    subgraph_buffer = (
+        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
+    )
+    mask_graph_buffer = (
+        mask_graph_buffer
+        if isinstance(mask_graph_buffer, Sequence)
+        else [mask_graph_buffer]
+    )
+    joint_output_buffers = [
+        joint_outputs.grad_input,
+        *joint_outputs.captured_grads_compute,
+        *joint_outputs.captured_grads,
+        *joint_outputs.mutated_grads,
+    ]
+
+    return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]
