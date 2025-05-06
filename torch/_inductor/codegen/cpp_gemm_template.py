@@ -337,7 +337,7 @@ SMALL_M_GEMM_TEMPLATE = r"""
     {
         #pragma omp for nowait
         for (int64_t nr_block_id = 0; nr_block_id < Nr_blocks; nr_block_id++) {
-            // Handle one output Nr block at a time in each thread
+            // Handle one output M * Nr block in each thread
             int64_t n_start = nr_block_id * Nr;
             int64_t n_end = (nr_block_id + 1) * Nr;
 {%- if use_local_acc %}
@@ -348,12 +348,12 @@ SMALL_M_GEMM_TEMPLATE = r"""
     {%- set acc = kernel.slice_nd(GemmOut, [(0, "M"), ("n_start", "n_end")]) %}
 {%- endif %}
             for (int64_t kr_block_id = 0; kr_block_id < Kr_blocks; kr_block_id++) {
-                // handle each Kr block in every thread (this loop is not parallelized)
+                // this loop is not parallelized
                 int64_t k_start = kr_block_id * Kr;
                 int64_t k_end = std::min((kr_block_id + 1) * Kr, K);
-                {%- set tile_X = kernel.slice_nd(X, [(0, "M"), ("k_start", "k_end")]) %}
-                {%- set tile_W_3d = kernel.slice_nd(W, [("nr_block_id", "nr_block_id + 1"), ("k_start", "k_end"), ()]) %}
-                {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+{%- set tile_X = kernel.slice_nd(X, [(0, "M"), ("k_start", "k_end")]) %}
+{%- set tile_W_3d = kernel.slice_nd(W, [("nr_block_id", "nr_block_id + 1"), ("k_start", "k_end"), ()]) %}
+{%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                 if C10_UNLIKELY(kr_block_id == 0) {
                     {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False, prefetch=True)|indent(20, false) }}
                 } else if C10_UNLIKELY(k_end == K) {
@@ -362,8 +362,8 @@ SMALL_M_GEMM_TEMPLATE = r"""
                     {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True, prefetch=True)|indent(20, false) }}
                 }
             }
-            {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-            {%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
+{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
             {{ kernel.store_output(
                 tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
             )|indent(20, false) }}
