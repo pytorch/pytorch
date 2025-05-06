@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_LINUX,
     IS_WINDOWS,
-    NoTest,
     run_tests,
     suppress_warnings,
     TEST_XPU,
@@ -30,10 +29,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint_sequential
 
-
-if not TEST_XPU:
-    print("XPU not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
 
@@ -74,6 +69,7 @@ _xpu_computation_ops = [
 ]
 
 
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpu(TestCase):
     def test_device_behavior(self):
         current_device = torch.xpu.current_device()
@@ -334,13 +330,13 @@ if __name__ == "__main__":
         self.assertEqual(torch.xpu.current_device(), prev_device)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
-    def test_device_context_manager_with_set_device(self):
+    def test_multi_device_context_manager(self):
         src_device = 0
         dst_device = 1
         torch.xpu.set_device(src_device)
         with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.xpu.current_device(), 1)
-        self.assertEqual(torch.xpu.set_device(), src_device)
+        self.assertEqual(torch.xpu.current_device(), src_device)
 
     def test_stream_context_manager(self):
         prev_stream = torch.xpu.current_stream()
@@ -581,6 +577,7 @@ if __name__ == "__main__":
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
 
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
@@ -661,6 +658,7 @@ class TestXpuAutocast(TestAutocast):
             self.assertEqual(result.dtype, torch.float16)
 
 
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
     def setUp(self):
         torch._C._activate_gpu_trace()
@@ -721,6 +719,18 @@ class TestXpuTrace(TestCase):
         event.record()
         event.synchronize()
         self.mock.assert_called_once_with(event._as_parameter_.value)
+
+
+class TestXPUAPISanity(TestCase):
+    def test_is_bf16_supported(self):
+        self.assertEqual(
+            torch.xpu.is_bf16_supported(including_emulation=True),
+            torch.xpu.is_available(),
+        )
+
+    def test_get_arch_list(self):
+        if not torch.xpu._is_compiled():
+            self.assertEqual(len(torch.xpu.get_arch_list()), 0)
 
 
 if __name__ == "__main__":
