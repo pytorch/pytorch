@@ -231,7 +231,7 @@ class CKTileGemmTemplate(CKTileTemplate):
     extern "C" {
     PT_EXPORT {{kernel_definition}} {
 
-        constexpr int32_t kBatch = 1;
+        constexpr int32_t kBatch = {{k_batch}};
 
         using {{instance_namespace}}::BaseGemmPipeline;
         using {{instance_namespace}}::TilePartitioner;
@@ -296,6 +296,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             input_nodes=input_nodes,
             layout=layout,
         )
+        self.k_batch = 1
 
     def header(self) -> IndentedBuffer:
         res = super().header()
@@ -385,6 +386,84 @@ class CKTileGemmTemplate(CKTileTemplate):
         )
         return res
 
+    def check_dtypes(self, op: "CKTileGemmOperation"):
+        X_dtype, W_dtype, out_dtype = [
+            T.get_layout().dtype for T in [*self.input_nodes, self.output_node]
+        ]
+        if op.datatype_a != self._TORCH_DTYPE_TO_CK[X_dtype]:
+            return False
+        if op.datatype_b != self._TORCH_DTYPE_TO_CK[W_dtype]:
+            return False
+        if op.datatype_c != self._TORCH_DTYPE_TO_CK[out_dtype]:
+            return False
+        return True
+
+    def check_layouts(self, op: "CKTileGemmOperation"):
+        X_layout, W_layout, out_layout = [
+            torch_layout_to_ck_layout(T.get_layout())
+            for T in [*self.input_nodes, self.output_node]
+        ]
+        if op.layout_a != X_layout:
+            return False
+        if op.layout_b != W_layout:
+            return False
+        if op.layout_c != out_layout:
+            return False
+        return True
+
+    def get_gemm_problem_size(self):
+        X_size, W_size = [T.get_layout().size for T in [*self.input_nodes]]
+
+        M, K = X_size
+        _, N = W_size
+
+        return M, N, K
+
+    def check_block_tiles(self, op: "CKTileGemmOperation"):
+        """
+        Block tile size must be divideable by the contiguous dimension.
+        This helper function enforces it.
+        """
+        M, N, K = self.get_gemm_problem_size()
+
+        def check(dim_size, tile_size, is_padded):
+            if (
+                is_static_int(dim_size)
+                and dim_size % tile_size != 0
+                and is_padded == "false"
+            ):
+                return False
+            return True
+
+        if op.layout_a == "Row":
+            if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
+                return False
+        elif op.layout_a == "Col":
+            if not check(M, op.tile_m, op.m_is_padded):
+                return False
+        else:
+            raise AssertionError(f"Invalid layout {op.layout_a=}")
+
+        if op.layout_b == "Row":
+            if not check(N, op.tile_n, op.n_is_padded):
+                return False
+        elif op.layout_b == "Col":
+            if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
+                return False
+        else:
+            raise AssertionError(f"Invalid {op.layout_b=}")
+
+        if op.layout_c == "Row":
+            if not check(N, op.tile_n, op.n_is_padded):
+                return False
+        elif op.layout_c == "Col":
+            if not check(M, op.tile_m, op.m_is_padded):
+                return False
+        else:
+            raise AssertionError(f"Invalid layout {op.layout_c=}")
+
+        return True
+
     def filter_op(self, op: "CKTileGemmOperation"):
         """
         Determines whether a given op definition is suitable for the current
@@ -394,34 +473,11 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
-        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
-        X_meta = metas[0]
-        W_meta = metas[1]
-        Y_meta = metas[-1]
-        # disable the instance if dtypes don't match
-        if op.datatype_a != self._TORCH_DTYPE_TO_CK[X_meta.dtype]:
+        if not self.check_dtypes(op):
             return None
-        if op.datatype_b != self._TORCH_DTYPE_TO_CK[W_meta.dtype]:
+        if not self.check_layouts(op):
             return None
-        if op.datatype_c != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
-            return None
-        # disable the instance if layouts don't match
-        if op.layout_a != torch_layout_to_ck_layout(X_meta):
-            return None
-        if op.layout_b != torch_layout_to_ck_layout(W_meta):
-            return None
-        if op.layout_c != torch_layout_to_ck_layout(Y_meta):
-            return None
-
-        M = X_meta.size[-2]
-        K = X_meta.size[-1]
-        N = W_meta.size[-1]
-
-        if (not op.m_is_padded) and is_static_int(M) and (M % op.tile_m != 0):
-            return None
-        if (not op.n_is_padded) and is_static_int(N) and (N % op.tile_n != 0):
-            return None
-        if (not op.k_is_padded) and is_static_int(K) and (K % op.tile_k != 0):
+        if not self.check_block_tiles(op):
             return None
 
         return op
@@ -466,8 +522,8 @@ class CKTileGemmTemplate(CKTileTemplate):
         constexpr bool TransposeC = false;
 
         constexpr int kBlockPerCu                         = 1;
-        constexpr ck_tile::index_t TileParitionerGroupNum = 8;
-        constexpr ck_tile::index_t TileParitionerM01      = 4;
+        constexpr ck_tile::index_t TilePartitionerGroupNum = 8;
+        constexpr ck_tile::index_t TilePartitionerM01      = 4;
 
         using GemmShape =
             ck_tile::TileGemmShape<ck_tile::sequence<TileM, TileN, TileK>,
@@ -478,8 +534,8 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         using TilePartitioner =
             ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
-                                                       TileParitionerGroupNum,
-                                                       TileParitionerM01>;
+                                                       TilePartitionerGroupNum,
+                                                       TilePartitionerM01>;
 
         using Traits  =
             ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout>;
@@ -692,6 +748,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             instance_namespace=op.name(),
             version_comment=version_comment,
             rendered_dispatch=render_dispatch(op.pipeline, op.name()),
+            k_batch=self.k_batch,
         )
 
     def gen_ops(self):
