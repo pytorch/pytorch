@@ -888,6 +888,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
         )
 
     def test_cond_autograd_pytree_input(self):
+        # TODO: This is an unexpected behavior for cond
+        # Without this additional multiplication,
+        # the output of the backward graph would alias the
+        # inputs, as the gradients are just 1s and thus get optimized
         def true_fn(x):
             return (x["t"][0] * 2.0) + x["t"][1]["b"] * x["t"][2][0]
 
@@ -8487,21 +8491,21 @@ class GraphModule(torch.nn.Module):
         return (sub,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_cond_true, getitem_2_cond_false, l_z__cond_false):
+        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
             l_x__1 = l_x_
             s94_1 = s94
 
-            add: "f32[s17, s94]" = l_x__1 + s17_cond_true;  l_x__1 = s17_cond_true = None
+            add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = s17_true_branch = None
             getitem: "f32[s17 - 2, s94]" = add[slice(2, None, None)];  add = None
             clone: "f32[s17 - 2, s94]" = getitem.clone();  getitem = None
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_x_, s94, s17_cond_true, getitem_2_cond_false, l_z__cond_false):
+        def forward(self, l_x_, s94, s17_true_branch, getitem_2_false_branch, l_z__false_branch):
             l_x__1 = l_x_
             s94_1 = s94
 
-            mul: "f32[s17, s94]" = getitem_2_cond_false * l_z__cond_false;  getitem_2_cond_false = l_z__cond_false = None
+            mul: "f32[s17, s94]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
             add: "f32[s17, s94]" = l_x__1 + mul;  l_x__1 = mul = None
             getitem: "f32[2, s94]" = add[slice(None, 2, None)];  add = None
             clone: "f32[2, s94]" = getitem.clone();  getitem = None

@@ -1086,8 +1086,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
-        true_gm_name = "cond_true"
-        false_gm_name = "cond_false"
         (
             true_graph,
             false_graph,
@@ -1098,21 +1096,21 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = _merge_graph_inputs(
             true_graph,
             true_lifted_freevars,
-            true_gm_name,
+            "true_branch",
             false_graph,
             false_lifted_freevars,
-            false_gm_name,
+            "false_branch",
         )
 
         true_gm = torch.fx.GraphModule(true_nn_modules, true_graph)
         false_gm = torch.fx.GraphModule(false_nn_modules, false_graph)
 
         true_name = tx.output.install_subgraph(
-            true_gm_name,
+            "cond_true",
             true_gm,
         )
         false_name = tx.output.install_subgraph(
-            false_gm_name,
+            "cond_false",
             false_gm,
         )
 
@@ -1365,8 +1363,6 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             include_contiguity=False,
         )
 
-        cond_name = "cond_fn"
-        body_name = "body_fn"
         (
             cond_graph,
             body_graph,
@@ -1377,10 +1373,10 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = _merge_graph_inputs(
             cond_graph,
             cond_lifted_freevars,
-            cond_name,
+            "cond_fn",
             body_graph,
             body_lifted_freevars,
-            body_name,
+            "body_fn",
         )
 
         # Note: cond_shared and body_shared refer to the same proxy in parent graph
@@ -1390,12 +1386,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_nn_modules = dict(tx.output.nn_modules)
         cond_gm = torch.fx.GraphModule(cond_nn_modules, cond_graph)
         cond_name = tx.output.install_subgraph(
-            cond_name,
+            "cond_fn",
             cond_gm,
         )
         body_gm = torch.fx.GraphModule(body_nn_modules, body_graph)
         body_name = tx.output.install_subgraph(
-            body_name,
+            "body_fn",
             body_gm,
         )
 
@@ -1617,13 +1613,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     raise RuntimeError(
                         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
                     )
-
-        check_meta_consistency_vt(
-            [_make_inlined(tx, first_slice_copy)(t) for t in xs.items],
-            combine_result.unpack_var_sequence(tx),
-            "initial_xs",
-            "combine_fn_output",
-        )
 
         combine_fn_name = tx.output.install_subgraph(
             "associative_scan_combine_fn", combine_gm
