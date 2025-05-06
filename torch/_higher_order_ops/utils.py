@@ -714,7 +714,7 @@ def check_input_alias_and_mutation(
 
 def check_input_alias_and_mutation_return_ouputs(
     gm: torch.fx.GraphModule,
-    fake_args: list[FakeTensor],
+    fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
     list[int],
     dict[int, int],
