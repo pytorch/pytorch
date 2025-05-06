@@ -1,6 +1,9 @@
 name: inductor-perf-nightly-x86
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/inductor-perf-test-nightly-x86.yml
   schedule:
     # - cron: 0 7 * * 1-6
     # - cron: 0 7 * * 0
