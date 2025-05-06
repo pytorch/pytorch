@@ -901,12 +901,10 @@ class BuiltinVariable(VariableTracker):
                             *[x.as_python_constant() for x in args],
                         )
                     except Exception as exc:
-                        unimplemented_v2(
-                            gb_type="constant fold exception",
-                            context=f"attempted to run function {fn} with arguments {args}",
-                            explanation="Encountered exception when attempting to constant fold.",
-                            hints=[*graph_break_hints.DYNAMO_BUG],
-                            from_exc=exc,
+                        raise_observed_exception(
+                            type(exc),
+                            tx,
+                            args=list(map(ConstantVariable.create, exc.args)),
                         )
                     return VariableTracker.build(tx, res)
 
@@ -923,12 +921,10 @@ class BuiltinVariable(VariableTracker):
                                 },
                             )
                         except Exception as exc:
-                            unimplemented_v2(
-                                gb_type="constant fold exception",
-                                context=f"attempted to run function {fn} with arguments {args} {kwargs}",
-                                explanation="Encountered exception when attempting to constant fold.",
-                                hints=[*graph_break_hints.DYNAMO_BUG],
-                                from_exc=exc,
+                            raise_observed_exception(
+                                type(exc),
+                                tx,
+                                args=list(map(ConstantVariable.create, exc.args)),
                             )
                         return VariableTracker.build(tx, res)
 
