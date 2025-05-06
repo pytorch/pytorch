@@ -145,6 +145,29 @@ struct sqrt_functor {
   }
 };
 
+struct rsqrt_functor {
+  template <typename T>
+  inline enable_if_t<is_scalar_floating_point_v<T>, T> operator()(const T x) {
+    return T(1 / ::precise::sqrt(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_scalar_integral_v<T>, float> operator()(const T x) {
+    return 1 / ::precise::sqrt(static_cast<float>(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
+    // modulus
+    auto m = precise::sqrt(x.x * x.x + x.y * x.y);
+    // real part: sqrt((m + a)/2)
+    auto real_part = precise::sqrt((m + x.x) * .5);
+    // imaginary part: sign(b) * sqrt((m - a)/2)
+    auto imag_part = copysign(
+        static_cast<decltype(x.y)>(precise::sqrt((m - x.x) * .5)), x.y);
+    auto denominator = (real_part * real_part) + (imag_part * imag_part);
+    return T(real_part / denominator, -1 * imag_part / denominator);
+  }
+};
+
 struct bitwise_not_functor {
   template <typename T>
   inline enable_if_t<!is_same_v<T, bool> && is_scalar_integral_v<T>, T>
@@ -174,6 +197,7 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
   REGISTER_UNARY_OP(exp2, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sinc, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sqrt, DTYPE1, DTYPE0);         \
+  REGISTER_UNARY_OP(rsqrt, DTYPE1, DTYPE0);        \
   REGISTER_UNARY_OP(tanh, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(sin, DTYPE1, DTYPE0);          \
   REGISTER_UNARY_OP(cos, DTYPE1, DTYPE0);          \
@@ -191,14 +215,16 @@ INSTANTIATE_UNARY_KERNELS2(float, short);
 INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
-#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)  \
-  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);  \
-  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2); \
-  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);  \
-  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);  \
+#define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)   \
+  REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);   \
+  REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2); \
+  \  
+  REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);  \
+  REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);   \
+  REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(tan, DTYPE##2, DTYPE##2)
 
 INSTANTIATE_UNARY_KERNELS_VEC2(half);

@@ -5203,8 +5203,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: rsqrt_out
-    MPS: rsqrt_out_mps
+    CPU, CUDA, MPS: rsqrt_out
   tags: pointwise
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
