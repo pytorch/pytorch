@@ -569,7 +569,7 @@ def find_coalesced_group(
             break
 
     if len(found) > 1:
-        assert found[-1][1]["profiling_name"] == "nccl:coalesced"
+        assert found[-1][1]["profiling_name"].endswith("ccl:coalesced")
         return found
     return []
 
@@ -603,7 +603,7 @@ def find_coalesced_group_with_non_p2p(
 
     if len(found) > 1:
         name = found[-1][1]["profiling_name"]
-        if name.startswith("nccl:") and not name.endswith("_coalesced"):
+        if name[1:].startswith("ccl:") and not name.endswith("_coalesced"):
             logger.error("Rank %s does not have a coalesced end.", rank)
         return found
     return []
