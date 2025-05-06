@@ -1706,6 +1706,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @parametrize("_type", [set])
+    def test_set_union(self, _type):
+        @make_test
+        def fn(a, b):
+            set1 = _type({"apple", "banana", "cherry"})
+            set2 = _type({"google", "microsoft", "apple"})
+            set3 = _type({"shoes", "flipflops", "sneakers"})
+            union_set = set1.union(set2, set3)
+            if "apple" in union_set:
+                x = a + b
+            else:
+                x = a - b
+            if "banana" in union_set:
+                y = a + b
+            else:
+                y = a - b
+            if "shoes" in union_set:
+                z = a + b
+            else:
+                z = a - b
+            return x, y, z
+
+        fn(self)
+
     @make_test
     def test_set_contains(a, b):
         vals = set(["a", "b", "c"])
@@ -1766,7 +1790,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a + b
         else:
             y = a - b
-        return x, y
+        if "shoes" in set1:
+            z = a + b
+        else:
+            z = a - b
+        return x, y, z
 
     @parametrize(
         "fn_name", ["add", "symmetric_difference", "symmetric_difference_update"]
