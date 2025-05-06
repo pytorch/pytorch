@@ -326,12 +326,13 @@ def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
         k % config.register_blocking.block_k == 0
         and n % config.register_blocking.block_n == 0
         and m < 16
+        and not kwargs.get("dynamic_M", False)
     )
 
 
 # For int8 WoQ GEMM with small M, we use different blockings that shouldn't be used otherwise
-def do_not_use_with_small_m(config, m, n, k, alpha, num_threads, **kwargs):
-    return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads)
+def do_not_use_with_small_m(config, m, n, k, alpha, num_threads **kwargs):
+    return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs)
 
 
 @register_micro_gemm(
@@ -1672,14 +1673,14 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads, q_group_size=q_group_size
+                    config, m, n, k, alpha, num_threads, dynamic_M=dynamic_M, q_group_size=q_group_size
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
                 if (
                     config.vec_isa_cls == VecAMX
-                    and not dynamic_M
                     and m < block_m
+                    and not dynamic_M
                     and input_dtype == torch.bfloat16
                     and input2_dtype == torch.int8
                 ):
