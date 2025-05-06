@@ -17,6 +17,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import override
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
@@ -49,7 +50,11 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
-from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
 from torch.fx.experimental.symbolic_shapes import hint_int
 from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
@@ -766,6 +771,18 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
             setattr(gm, field, value)
 
 
+@CacheArtifactFactory.register
+class AOTAutogradCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self):
+        AOTAutogradCache._write_to_local_cache(self.key, self.content)
+
+    @override
+    @staticmethod
+    def type():
+        return "aot_autograd"
+
+
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
@@ -1015,7 +1032,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             cache_info.update(guard_info)
             if pickled_content is not None:
                 CacheArtifactManager.record_artifact(
-                    CacheArtifactType.AOT_AUTOGRAD, key, pickled_content
+                    AOTAutogradCacheArtifact.type(), key, pickled_content
                 )
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
@@ -1044,7 +1061,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AOT_AUTOGRAD, key, content
+                AOTAutogradCacheArtifact.type(), key, content
             )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
