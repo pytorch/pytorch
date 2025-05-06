@@ -2471,7 +2471,7 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA, name_fn=lambda x: x.name)
-    @parametrize("compile_mode", ["eager"])
+    @parametrize("compile_mode", ["eager", "inductor"])
     @parametrize(
         "permute_order",
         [perm + (3,) for perm in itertools.permutations([0, 1, 2])],
