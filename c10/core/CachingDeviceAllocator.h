@@ -3,7 +3,8 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
 
-namespace c10::CachingDeviceAllocator {
+namespace c10 {
+namespace CachingDeviceAllocator {
 
 using namespace c10::CachingAllocator;
 
@@ -59,8 +60,9 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-class C10_API CachingDeviceAllocator : public c10::Allocator {
- public:
+} // namespace CachingDeviceAllocator
+
+struct C10_API DeviceAllocator : public c10::Allocator {
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, c10::Stream stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
@@ -71,22 +73,21 @@ class C10_API CachingDeviceAllocator : public c10::Allocator {
   virtual bool is_enabled() const = 0;
   virtual void* get_base_allocation(void* ptr, size_t* size) = 0;
   virtual void record_stream(const DataPtr&, c10::Stream stream) = 0;
-  virtual DeviceStats get_device_stats(c10::DeviceIndex device) = 0;
+  virtual CachingDeviceAllocator::DeviceStats get_device_stats(
+      c10::DeviceIndex device) = 0;
   virtual void reset_accumulated_stats(c10::DeviceIndex device) = 0;
   virtual void reset_peak_stats(c10::DeviceIndex device) = 0;
   virtual std::string name() = 0;
 };
 
-C10_API inline CachingDeviceAllocator* GetAllocator(const DeviceType& t) {
+// This function is used to get the DeviceAllocator for a specific device type
+// and keep backward compatibility with c10::GetAllocator.
+C10_API inline DeviceAllocator* GetDeviceAllocator(const DeviceType& t) {
   auto* allocator = c10::GetAllocator(t);
-  auto* caching_device_allocator =
-      dynamic_cast<CachingDeviceAllocator*>(allocator);
+  auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
   TORCH_INTERNAL_ASSERT(
-      caching_device_allocator,
-      "Allocator for ",
-      t,
-      " is not a CachingDeviceAllocator.");
-  return caching_device_allocator;
+      device_allocator, "Allocator for ", t, " is not a DeviceAllocator.");
+  return device_allocator;
 }
 
-} // namespace c10::CachingDeviceAllocator
+} // namespace c10
