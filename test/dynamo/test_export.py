@@ -3862,7 +3862,7 @@ def forward(self, pred, x):
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, a, b, l_x_, d_cond_true, c_cond_false):
+def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     a_1 = a
     b_1 = b
     l_x__1 = l_x_
@@ -3871,7 +3871,7 @@ def forward(self, a, b, l_x_, d_cond_true, c_cond_false):
     add_1 = add + cos;  add = cos = None
     cos_1 = b_1.cos();  b_1 = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
-    cos_2 = d_cond_true.cos();  d_cond_true = None
+    cos_2 = d_true_branch.cos();  d_true_branch = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
     return (add_3,)""",
         )
@@ -3879,7 +3879,7 @@ def forward(self, a, b, l_x_, d_cond_true, c_cond_false):
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, a, b, l_x_, d_cond_true, c_cond_false):
+def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     a_1 = a
     b_1 = b
     l_x__1 = l_x_
@@ -3888,7 +3888,7 @@ def forward(self, a, b, l_x_, d_cond_true, c_cond_false):
     add = mul + sin;  mul = sin = None
     sin_1 = b_1.sin();  b_1 = None
     add_1 = add + sin_1;  add = sin_1 = None
-    sin_2 = c_cond_false.sin();  c_cond_false = None
+    sin_2 = c_false_branch.sin();  c_false_branch = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return (add_2,)""",
         )
