@@ -421,8 +421,8 @@ class CKTileGemmTemplate(CKTileTemplate):
 
     def check_block_tiles(self, op: "CKTileGemmOperation"):
         """
-        Block tile size must be divideable by the contiguous dimension.
-        This helper function enforces it.
+        The contiguous dimension of a tensor must be divisible by the block tile size
+        This helper function enforces it for the inputs and the output.
         """
         M, N, K = self.get_gemm_problem_size()
 
@@ -464,6 +464,68 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return True
 
+    def check_alignments(self, op: "CKTileGemmOperation"):
+        """
+        The contiguous dimension of a tensor must be divisible by the vector load size.
+        """
+        M, N, K = self.get_gemm_problem_size()
+
+        ck_dtype_to_size = {
+            "FP16": 2,
+            "BF16": 2,
+        }
+
+        def max_alignment(contiguous_elements_per_tile, elements_per_thread, ck_dtype):
+            for vector_load_bytes in (16, 8, 4, 2, 1):
+                alignment = vector_load_bytes // ck_dtype_to_size[ck_dtype]
+                if (
+                    alignment > 0
+                    and contiguous_elements_per_tile % alignment == 0
+                    and elements_per_thread % alignment == 0
+                ):
+                    return alignment
+
+        gfx9_threads_per_warp = 64
+        threads_per_block = op.warp_m * op.warp_n * op.warp_k * gfx9_threads_per_warp
+        a_elements_per_thread = op.tile_m * op.tile_k / threads_per_block
+        b_elements_per_thread = op.tile_n * op.tile_k / threads_per_block
+
+        if op.layout_a == "Row":
+            # K is contiguous tensor dimension
+            a_max_vector_size = max_alignment(
+                op.tile_k, a_elements_per_thread, op.datatype_a
+            )
+            if is_static_int(K) and K % a_max_vector_size != 0:
+                return False
+        elif op.layout_a == "Col":
+            # M is contiguous tensor dimension
+            a_max_vector_size = max_alignment(
+                op.tile_m, a_elements_per_thread, op.datatype_a
+            )
+            if is_static_int(M) and M % a_max_vector_size != 0:
+                return False
+        else:
+            raise AssertionError(f"Invalid layout {op.layout_a=}")
+
+        if op.layout_b == "Row":
+            # N is contiguous tensor dimension
+            b_max_vector_size = max_alignment(
+                op.tile_n, b_elements_per_thread, op.datatype_b
+            )
+            if is_static_int(N) and N % b_max_vector_size != 0:
+                return False
+        elif op.layout_b == "Col":
+            # K is contiguous tensor dimension
+            b_max_vector_size = max_alignment(
+                op.tile_k, b_elements_per_thread, op.datatype_b
+            )
+            if is_static_int(K) and K % b_max_vector_size != 0:
+                return False
+        else:
+            raise AssertionError(f"Invalid layout {op.layout_b=}")
+
+        return True
+
     def filter_op(self, op: "CKTileGemmOperation"):
         """
         Determines whether a given op definition is suitable for the current
@@ -478,6 +540,8 @@ class CKTileGemmTemplate(CKTileTemplate):
         if not self.check_layouts(op):
             return None
         if not self.check_block_tiles(op):
+            return None
+        if not self.check_alignments(op):
             return None
 
         return op
