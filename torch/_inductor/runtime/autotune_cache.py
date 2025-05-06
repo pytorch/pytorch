@@ -238,8 +238,9 @@ class AutotuneCache:
             cache, key = local_cache
             cache.put(key, data)
             AutotuneCacheBundler.put(key, data)
+            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, os.path.basename(key), data
+                CacheArtifactType.AUTOTUNE, autotune_artifact_key, data
             )
 
             if log.isEnabledFor(logging.DEBUG):
@@ -560,8 +561,9 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
             # model would only bundle *newly* compiled kernels, not existing
             # kernels that were already compiled and cached.
             AutotuneCacheBundler.put(key, result)
+            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, os.path.basename(key), result
+                CacheArtifactType.AUTOTUNE, autotune_artifact_key, result
             )
         return result
 

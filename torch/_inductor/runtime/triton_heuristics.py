@@ -1488,7 +1488,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
             # we want to burn None in to the launch args with zero overhead.
             # See https://github.com/pytorch/pytorch/issues/123597
-            if binary.__class__.launch_enter_hook:
+            if launch_enter:
                 launch_metadata = f"bin.launch_metadata((grid_0, grid_1, grid_2), stream, {', '.join(call_args)})"
             else:
                 launch_metadata = "None"

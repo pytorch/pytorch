@@ -238,7 +238,9 @@ SGD.__doc__ = (
 
         Moreover, the initial value of the momentum buffer is set to the
         gradient value at the first step. This is in contrast to some other
-        frameworks that initialize it to all zeros.
+        frameworks that initialize it to all zeros. One notable side effect
+        of this decision is that the first momentum value will not be scaled
+        by dampening. Dampening will be applied starting at the second step.
 
     """
 )
