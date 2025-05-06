@@ -121,8 +121,8 @@ def _compile_end() -> None:
 def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
     global _triton_kernel_metrics
     # Must be called between _compile_start and _compile_end
-    assert _triton_kernel_metrics is not None
-    _triton_kernel_metrics[kernel_name] = info
+    if _triton_kernel_metrics is not None:
+        _triton_kernel_metrics[kernel_name] = info
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -387,6 +387,7 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 start_ns = time_ns()
                 _set_triton_ptxas_path()
@@ -475,6 +476,7 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
 

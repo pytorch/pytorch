@@ -73,6 +73,7 @@ from .triton_compat import (
     GPUTarget,
     HAS_WARP_SPEC,
     KernelInterface,
+    knobs,
     OutOfResources,
     PTXASError,
     triton,
@@ -84,7 +85,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Hashable, Sequence
+    from collections.abc import Container, Hashable
 
     from torch._guards import CompileId
 
@@ -1425,11 +1426,18 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
+        if knobs is None:
+            launch_enter = binary.__class__.launch_enter_hook
+            launch_exit = binary.__class__.launch_exit_hook
+        else:
+            launch_enter = knobs.runtime.launch_enter_hook
+            launch_exit = knobs.runtime.launch_exit_hook
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.__class__.launch_enter_hook,
-            "launch_exit_hook": binary.__class__.launch_exit_hook,
+            "launch_enter_hook": launch_enter,
+            "launch_exit_hook": launch_exit,
             "metadata": (
                 binary.packed_metadata
                 if hasattr(binary, "packed_metadata")
@@ -1480,7 +1488,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
             # we want to burn None in to the launch args with zero overhead.
             # See https://github.com/pytorch/pytorch/issues/123597
-            if binary.__class__.launch_enter_hook:
+            if launch_enter:
                 launch_metadata = f"bin.launch_metadata((grid_0, grid_1, grid_2), stream, {', '.join(call_args)})"
             else:
                 launch_metadata = "None"
@@ -2556,13 +2564,15 @@ class GridExpr:
 
     inductor_meta: dict[str, Any]
     mode: Literal["python", "cpp"] = "python"
-    prefix: Sequence[str] = ()
+    prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: Union[str, int] = 1
     y_grid: Union[str, int] = 1
     z_grid: Union[str, int] = 1
 
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
+        if self.mode == "python":
+            self.prefix.append("from torch.utils._sympy.functions import FloorDiv")
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
@@ -2575,7 +2585,9 @@ class GridExpr:
         if isinstance(numel, int) and isinstance(block, int):
             return ceildiv(numel, block)  # constant fold
         if self.mode == "python":
-            return f"-(({numel}) // -({block}))"
+            # Use FloorDiv instead of // so we can get better sympy expressions for
+            # dynamic shapes.
+            return f"-FloorDiv(({numel}), -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
@@ -2658,12 +2670,16 @@ class Grid3D(GridExpr):
 class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.prefix = [
-            self.assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
-            self.assign_tmp(
-                "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
-            ),
-        ]
+        self.prefix.extend(
+            [
+                self.assign_tmp(
+                    "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
+                ),
+                self.assign_tmp(
+                    "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
+                ),
+            ]
+        )
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
 

@@ -4375,8 +4375,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 outs[0].sum().backward()
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm(msg="ROCm doesn't support 'dropout' for RNN "
-                "(WIP to enable dropout https://github.com/pytorch/pytorch/pull/144572)")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
             for train in (True, False):
@@ -6399,6 +6397,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
         torch.testing.assert_close(output, input_tensor)
+
+    def test_channel_shuffle_input_checks(self):
+        input_tensor = torch.rand([1, 3, 2, 2])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups to divide channels in must be positive.*"):
+            groups = 0
+            torch.native_channel_shuffle(input_tensor, groups)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of channels must be divisible by groups.*"):
+            groups = 2
+            torch.native_channel_shuffle(input_tensor, groups)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "channel_shuffle expects input with > 2 dims,.*"):
+            input_tensor = torch.rand([1, 2])
+            groups = 2
+            torch.native_channel_shuffle(input_tensor, groups)
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_native_channel_shuffle_return_alias_of_self(self):
