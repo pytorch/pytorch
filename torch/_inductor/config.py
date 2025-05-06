@@ -49,6 +49,8 @@ def static_cuda_launcher_default() -> bool:
 
 def prologue_fusion_enabled() -> bool:
     ENABLE_PROLOGUE_FUSION_VERSION = 0
+    if os.environ.get("PYTORCH_DISABLE_JUSTKNOBS", 0) == 1:
+        return True
 
     if "TORCHINDUCTOR_PROLOGUE_FUSION" in os.environ:
         return os.environ.get("TORCHINDUCTOR_PROLOGUE_FUSION") == "1"
