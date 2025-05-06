@@ -1942,7 +1942,14 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads, dynamic_M=dynamic_M, q_group_size=q_group_size
+                    config,
+                    m,
+                    n,
+                    k,
+                    alpha,
+                    num_threads,
+                    dynamic_M=dynamic_M,
+                    q_group_size=q_group_size
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
