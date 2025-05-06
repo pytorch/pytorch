@@ -43,6 +43,7 @@ if torch.backends.mps.is_available():
             "conj",
             "conj_physical",
             "contiguous",
+            "cos",
             "diag",
             "diag_embed",
             "diagflat",
@@ -55,6 +56,7 @@ if torch.backends.mps.is_available():
             "empty_permuted",
             "empty_strided",
             "exp",
+            "exp2",
             "expand",
             "expand_as",
             "expand_copy",
@@ -83,6 +85,7 @@ if torch.backends.mps.is_available():
             "mul",
             "narrow",
             "narrow_copy",
+            "neg",
             "new_full",
             "new_ones",
             "new_zeros",
@@ -109,9 +112,11 @@ if torch.backends.mps.is_available():
             "reshape",
             "resolve_conj",
             "resolve_neg",
+            "rsqrt",
             "scalar_tensor",
             "select",
             "sgn",
+            "sin",
             "sinc",
             "slice",
             "special.spherical_bessel_j0",
@@ -192,7 +197,6 @@ if torch.backends.mps.is_available():
             "einsum",
             "eq",
             "equal",
-            "exp2",
             "expm1",
             "eye",
             "fft.fft",
@@ -247,7 +251,6 @@ if torch.backends.mps.is_available():
             "mm",
             "mv",
             "ne",
-            "neg",
             "nn.functional.padconstant",
             "nn.functional.padreflect",
             "nn.functional.padreplicate",
@@ -259,7 +262,6 @@ if torch.backends.mps.is_available():
             "reciprocal",
             "roll",
             "rot90",
-            "rsqrt",
             "short",
             "sigmoid",
             "sinh",
@@ -282,7 +284,6 @@ if torch.backends.mps.is_available():
         # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
         MACOS_BEFORE_13_3_XFAILLIST = {
             # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-            "tan": [torch.float32],
             "cdist": [torch.float32],
             # CPU Error: cpu not giving nan for x/0.0
             "atan2": [
