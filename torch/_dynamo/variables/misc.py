@@ -927,7 +927,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 f"`{name}` on `autograd.Function` context objects. Supported "
                 "methods are `__setattr__`, `save_for_backward` and "
                 "`mark_non_differentiable`.",
-                hints=[*graph_break_hints.USER_ERROR],
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
         if self.saved_tensors is None:
             unimplemented_v2(
