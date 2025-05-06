@@ -459,7 +459,7 @@ class ExceptionVariable(VariableTracker):
                 explanation="Dynamo does not support setting the attribute "
                 f"'{name}' on tracked exception objects. Only `__context__`, "
                 "`__cause__`, `__suppress_context__`, and `__traceback__` are supported.",
-                hints=[*graph_break_hints.USER_ERROR],
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
         return variables.ConstantVariable(None)
 
