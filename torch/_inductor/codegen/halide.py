@@ -705,9 +705,9 @@ class HalideKernel(SIMDKernel):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return halide_type(dtype)
 
-    def create_cse_var(self, name, bounds=None, dtype=None):
+    def create_cse_var(self, name, bounds=None, dtype=None, shape=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        return HalideCSEVariable(name, bounds, dtype)
+        return HalideCSEVariable(name, bounds, dtype, shape)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -1366,14 +1366,16 @@ class HalideKernel(SIMDKernel):
         used_dims,
         *,
         bounds=ValueRanges.unknown(),
-        shape=None,
+        shape: Optional[ShapeType] = None,
     ) -> HalideCSEVariable:
         var = self.cse.generate(self.body, line, bounds=bounds, shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var
 
-    def newfunc(self, used_dims, *, shape=None) -> HalideCSEVariable:
+    def newfunc(
+        self, used_dims, *, shape: Optional[ShapeType] = None
+    ) -> HalideCSEVariable:
         var = self.cse.newvar(shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims

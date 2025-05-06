@@ -748,7 +748,11 @@ def low_precision_fp_var(var: Union[CSEVariable, Any]) -> bool:
 
 class TritonCSEVariable(CSEVariable):
     def __init__(
-        self, name, bounds: ValueRanges[Any], dtype: torch.dtype, shape=None
+        self,
+        name: str,
+        bounds: ValueRanges[Any],
+        dtype: torch.dtype,
+        shape: Optional[ShapeType] = None,
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
@@ -3169,6 +3173,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ],
         values: tuple[CSEVariable, ...],
     ) -> tuple[CSEVariable, ...]:
+        """
+        Perform an associative scan on 'values'.
+        """
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -3223,8 +3230,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if all(self.cse.contains(cache_key) for cache_key in cache_keys):
                 return [self.cse.get(cache_key) for cache_key in cache_keys]
             result_vars = [
-                self.cse.newvar(dtype=_dtype, shape=_value.shape)
-                for (_dtype, _value) in zip(dtypes, values)
+                self.cse.newvar(dtype=dtype, shape=value.shape)
+                for (dtype, value) in zip(dtypes, values)
             ]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
