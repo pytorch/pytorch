@@ -165,7 +165,12 @@ if HAS_PYDOT:
             else:
                 # Use a random color for each node; based on its name so it's stable.
                 target_name = node._pretty_print_target(node.target)
-                target_hash = int(hashlib.md5(target_name.encode()).hexdigest()[:8], 16)
+                target_hash = int(
+                    hashlib.md5(
+                        target_name.encode(), usedforsecurity=False
+                    ).hexdigest()[:8],
+                    16,
+                )
                 template["fillcolor"] = _HASH_COLOR_MAP[
                     target_hash % len(_HASH_COLOR_MAP)
                 ]

@@ -1,7 +1,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/PyInterpreter.h>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace c10::impl {
 
 struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
@@ -128,7 +128,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void reset_backward_hooks(const TensorImpl* self) const override {
     PANIC(reset_backward_hooks);
-  };
+  }
 };
 
 // Construct this in Global scope instead of within `disarm`
@@ -145,3 +145,4 @@ void PyInterpreter::disarm() noexcept {
 }
 
 } // namespace c10::impl
+C10_DIAGNOSTIC_POP()

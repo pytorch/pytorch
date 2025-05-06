@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C as _C
@@ -1104,8 +1104,14 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C.TensorBase.pow
+    __pow__ = cast(
+        Callable[
+            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
+            "Tensor",
+        ],
+        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow
+        ),
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
@@ -1119,7 +1125,9 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
         if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
-            return self.item().__format__(format_spec)
+            # Use detach() here to avoid the warning when converting a scalar Tensor that
+            # requires gradients to a python number. It is ok for formatting.
+            return self.detach().item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -1256,7 +1264,7 @@ class Tensor(torch._C.TensorBase):
         """Array view description for cuda tensors.
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185

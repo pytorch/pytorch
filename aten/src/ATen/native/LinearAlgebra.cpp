@@ -23,6 +23,7 @@
 #include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <variant>
 
@@ -285,7 +286,7 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
+static void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = std::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -1366,8 +1367,8 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
       //it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 : 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
-    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
+    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_DIM");
+    return value.has_value() ? std::stoi(value.value()) : default_min_dim;
   }();
   return value;
 }
@@ -1380,8 +1381,8 @@ static inline int64_t get_mkldnn_matmul_min_size() {
       // it's enabled on all Neoverse cpus.
       return is_arm_neoverse() ? 8 * 1024 : 0;
     }();
-    const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
-    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
+    const auto value = c10::utils::get_env("TORCH_MKLDNN_MATMUL_MIN_SIZE");
+    return value.has_value() ? std::stoi(value.value()) : default_min_size;
   }();
   return value;
 }
@@ -1513,12 +1514,8 @@ static void addmm_impl_cpu_(
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
   if (transpose_c) {
-    bool apply_heur =
-        apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
-    if (apply_heur && transpose_a && !transpose_b &&
-        (result.scalar_type() == at::ScalarType::Float ||
-         result.scalar_type() == at::ScalarType::BFloat16 ||
-         result.scalar_type() == at::ScalarType::Half)) {
+    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       try {
         mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
         // We have dispatched to ACL GEMM for single precision float
@@ -1643,7 +1640,7 @@ TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tens
 }
 
 template <typename scalar_t, bool is_bmm>
-inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
+static inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
   int64_t bs = result.size(0);
   int64_t is = result.size(1);
   int64_t js = result.size(2);
@@ -2656,7 +2653,7 @@ Tensor mexp_impl(
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
     // and better performance overall (benchmarked).
     const auto norm_cpu = (a.device().type() == at::kCUDA)
       ? norm.to(at::kCPU) : norm;
@@ -3489,6 +3486,8 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
       __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+  TORCH_CHECK(K % qGroupSize == 0,
+      __func__, ": expect K to be divisible by qGroupSize, got K:", K, ", qGroupSize:", qGroupSize);
 
   TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
       && qScaleAndZeros.size(2) == 2,
@@ -3574,11 +3573,10 @@ Tensor _weight_int8pack_mm_cpu(
 
   TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(),
-      __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
-
+  TORCH_CHECK(A.stride(1) == 1,
+      __func__, " : A must be contiguous on the last dimension.");
   TORCH_CHECK(B.dtype() == kChar,
       __func__, " : expect B to be int8 tensor.");
   TORCH_CHECK(B.is_contiguous(),

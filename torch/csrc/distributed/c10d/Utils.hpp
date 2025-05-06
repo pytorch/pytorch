@@ -130,15 +130,15 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char* val = std::getenv(env[i].c_str());
-    if (val == nullptr) {
+    const auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
-      ret = std::stoi(val);
+      ret = std::stoi(val.value());
     } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
@@ -557,6 +557,13 @@ size_t computeLengthsAndOffsets(
   }
   return offset;
 }
+
+// Get the start and stride of the global rank from a list of global ranks
+// If the global ranks do not follow the consecutive rule, the stride will be -1
+void TORCH_API getGlobalRankStartAndStride(
+    const std::vector<uint64_t>& globalRanksInGroup,
+    int& globalRankStart,
+    int& globalRankStride);
 
 using RankType = uint32_t;
 using SizeType = uint64_t;

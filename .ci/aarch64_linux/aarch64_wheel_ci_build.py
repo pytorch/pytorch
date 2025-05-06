@@ -39,7 +39,7 @@ def build_ArmComputeLibrary() -> None:
             "clone",
             "https://github.com/ARM-software/ComputeLibrary.git",
             "-b",
-            "v24.09",
+            "v25.02",
             "--depth",
             "1",
             "--shallow-submodules",
@@ -99,10 +99,14 @@ def update_wheel(wheel_path, desired_cuda) -> None:
         if "126" in desired_cuda:
             libs_to_copy += [
                 "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
+                "/usr/local/cuda/lib64/libcufile.so.0",
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
             ]
         elif "128" in desired_cuda:
             libs_to_copy += [
                 "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
+                "/usr/local/cuda/lib64/libcufile.so.0",
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
             ]
     else:
         libs_to_copy += [
@@ -132,6 +136,9 @@ def complete_wheel(folder: str) -> str:
     """
     wheel_name = list_dir(f"/{folder}/dist")[0]
 
+    # Please note for cuda we don't run auditwheel since we use custom script to package
+    # the cuda dependencies to the wheel file using update_wheel() method.
+    # However we need to make sure filename reflects the correct Manylinux platform.
     if "pytorch" in folder and not enable_cuda:
         print("Repairing Wheel with AuditWheel")
         check_call(["auditwheel", "repair", f"dist/{wheel_name}"], cwd=folder)
@@ -143,7 +150,14 @@ def complete_wheel(folder: str) -> str:
             f"/{folder}/dist/{repaired_wheel_name}",
         )
     else:
-        repaired_wheel_name = wheel_name
+        repaired_wheel_name = wheel_name.replace(
+            "linux_aarch64", "manylinux_2_28_aarch64"
+        )
+        print(f"Renaming {wheel_name} wheel to {repaired_wheel_name}")
+        os.rename(
+            f"/{folder}/dist/{wheel_name}",
+            f"/{folder}/dist/{repaired_wheel_name}",
+        )
 
     print(f"Copying {repaired_wheel_name} to artifacts")
     shutil.copy2(
@@ -204,7 +218,7 @@ if __name__ == "__main__":
         else:
             build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date} PYTORCH_BUILD_NUMBER=1 "
     elif branch.startswith(("v1.", "v2.")):
-        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1:branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
+        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
 
     if enable_mkldnn:
         build_ArmComputeLibrary()

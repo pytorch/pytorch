@@ -49,16 +49,9 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name) \
   Scalar(type vv) : Scalar(vv, true) {}
 
-  AT_FORALL_SCALAR_TYPES_AND7(
-      Half,
-      BFloat16,
-      Float8_e5m2,
-      Float8_e4m3fn,
-      Float8_e5m2fnuz,
-      Float8_e4m3fnuz,
-      ComplexHalf,
-      DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_SCALAR_TYPES_AND3(Half, BFloat16, ComplexHalf, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_FLOAT8_TYPES(DEFINE_IMPLICIT_CTOR)
 
   // Helper constructors to allow Scalar creation from long and long long types
   // As std::is_same_v<long, long long> is false(except Android), one needs to
