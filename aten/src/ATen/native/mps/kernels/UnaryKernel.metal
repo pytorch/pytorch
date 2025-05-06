@@ -221,7 +221,7 @@ INSTANTIATE_UNARY_KERNELS2(float, long);
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(sqrt, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(rsqrt, DTYPE##2, DTYPE##2); \
-  \  
+                                                \
   REGISTER_UNARY_OP(sinc, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(sin, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(cos, DTYPE##2, DTYPE##2);   \
