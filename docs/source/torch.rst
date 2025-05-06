@@ -80,6 +80,7 @@ Creation Ops
     complex
     polar
     heaviside
+    nonzero_static
 
 .. _indexing-slicing-joining:
 
