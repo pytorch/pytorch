@@ -331,7 +331,7 @@ def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
 
 
 # For int8 WoQ GEMM with small M, we use different blockings that shouldn't be used otherwise
-def do_not_use_with_small_m(config, m, n, k, alpha, num_threads **kwargs):
+def do_not_use_with_small_m(config, m, n, k, alpha, num_threads, **kwargs):
     return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs)
 
 
