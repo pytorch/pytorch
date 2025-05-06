@@ -72,8 +72,7 @@ FileLike: TypeAlias = Union[str, os.PathLike[str], IO[bytes]]
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 ExplicitDevice: TypeAlias = Union[_device, str, int]
 # None means use the default device (typically CPU)
-OptionalDevice: TypeAlias = Union[ExplicitDevice, None]
-Device: TypeAlias = OptionalDevice
+Device: TypeAlias = Union[ExplicitDevice, None]
 
 
 # Storage protocol implemented by ${Type}StorageBase classes
