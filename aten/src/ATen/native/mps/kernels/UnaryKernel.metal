@@ -79,8 +79,8 @@ struct tan_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // tan(x+yi)=(tan(x) + itanh(y)) / (1 - i(tan(x) * tanh(y)))
-    auto tan_x = precise::sin(x.x);
-    auto tanh_y = precise::cosh(x.y);
+    auto tan_x = precise::tan(x.x);
+    auto tanh_y = precise::tanh(x.y);
     return complex_div(T(tan_x, tanh_y), T(1, -1 * tan_x * tanh_y));
   }
 };
