@@ -808,18 +808,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
-        from .torch_function import build_torch_function_fn
+        from .torch_function import get_torch_function_fn
 
-        return build_torch_function_fn(tx, self.value, self.source)
+        return get_torch_function_fn(tx, self)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         self.torch_function_check()
 
-        from .torch_function import _get_subclass_type_var, call_torch_function
+        from .torch_function import call_torch_function
 
         return call_torch_function(
             tx,
-            _get_subclass_type_var(tx, self),
             self.get_torch_fn(tx),
             fn,
             types,
@@ -989,7 +988,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif callable(self.value):
             if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                source = AttrSource(self.cls_source, "__call__")
+                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
@@ -1262,7 +1262,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and isinstance(self, variables.UnspecializedNNModuleVariable)
             # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
             # usecase for now.
-            and not tx.output.export
+            and (not tx.output.export or torch._dynamo.config.install_free_tensors)
         ):
             # Recalculate source for params/buffers
             if name in ("_buffers", "_parameters"):

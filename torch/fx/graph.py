@@ -20,6 +20,7 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
@@ -210,34 +211,6 @@ class _Namespace:
         assert obj in self._obj_to_name
         self._obj_to_name[obj] = name
         self._used_names.add(name)
-
-
-dtype_abbrs = {
-    torch.bfloat16: "bf16",
-    torch.float64: "f64",
-    torch.float32: "f32",
-    torch.float16: "f16",
-    torch.float8_e4m3fn: "f8e4m3fn",
-    torch.float8_e5m2: "f8e5m2",
-    torch.float8_e4m3fnuz: "f8e4m3fnuz",
-    torch.float8_e5m2fnuz: "f8e5m2fnuz",
-    torch.float8_e8m0fnu: "f8e8m0fnu",
-    torch.float4_e2m1fn_x2: "f4e2m1fnx2",
-    torch.complex32: "c32",
-    torch.complex64: "c64",
-    torch.complex128: "c128",
-    torch.int8: "i8",
-    torch.int16: "i16",
-    torch.int32: "i32",
-    torch.int64: "i64",
-    torch.bool: "b8",
-    torch.uint8: "u8",
-    torch.uint16: "u16",
-    torch.uint32: "u32",
-    torch.uint64: "u64",
-    torch.bits16: "b16",
-    torch.bits1x8: "b1x8",
-}
 
 
 @compatibility(is_backward_compatible=True)
@@ -1806,6 +1779,8 @@ class Graph:
             of functional operations or you supply your own custom
             function for detecting side-effectful nodes.
         """
+        from torch.utils._ordered_set import OrderedSet
+
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
         self.lint()
@@ -1827,6 +1802,20 @@ class Graph:
             if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
+
+        # Call DCE on the subgraphs
+        if self.owning_module is not None:
+            subgraph_names = OrderedSet(
+                x.target for x in self.find_nodes(op="get_attr")
+            )
+            for child_name, child_module in self.owning_module.named_children():
+                # Sometimes an owning_module can have unused children. Skip them
+                # by checking them from get_attr node targets.
+                if child_name in subgraph_names and isinstance(
+                    child_module, torch.fx.GraphModule
+                ):
+                    changed |= child_module.graph.eliminate_dead_code()
+                    child_module.recompile()
 
         return changed
 

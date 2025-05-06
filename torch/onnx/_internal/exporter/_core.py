@@ -115,16 +115,24 @@ class TorchTensor(ir.Tensor):
 
     def numpy(self) -> npt.NDArray:
         self.raw: torch.Tensor
+
+        # Handle dtypes that are not natively supported by NumPy:
+        # We pick an uint dtype that has the same size as the original dtype,
+        # view the tensor as that dtype so that it is convertible to NumPy,
+        # and then view it back to the proper dtype (using ml_dtypes obtained by
+        # calling dtype.numpy()).
         if self.dtype == ir.DataType.BFLOAT16:
-            return self.raw.view(torch.uint16).numpy(force=True)
+            return (
+                self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
+            )
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # TODO: Use ml_dtypes
-            return self.raw.view(torch.uint8).numpy(force=True)
+            return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
+
         return self.raw.numpy(force=True)
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> npt.NDArray:
@@ -1237,7 +1245,8 @@ def export(
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used.
         program = model
-        export_status.torch_export = True
+        # torch.export.export has strict default to False
+        export_status.torch_export_non_strict = True
     else:
         # Convert an nn.Module to an ExportedProgram
         # Try everything 🐰 (all paths for getting an ExportedProgram)
@@ -1255,12 +1264,10 @@ def export(
             # Record the status
             if strategy_class is _capture_strategies.TorchExportNonStrictStrategy:
                 export_status.torch_export_non_strict = result.success
-            elif strategy_class is _capture_strategies.TorchExportStrategy:
-                export_status.torch_export = result.success
+            elif strategy_class is _capture_strategies.TorchExportStrictStrategy:
+                export_status.torch_export_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
                 export_status.torch_export_draft_export = result.success
-            elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
-                export_status.torch_jit = result.success
 
             if result.exception is not None:
                 failed_results.append(result)
