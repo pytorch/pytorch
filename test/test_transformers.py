@@ -4347,13 +4347,16 @@ class TestSDPACompile(InductorTestCase):
         )
 
         grad_output = torch.randn_like(out)
-        out.backward(grad_output)
+        cm = torch._subclasses.CrossRefFakeMode() if compile_mode == "eager" else contextlib.nullcontext()
+
+        with cm:
+            grad_query, grad_key, grad_value = torch.autograd.grad(out, [query, key, value], grad_output)
 
         # Check that gradient stride orders match input stride orders
         for leaf, grad, name in [
-            (query, query.grad, "query"),
-            (key, key.grad, "key"),
-            (value, value.grad, "value"),
+            (query, grad_query, "query"),
+            (key, grad_key, "key"),
+            (value, grad_value, "value"),
         ]:
             grad_stride_order = get_stride_order(grad.stride())
             input_stride_order = get_stride_order(leaf.stride())
