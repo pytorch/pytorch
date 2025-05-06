@@ -3,12 +3,11 @@
 #include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
-// #include <cuda_runtime.h>
+#if defined(USE_ROCM)
+#include <rocm_smi/rocm_smi.h>
+#endif
 
 namespace c10d::intra_node_comm {
-
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-bool isIntraNodeCommSupported();
 
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
@@ -16,15 +15,13 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
 // IntraNodeComm can be used even without NVLink connection. This is only used
 // for testing purposes.
 static std::vector<std::string> TEST_INTRA_NODE_COMM = {"TEST_INTRA_NODE_COMM"};
-
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 static int intraNodeCommIdx = 0;
-#endif
 
 /**
  * Query the nvlink connection among devices.
  */
 static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
+#if !defined(USE_RCOM)
   auto connectivity = detect_dma_connectivity(c10::DeviceType::CUDA, "nvlink");
   NvlMesh nvlMesh = {};
   for (size_t srcRank = 0; srcRank < kMaxDevices; ++srcRank) {
@@ -38,6 +35,31 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
     }
   }
   return nvlMesh;
+#else
+  NvlMesh nvlMesh = {};
+  const auto worldSize = rankToDeviceIdx.size();
+  // For each device, loop over devices connected to it
+  for (size_t idx = 0; idx < worldSize; ++idx) {
+    for (size_t link = 0; link < kMaxDevices; ++link) {
+      if (idx == link)
+        continue;
+
+      bool conn = false;
+      auto ret = rsmi_is_P2P_accessible(idx, link, &conn);
+      if (ret != RSMI_STATUS_SUCCESS) {
+        LOG(ERROR)
+            << "IntraNodeComm: getNvlMesh: rsmi_is_P2P_accessible returned error ret="
+            << ret;
+        return {};
+      }
+
+      if (conn) {
+        nvlMesh[idx][link] += 1;
+      }
+    }
+  }
+  return nvlMesh;
+#endif
 }
 
 /**
@@ -131,7 +153,6 @@ bool IntraNodeComm::rendezvous() {
   if (isInitialized_) {
     return true;
   }
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   if (!isIntraNodeCommSupported() || worldSize_ < 2 ||
       worldSize_ > kMaxDevices) {
     return false;
@@ -150,6 +171,14 @@ bool IntraNodeComm::rendezvous() {
   DevInfo devInfo{};
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   devInfo.deviceIdx = deviceIdx_;
+
+#if defined(USE_ROCM)
+  auto ret = rsmi_init(0);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    LOG(ERROR) << "IntraNodeComm:: rendezvous failed in rsmi_init, ret=" << ret;
+    return false;
+  }
+#endif
 
   auto peerDevInfos =
       storeAllGather(store_, "handshake-0", rank_, worldSize_, devInfo);
@@ -194,8 +223,6 @@ bool IntraNodeComm::rendezvous() {
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
   isInitialized_ = true;
   return true;
-#endif
-  return false;
 }
 
 } // namespace c10d::intra_node_comm

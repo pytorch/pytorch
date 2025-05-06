@@ -488,11 +488,12 @@ def process_inputs(
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
+    ignore_shape_env: bool = False,
 ) -> FakifiedFlatArgs:
     with fake_mode:
 
         def convert(idx, x):
-            if shape_env is not None:
+            if shape_env is not None and not ignore_shape_env:
                 from torch._dynamo.source import ConstantSource
 
                 if isinstance(x, int):
@@ -540,13 +541,14 @@ def process_inputs(
                 # Dynamo
                 return fake_mode.from_tensor(x, static_shapes=True)
 
-            return fake_mode.from_tensor(
+            result = fake_mode.from_tensor(
                 x,
-                static_shapes=False,
+                static_shapes=ignore_shape_env,
                 symbolic_context=symbolic_context,
                 source=source,
                 trace=trace,
             )
+            return result
 
         return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
 
@@ -1026,18 +1028,20 @@ def _try_get_metadata_from_dynamo(
     seen_sources = set()
 
     aot_autograd_arg_pos_to_source = []
+    static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
-    for name in param_keys:
+    for i, name in enumerate(param_keys):
         assert name in param_name_to_source, f"{name} not found."
         source = param_name_to_source[name]
         assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
+        static_input_indices.append(i)
+
     # Collect the dynamo graph inputs
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
-    static_input_indices = []
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
@@ -1046,16 +1050,22 @@ def _try_get_metadata_from_dynamo(
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name() if source else str(source)
 
+        # input[i] in dynamo is now:
+        # input[i + len(extra_params)] in AOT,
+        # where extra_params are the params/buffers that dynamo baked into the
+        # OutputGraph
+        actual_pos = pos + len(param_keys)
+
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
             "_dynamo_static_input_type", None
         ):
             static_inputs_log.debug(
-                "Adding static input pos %s for source %s", pos, source_name
+                "Adding static input pos %s for source %s", actual_pos, source_name
             )
-            static_input_indices.append(pos)
+            static_input_indices.append(actual_pos)
         else:
             static_inputs_log.debug(
-                "Non-static input pos %s for source %s", pos, source_name
+                "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
     assert full_args_num == len(aot_autograd_arg_pos_to_source)
@@ -1073,6 +1083,7 @@ def aot_module_simplified(
     inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
+    ignore_shape_env: bool = False,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1140,9 +1151,12 @@ def aot_module_simplified(
         is_export=False,
         no_tangents=False,
         cache_info=None,
+        ignore_shape_env=ignore_shape_env,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
-    fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
+    fake_flat_args = process_inputs(
+        full_args, aot_config, fake_mode, shape_env, ignore_shape_env
+    )
 
     def dispatch_and_compile():
         functional_call = create_functional_call(mod, params_spec, params_len)
@@ -1658,6 +1672,7 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
                     )
                 # TODO(avik): Assigning all other types are allowed right now.
                 # Maybe in the future we want to limit this to primitive types?
+            return v
 
         new_attrs = _get_attributes(mod)
         if len(new_attrs) != len(snapshot):
