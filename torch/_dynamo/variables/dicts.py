@@ -422,18 +422,18 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             return DictItemsVariable(self)
         elif name == "keys":
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
             self.install_dict_keys_match_guard()
             if self.source:
-                tx.output.guard_on_key_order.add(self.source.name())
+                tx.output.guard_on_key_order.add(self.source)
             assert not (args or kwargs)
             return DictValuesVariable(self)
         elif name == "copy":
@@ -534,6 +534,23 @@ class ConstDictVariable(VariableTracker):
             self.items.pop(key)
             self.items[key] = val
             return ConstantVariable.create(None)
+        elif name == "__or__":
+            assert len(args) == 1
+            if not isinstance(args[0], ConstDictVariable):
+                raise TypeError(
+                    f"unsupported operand type(s) for |: 'dict' and '{args[0].python_type().__name__}'"
+                )
+
+            self.install_dict_keys_match_guard()
+            new_dict_vt = self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
+
+            # NB - Guard on all the keys of the other dict to ensure
+            # correctness.
+            args[0].install_dict_keys_match_guard()
+            new_dict_vt.items.update(args[0].items)
+            return new_dict_vt
         else:
             return super().call_method(tx, name, args, kwargs)
 

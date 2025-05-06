@@ -514,7 +514,11 @@ class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+#else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
+#endif
   }
 };
 static ReduceAdd reduce_add;
@@ -1535,11 +1539,16 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
                                       int64_t srcSelectDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < totalSize;
-       linearIndex += gridDim.x * blockDim.x) {
+  constexpr bool kPack4 = (sizeof(T) == 2);
+  constexpr int kElemsPerVec = kPack4 ? 4 : 1;
+
+  for (IndexType vecLinear = (blockIdx.x * blockDim.x + threadIdx.x) * kElemsPerVec;
+       vecLinear < totalSize;
+       vecLinear += gridDim.x * blockDim.x * kElemsPerVec) {
+
+    IndexType linearIndex = vecLinear;
     IndexType dstIndex, elementInSlice;
-    if (IndexIsMajor) {
+    if constexpr (IndexIsMajor) {
       dstIndex = linearIndex / innerSize;
       elementInSlice = linearIndex % innerSize;
     }
@@ -1559,8 +1568,55 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
     IndexType srcOffset =
       cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcSelectDim];
+    if constexpr (kPack4) {
+      IndexType srcNextOffset = cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice + 1, src) + srcIndex * src.strides[srcSelectDim];
+      IndexType dstNextOffset = cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice + 1, dst) + dstIndex * dst.strides[dstSelectDim];
 
-    dst.data[dstOffset] = src.data[srcOffset];
+      bool inner_contiguous = (srcNextOffset - srcOffset == 1) && (dstNextOffset - dstOffset == 1);
+      bool slic_has_4 = (elementInSlice + 3 < innerSize);
+      bool aligned = (((uintptr_t)(dst.data + dstOffset) & 7)==0) && (((uintptr_t)(src.data + srcOffset) & 7)==0);
+
+      bool can_vectorize = IndexIsMajor && inner_contiguous && slic_has_4 && aligned;
+      #if defined(__CUDA_ARCH__)
+        bool warp_fast = __all_sync(0xffffffffu, can_vectorize);
+      #elif defined(__HIP_DEVICE_COMPILE__)
+        unsigned long long mask = __ballot(can_vectorize);
+        bool warp_fast = (mask == 0xffffffff);
+      #else
+        bool warp_fast = can_vectorize;
+      #endif
+
+      if (warp_fast) {
+        uint64_t tmp;
+        memcpy(&tmp, src.data + srcOffset, 8);
+        memcpy(dst.data + dstOffset, &tmp, 8);
+      } else {
+      #pragma unroll
+      for (int i = 0; i < kElemsPerVec; ++i) {
+        IndexType li = linearIndex + i;
+        if (li >= totalSize) break;
+
+        IndexType dstIndex2, elem2;
+        if constexpr (IndexIsMajor) {
+          dstIndex2 = li / innerSize;
+          elem2 = li % innerSize;
+        } else {
+          elem2 = li / innerSize;
+          dstIndex2 = li % innerSize;
+        }
+
+        IndexType srcIndex2 = indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(dstIndex2, indices)];
+        CUDA_KERNEL_ASSERT(srcIndex2 < srcSelectDimSize);
+
+        IndexType dstOffset2 = cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elem2, dst) + dstIndex2 * dst.strides[dstSelectDim];
+        IndexType srcOffset2 = cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elem2, src) + srcIndex2 * src.strides[srcSelectDim];
+        dst.data[dstOffset2] = src.data[srcOffset2];
+        }
+      }
+    }
+    else {
+      dst.data[dstOffset] = src.data[srcOffset];
+    }
   }
 }
 
@@ -1702,7 +1758,12 @@ void index_select_out_cuda_impl(
             LARGE_INDEX(scalar_t, index_t, unsigned int, 3, 3, -2, false);
           }
         } else {
-          LARGE_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1, true);
+          if (indexIsMajor) {
+            LARGE_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1, true);
+          } else {
+            LARGE_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1, false);
+          }
+
         }
       }
     });
@@ -1731,7 +1792,7 @@ Tensor& index_select_out_cuda(
     int64_t dim,
     const Tensor& index,
     Tensor& out) {
-  static constexpr string_view DIM_WARNING =
+  static constexpr std::string_view DIM_WARNING =
       "Tensor too large or too many (> 25) dimensions";
   TORCH_CHECK(
       at::cuda::check_device({out, self, index}),
