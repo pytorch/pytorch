@@ -58,6 +58,10 @@ static void rsqrt_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "rsqrt");
 }
 
+static void neg_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "neg");
+}
+
 static void bitwise_not_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "bitwise_not");
 }
@@ -73,5 +77,6 @@ REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(sqrt_stub, sqrt_kernel_mps);
 REGISTER_DISPATCH(rsqrt_stub, rsqrt_kernel_mps);
 REGISTER_DISPATCH(exp2_stub, exp2_kernel_mps);
+REGISTER_DISPATCH(neg_stub, neg_kernel_mps);
 REGISTER_DISPATCH(bitwise_not_stub, bitwise_not_kernel_mps);
 } // namespace at::native

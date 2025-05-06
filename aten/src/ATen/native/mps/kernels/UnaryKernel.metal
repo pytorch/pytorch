@@ -168,6 +168,13 @@ struct rsqrt_functor {
   }
 };
 
+struct neg_functor {
+  template <typename T>
+  inline T operator()(const T x) {
+    return T(-1 * x);
+  }
+};
+
 struct bitwise_not_functor {
   template <typename T>
   inline enable_if_t<!is_same_v<T, bool> && is_scalar_integral_v<T>, T>
@@ -183,6 +190,14 @@ struct bitwise_not_functor {
 
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
+
+REGISTER_UNARY_OP(neg, int, int);
+REGISTER_UNARY_OP(neg, long, long);
+REGISTER_UNARY_OP(neg, short, short);
+REGISTER_UNARY_OP(neg, char, char);
+REGISTER_UNARY_OP(neg, uchar, uchar);
+REGISTER_UNARY_OP(neg, float, float);
+REGISTER_UNARY_OP(neg, half, half);
 
 REGISTER_UNARY_OP(bitwise_not, int, int);
 REGISTER_UNARY_OP(bitwise_not, long, long);
@@ -205,6 +220,7 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
+REGISTER_UNARY_OP(neg, bfloat, bfloat);
 #endif
 INSTANTIATE_UNARY_KERNELS2(half, half);
 INSTANTIATE_UNARY_KERNELS2(float, float);
@@ -216,6 +232,7 @@ INSTANTIATE_UNARY_KERNELS2(float, int);
 INSTANTIATE_UNARY_KERNELS2(float, long);
 
 #define INSTANTIATE_UNARY_KERNELS_VEC2(DTYPE)   \
+  REGISTER_UNARY_OP(neg, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(exp, DTYPE##2, DTYPE##2);   \
   REGISTER_UNARY_OP(exp2, DTYPE##2, DTYPE##2);  \
   REGISTER_UNARY_OP(tanh, DTYPE##2, DTYPE##2);  \

@@ -4921,8 +4921,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: neg_out
-    MPS: neg_out_mps
+    CPU, CUDA, MPS: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: neg_sparse_csr_out
   tags: pointwise
