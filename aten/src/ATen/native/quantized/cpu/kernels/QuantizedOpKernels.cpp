@@ -2544,7 +2544,7 @@ void q_batch_norm_cpu_kernel_impl(
   auto fake_scale = _mm512_set1_ps(1.0f);
   auto scale_neg_zp_premul = _mm512_xor_ps(_mm512_set1_ps(-0.f), in_zp_vec);
   auto out_zero_point_v = _mm512_set1_epi32((int)out_zero_point);
-  const auto lanes = static_cast<int64_t>(num_vecs * kVLen);
+  constexpr auto lanes = static_cast<int64_t>(num_vecs * kVLen);
   __m512i v_q_max = _mm512_set1_epi32(q_max);
   __m512i v_q_min = _mm512_set1_epi32(q_min);
 
@@ -2574,6 +2574,14 @@ void q_batch_norm_cpu_kernel_impl(
     dst[1] = _mm512_cvtepi32_ps(i32_1);
     dst[2] = _mm512_cvtepi32_ps(i32_2);
     dst[3] = _mm512_cvtepi32_ps(i32_3);
+  };
+
+  auto load_convert_u8_to_f32_128bit = [&](const uint8_t* src) {
+    // --- Load and expand uint8_t -> uint16_t ---
+    __m256i v_u16 = _mm256_cvtepu8_epi16(_mm_loadu_si128((__m128i*)src));
+
+    // --- Expand to uint32_t and convert to float ---
+    return _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(v_u16));
   };
 
   auto store_output = [&](__m512 out, T* out_addr) {
@@ -2616,20 +2624,17 @@ void q_batch_norm_cpu_kernel_impl(
         }
       }
 
-      // for channel between 16 and 64, still use 64 width for performance
+      // for channel between 16 and 64
       int64_t elem_size = C - ch;
-      if ((lanes == 64) && elem_size >= kVLen) {
+      if (elem_size >= kVLen) {
         int64_t vec_num = elem_size / kVLen;
-        std::vector<uint8_t> buf_in(lanes);
-        memcpy(buf_in.data(), X_ptr + ch, vec_num * kVLen); // 3 cycles
-        __m512 vals_dq[num_vecs];
-        load_convert_u8_to_f32_512bit(buf_in.data(), vals_dq);
         for (const auto idx : c10::irange(vec_num)) {
-          vals_dq[idx] = _mm512_fmadd_ps(fake_scale, vals_dq[idx], scale_neg_zp_premul);
+          __m512 val_dq = load_convert_u8_to_f32_128bit(X_ptr + ch + idx * kVLen);
+          val_dq = _mm512_fmadd_ps(fake_scale, val_dq, scale_neg_zp_premul);
           auto alpha_v = _mm512_loadu_ps(alpha_ptr + ch + idx * kVLen);
           auto beta_v = _mm512_loadu_ps(beta_ptr + ch + idx * kVLen);
-          vals_dq[idx] = _mm512_fmadd_ps(alpha_v, vals_dq[idx], beta_v);
-          store_output(vals_dq[idx], Y_ptr + ch + idx * kVLen);
+          val_dq = _mm512_fmadd_ps(alpha_v, val_dq, beta_v);
+          store_output(val_dq, Y_ptr + ch + idx * kVLen);
         }
         ch += vec_num * kVLen;
       }

@@ -3204,7 +3204,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoONEDNN
     def test_int8_batch_norm_onednn(self):
         # hypothesis too slow for this test, create test cases manually
-        channel_len_list = (8, 64, 96, 128)
+        channel_len_list = (8, 64, 100, 120, 128)
         output_dtype_list = [torch.uint8, torch.float, torch.bfloat16, torch.half]
         x_scale, x_zero_point = 0.1, 1
         cases = itertools.product(channel_len_list, output_dtype_list)
