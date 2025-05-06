@@ -838,7 +838,7 @@ class BaseSchedulerNode:
         except Exception:
             return 0
 
-        if isinstance(self, FusedSchedulerNode):
+        if isinstance(self, (FusedSchedulerNode, GroupedSchedulerNode)):
             flops_est: int | None = sum(
                 filter(
                     None,
