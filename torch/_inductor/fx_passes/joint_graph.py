@@ -284,7 +284,7 @@ class UniformValueConstantFolder(ConstantFolder):
             node.op == "call_function"
             and node.target == torch.ops.aten.lift_fresh_copy.default
         ):
-            out = super(ConstantFolder, self)._run_node_on_cpu(node)
+            out = self._run_node_on_cpu(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
@@ -309,7 +309,7 @@ class UniformValueConstantFolder(ConstantFolder):
 
         # handle before view ops because this changes value
         if node.target == aten.view.dtype:
-            return super(ConstantFolder, self)._run_node_on_cpu(node)
+            return self._run_node_on_cpu(node)
 
         # view ops, return input tensor, the first argument
         if hasattr(node.target, "overloadpacket") and (
