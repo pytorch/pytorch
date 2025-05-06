@@ -239,8 +239,7 @@ struct AttentionKernel {
         value_ptr += batch_id * v_strideB;
         output_ptr += batch_id * q_strideB;
 
-        // Last dim must be contiguous
-        // So we increment by the stride of the batch dim and then
+        // Reuse q_strides since we want to guarantee exact match w/ input
         if (output_accum_ptr != nullptr) {
           output_accum_ptr +=
               int64_t(batch_id * q_strideB);
