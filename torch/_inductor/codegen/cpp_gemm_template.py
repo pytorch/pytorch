@@ -340,7 +340,7 @@ SMALL_M_GEMM_TEMPLATE = r"""
             // Handle one output Nr block at a time in each thread
             int64_t n_start = nr_block_id * Nr;
             int64_t n_end = (nr_block_id + 1) * Nr;
-    {%- if use_local_acc %}
+{%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
             {{ kernel.define_stack_allocated_buffer(acc_buf_name, ["M", "Nr"], acc_buf_dtype) }}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
