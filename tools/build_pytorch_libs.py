@@ -98,11 +98,11 @@ def checkout_nccl() -> None:
     print(f"-- Checkout nccl release tag: {release_tag}")
     nccl_basedir = os.path.join(third_party_path, "nccl")
     if not os.path.exists(nccl_basedir):
+        ## pip install --target d:\somewhere\other\than\the\default package_name
         subprocess.check_call(
-            ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
+            ["pip", "install", "nvidia-nccl-cu12==2.26.2", "--target", "third_party_path"],
             cwd=third_party_path,
         )
-        subprocess.check_call(["git", "checkout", release_tag], cwd=nccl_basedir)
 
 
 def build_pytorch(
