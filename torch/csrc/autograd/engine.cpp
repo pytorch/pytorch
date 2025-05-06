@@ -1063,12 +1063,26 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // The InputBuffer::adds that supplied incoming grads took pains to
-  // ensure they're safe to consume in the context of the present
-  // func's stream (if applicable). So we guard onto that stream
-  // before working with the grads in any capacity.
+  // Guard onto the present func's stream
   auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
+  if (opt_parent_stream.has_value()) {
+    for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
+      if (!inputs.buffer[pos].defined()) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(inputs.ready_events[pos].has_value())
+      // Ensure that the incoming gradients are ready
+      const auto& ready_stream = inputs.ready_streams[pos];
+      TORCH_INTERNAL_ASSERT(ready_stream.has_value());
+      if (*opt_parent_stream != *ready_stream) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        opt_parent_stream->wait(inputs.ready_events[pos].value());
+        _record_stream_any_impl(inputs.buffer[pos], *opt_parent_stream);
+      }
+    }
+  }
 
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
@@ -1179,11 +1193,7 @@ void Engine::evaluate_function(
       // Accumulates into buffer
       auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr,
-          std::move(output),
-          opt_parent_stream,
-          opt_next_stream,
-          graph_task->dependencies_orig_[next.function.get()]);
+          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
@@ -1199,11 +1209,7 @@ void Engine::evaluate_function(
       // Accumulates into buffer
       auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr,
-          std::move(output),
-          opt_parent_stream,
-          opt_next_stream,
-          graph_task->dependencies_orig_[next.function.get()]);
+          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
@@ -1237,6 +1243,7 @@ auto Engine::compute_dependencies(
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
+  auto& dependencies = task.dependencies_;
   while (!queue.empty()) {
     auto fn = queue.back();
     queue.pop_back();
@@ -1248,8 +1255,7 @@ auto Engine::compute_dependencies(
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
-        task.dependencies_[next_ptr] += 1;
-        task.dependencies_orig_[next_ptr] += 1;
+        dependencies[next_ptr] += 1;
         const bool was_inserted = task.nodes_in_graph_.insert(next_ptr).second;
         if (was_inserted)
           queue.push_back(next_ptr);
@@ -1355,8 +1361,7 @@ auto Engine::execute(
         root_edges.at(0).input_nr,
         std::move(input),
         input_stream,
-        opt_next_stream,
-        1);
+        opt_next_stream);
 
     execute_with_graph_task(
         graph_task, std::move(graph_root), std::move(input_buffer));

@@ -20,61 +20,6 @@
 namespace torch::autograd {
 
 namespace {
-// look what you made me do >.<
-// Divergent paths for per-Impl stream recording that leak implementation
-// details of the impls should not be needed here.
-// See https://github.com/pytorch/pytorch/issues/60306
-// TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
-// improved
-void mb_record_stream_any_impl(
-    Variable& var,
-    const c10::Stream& stream,
-    const c10::Stream& prev_stream) {
-  if (stream == prev_stream) {
-    return;
-  }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
-
-  if (C10_UNLIKELY(at::isBatchedTensor(var))) {
-    auto* impl = at::maybeGetBatchedImpl(var);
-    if (impl) {
-      guard.recordDataPtrOnStream(impl->value().storage().data_ptr(), stream);
-    } else {
-      TORCH_INTERNAL_ASSERT(false, "Expected batched tensor");
-    }
-  } else {
-    switch (var.layout()) {
-      case c10::kSparseCsr:
-      case c10::kSparseCsc:
-      case c10::kSparseBsr:
-      case c10::kSparseBsc: {
-        auto* impl = at::sparse_csr::get_sparse_csr_impl(var);
-        guard.recordDataPtrOnStream(
-            impl->values().storage().data_ptr(), stream);
-        guard.recordDataPtrOnStream(
-            impl->compressed_indices().storage().data_ptr(), stream);
-        guard.recordDataPtrOnStream(
-            impl->plain_indices().storage().data_ptr(), stream);
-        break;
-      }
-      case c10::kSparse: {
-        auto* impl = at::sparse::get_sparse_impl(var);
-        guard.recordDataPtrOnStream(
-            impl->values().storage().data_ptr(), stream);
-        guard.recordDataPtrOnStream(
-            impl->indices().storage().data_ptr(), stream);
-        break;
-      }
-      case c10::kStrided:
-        guard.recordDataPtrOnStream(var.storage().data_ptr(), stream);
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(
-            false, "Unknown layout in record_stream_any_impl");
-    }
-  }
-}
 
 bool can_accumulate_inplace(const Variable& v) {
   return (
@@ -87,19 +32,6 @@ bool can_accumulate_inplace(const Variable& v) {
       // and we hold the last reference
       at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
       v.storage().use_count() == 1);
-}
-
-void mb_wait_stream(
-    const std::optional<c10::Stream>& lhs,
-    const std::optional<c10::Stream>& rhs,
-    c10::DeviceType device_type) {
-  TORCH_INTERNAL_ASSERT(lhs && rhs);
-  if (*lhs == *rhs) {
-    return;
-  }
-  auto event = c10::Event{device_type};
-  event.record(*rhs);
-  lhs->wait(event);
 }
 
 } // anonymous namespace
@@ -146,7 +78,62 @@ static void accumulate(
   }
 }
 
-// Note [Stream sync contract when dealing with multi-deviced-ness]
+// look what you made me do >.<
+// Divergent paths for per-Impl stream recording that leak implementation
+// details of the impls should not be needed here.
+// See https://github.com/pytorch/pytorch/issues/60306
+// TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
+// improved
+void _record_stream_any_impl(Variable& var, const c10::Stream& stream) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+
+  if (stream.device_index() != var.device().index()) {
+    return;
+  }
+
+  const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
+
+  if (C10_UNLIKELY(at::isBatchedTensor(var))) {
+    auto* impl = at::maybeGetBatchedImpl(var);
+    if (impl) {
+      guard.recordDataPtrOnStream(impl->value().storage().data_ptr(), stream);
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Expected batched tensor");
+    }
+  } else {
+    switch (var.layout()) {
+      case c10::kSparseCsr:
+      case c10::kSparseCsc:
+      case c10::kSparseBsr:
+      case c10::kSparseBsc: {
+        auto* impl = at::sparse_csr::get_sparse_csr_impl(var);
+        guard.recordDataPtrOnStream(
+            impl->values().storage().data_ptr(), stream);
+        guard.recordDataPtrOnStream(
+            impl->compressed_indices().storage().data_ptr(), stream);
+        guard.recordDataPtrOnStream(
+            impl->plain_indices().storage().data_ptr(), stream);
+        break;
+      }
+      case c10::kSparse: {
+        auto* impl = at::sparse::get_sparse_impl(var);
+        guard.recordDataPtrOnStream(
+            impl->values().storage().data_ptr(), stream);
+        guard.recordDataPtrOnStream(
+            impl->indices().storage().data_ptr(), stream);
+        break;
+      }
+      case c10::kStrided:
+        guard.recordDataPtrOnStream(var.storage().data_ptr(), stream);
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(
+            false, "Unknown layout in record_stream_any_impl");
+    }
+  }
+}
+
+// Note: [Stream sync contract when dealing with multi-deviced-ness]
 //
 // An operator can deal with multiple devices, e.g. if it does a device
 // transfer, etc. However, for the purpose of stream synchronization, the engine
@@ -159,19 +146,54 @@ static void accumulate(
 //   stream during node execution.
 // 2) A node consuming a gradient should wait on the current stream before using
 //    it.
+//
+// Note: [Autograd Producer-Consumer Stream Syncs]
+//
+// The actual wait and record stream happens prior to the consumer's
+// execution. The logic here is mainly responsible for handling the
+// synchronization needed for accumulation and recording the event that the
+// consumer should wait on later.
+//
+// First producer
+// ==============
+// 1) Determine the accumulation stream (which may or may not be used):
+//    case A) var's device matches consumer node's canonical device
+//            (The producer node's canonical device may or may not match)
+//            -> accumulator stream = consumer stream
+//    case B) var's device matches producer node's canonical device
+//            and does not match consumer node's canonical device
+//            -> accumulator stream = producer stream
+//    case C) var device matches neither
+//            -> accumulator stream = var device's current stream
+//            See Note [Stream sync contract when dealing with
+//            multi-deviced-ness]
+// 2) Because we are the first producer, there's no accumulation necessary.
+//    Just move var into the buffer.
+// 3) Update the ready_events and streams for the current position.
+//    ready_events are events you need to wait for to ensure the corresponding
+//    buffers are ready. The events are updated as we accumulate into the
+//    buffer.
+//
+// Nth producer
+// ============
+// 1) Synchronize for accumulation. Accumulation operates on both the new
+//   incoming gradient and the existing gradient in the buffer.
+//   (1) wait stream and (2) record stream to make sure both are ready to be
+//   used on the accumulation stream.
+// 2) Accumulation on the accumulation straem
+// 3) Update the ready event and stream for the current position.
+//
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
     const std::optional<c10::Stream>& opt_producer_stream_,
-    const std::optional<c10::Stream>& opt_consumer_stream,
-    int num_dependencies) {
+    const std::optional<c10::Stream>& opt_consumer_stream) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
 
   if (!var.defined()) {
     return;
   }
-  int curr_producer_idx = accum_counts[pos]++;
   auto const device = device_of(var);
   TORCH_INTERNAL_ASSERT(device.has_value());
   const auto device_type = device->type();
@@ -182,8 +204,7 @@ void InputBuffer::add(
   // [ Non-accelerator case ]
   //
   if (!is_accelerator) {
-    if (curr_producer_idx == 0) {
-      TORCH_INTERNAL_ASSERT(!buffer[pos].defined())
+    if (!buffer[pos].defined()) {
       buffer[pos] = std::move(var);
     } else {
       c10::OptionalDeviceGuard device_guard{device};
@@ -202,114 +223,49 @@ void InputBuffer::add(
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
-  //
-  // [ Single producer case ]
-  //
-  // If during forward, a tensor is used only once, there's only a single
-  // producer node corresponding to the input buffer we're adding to.
-  // There is no need to accumulate in this case.
-  if (num_dependencies == 1) {
-    mb_wait_stream(opt_consumer_stream, opt_producer_stream, device_type);
-    mb_record_stream_any_impl(
-        var, *opt_consumer_stream, /*prev_stream=*/*opt_producer_stream);
-    TORCH_INTERNAL_ASSERT(curr_producer_idx == 0);
-    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
-    buffer[pos] = std::move(var);
-    return;
-  }
-  //
-  // [ Multiple producer case ]
-  //
-  // First producer
-  // ==============
-  //
-  // - Determine the accumulation stream:
-  //    case 1) var's device matches consumer node's canonical device
-  //            (The producer node's canonical device may or may not match)
-  //            -> accumulator stream = consumer stream
-  //    case 2) var's device matches producer node's canonical device
-  //            and does not match consumer node's canonical device
-  //            -> accumulator stream = producer stream
-  //    case 3) var device matches neither
-  //            -> accumulator stream = var device's current stream
-  //            See Note [Stream sync contract when dealing with
-  //            multi-deviced-ness]
-  //
-  // - Record stream (var will be used on the accum stream)
-  // - Because we are the first producer, there's no accumulation necessary.
-  //   Just move var into the buffer.
-  //
-  // Nth producer
-  // ============
-  //
-  // - The accumulation stream (determined at "first producer") waits for
-  //   the new producer stream
-  // - Record stream (var will be used on the accum stream)
-  // - Accumulate var into buffer
-  // - If we are the last producer, the consumer waits for the accumulation
-  //   stream. (No-op for case 1)
-  //
-  //
-  // Note: [Delay synchronizing the first producer]
-  //
-  // In case 1, we delay synchronizing the first producer with the
-  // consumer until we see the second producer. For more details, see
-  // "test_side_stream_backward_overlap".
-  //
-  // There are two pieces of logic that happen:
-  //    Part 1: At the first iteration, record an event on the first
-  //            producer stream and stash it.
-  //    Part 2: At the second iteration, have the consumer wait for
-  //            for the stashed event.
-  //
-  bool matches_consumer = opt_consumer_stream->device() == *device;
-
-  if (curr_producer_idx == 0) {
+  // See Note: [Autograd Producer-Consumer Stream Syncs]
+  if (!opt_accum_streams[pos].has_value()) {
     // [ First producer ]
-    // Determine the accumulation stream
-    if (matches_consumer) {
-      // Case 1
+    // 1)
+    if (opt_consumer_stream->device() == *device) {
+      // Case A
       opt_accum_streams[pos] = opt_consumer_stream;
-      // Part 1 of Note: [Delay synchronizing the first producer]
-      opt_first_producer_evts[pos] = c10::Event{device_type};
-      opt_first_producer_evts[pos]->record(*opt_producer_stream);
-      opt_first_producer_streams[pos] = opt_producer_stream;
     } else if (opt_producer_stream->device() == *device) {
-      // Case 2
+      // Case B
       opt_accum_streams[pos] = opt_producer_stream;
     } else {
-      // Case 3
+      // Case C
       opt_accum_streams[pos] =
           at::accelerator::getCurrentStream(device->index());
     }
-    mb_record_stream_any_impl(
-        var,
-        *opt_accum_streams[pos],
-        /*prev_stream=*/*opt_producer_stream);
+    // 2)
     TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
     buffer[pos] = std::move(var);
+    // 3)
+    ready_events[pos] = c10::Event{device_type};
+    ready_events[pos]->record(*opt_producer_stream);
+    ready_streams[pos] = opt_producer_stream;
   } else {
     // [ Nth producer ]
     auto accum_stream = opt_accum_streams[pos];
-    TORCH_INTERNAL_ASSERT(accum_stream);
-    mb_wait_stream(accum_stream, opt_producer_stream, device_type);
-    mb_record_stream_any_impl(
-        var, *accum_stream, /*prev_stream=*/*opt_producer_stream);
-    if (matches_consumer && curr_producer_idx == 1) {
-      TORCH_INTERNAL_ASSERT(
-          opt_first_producer_streams[pos] && opt_first_producer_evts[pos]);
-      // Part 2 of Note: [Delay synchronizing the first producer]
-      if (*accum_stream != *opt_first_producer_streams[pos]) {
-        accum_stream->wait(*opt_first_producer_evts[pos]);
-      }
+    // 1)
+    if (*accum_stream != *opt_producer_stream) {
+      auto event = c10::Event{device_type};
+      event.record(*opt_producer_stream);
+      accum_stream->wait(event);
+      _record_stream_any_impl(var, *accum_stream);
     }
-    {
-      c10::OptionalStreamGuard stream_guard{accum_stream};
-      accumulate(buffer, pos, std::move(var));
+    if (*accum_stream != *ready_streams[pos]) {
+      accum_stream->wait(*ready_events[pos]);
+      _record_stream_any_impl(buffer[pos], *opt_accum_streams[pos]);
     }
-    if (curr_producer_idx == num_dependencies - 1) {
-      mb_wait_stream(opt_consumer_stream, accum_stream, device_type);
-    }
+    // 2)
+    c10::OptionalStreamGuard stream_guard{accum_stream};
+    accumulate(buffer, pos, std::move(var));
+    // 3)
+    ready_events[pos] = c10::Event{device_type};
+    ready_events[pos]->record(*accum_stream);
+    ready_streams[pos] = accum_stream;
   }
 }
 // NOLINTEND(bugprone-unchecked-optional-access)

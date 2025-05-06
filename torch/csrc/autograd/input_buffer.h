@@ -18,9 +18,8 @@ struct InputBuffer {
   explicit InputBuffer(size_t size)
       : buffer(size),
         opt_accum_streams(size),
-        opt_first_producer_evts(size),
-        opt_first_producer_streams(size),
-        accum_counts(size, 0) {}
+        ready_events(size),
+        ready_streams(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
   explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
@@ -33,9 +32,7 @@ struct InputBuffer {
       size_t pos,
       Variable&& var,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const std::optional<c10::Stream>& opt_consumer_stream,
-      // How many times we expect to add to this pos in total
-      int num_dependencies);
+      const std::optional<c10::Stream>& opt_consumer_stream);
 
   Variable operator[](size_t pos) {
     return buffer[pos];
@@ -47,13 +44,13 @@ struct InputBuffer {
   std::vector<Variable> buffer;
   // The stream used for accumulation when a variable is used multiple times.
   std::vector<std::optional<c10::Stream>> opt_accum_streams;
-  // Record an event on the first producer stream so we can delay
-  // waiting for it until the second producer is seen. See Note: [Delay
-  // synchronizing the first producer]
-  std::vector<std::optional<c10::Event>> opt_first_producer_evts;
-  std::vector<std::optional<c10::Stream>> opt_first_producer_streams;
-  // Count the number of times we've added to each position.
-  std::vector<int> accum_counts;
+  // The events you need to wait for to ensure the corresponding buffers
+  // are ready. The events are updated as we accumulate into the buffer.
+  std::vector<std::optional<c10::Event>> ready_events;
+  // The streams corresponding to the events above.
+  std::vector<std::optional<c10::Stream>> ready_streams;
 };
+
+void _record_stream_any_impl(Variable& var, const c10::Stream& stream);
 
 } // namespace torch::autograd
