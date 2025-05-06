@@ -4298,7 +4298,7 @@ def meta_alias(self):
     return self.view(self.shape)
 
 
-def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
+def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype=None):
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
 
@@ -4316,10 +4316,18 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
         lambda: f"Expected size for first two dimensions of batch2 tensor to be: [{bs}"
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
-
-    # TODO: handle out
-
-    output = batch2.new_empty(output_size)
+    if out_dtype:
+        supported_out_dtype = (
+            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+        ) and out_dtype == torch.float32
+        torch._check(
+            out_dtype == batch1.dtype or supported_out_dtype,
+            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+        )
+        output = batch2.new_empty(output_size).to(out_dtype)
+    else:
+        # TODO: handle out
+        output = batch2.new_empty(output_size)
 
     if not is_bmm and self_baddbmm is not None:
         torch._check(self_baddbmm.dim() == 3, lambda: "self must be a 3D tensor")
@@ -4334,6 +4342,11 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
 @register_meta(aten.bmm.default)
 def meta_bmm(self, mat2):
     return common_meta_baddbmm_bmm(self, mat2, True)
+
+
+@register_meta(aten.bmm.dtype)
+def meta_bmm_dtype(self, mat2, out_dtype):
+    return common_meta_baddbmm_bmm(self, mat2, True, out_dtype=out_dtype)
 
 
 def div_rtn(x, y):
@@ -5420,8 +5433,8 @@ def meta_gather(self, dim, index, sparse_grad=False):
     is_index_empty = guard_size_oblivious(index.numel() == 0)
     if not is_index_empty:
         torch._check(
-            index.dtype == torch.long,
-            lambda: f"gather(): Expected dtype int64 for index, but got {index.dtype}",
+            index.dtype == torch.long or index.dtype == torch.int,
+            lambda: f"gather(): Expected dtype int32/int64 for index, but got {index.dtype}",
         )
         gather_shape_check(self, wrapped_dim, index)
     return self.new_empty(index.shape)
@@ -5460,8 +5473,8 @@ def scatter_gather_dtype_check(method_name, self, index, src_opt=None):
 
     if guard_size_oblivious(index.numel() != 0):
         torch._check(
-            index.dtype == torch.long,
-            lambda: f"{method_name}(): Expected dtype int64 for index",
+            index.dtype == torch.long or index.dtype == torch.int,
+            lambda: f"{method_name}(): Expected dtype int32/int64 for index",
         )
 
     if src_opt is not None:
