@@ -687,6 +687,7 @@ class AutogradFunctionVariable(VariableTracker):
                     "a custom `jvp` method.",
                     hints=[
                         "Remove the custom `jvp` method if possible.",
+                        *graph_break_hints.SUPPORTABLE,
                     ],
                 )
 
