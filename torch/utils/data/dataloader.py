@@ -312,9 +312,8 @@ class DataLoader(Generic[_T_co]):
         # disable pin_memory on MPS. Remove this restriction once pinned
         # memory allocation for MPS is fixed.
         if (
-            self.pin_memory
-            and (acc := torch.accelerator.current_accelerator()) is not None
-            and acc.type == "mps"
+            self.pin_memory_device is not None 
+            and self.pin_memory_device == "mps"
         ):
             self._pin_memory = False
             warn_msg = (
