@@ -183,9 +183,9 @@ function prune_126 {
 
 function install_128 {
   CUDNN_VERSION=9.8.0.87
-  echo "Installing CUDA 12.8.0 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
-  # install CUDA 12.8.0 in the same container
-  install_cuda 12.8.0 cuda_12.8.0_570.86.10_linux
+  echo "Installing CUDA 12.8.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.3"
+  # install CUDA 12.8.1 in the same container
+  install_cuda 12.8.1 cuda_12.8.1_570.124.06_linux
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 12 $CUDNN_VERSION
