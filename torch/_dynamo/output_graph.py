@@ -300,6 +300,9 @@ class OutputGraphGuardsState:
     guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
+    dual_level: int
+    functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
+
     export: bool = False
     export_constraints: bool = False
 
@@ -351,6 +354,8 @@ class OutputGraph(OutputGraphGuardsState):
             torch_function_mode_stack,
             guard_on_key_order=set(),
             input_source_to_sizes_strides={},
+            dual_level=torch.autograd.forward_ad._current_level,
+            functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -586,6 +591,8 @@ class OutputGraph(OutputGraphGuardsState):
             torch_function_mode_stack=self.torch_function_mode_stack,
             guard_on_key_order=self.guard_on_key_order,
             input_source_to_sizes_strides=self.input_source_to_sizes_strides,
+            dual_level=self.dual_level,
+            functorch_layers=self.functorch_layers,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
