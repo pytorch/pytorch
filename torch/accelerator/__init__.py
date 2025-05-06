@@ -2,7 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Any, Optional
+from typing import Optional
 from typing_extensions import deprecated
 
 import torch
@@ -121,7 +121,7 @@ current_device_idx = deprecated(
 )(current_device_index)
 
 
-def set_device_index(device: ExplicitDevice) -> None:
+def set_device_index(device: ExplicitDevice, /) -> None:
     r"""Set the current device index to a given device.
 
     Args:
