@@ -406,7 +406,6 @@ auto_functionalized_v2.fallthrough(DispatchKey.AutogradCUDA)
 def can_auto_functionalize(
     op: Union[OperatorBase, HopInstance],
 ) -> bool:
-    assert isinstance(op, (OperatorBase, HopInstance)), (op, type(op))
     if isinstance(op, HopInstance):
         # HOPs that implement gen_schema and schema is not functional are auto_functionalizable.
         def _has_gen_schema(op: HigherOrderOperator):

@@ -79,7 +79,7 @@ std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHa
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
-// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/conv_sample.cpp#L293
+// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/legacy_samples/conv_sample.cpp#L295
 //static cudnn_frontend::ExecutionPlanCache plan_cache("sample_cache");
 
 // currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized linear op
