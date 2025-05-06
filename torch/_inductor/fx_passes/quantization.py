@@ -1068,6 +1068,39 @@ def _register_quantization_reshape():
     )
 
 
+def _is_valid_concat_linear_woq_optimization_pattern():
+    def fn(match):
+        assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
+        if not all(
+            hasattr(match.kwargs[key], "meta")
+            for key in ["x", "w1", "w2", "w3", "scales"]
+        ):
+            return False
+        x = match.kwargs["x"].meta["val"]
+        w1 = match.kwargs["w1"].meta["val"]
+        w2 = match.kwargs["w2"].meta["val"]
+        w3 = match.kwargs["w3"].meta["val"]
+        scales = match.kwargs["scales"].meta["val"]
+        return (
+            # For now, we only support woq mm kernels
+            # with x.type=bfloat16 and w.type=int8
+            x.dtype == torch.bfloat16
+            and w1.dtype == torch.int8
+            and w2.dtype == torch.int8
+            and w3.dtype == torch.int8
+            and scales.dtype == torch.bfloat16
+            # _weight_int8pack_mm kernel only supports cpu now
+            # TODO: add cuda kernel support instead of calling mul+sum
+            and x.device.type == "cpu"
+            and x.device == w1.device
+            and w1.device == w2.device
+            and w2.device == w3.device
+            and x.device == scales.device
+        )
+
+    return fn
+
+
 def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
@@ -1092,6 +1125,56 @@ def _is_valid_woq_optimization_pattern():
         )
 
     return fn
+
+
+def _register_concat_linear_woq_lowering(pattern, computation_woq, computation_reshape):
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_is_valid_concat_linear_woq_optimization_pattern(),
+        pass_number=2,
+    )
+    def woq(match: Match, *args, **kwargs):
+        x = kwargs["x"]
+        w1 = kwargs["w1"]
+        w2 = kwargs["w2"]
+        w3 = kwargs["w3"]
+        scales = kwargs["scales"]
+        counters["inductor"]["woq_matcher_count"] += 1
+        counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
+        out_features = (
+            w1.meta["val"].size()[0]
+            + w2.meta["val"].size()[0]
+            + w3.meta["val"].size()[0]
+        )
+        origin_x_size = tuple(x.meta["val"].size())
+        x_shape = [-1, origin_x_size[-1]]
+        out_shape = list(origin_x_size[:-1] + (out_features,))
+        mm_node_of_x = next(iter(x.users.keys()))
+        with match.graph.inserting_before(mm_node_of_x):
+            new_cat_node = match.graph.call_function(
+                aten.cat.default,
+                args=([w1, w2, w3], 0),
+            )
+            x_reshape_node = match.graph.call_function(
+                computation_reshape, args=(x, x_shape)
+            )
+            new_woq_node = match.graph.call_function(
+                computation_woq,
+                args=(x_reshape_node, new_cat_node, scales),
+            )
+            new_woq_node.meta = copy.copy(x.meta)
+            output_reshape_node = match.graph.call_function(
+                computation_reshape, args=(new_woq_node, out_shape)
+            )
+            _, cat_wgt_node = mm_node_of_x._input_nodes
+            scaling_node = next(iter(mm_node_of_x.users.keys()))
+            scaling_node.replace_all_uses_with(output_reshape_node)
+            match.graph.erase_node(scaling_node)
+            match.graph.erase_node(mm_node_of_x)
+            match.graph.erase_node(cat_wgt_node)
+            match.graph.lint()
+
+    return woq
 
 
 def _register_woq_lowering(pattern, computation_woq, computation_reshape):
@@ -1212,6 +1295,46 @@ def _register_woq_mm_int8_pattern4():
         KeywordArg("scales"),
     )
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
+def _register_woq_concat_linear_pattern():
+    wgt1 = CallFunction(
+        prims.convert_element_type.default,
+        CallFunction(
+            aten.permute.default,
+            KeywordArg("w1"),
+            Arg(),
+        ),
+        Arg(),
+    )
+    wgt2 = CallFunction(
+        prims.convert_element_type.default,
+        CallFunction(
+            aten.permute.default,
+            KeywordArg("w2"),
+            Arg(),
+        ),
+        Arg(),
+    )
+    wgt3 = CallFunction(
+        prims.convert_element_type.default,
+        CallFunction(
+            aten.permute.default,
+            KeywordArg("w3"),
+            Arg(),
+        ),
+        Arg(),
+    )
+    cat_wgt = CallFunction(aten.cat.default, [wgt1, wgt2, wgt3], 1)
+
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(aten.mm.default, KeywordArg("x"), cat_wgt),
+        KeywordArg("scales"),
+    )
+    _register_concat_linear_woq_lowering(
+        _woq_pattern, aten._weight_int8pack_mm.default, aten.reshape
+    )
 
 
 def _register_quantization_lowerings():
@@ -2185,7 +2308,8 @@ def _register_qlinear_weight_prepack():
     # Step 2: register patterns from bmm
     # Linear might be decomposed into bmm when input dim exceeds 2 and not contiguous
     # refer to:
-    # https://github.com/pytorch/pytorch/blob/80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
+    # https://github.com/pytorch/pytorch/blob/
+    # 80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
     # in this case, we can convert it back to qlinear
     for dtype, with_bias, is_tensor_overload in itertools.product(
         [torch.float32, torch.bfloat16], [True, False], [True, False]
