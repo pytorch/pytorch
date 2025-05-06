@@ -2539,7 +2539,7 @@ void q_batch_norm_cpu_kernel_impl(
 
 #if defined(CPU_CAPABILITY_AVX512)
   constexpr int kVLen = 16;
-  constexpr int num_vecs = sizeof(float) / sizeof(uint8_t);
+  static constexpr int num_vecs = sizeof(float) / sizeof(uint8_t);
   auto in_zp_vec = _mm512_set1_ps((float)in_zero_point);
   auto fake_scale = _mm512_set1_ps(1.0f);
   auto scale_neg_zp_premul = _mm512_xor_ps(_mm512_set1_ps(-0.f), in_zp_vec);
