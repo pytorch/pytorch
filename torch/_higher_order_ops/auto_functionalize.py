@@ -21,7 +21,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-class AutoFunctionalizedSchema:
+class SchemaHolder:
     def __init__(self, schema: torch.FunctionSchema):
         self.schema = schema
 
@@ -32,10 +32,19 @@ class AutoFunctionalizedSchema:
         return hash(self.schema)
 
 
-# regsiter_constant allows us to get a tree_spec from pytree.tree_flatten(FunctionSchema).
+# regsiter_constant allows us to get a tree_spec from pytree.tree_flatten(SchemaHolder(FunctionSchema)).
 # The tree_spec is proxable in the graph and we can get back the schema via
-# schema = pytree.tree_unflatten([], tree_spec)
-pytree.register_constant(AutoFunctionalizedSchema)
+# schema = pytree.tree_unflatten([], tree_spec).schema
+pytree.register_constant(SchemaHolder)
+
+
+# A wrapper over HigherOrderOperator that also carries its schema
+class HopInstance:
+    def __init__(self, op: HigherOrderOperator, schema: torch.FunctionSchema):
+        assert isinstance(op, HigherOrderOperator), op
+        self._op = op
+        # Using "_" to be consistent with how we access _schema of OpOverload
+        self._schema = schema
 
 
 def get_base(tensor):
@@ -374,12 +383,15 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         _mutable_op: _MutableOpType,
         **kwargs: Any,
     ) -> tuple[Any, tuple[Tensor, ...]]:
-        schema = (
-            pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema
-            if isinstance(_mutable_op, HigherOrderOperator)
-            else _mutable_op._schema
-        )
-        assert can_auto_functionalize(_mutable_op, schema)
+        _op_to_check: Optional[Union[OpOverload, HopInstance]] = None
+        if isinstance(_mutable_op, HigherOrderOperator):
+            schema = pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema
+            _op_to_check = HopInstance(_mutable_op, schema)
+        else:
+            _op_to_check = _mutable_op
+
+        assert _op_to_check is not None
+        assert can_auto_functionalize(_op_to_check)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
 
@@ -392,14 +404,9 @@ auto_functionalized_v2.fallthrough(DispatchKey.AutogradCUDA)
 
 
 def can_auto_functionalize(
-    op: Union[OperatorBase, HigherOrderOperator],
-    hop_schema: Optional[torch.FunctionSchema] = None,
+    op: Union[OperatorBase, HopInstance],
 ) -> bool:
-    if isinstance(op, HigherOrderOperator):
-        assert (
-            hop_schema is not None
-        ), "must provide a schema if op is a HigherOrderOperator."
-
+    if isinstance(op, HopInstance):
         # HOPs that implement gen_schema and schema is not functional are auto_functionalizable.
         def _has_gen_schema(op: HigherOrderOperator):
             method = "gen_schema"
@@ -407,7 +414,7 @@ def can_auto_functionalize(
                 type(op), method
             ) is not getattr(HigherOrderOperator, method)
 
-        return _has_gen_schema(op) and hop_schema.is_mutable
+        return _has_gen_schema(op._op) and op._schema.is_mutable
 
     if not isinstance(op, OpOverload):
         return False
@@ -680,9 +687,9 @@ def do_auto_functionalize_v2(
     auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)
     if isinstance(op, HigherOrderOperator):
         assert "_ops_schema" not in unwrapped_kwargs, (op, unwrapped_kwargs)
-        # We pass in the tree_spec of tree_flatten(AutoFunctionalizedSchema) to make it proxable
+        # We pass in the tree_spec of tree_flatten(SchemaHolder) to make it proxable
         auto_func_kwargs.update(
-            {"_op_schema": pytree.tree_flatten(AutoFunctionalizedSchema(schema))[1]}
+            {"_op_schema": pytree.tree_flatten(SchemaHolder(schema))[1]}
         )
 
     with ctx.redispatch_to_next():
