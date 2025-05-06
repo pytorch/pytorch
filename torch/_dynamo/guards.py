@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
 from weakref import ReferenceType
 
 import torch
@@ -475,7 +475,11 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
                     extra = f"  # {format_frame(fs, line=True)}"
                     break
         elif guard.stack:
-            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+            summary = guard.stack.summary()
+            if len(summary) > 0:
+                extra = f"  # {format_frame(summary[-1])}"
+            else:
+                extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
 
 
@@ -522,6 +526,14 @@ def get_key_index(dct, key):
 
 def get_key_index_source(source, index):
     return f"list(dict.keys({source}))[{index}]"
+
+
+def raise_local_type_error(obj: Any) -> NoReturn:
+    raise TypeError(
+        f"Type {type(obj)} for object {obj} cannot be saved "
+        + "into torch.compile() package since it's defined in local scope. "
+        + "Please define the class at global scope (top level of a module)."
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -622,6 +634,7 @@ class GuardBuilder(GuardBuilderBase):
         global_scope: dict[str, object],
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
+        serialization_mode: Optional[str] = None,
     ):
         self.f_code = f_code
         self.id_ref = id_ref
@@ -661,8 +674,8 @@ class GuardBuilder(GuardBuilderBase):
         # to access the same object - self._module["param"] is same as
         # self.param.
         self.key_order_guarded_dict_ids = set()
-        for source_name in self.check_fn_manager.output_graph.guard_on_key_order:
-            self.key_order_guarded_dict_ids.add(id(self.get(source_name)))
+        for source in self.check_fn_manager.output_graph.guard_on_key_order:
+            self.key_order_guarded_dict_ids.add(id(self.get(source.name())))
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -674,6 +687,7 @@ class GuardBuilder(GuardBuilderBase):
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self.serialization_mode = serialization_mode
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1436,7 +1450,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
-        t = type(self.get(guard.name))
+        value = self.get(guard.name)
+        t = type(value)
+        if self.serialization_mode == "save":
+            if t.__qualname__ != t.__name__:
+                raise_local_type_error(value)
+
         obj_id = self.id_ref(t, f"type({guard.name})")
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
@@ -1446,6 +1465,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def DICT_VERSION(self, guard: Guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("DICT_VERSION guard cannot be serialized.")
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -1500,6 +1521,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def ID_MATCH(self, guard: Guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("ID_MATCH guard cannot be serialized.")
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
@@ -1556,7 +1579,7 @@ class GuardBuilder(GuardBuilderBase):
     def DUAL_LEVEL(self, guard: Guard):
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
-        dual_level = torch.autograd.forward_ad._current_level
+        dual_level = self.check_fn_manager.output_graph.dual_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, [code])
         # TODO(anijain2305) - Consider this moving this guard to C++
@@ -1572,7 +1595,7 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        cis = self.check_fn_manager.output_graph.functorch_layers
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._set_guard_export_info(guard, code)
@@ -1815,6 +1838,8 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
+        if self.serialization_mode == "save":
+            raise RuntimeError("DUPLICATE_INPUT guard cannot be serialized yet.")
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
@@ -1841,6 +1866,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def WEAKREF_ALIVE(self, guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("WEAKREF_ALIVE guard cannot be serialized.")
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -2201,7 +2228,7 @@ class GuardBuilder(GuardBuilderBase):
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
-                # For numpy tensors, since those are ephemeral, we dont have to
+                # For numpy tensors, since those are ephemeral, we don't have to
                 # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
@@ -2495,7 +2522,25 @@ class GuardsStatePickler(pickle.Pickler):
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
 
+    @classmethod
+    def _unpickle_python_module(cls, alias: str):
+        return importlib.import_module(alias)
+
+    @classmethod
+    def _unpickle_dispatch_key_set(cls, raw_repr: int):
+        return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
+
+    @classmethod
+    def _unpickle_functorch_interpreter(cls, json: bytes):
+        return torch._C._functorch.CInterpreter.deserialize(json)
+
+    @classmethod
+    def _unpickle_mapping_proxy(cls, d):
+        return types.MappingProxyType(d)
+
     def reducer_override(self, obj):
+        import sympy
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta"),
@@ -2505,8 +2550,33 @@ class GuardsStatePickler(pickle.Pickler):
             )
 
         elif isinstance(obj, torch.nn.Module):
+            if type(obj).__qualname__ == type(obj).__name__:
+                return NotImplemented
             if obj.__class__.__getstate__ == torch.nn.Module.__getstate__:
                 return type(self)._unpickle_module, (obj.__getstate__(),)
+
+        elif inspect.ismodule(obj):
+            return type(self)._unpickle_python_module, (obj.__name__,)
+
+        elif isinstance(obj, torch._C.DispatchKeySet):
+            return type(self)._unpickle_dispatch_key_set, (obj.raw_repr(),)
+
+        elif isinstance(obj, torch._C._functorch.CInterpreter):
+            return type(self)._unpickle_functorch_interpreter, (obj.serialize(),)
+
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, sympy.Function)
+            and hasattr(obj, "_torch_handler_name")
+        ):
+            assert hasattr(obj, "_torch_unpickler")
+            return obj._torch_unpickler, (obj._torch_handler_name,)
+
+        elif isinstance(obj, torch.SymInt):
+            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+
+        elif isinstance(obj, types.MappingProxyType):
+            return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise RuntimeError(
@@ -2562,7 +2632,11 @@ class CheckFunctionManager:
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
         builder, guard_manager = self.build_guards(
-            sorted_guards, existing_diff_guard_sources, f_code, output_graph
+            sorted_guards,
+            existing_diff_guard_sources,
+            f_code,
+            output_graph,
+            None if guard_filter_fn else self.guards_serialization_mode,
         )
 
         if guard_filter_fn:
@@ -2602,7 +2676,11 @@ class CheckFunctionManager:
             ]
             # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(
-                sorted_guards, existing_diff_guard_sources, f_code, output_graph
+                sorted_guards,
+                existing_diff_guard_sources,
+                f_code,
+                output_graph,
+                self.guards_serialization_mode,
             )
 
         self.guard_manager = guard_manager
@@ -2668,6 +2746,10 @@ class CheckFunctionManager:
                 if name := get_global_source_name(guard.originating_source):
                     assert isinstance(name, str)
                     used_global_vars.add(name)
+            for source in self.output_graph.guard_on_key_order:
+                if name := get_global_source_name(source):
+                    assert isinstance(name, str)
+                    used_global_vars.add(name)
 
             def normalize_create_fn(x):
                 if isinstance(x, functools.partial):
@@ -2729,6 +2811,7 @@ class CheckFunctionManager:
         existing_diff_guard_sources,
         f_code,
         output_graph,
+        serialization_mode=None,
     ):
         guard_manager = GuardManagerWrapper()
         guard_manager.diff_guard_sources = existing_diff_guard_sources
@@ -2754,6 +2837,7 @@ class CheckFunctionManager:
             output_graph.global_scope,
             guard_manager,
             self,
+            serialization_mode,
         )
 
         # Break retain cycle. See test_release_scope_memory
@@ -3045,8 +3129,8 @@ def is_recompiles_verbose_enabled():
 
 
 # this will only be used if cpp guards are disabled
-def make_torch_function_mode_stack_guard(intial_stack):
-    types = [type(x) for x in intial_stack]
+def make_torch_function_mode_stack_guard(initial_stack):
+    types = [type(x) for x in initial_stack]
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()
