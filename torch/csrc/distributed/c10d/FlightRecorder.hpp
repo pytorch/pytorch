@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAEvent.h>
 #endif // USE_C10D_NCCL
 #include <c10/util/Exception.h>
-#include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
@@ -107,10 +106,10 @@ struct FlightRecorder {
     return instance;
   }
   FlightRecorder() {
-    max_entries_ = getCvarInt(
-        {"TORCH_TRACE_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    max_entries_ =
+        getCvarInt({"TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     capture_cpp_stack_ = getCvarBool(
-        {"TORCH_TRACE_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
+        {"TORCH_FR_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
   struct Entry {
@@ -247,37 +246,19 @@ struct FlightRecorder {
   const std::map<std::string, std::map<std::string, std::string>>
   getPgStatusJson();
 
-  std::string dump_json(bool includeCollectives, bool onlyActive);
-
-  std::string dump(
-      bool includeCollectives,
-      bool includeStackTraces,
-      bool onlyActive);
-
-#ifdef USE_C10D_NCCL
   std::string dump_json(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool onlyActive);
 
   std::string dump(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool includeStackTraces,
       bool onlyActive);
-#endif // USE_C10D_NCCL
-
- private:
-  c10::Dict<c10::IValue, c10::IValue> get_dump(
-      bool includeCollectives,
-      bool includeStackTraces,
-      bool onlyActive);
-
-  using json = nlohmann::json;
-  json get_dump_json(bool includeCollectives, bool onlyActive);
 };
 } // namespace c10d
