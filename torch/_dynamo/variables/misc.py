@@ -202,12 +202,11 @@ class SuperVariable(VariableTracker):
             else:
                 unimplemented_v2(
                     gb_type="Unsupported super().__init__() call",
-                    context=f"call_method {self} {name}",
-                    explanation=f"Dynamo encountered a super().__init__() call on {objvar} that resolved to a `torch.nn.Module.__init__()` call that we cannot trace.",
-                    hints=[
-                        "Avoid passing arguments to `super().__init__()` in `nn.Module` if possible.",
-                        "Ensure this call happens during the initial `__init__` of the object.",
-                    ],
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation="Dynamo encountered a super().__init__() call "
+                    f"on {objvar} that resolved to a `torch.nn.Module.__init__()` "
+                    "call that we cannot trace.",
+                    hints=[*graph_break_hints.DIFFICULT],
                 )
         elif (
             self.objvar.source
