@@ -1782,9 +1782,6 @@ class GuardBuilder(GuardBuilderBase):
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def PYMODULE_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
-
     def SEQUENCE_LENGTH(self, guard):
         # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
