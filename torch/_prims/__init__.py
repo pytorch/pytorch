@@ -1257,7 +1257,7 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
 
     # Type checks
     assert isinstance(a, TensorLike)
@@ -1378,7 +1378,6 @@ def _collapse_view_helper(
 ) -> tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
     _validate_collapse_args(a, start, end)
 
@@ -1521,19 +1520,19 @@ def expand_dims(
 
 
 def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+
     assert isinstance(a, TensorLike)
     utils.validate_idx(a.ndim, dim)
     utils.validate_dim_length(outer_length)
 
     # Verifies the dim can be split with the specified lhs_length
     inner_length = a.shape[dim] // outer_length
-
-    if (a.shape[dim] % outer_length) != 0:
-        msg = (
+    msg = lambda :(
             f"Attempting to split dimension of length {a.shape[dim]}, "
             f"but outer length of {outer_length} divides it with a remainder!"
         )
-        raise ValueError(msg)
+    torch._check(sym_eq(a.shape[dim] % outer_length,0) ,msg)
 
     new_shape: list[int] = []
     new_strides: list[int] = []

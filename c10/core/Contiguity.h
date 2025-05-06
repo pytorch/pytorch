@@ -13,15 +13,15 @@ namespace c10 {
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   bool is_contiguous = true;
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, 0))) {
+  if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
     return is_contiguous;
   }
   T z = 1;
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(strides[d], z))) {
+    if (TORCH_GUARD_OR_TRUE(sym_ne(size_d, 1))) {
+      if (TORCH_GUARD_OR_FALSE(sym_eq(strides[d], z))) {
         z *= size_d;
       } else {
         is_contiguous = false;

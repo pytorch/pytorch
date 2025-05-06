@@ -3837,7 +3837,25 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         while guard_or_true(accum % length != 0):
             deferred.append(lambda: bool(accum % length != 0))
             if end == a_.ndim - 1:
-                maybe_throw_dde()
+                # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
+                # This flattening is why reshape sometimes creates a copy -- because flattening
+                # may return a view of a copy
+
+                # Checks if collapse can be a view and short-circuits to copying reshape if it can't
+                new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+                if new_shape is None:
+                    if allow_copy:
+                        return prims.reshape(a, shape)
+
+                    maybe_throw_dde()
+                    assert False, "not reachable"
+                else:
+                    a_ = flatten(a_, idx, end)
+                    break
+
+                #if we reach here and the input is not contigious 
+                
+                
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:

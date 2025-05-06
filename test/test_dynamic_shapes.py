@@ -3035,16 +3035,23 @@ class TestGuardsExpressions(TestCase):
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_non_contigious_reshape(self):
-        # reshape u0 -> (u1*u1)
+        # reshape 4 -> (u1*u1)
         @torch.compile(fullgraph=True, dynamic=False)
-        def func1(x, y):  
-            t = torch.reshape(x, (y.item(),y.item()))
+        def func1(x, y): 
+            f = y.item()
+            # if we do not have this we have to make everything 
+            torch._check_is_size(f)
+
+            t = torch.reshape(x, (f,f))
             return t
 
         # create a non-contigious tensor with unbackes size u0.
         x = torch.arange(8)
         x = x.as_strided((4,), (2,))
         print(x)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        ## 4 -> u0*u0
         # reshape 4 -> 2*2
         print(func1(x, torch.tensor([2])))
 

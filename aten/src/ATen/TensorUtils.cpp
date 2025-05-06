@@ -376,8 +376,12 @@ inline static std::optional<ResultVec> computeStride_impl(
     if ((tensor_d == 0) ||
         (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
         TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
-    // tensor_numel will accumalte unbacked potentially , view_numel wil be 1 intially in the firt iterations
-    // post first iteration view_numel might become valued like X, y or can accumalte unbacked also. 
+      // For the unbacke case can really accumlate howeber we like here or not. we probably want to 
+      // keep accumalting here hoping that we would reach a point where view_numel==tensor_numel if that is ever
+      // reached we would exist here since view_numel<tensor_numel will false and newshape[view_d]==1 will be false.
+      // newshape[view_d]==1 is True we can do one more loop wont hurt.
+      // This is ok because eventually we will return   return std::nullopt if view_numel== tensor_numel is not guaranteed.
+
       while (view_d >= 0 &&
             (TORCH_GUARD_OR_TRUE(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
@@ -385,6 +389,7 @@ inline static std::optional<ResultVec> computeStride_impl(
         view_d--;
       }
       if (TORCH_GUARD_OR_TRUE(sym_ne(view_numel, tensor_numel))) {
+        std::cout<<"clone";
         return std::nullopt;
       }
       if (tensor_d > 0) {
@@ -395,6 +400,7 @@ inline static std::optional<ResultVec> computeStride_impl(
     }
   }
   if (view_d != -1) {
+    std::cout<<"clone";
     return std::nullopt;
   }
   return newstride;
