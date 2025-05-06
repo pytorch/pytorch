@@ -28,6 +28,8 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinousTest,
     requires_nccl,
+    requires_nccl_version,
+    sm_is_or_higher_than,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -242,6 +244,24 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         ):
             with self.assertRaisesRegex(ValueError, "Cannot use " + err + " with NCCL"):
                 allreduce(tensors, op)
+
+    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_allreduce_float8(self):
+        device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
+        if not sm_is_or_higher_than(device, 9, 0):
+            self.skipTest("Float8 requires sm >= 90")
+
+        numel = 1024
+        tensor = torch.ones(numel, dtype=torch.float32, device=device).to(
+            torch.float8_e4m3fn
+        )
+        dist.all_reduce(tensor)
+
+        expected = (
+            torch.empty_like(tensor).fill_(self.world_size).to(torch.float8_e4m3fn)
+        )
+        torch.testing.assert_close(tensor, expected)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -891,6 +911,27 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
         # Verification
         self.assertEqual(output_t[0], self.rank * self.world_size)
+
+    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_reduce_scatter_float8(self):
+        device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
+        if not sm_is_or_higher_than(device, 9, 0):
+            self.skipTest("Float8 requires sm >= 90")
+
+        numel = 1024
+        output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(
+            torch.float8_e5m2
+        )
+        input_tensor = torch.ones(
+            self.world_size * numel, dtype=torch.float32, device=device
+        ).to(torch.float8_e5m2)
+        dist.reduce_scatter_tensor(output_tensor, input_tensor)
+
+        expected = (
+            torch.empty_like(output_tensor).fill_(self.world_size).to(torch.float8_e5m2)
+        )
+        torch.testing.assert_close(output_tensor, expected)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
