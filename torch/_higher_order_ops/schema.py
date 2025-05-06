@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
+import torch.utils._pytree as pytree
 from torch.fx.node import Target
 
 
@@ -28,12 +29,15 @@ class HopArgumentInfoGen:
         example_value: Any,
         *,
         name: str = "",
-        default_value: Optional[Any],
+        default_value: Optional[Any] = None,
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
-            assert type(example_value) == type(default_value)
+            assert type(example_value) == type(
+                default_value
+            ), f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
+
         return HopArgumentInfo(
             name=name,
             example_value=example_value,
@@ -81,6 +85,48 @@ class CArgumentGen:
             arg_info.default_value,
             arg_info.kw_only,
             alias_info,
+        )
+
+
+class HopSchemaGenerator:
+    def __init__(self, hop: torch._ops.HigherOrderOperator):
+        self.arg_infos: list[HopArgumentInfo] = []
+        self.example_outputs: list[Any] = []
+        self.hop = hop
+
+    def add_arg(
+        self,
+        name: str,
+        example_value: Any,
+        default_value: Optional[Any] = None,
+        is_mutated: bool = False,
+        kw_only: bool = False,
+    ) -> None:
+        if callable(example_value):
+            assert isinstance(
+                example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
+            ), (
+                "Expect callable to be a GraphModule or an. Please call materialize_as_graph first "
+                f"to turn callable arguments {example_value} into a GraphModule."
+            )
+
+        arg_info = HopArgumentInfoGen.from_example(
+            example_value=example_value,
+            name=name,
+            default_value=default_value,
+            is_mutated=is_mutated,
+            kw_only=kw_only,
+        )
+        self.arg_infos.append(arg_info)
+
+    def add_output(self, output: Any) -> None:
+        self.example_outputs.append(output)
+
+    def gen_schema(self) -> torch._C.FunctionSchema:
+        return CFunctionSchemaGen.from_hop_argument_info(
+            str(self.hop),
+            self.arg_infos,
+            HopArgumentInfoGen.from_example(tuple(self.example_outputs), name="out"),
         )
 
 
@@ -168,8 +214,6 @@ class CFunctionSchemaGen:
 def find_hop_schema(
     gm: torch.fx.GraphModule, target: Target
 ) -> list[torch._C.FunctionSchema]:
-    import torch.utils._pytree as pytree
-
     schemas = []
     for node in gm.graph.find_nodes(op="call_function", target=target):
 
