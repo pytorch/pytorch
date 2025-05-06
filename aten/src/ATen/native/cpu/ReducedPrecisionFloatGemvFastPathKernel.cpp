@@ -157,6 +157,7 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 // We would have to write a separate SVE-specific path to use SVE
 // BFDOT. Deferring that for now to get the NEON/ASIMD BFDOT path
 // working.
+#if __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
 #if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 // https://godbolt.org/z/z8P4Yncra
 #define COMPILER_SUPPORTS_BF16_TARGET 1
@@ -167,6 +168,9 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 #else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 #define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#else // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
+#define COMPILER_SUPPORTS_BF16_TARGET 0
+#endif // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
 
 #if COMPILER_SUPPORTS_BF16_TARGET
 #define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
@@ -237,7 +241,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
 
 // Return a + b_low * c_low + b_high * c_high
 vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
-#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML)
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE)
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
   // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en

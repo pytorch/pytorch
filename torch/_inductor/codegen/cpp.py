@@ -1420,7 +1420,15 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def tanh(a):
-        return f"{a}.tanh()"
+        if config.cpp.use_decompose_tanh:
+            vec_one = f"decltype({a})(1)"
+            vec_two = f"decltype({a})(2)"
+            vec_minus_two = f"decltype({a})(-2)"
+            return (
+                f"{vec_two} / ({vec_one} + ({vec_minus_two} * {a}).exp()) - {vec_one}"
+            )
+        else:
+            return f"{a}.tanh()"
 
     @staticmethod
     def reciprocal(a):
@@ -2990,9 +2998,7 @@ class CppVecKernel(CppKernel):
         else:
             # Vertical reduction
             if out_dtype != dtype:
-                converted_value = (
-                    f"{DTYPE_TO_CPP[out_dtype].replace('::', '_')}_{value}"
-                )
+                converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
                 if out_dtype == torch.bool:
                     convert = f"{value}.template cast<bool,{self._get_num_vectors(torch.bool)}>()"
                 else:
