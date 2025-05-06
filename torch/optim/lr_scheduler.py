@@ -1039,6 +1039,17 @@ class CosineAnnealingLR(LRScheduler):
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
+
+    Example:
+    >>> # xdoctest: +SKIP
+    >>> num_epochs = 100
+    >>> scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
+    >>> for epoch in range(num_epochs):
+    >>>     train(...)
+    >>>     validate(...)
+    >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/CosineAnnealingLR.png
     """
 
     def __init__(
