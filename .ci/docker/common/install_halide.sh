@@ -17,7 +17,7 @@ if [ -n "${UBUNTU_VERSION}" ];then
                   libopenblas-dev libeigen3-dev libatlas-base-dev libzstd-dev
 fi
 
-pip_install numpy scipy imageio cmake ninja
+conda_install numpy scipy imageio cmake ninja
 
 git clone --depth 1 --branch release/16.x --recursive https://github.com/llvm/llvm-project.git
 cmake -DCMAKE_BUILD_TYPE=Release \
