@@ -14,7 +14,7 @@ For more information on the environment variables, see `ProcessGroupNCCL Environ
   * - ``TORCH_NCCL_HIGH_PRIORITY``
     - Control whether to use high priority stream for the NCCL communicator.
   * - ``TORCH_NCCL_BLOCKING_WAIT``
-    - Control whether or not wait() is blocking or non-blocking.
+    - Control whether or not wait() is blocking or non-blocking. If blocking, no watchdog thread is running.
   * - ``TORCH_NCCL_DUMP_ON_TIMEOUT``
     - Control whether dumping debug info on watchdog timeout or exception is detected. This variable must be set together with TORCH_NCCL_TRACE_BUFFER_SIZE larger than 0.
   * - ``TORCH_NCCL_DESYNC_DEBUG``
@@ -22,9 +22,9 @@ For more information on the environment variables, see `ProcessGroupNCCL Environ
   * - ``TORCH_NCCL_ENABLE_TIMING``
     - If set to ``1``, enable recording start-events for all ProcessGroupNCCL collectives, and compute accurate collective timing per-collective.
   * - ``TORCH_NCCL_ENABLE_MONITORING``
-    - If set to ``1``,enable monitoring thread which aborts the process when the ProcessGroupNCCL Watchdog thread gets stuck and no heartbeat is detected after TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged time than necessary tying up cluster resources.
+    - If set to ``1`` (default), enable monitoring thread which aborts the process when the ProcessGroupNCCL Watchdog thread gets stuck and no heartbeat is detected after TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL APIs that may hang. It is useful to prevent jobs being stuck for a prolonged time than necessary tying up cluster resources.
   * - ``TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC``
-    - Control the watchdog heartbeat timeout period after which the monitoring thread will abort the process.
+    - Control the watchdog heartbeat timeout period after which the monitoring thread will abort the process. This timeout doesn't require collectives to make progress. As long as the watchdog thread is alive, the heartbeat is updated. Workload timeouts are defined via timeout= argument to ``init_process_group()``.
   * - ``TORCH_NCCL_TRACE_BUFFER_SIZE``
     - The maximum number of events we store in the flight recorder's ring buffer. One event could be the start or end of a collective, for example. Set to 0 to disable the tracebuffer and debugging info dump.
   * - ``TORCH_NCCL_TRACE_CPP_STACK``
