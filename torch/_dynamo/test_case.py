@@ -106,7 +106,10 @@ class TestCase(TorchTestCase):
 
 class CPythonTestCase(TestCase):
     """
-    Enable certain features that are off by default (i.e. tracing through unittest)
+    Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
+
+    This class enables specific features that are disabled by default, such as
+    tracing through unittest methods.
     """
 
     _stack: contextlib.ExitStack
@@ -187,6 +190,10 @@ class CPythonTestCase(TestCase):
                 raise unittest.SkipTest(
                     f"Test requires Python {expected} but got Python {got}"
                 )
+        else:
+            raise unittest.SkipTest(
+                f"Test requires a specific Python version but not found in path {inspect.getfile(cls)}"
+            )
 
         super().setUpClass()
         cls._stack = contextlib.ExitStack()  # type: ignore[attr-defined]
