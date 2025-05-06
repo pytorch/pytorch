@@ -22,7 +22,7 @@ from ...ir import (
     Layout,
     ReinterpretView,
 )
-from ...utils import is_dynamic
+from ...utils import is_dynamic, Placeholder
 from ...virtualized import V
 from ..common import IndentedBuffer
 from . import cutlass_utils
@@ -423,7 +423,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_reorder (Optional[List[int]]): Specifies the reordering of the input nodes. If not provided,
                             no reordering is performed. Defaults to None.
         """
-        super().__init__("cutlass_gemm", input_nodes, layout, input_reorder)
+        super().__init__(
+            str(Placeholder.KERNEL_NAME), input_nodes, layout, input_reorder
+        )
         self.alpha = alpha
         self.beta = beta
         assert len(input_nodes) == 2 or len(input_nodes) == 3
@@ -1078,7 +1080,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)
             res += "\n\n" + test_runner_code
-        return res
+
+        # splice to remove trailing spaces in each line
+        buf = IndentedBuffer()
+        buf.splice(res)
+        return buf.getvalue()
 
     def test_call_statement(
         self,

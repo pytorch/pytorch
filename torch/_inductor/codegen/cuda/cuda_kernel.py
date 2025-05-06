@@ -9,6 +9,7 @@ from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.utils import Placeholder
 
 
 if TYPE_CHECKING:
@@ -313,7 +314,7 @@ class CUDATemplateKernel(CUDAKernel):
             wrapper.initialized_kernels[name] = self
             # We always originally initialize name with "KERNEL_NAME". So, we
             # we replace with the real kernel name passed as an arg to this function.
-            self.signature = self.signature.replace("KERNEL_NAME", name)
+            self.signature = self.signature.replace(str(Placeholder.KERNEL_NAME), name)
             _, call_args, arg_types = self.args.cpp_argdefs()
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
