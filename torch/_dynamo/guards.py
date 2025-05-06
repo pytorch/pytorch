@@ -2201,7 +2201,7 @@ class GuardBuilder(GuardBuilderBase):
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
-                # For numpy tensors, since those are ephemeral, we dont have to
+                # For numpy tensors, since those are ephemeral, we don't have to
                 # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
@@ -3045,8 +3045,8 @@ def is_recompiles_verbose_enabled():
 
 
 # this will only be used if cpp guards are disabled
-def make_torch_function_mode_stack_guard(intial_stack):
-    types = [type(x) for x in intial_stack]
+def make_torch_function_mode_stack_guard(initial_stack):
+    types = [type(x) for x in initial_stack]
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()
