@@ -432,9 +432,6 @@ class Module:
 
     .. note::
         Avoid performing differentiable operations in the ``__init__`` method of a Module.
-        Otherwise, moving tensors to different devices (e.g., using ``tensor.to('cuda')``)
-        may not be properly tracked by the autograd system, causing ``tensor.grad`` to remain
-        on the original device.
 
     :ivar training: Boolean represents whether this module is in training or
                     evaluation mode.
