@@ -1342,8 +1342,8 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-
-            if not _has_sufficient_memory(_device, size_bytes):
+            # TODO: Memory availability checks for Intel GPU
+            if device != "xpu" and not _has_sufficient_memory(_device, size_bytes):
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
             return fn(self, *args, **kwargs)
