@@ -136,9 +136,11 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
-        "einops.einops.rearrange",
     )
-    SAFE_NON_TORCH_FUNCTIONS = ("einops.einops.repeat",)
+    SAFE_NON_TORCH_FUNCTIONS = (
+        "einops.einops.rearrange",
+        "einops.einops.repeat",
+    )
 
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace

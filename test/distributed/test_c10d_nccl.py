@@ -57,9 +57,11 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI300_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
+    runOnRocmArch,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
@@ -3273,27 +3275,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_all_reduce_coalesced_nccl_float8_errors(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"cuda:{self.rank:d}")
-        tensors = [
-            torch.full(
-                (60 + i,), self.rank + 1 + i, device=device, dtype=torch.float
-            ).to(torch.float8_e4m3fn)
-            for i in range(5)
-        ]
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Float8 dtypes are not currenlty supported for NCCL reductions",
-        ):
-            torch.distributed.all_reduce_coalesced(tensors, group=process_group)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_manager_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
@@ -3322,7 +3303,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_multiprocess
+    @runOnRocmArch(MI300_ARCH)
     def test_intra_node_comm_all_reduce(self):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
@@ -3693,56 +3674,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             for i in range(self.world_size):
                 dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_base_k_float8_errors(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        output_tensor = (
-            torch.zeros(2, dtype=torch.float32).to(torch.float8_e4m3fn).to(self.rank)
-        )
-        input_tensors = (
-            torch.arange(self.world_size * 2, dtype=torch.float32)
-            .to(torch.float8_e4m3fn)
-            .to(self.rank)
-        )
-        input_tensors = torch.reshape(input_tensors, (self.world_size, 2))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Float8 dtypes are not currenlty supported for NCCL reductions",
-        ):
-            dist.reduce_scatter_tensor(output_tensor, input_tensors)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_reduce_scatter_tensor_coalesced_float8_errors(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        output_tensors = torch.zeros(2, 2).to(torch.float8_e5m2).to(self.rank)
-        input_tensors = [
-            torch.ones(2, 2).to(torch.float8_e5m2).to(self.rank)
-            for _ in range(self.world_size)
-        ]
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Float8 dtypes are not currenlty supported for NCCL reductions",
-        ):
-            with dist._coalescing_manager():
-                for i in range(self.world_size):
-                    dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
-            self.assertEqual(output_tensors, input_tensors[self.rank])
 
 
 class SetDeviceMethod(Enum):

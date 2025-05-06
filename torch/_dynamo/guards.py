@@ -475,7 +475,11 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
                     extra = f"  # {format_frame(fs, line=True)}"
                     break
         elif guard.stack:
-            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+            summary = guard.stack.summary()
+            if len(summary) > 0:
+                extra = f"  # {format_frame(summary[-1])}"
+            else:
+                extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
 
 
@@ -1575,7 +1579,7 @@ class GuardBuilder(GuardBuilderBase):
     def DUAL_LEVEL(self, guard: Guard):
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
-        dual_level = torch.autograd.forward_ad._current_level
+        dual_level = self.check_fn_manager.output_graph.dual_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, [code])
         # TODO(anijain2305) - Consider this moving this guard to C++
@@ -1591,7 +1595,7 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        cis = self.check_fn_manager.output_graph.functorch_layers
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._set_guard_export_info(guard, code)
@@ -1834,6 +1838,8 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
+        if self.serialization_mode == "save":
+            raise RuntimeError("DUPLICATE_INPUT guard cannot be serialized yet.")
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
@@ -1860,6 +1866,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def WEAKREF_ALIVE(self, guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("WEAKREF_ALIVE guard cannot be serialized.")
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -2522,7 +2530,17 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_dispatch_key_set(cls, raw_repr: int):
         return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
 
+    @classmethod
+    def _unpickle_functorch_interpreter(cls, json: bytes):
+        return torch._C._functorch.CInterpreter.deserialize(json)
+
+    @classmethod
+    def _unpickle_mapping_proxy(cls, d):
+        return types.MappingProxyType(d)
+
     def reducer_override(self, obj):
+        import sympy
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta"),
@@ -2542,6 +2560,23 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, torch._C.DispatchKeySet):
             return type(self)._unpickle_dispatch_key_set, (obj.raw_repr(),)
+
+        elif isinstance(obj, torch._C._functorch.CInterpreter):
+            return type(self)._unpickle_functorch_interpreter, (obj.serialize(),)
+
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, sympy.Function)
+            and hasattr(obj, "_torch_handler_name")
+        ):
+            assert hasattr(obj, "_torch_unpickler")
+            return obj._torch_unpickler, (obj._torch_handler_name,)
+
+        elif isinstance(obj, torch.SymInt):
+            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+
+        elif isinstance(obj, types.MappingProxyType):
+            return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise RuntimeError(
