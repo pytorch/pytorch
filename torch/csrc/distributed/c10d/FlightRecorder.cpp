@@ -695,7 +695,7 @@ std::string FlightRecorder<EventType>::dump(
   return pickle_str(result);
 }
 
-template class FlightRecorder<at::cuda::CUDAEvent>;
+template struct FlightRecorder<at::cuda::CUDAEvent>;
 
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
 std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
