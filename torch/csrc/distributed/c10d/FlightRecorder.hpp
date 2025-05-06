@@ -1,7 +1,7 @@
 #pragma once
-#include <nlohmann/json.hpp>
 #include <cstdio>
 #include <cstdlib>
+
 #include <memory>
 #include <mutex>
 
@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAEvent.h>
 #endif // USE_C10D_NCCL
 #include <c10/util/Exception.h>
-#include <c10/util/WaitCounter.h>
 #include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
@@ -250,6 +249,12 @@ struct FlightRecorder {
 
   std::string dump_json(bool includeCollectives, bool onlyActive);
 
+  std::string dump(
+      bool includeCollectives,
+      bool includeStackTraces,
+      bool onlyActive);
+
+#ifdef USE_C10D_NCCL
   std::string dump_json(
       const std::optional<std::unordered_map<
           std::string,
@@ -258,17 +263,13 @@ struct FlightRecorder {
       bool onlyActive);
 
   std::string dump(
-      bool includeCollectives,
-      bool includeStackTraces,
-      bool onlyActive);
-
-  std::string dump(
       const std::optional<std::unordered_map<
           std::string,
           std::unordered_map<std::string, std::string>>>& ncclDumpMap,
       bool includeCollectives,
       bool includeStackTraces,
       bool onlyActive);
+#endif // USE_C10D_NCCL
 
  private:
   c10::Dict<c10::IValue, c10::IValue> get_dump(
