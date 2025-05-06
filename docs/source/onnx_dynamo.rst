@@ -45,14 +45,6 @@ See below a demonstration of exporter API in action with a simple Multilayer Per
 
 .. code-block:: python
 
-  import torch
-  import torch.nn as nn
-
-  class   .. code-block:: python
-
-    import torch
-    import torch.nn as nn
-
     class MLPModel(nn.Module):
       def __init__(self):
           super().__init__()
