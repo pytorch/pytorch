@@ -4,6 +4,7 @@ import math
 import os
 import re
 import sysconfig
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -393,7 +394,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("dynamic", (False,))
+    @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -416,17 +417,20 @@ class TestCutlassBackend(TestCase):
         # M, N, K
         shapes = [
             (128, 128, 16),
+            (512, 512, 128),
         ]
+        shapes = shapes[0:1] if not dynamic else shapes
 
         x_shapes = [
             lambda M, N: (M, N),
-            # lambda M, N: (M, 1),
-            # lambda M, N: (1, N),
-            # lambda M, N: (N,),
+            lambda M, N: (M, 1),
+            lambda M, N: (1, N),
+            lambda M, N: (N,),
         ]
         for x_shape in x_shapes:
             torch._dynamo.reset()
             clear_inductor_caches()
+
             inputs = [
                 (
                     torch.randn(x_shape(M, N)).cuda().to(dtype),
@@ -435,6 +439,19 @@ class TestCutlassBackend(TestCase):
                 )
                 for (M, N, K) in shapes
             ]
+            dynamic_shapes = (
+                {
+                    "x": {
+                        i: v
+                        for i, v in enumerate(x_shape(Dim.DYNAMIC, Dim.DYNAMIC))
+                        if v != 1
+                    },
+                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                }
+                if dynamic
+                else None
+            )
             with config.patch(
                 {
                     "max_autotune": True,
@@ -446,7 +463,7 @@ class TestCutlassBackend(TestCase):
                 expected = [model(*input) for input in inputs]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
-                        model, inputs, dynamic_shapes=None
+                        model, inputs, dynamic_shapes=dynamic_shapes
                     )
                 else:
                     compiled_model = torch.compile(model, dynamic=dynamic)
@@ -1297,6 +1314,31 @@ class TestCutlassBackend(TestCase):
             }
         ):
             _ = torch.compile(model)(B)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_filtered_ops_cache(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, B):
+                A = torch.zeros_like(B)
+                for _ in range(100):
+                    A = A @ B
+                return A
+
+        M = 1024
+        B = torch.randn(M, M).cuda().half()
+        model = TestModel().cuda()
+
+        start_time = time.time()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            _ = torch.compile(model)(B)
+        self.assertTrue(time.time() - start_time < 100)
 
 
 if __name__ == "__main__":

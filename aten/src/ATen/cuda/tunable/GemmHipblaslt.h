@@ -513,9 +513,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
 #ifdef HIPBLASLT_VEC_EXT
         if (GetUseRowwiseFromParams<CT>(params)) {
-          // swapped
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
         }
         else
 #endif
