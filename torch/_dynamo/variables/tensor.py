@@ -391,15 +391,21 @@ class TensorVariable(VariableTracker):
         )
 
     def call_obj_hasattr(self, tx: "InstructionTranslator", name):
-        from .builtin import BuiltinVariable
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return ConstantVariable(True)
 
         try:
-            var = BuiltinVariable(getattr).call_function(
-                tx, [self, ConstantVariable(name)], {}
-            )
-            # in the event that TensorVariable returns NotImplemented
-            # BuiltinVariable.call_getattr returns GetAttrVariable
+            self.var_getattr(tx, name)
             ret_val = True
+        except NotImplementedError:
+            unimplemented_v2(
+                gb_type=f"Cannot tell if tensor has attribute {name}",
+                context="",
+                explanation=f"Dynamo is unable to decipher if tensor with {self.source} has {name} attr",
+                hints=[
+                    "Consider rewriting your code to avoid hasattr(tensor, atrr_name)"
+                ],
+            )
         except AttributeError:
             ret_val = False
 
