@@ -13,9 +13,9 @@ class Model(torch.nn.Module):
 
     def __init__(self):
         super(Model, self).__init__()
-        # self.pad = torch.nn.ReflectionPad3d(1)  # this fails
+        self.pad = torch.nn.ReflectionPad3d(1)  # this fails
         # self.pad = torch.nn.ReplicationPad3d(1)  # this also fails
-        self.pad = torch.nn.CircularPad3d(1)  # this works
+        # self.pad = torch.nn.CircularPad3d(1)  # this works
         # self.pad = torch.nn.ZeroPad3d(1)  # this works
         self.dist = torch.nn.PairwiseDistance(p=2)
 
