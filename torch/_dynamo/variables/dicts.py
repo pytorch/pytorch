@@ -761,8 +761,14 @@ class SetVariable(ConstDictVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
-        # We foward the calls to the dictionary model
-        if name == "add":
+        # We forward the calls to the dictionary model
+        if name == "__init__":
+            temp_set_vt = variables.BuiltinVariable(set).call_set(tx, *args, *kwargs)
+            tx.output.side_effects.mutation(self)
+            self.items.clear()
+            self.items.update(temp_set_vt.items)
+            return ConstantVariable.create(None)
+        elif name == "add":
             assert not kwargs
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
