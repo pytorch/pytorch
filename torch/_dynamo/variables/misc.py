@@ -78,7 +78,7 @@ class SuperVariable(VariableTracker):
 
     def __init__(self, typevar, objvar=None, **kwargs) -> None:
         super().__init__(**kwargs)
-        # typevar is the fist argument to super(). In the case where no argument
+        # typevar is the first argument to super(). In the case where no argument
         # is provided to super(), it is the __class__ object where
         # the super() function is being called
         self.typevar = typevar
@@ -145,7 +145,9 @@ class SuperVariable(VariableTracker):
         unimplemented_v2(
             gb_type="Unable to resolve super getattr",
             context="",
-            explanation="Dynamo was unable to find the attribute requested via `super()`.",
+            explanation=f"Dynamo failed to trace attribute `{name}` accessed "
+            f"via `super()` (for type `{self.typevar}` and object `{self.objvar}`) "
+            "because the resolved attribute type is not supported.",
             hints=[
                 "Ensure the attribute exists in the parent class.",
                 "Check the arguments passed to `super()`.",
