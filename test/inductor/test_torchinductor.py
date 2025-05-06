@@ -2558,6 +2558,18 @@ class CommonTemplate:
 
         self.common(fn, (torch.ones(32, 32) * 70,))
 
+    @skip_if_halide
+    @xfail_if_mps
+    def test_cummin(self):
+        def fn(x):
+            return x.cummin(0)
+
+        self.common(
+            fn, (torch.rand(16, 32),), check_lowp=not is_halide_backend(self.device)
+        )
+        self.common(fn, (torch.rand(1),), check_lowp=not is_halide_backend(self.device))
+        self.common(fn, (torch.rand(0),), check_lowp=not is_halide_backend(self.device))
+
     def test_cumsum(self):
         def fn(x):
             return x.cumsum(0), x.cumsum(1)
@@ -3192,7 +3204,6 @@ class CommonTemplate:
             (torch.ones([8, 8], dtype=torch.bool), torch.randint(-100, -1, [8, 8])),
         )
 
-    @xfail_if_mps  # 100% of results are wrong
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
     def test_div7(self):
         def fn(a, b):
@@ -11545,6 +11556,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
+    @requires_gpu()
+    @skip_if_gpu_halide
+    @skip_if_not_triton
+    def test_searchsorted_broadcast(self):
+        def fn(sorted_sequence, values):
+            return (
+                torch.searchsorted(
+                    sorted_sequence,
+                    values,
+                )
+                .unsqueeze(-1)
+                .expand(-1, 64)
+                .contiguous()
+            )
+
+        unsorted_sequence = torch.rand((32,))
+        sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
+        values = torch.rand((64,))
+
+        self.common(fn, (sorted_sequence, values), check_lowp=False)
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, sorted_sequence.cuda(), values.cuda())
+
+        # make sure that we did not fuse the broadcast and the bucketize,
+        # because bucketize is computationally expensive.
+        FileCheck().check("def triton").check("def triton").run(code[0])
+
     @parametrize("nd_tiling", (False, True))
     def test_bucketize(self, nd_tiling: bool):
         def fn(input, boundaries, out_int32, right):
@@ -11617,6 +11655,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9]) - 0.01
 
         self.common(fn, (inp, offsets), check_lowp=False)
+
+    @requires_gpu()
+    @skip_if_gpu_halide
+    @skip_if_not_triton
+    def test_bucketize_broadcast(self):
+        def fn(input, boundaries):
+            return (
+                torch.bucketize(input, boundaries)
+                .unsqueeze(-1)
+                .expand(-1, -1, 64)
+                .contiguous()
+            )
+
+        inp = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (inp, boundaries), check_lowp=False)
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, inp.cuda(), boundaries.cuda())
+
+        # make sure that we did not fuse the broadcast and the bucketize,
+        # because bucketize is computationally expensive.
+        FileCheck().check("def triton").check("def triton").run(code[0])
 
     @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
