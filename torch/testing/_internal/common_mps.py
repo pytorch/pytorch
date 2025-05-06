@@ -131,6 +131,7 @@ if torch.backends.mps.is_available():
             "t",
             "t_copy",
             "tanh",
+            "tan",
             "tensor_split",
             "transpose",
             "transpose_copy",
