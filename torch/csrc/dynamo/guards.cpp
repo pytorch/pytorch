@@ -2867,8 +2867,6 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    // bool guards_failed = false;
-    // py::list verbose_code_parts;
     int num_guards_executed = 0;
 
     // Run leaf guards
@@ -2881,8 +2879,6 @@ class RootGuardManager : public GuardManager {
     if (!debug_info_leaf.result) {
       _reset_relational_guard_state();
       return debug_info_leaf;
-      // guards_failed = true;
-      // verbose_code_parts += debug_info_leaf.verbose_code_parts;
     }
 
     const at::impl::TorchFunctionDisabledState old_state =
@@ -2907,16 +2903,10 @@ class RootGuardManager : public GuardManager {
       if (!tmp_debug_info.result) {
         at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
-        return tmp_debug_info;
-        // guards_failed = true;
-        // verbose_code_parts += tmp_debug_info.verbose_code_parts;
+        return GuardDebugInfo(
+          false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
-    // if (guards_failed) {
-    //   return GuardDebugInfo(
-    //     false, verbose_code_parts, num_guards_executed
-    //   );
-    // }
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
