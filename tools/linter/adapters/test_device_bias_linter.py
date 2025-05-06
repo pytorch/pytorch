@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 This lint verifies that every Python test file (file that matches test_*.py or
-*_test.py in the test folder) has a main block which raises an exception or
-calls run_tests to ensure that the test will be run in OSS CI.
+*_test.py in the test folder) has a cuda hard code in `requires_gpu()`
+decorated function to ensure that the test not fail on other GPU.
 
-Takes ~2 minuters to run without the multiprocessing, probably overkill.
 """
 
 from __future__ import annotations
@@ -45,8 +44,9 @@ class DeviceBiasVisitor(ast.NodeVisitor):
         self.lint_messages: list[LintMessage] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        # Check if the function is decorated by requires_gpu, which allows run on
-        # both cuda and xpu, but still hard coded to cuda.
+        # Check if the function is decorated with @requires_gpu, which indicates
+        # that the function is intended to run on GPU devices (e.g., CUDA or XPU),
+        # but ensure it does not hardcode the device to CUDA.
         has_requires_gpu = any(
             isinstance(d, ast.Call)
             and (
@@ -88,7 +88,7 @@ class DeviceBiasVisitor(ast.NodeVisitor):
         self.lint_messages.append(
             LintMessage(
                 path=self.filename,
-                line=node.lineno,  # type: ignore[attr-defined]
+                line=getattr(node, "lineno", None),
                 char=None,
                 code=LINTER_CODE,
                 severity=LintSeverity.ERROR,
@@ -123,10 +123,8 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    pool = mp.Pool(8)
-    lint_messages = pool.map(check_file, args.filenames)
-    pool.close()
-    pool.join()
+    with mp.Pool(8) as pool:
+        lint_messages = pool.map(check_file, args.filenames)
 
     flat_lint_messages = []
     for sublist in lint_messages:
