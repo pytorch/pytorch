@@ -1466,13 +1466,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
     auto opts = query.options().dtype(CutlassToAtenDtype<typename Kernel::output_t>::atScalarType());
     res = create_output_with_matching_layout(query, {B, M, num_heads, Kv}, opts);
-    std::cout << "Strides: " << res.stride(0) << ", " << res.stride(1) << ", " << res.stride(2) << ", " << res.stride(3) << std::endl;
-
-    // res = at::empty(
-    //     {B, M, num_heads, Kv},
-    //     query.options().dtype(
-    //         CutlassToAtenDtype<typename Kernel::output_t>::atScalarType()));
-
     // NOTE: Should be aligned (by padding) in case M is
     // not a good number for loading during backward
     constexpr decltype(M) kAlignLSE = Kernel::kAlignLSE;
@@ -1490,11 +1483,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
         : nullptr;
     at::Tensor output_accum;
     if (Kernel::kNeedsOutputAccumulatorBuffer) {
-      output_accum = at::empty(
-          {B, M, num_heads, Kv},
-          query.options().dtype(
-              CutlassToAtenDtype<
-                  typename Kernel::output_accum_t>::atScalarType()));
+      auto opts = query.options().dtype(CutlassToAtenDtype<typename Kernel::output_t>::atScalarType());
+      output_accum = create_output_with_matching_layout(query, {B, M, num_heads, Kv}, opts);
       p.output_accum_ptr =
           (typename Kernel::output_accum_t*)output_accum.data_ptr();
     } else {
@@ -1529,12 +1519,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.v_strideB, value.stride(0));
+
     ASSIGN_CHECK_OVERFLOW(p.q_strideM, query.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.k_strideM, key.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.v_strideM, value.stride(1));
+
     ASSIGN_CHECK_OVERFLOW(p.q_strideH, query.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.k_strideH, key.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.v_strideH, value.stride(2));
+
     ASSIGN_CHECK_OVERFLOW(p.o_strideM, res.stride(1));
 
     if (bias.has_value()) {
