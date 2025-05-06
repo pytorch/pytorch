@@ -2469,6 +2469,73 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    @parametrize("compile_mode", ["eager"])
+    @parametrize(
+        "permute_order",
+        [perm + (3,) for perm in itertools.permutations([0, 1, 2])],
+    )
+    @parametrize("shape", [(2, 4, 128, 16), (4, 2, 64, 32)])
+    def test_sdpa_stride_ordering_and_backward(self, device, backend, compile_mode, permute_order, shape):
+        from torch._inductor.ir import get_stride_order
+        make_tensor = partial(
+            torch.randn,
+            shape,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+
+        # Create and permute tensors
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query = query.permute(permute_order)
+        key = key.permute(permute_order)
+        value = value.permute(permute_order)
+
+        # Create leaves
+        query.requires_grad_()
+        key.requires_grad_()
+        value.requires_grad_()
+
+        def run_sdpa(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+        if compile_mode == "inductor":
+            run_sdpa = torch.compile(run_sdpa, backend="inductor", fullgraph=True)
+
+        with sdpa_kernel(backends=[backend]):
+            out = run_sdpa(query, key, value)
+
+        # Check out and query
+        out_stride_order = get_stride_order(out.stride())
+        query_stride_order = get_stride_order(query.stride())
+
+        self.assertEqual(
+            out_stride_order,
+            query_stride_order,
+            f"Compile mode: {compile_mode}, Backend: {backend}, "
+            f"Forward: out {out_stride_order}, query {query_stride_order}",
+        )
+
+        grad_output = torch.randn_like(out)
+        out.backward(grad_output)
+
+        # Check that gradient stride orders match input stride orders
+        for leaf, grad, name in [
+            (query, query.grad, "query"),
+            (key, key.grad, "key"),
+            (value, value.grad, "value"),
+        ]:
+            grad_stride_order = get_stride_order(grad.stride())
+            input_stride_order = get_stride_order(leaf.stride())
+            self.assertEqual(
+                grad_stride_order,
+                input_stride_order,
+                f"Compile mode: {compile_mode}, Backend: {backend}, "
+                f"Backward for {name}: grad {grad_stride_order}, input {input_stride_order}",
+            )
+
     @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_gqa(self, device):
