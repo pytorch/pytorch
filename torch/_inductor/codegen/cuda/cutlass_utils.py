@@ -219,6 +219,7 @@ def cutlass_key() -> Optional[bytes]:
     combined_hash = hashlib.sha256()
     build_code_hash([cutlass_library_dir], "", combined_hash)
     build_code_hash([cutlass_dir], "", combined_hash)
+    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
     return combined_hash.digest()
 
 
