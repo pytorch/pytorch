@@ -227,6 +227,17 @@ using qbinary_eltwise_cpu_fn = void (*)(
     double /*output_scale*/,
     int64_t /*output_zero_point*/);
 
+using qbatch_norm_cpu_fn = void(*)(
+    int64_t /*N*/,
+    int64_t /*C*/,
+    int64_t /*H * W*/,
+    int64_t /*in_zero_point*/,
+    int64_t /*out_zero_point*/,
+    const Tensor& /*input*/,
+    const Tensor& /*a*/,
+    const Tensor& /*b*/,
+    Tensor& /*output*/);
+
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub)
 DECLARE_DISPATCH(qadaptive_avg_pool3d_fn, qadaptive_avg_pool3d_ndhwc_stub)
 DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_relu_stub)
@@ -266,5 +277,6 @@ DECLARE_DISPATCH(qprelu_fn, qprelu_stub)
 DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qmul_tensor_cpu_stub)
 DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_tensor_cpu_stub)
 DECLARE_DISPATCH(qbinary_eltwise_cpu_fn, qadd_relu_tensor_cpu_stub)
+DECLARE_DISPATCH(qbatch_norm_cpu_fn, qbatch_norm_cpu_stub)
 
 } // namespace at::native
