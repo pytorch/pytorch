@@ -4183,7 +4183,6 @@ class Scheduler:
                         SymT.FLOAT,
                         SymT.UNBACKED_INT,
                         SymT.UNBACKED_FLOAT,
-                        SymT.PRECOMPUTED_SIZE,
                     ),
                 )
             )
