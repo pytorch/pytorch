@@ -884,40 +884,6 @@ class AutogradCompilerInstance:
         after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
-    def remove_unused_sizes(self):
-        used_sizes = []
-        unused_sizes = []
-
-        # seek placeholder, should be at nodes[1]
-        it = iter(self.fx_tracer.graph.nodes)
-        next(it)
-        sizes_node = next(it)
-        assert sizes_node.name == "sizes"
-
-        for getitem_node in sizes_node.users.keys():
-            assert getitem_node.target == operator.getitem
-            if getitem_node.users:
-                used_sizes.append(getitem_node)
-            else:
-                # remove from the graph
-                unused_sizes.append(getitem_node)
-
-        used_sizes_idx: set[int] = set()
-        for used in used_sizes:
-            assert isinstance(used.args, tuple)
-            assert used.args[0] == sizes_node
-            assert isinstance(used.args[1], int)
-            next_size_idx = len(used_sizes_idx)
-            # used later reindex the runtime sizes arg
-            used_sizes_idx.add(used.args[1])
-            # reindex the graph
-            used.args = (used.args[0], next_size_idx)
-
-        for unused in unused_sizes:
-            self.fx_tracer.graph.erase_node(unused)
-
-        return used_sizes_idx
-
     def create_graph_module(self, id):
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
@@ -980,8 +946,17 @@ class AutogradCompilerInstance:
         if self.nan_checker:
             self.nan_checker.prep_with_graph(self.fx_tracer.graph)
 
-        # keep only sizes that are actually used in the graph
-        used_sizes_idx = self.remove_unused_sizes()
+        # record sizes that are actually used in the graph
+        used_sizes_idx = []
+        for node in self.fx_tracer.graph.find_nodes(op="placeholder"):
+            if node.name != "sizes":
+                continue
+
+            for getitem_node in node.users.keys():
+                if getitem_node.users:
+                    used_sizes_idx.append(getitem_node.args[1])
+
+            break
 
         graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
@@ -1004,26 +979,19 @@ class AutogradCompilerInstance:
             try:
                 in_compiled_autograd_region = True
 
+                for idx in used_sizes_idx:
+                    # can't create negative size
+                    if sizes[idx] > 0:
+                        sizes[idx] = torch.empty(0, sizes[idx])
+                        torch._dynamo.maybe_mark_dynamic(sizes[idx], 0)
                 if self.nan_checker:
                     self.nan_checker.prep_with_inputs(inputs)
-
-                filtered_sizes = []
-                for idx, integer in enumerate(sizes):
-                    if idx in used_sizes_idx:
-                        # can't create negative size
-                        if integer > 0:
-                            filtered_sizes.append(torch.empty(0, integer))
-                            torch._dynamo.maybe_mark_dynamic(filtered_sizes[-1], 1)
-                        else:
-                            filtered_sizes.append(integer)
 
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    out = compiled_fn(
-                        inputs, filtered_sizes, scalars, hooks, packed_inputs
-                    )
+                    out = compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
                     if self.nan_checker:
                         self.nan_checker.check(out)
                     return out
