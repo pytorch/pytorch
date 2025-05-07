@@ -29,7 +29,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
     if (debug) {
       TORCH_WARN(
           "OneDNN attention requires q,k,v to have head dimension less than ",
-          MAX_HEAD_DIM, 
+          MAX_HEAD_DIM,
           ". Got ",
           query_size_last,
           " instead.");
