@@ -1730,6 +1730,26 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f1_out, f1_replaced_out)
         self.assertEqual(count, 1)
 
+        # Case 2: mutates graph input
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f2(x):
+            out = torch.zeros_like(x)
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def f2_replaced(x):
+            out = torch.zeros_like(x)
+            foobar_out(x, out)
+            return out
+
+        f2_inp = inp.clone().detach()
+        f2_replaced_inp = inp.clone().detach()
+        f2_out = f2(f2_inp)
+        f2_replaced_out = f2_replaced(f2_replaced_inp)
+        self.assertEqual(f2_inp, f2_replaced_inp)
+        self.assertEqual(f2_out, f2_replaced_out)
+        self.assertEqual(count, 1)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
