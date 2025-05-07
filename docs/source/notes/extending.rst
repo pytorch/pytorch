@@ -112,14 +112,15 @@ the autograd engine.
   directly on ``ctx``). You cannot use ``save_for_backward`` for non-tensors;
   you should store those directly on ``ctx``.
 
-  Saving tensors via ``save_for_backward`` allows the autograd engine to clear
+  Saving tensors via ``save_for_backward``:
+  1. Allows the autograd engine to clear
   them as soon as the backward computation of the ``autograd.Function`` completes.
   (If a tensor is stored directly on ``ctx``
   it will unnecessarily remain alive for the lifetime of the autograd graph --
-  typically until the end of the iteration.) Using ``save_for_backward``
-  also helps avoid certain reference cycles, (e.g., since the tensor
+  typically until the end of the iteration.)
+  2. Helps avoid certain reference cycles, (e.g., since the tensor
   output of the ``autograd.Function`` itself keeps a reference to the ctx).
-  Saving via ``save_for_backward`` is also important for compatibility with
+  3. Is important for compatibility with
   features like activation checkpointing and offloading that rely on
   :class:`torch.autograd.graph.saved_tensors_hooks`.
 
