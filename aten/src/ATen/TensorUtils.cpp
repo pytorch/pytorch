@@ -367,19 +367,24 @@ inline static std::optional<ResultVec> computeStride_impl(
   // numel in current chunk
   Numel tensor_numel = 1;
   Numel view_numel = 1;
+
+  // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE bellow could result in returning std::nullopt which have an effect of falling
+  // back to a clone when unbacked presented. But it will not result in returning a different results, or wrong results.
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
-        (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldshape[tensor_d - 1], 1)) &&
-         TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
+        (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
+    // tensor_numel will accumalte unbacked potentially , view_numel wil be 1 intially in the firt iterations
+    // post first iteration view_numel might become valued like X, y or can accumalte unbacked also. 
       while (view_d >= 0 &&
-            (TORCH_GUARD_SIZE_OBLIVIOUS(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(newshape[view_d], 1)))) {
+            (TORCH_GUARD_OR_TRUE(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
       }
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(view_numel, tensor_numel))) {
+      if (TORCH_GUARD_OR_TRUE(sym_ne(view_numel, tensor_numel))) {
         return std::nullopt;
       }
       if (tensor_d > 0) {
