@@ -14,7 +14,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
-from torch._inductor.codecache import build_code_hash
+from torch._inductor.codecache import build_code_hash, torch_key_cache
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import config
@@ -195,7 +195,7 @@ def try_import_cutlass() -> bool:
     return False
 
 
-@functools.lru_cache(1)
+@torch_key_cache
 def cutlass_key() -> Optional[bytes]:
     """
     Compute a key representing the state of the CUTLASS library.

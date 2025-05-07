@@ -1306,7 +1306,6 @@ class TestCutlassBackend(TestCase):
         ):
             _ = torch.compile(model)(B)
 
-    @unittest.skipIf(not IS_FBCODE, "cutlass key not implemented for OSS")
     def test_cutlass_key(self):
         from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 
