@@ -1102,19 +1102,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "false_branch",
         )
 
-        true_gm = torch.fx.GraphModule(true_nn_modules, true_graph)
-        false_gm = torch.fx.GraphModule(false_nn_modules, false_graph)
-
         true_name = tx.output.install_subgraph(
             "cond_true",
-            true_gm,
+            torch.fx.GraphModule(true_nn_modules, true_graph),
         )
         false_name = tx.output.install_subgraph(
             "cond_false",
-            false_gm,
+            torch.fx.GraphModule(false_nn_modules, false_graph),
         )
-
-        proxy_vars = tuple(true_shared + unique_true + unique_false)
 
         true_node = make_attr(tx, true_name)
         false_node = make_attr(tx, false_name)
@@ -1124,7 +1119,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            proxy_vars,
+            tuple(true_shared + unique_true + unique_false),
         )
 
         return _call_function_and_unflatten_output(
@@ -1384,23 +1379,14 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_lifted_inputs = cond_shared + cond_unique + body_unique
 
         body_nn_modules = dict(tx.output.nn_modules)
-        cond_gm = torch.fx.GraphModule(cond_nn_modules, cond_graph)
+
         cond_name = tx.output.install_subgraph(
             "cond_fn",
-            cond_gm,
+            torch.fx.GraphModule(cond_nn_modules, cond_graph),
         )
-        body_gm = torch.fx.GraphModule(body_nn_modules, body_graph)
         body_name = tx.output.install_subgraph(
             "body_fn",
-            body_gm,
-        )
-
-        proxy_vars = (
-            tuple([operand.as_proxy() for operand in operands_seq]),
-            tuple(
-                [inp.as_proxy() for inp in additional_inputs_seq]
-                + additional_lifted_inputs
-            ),
+            torch.fx.GraphModule(body_nn_modules, body_graph),
         )
 
         cond_node = make_attr(tx, cond_name)
@@ -1409,7 +1395,11 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            *proxy_vars,
+            tuple([operand.as_proxy() for operand in operands_seq]),
+            tuple(
+                [inp.as_proxy() for inp in additional_inputs_seq]
+                + additional_lifted_inputs
+            ),
         )
 
         flat_example_value = pytree.tree_map_only(
@@ -1581,10 +1571,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
-        # Compute the proxies
-        xs_proxy = xs.as_proxy()
-        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
-        proxy_vars = xs_proxy, additional_inputs_proxy
+        # Compute the proxies for the input check
         proxy_vars_inputcheck = (
             tuple(sarg.as_proxy() for sarg in sub_args) + combine_freevars_proxy
         )
@@ -1618,9 +1605,15 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "associative_scan_combine_fn", combine_gm
         )
 
+        # Compute the proxies
+        xs_proxy = xs.as_proxy()
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
+        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
+
         p_args = (
             make_attr(tx, combine_fn_name),
-            *proxy_vars,
+            xs_proxy,
+            additional_inputs_proxy,
         )
 
         with tx.fake_mode:
@@ -1811,7 +1804,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_proxy = list(additional_inputs.as_proxy()) + list(
             combine_freevars_proxy
         )
-        proxy_vars = init_proxy, xs_proxy, additional_inputs_proxy
         y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
@@ -1819,7 +1811,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = (
             make_attr(tx, combine_fn_name),
-            *proxy_vars,
+            init_proxy,
+            xs_proxy,
+            additional_inputs_proxy,
         )
 
         with tx.fake_mode:

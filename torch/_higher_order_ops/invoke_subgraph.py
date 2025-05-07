@@ -411,7 +411,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 # None because the corresponding fwd_out does not require_grad.
                 pass
             else:
-                filtered_grad_outs.append(o.clone())
+                filtered_grad_outs.append(o)
         filtered_grad_outs = tuple(filtered_grad_outs)
 
         # Important note - Even though the forward graph can be same for

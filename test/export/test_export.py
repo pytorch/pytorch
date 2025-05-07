@@ -7587,13 +7587,21 @@ def forward(self, b_a_buffer, x):
         device = torch.device("cuda")
         combine_mode = "pointwise"
 
+        class A(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
+
+            def forward(self):
+                return self.buffer.cos()
+
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.b = torch.ones(3, 2, device=device)
+                self.a = A()
 
             def combine_fn(self, x, y):
-                return (x + y) * self.b
+                return (x + y) * self.a()
 
             def forward(self, x):
                 return associative_scan(

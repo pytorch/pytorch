@@ -19,8 +19,8 @@ from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_reenter_make_fx,
+    _maybe_run_with_interpreter,
     _set_compilation_env,
-    FunctionalizeCtxWrapper,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -670,8 +670,8 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next():
-        functional_true = FunctionalizeCtxWrapper(ctx, true_fn)
-        functional_false = FunctionalizeCtxWrapper(ctx, false_fn)
+        functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
+        functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
             _check_mutation_and_alias(

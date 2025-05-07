@@ -3,7 +3,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import FunctionalizeCtxWrapper, reenter_make_fx
+from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -242,7 +242,7 @@ def map_functionalize(ctx, f, xs, pos_args):
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
-    wrapped_fn = FunctionalizeCtxWrapper(ctx, f)
+    wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
 
     with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():
