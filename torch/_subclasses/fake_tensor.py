@@ -1164,7 +1164,7 @@ class DispatchCacheInfo:
 
 
 class FakeTensorMode(TorchDispatchMode):
-    cache: dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
+    cache: dict[_DispatchCacheKey, Optional[_DispatchCacheEntry]] = {}
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses: dict[str, int] = defaultdict(int)
@@ -1442,6 +1442,8 @@ class FakeTensorMode(TorchDispatchMode):
 
         if entry is not _UNASSIGNED:
             # We have a cache entry.
+            if TYPE_CHECKING:
+                assert isinstance(entry, _DispatchCacheEntry)
             output = self._output_from_cache_entry(state, entry, key, func, args)
             FakeTensorMode.cache_hits += 1
             if self.cache_crosscheck_enabled:
@@ -1664,8 +1666,6 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
         output: Optional[FakeTensor],
     ) -> None:
-        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
-
         # Is this even possible?
         if isinstance(output, (int, type(None))):
             return
@@ -1675,7 +1675,6 @@ class FakeTensorMode(TorchDispatchMode):
             # in the input. If there are any new unbacked symbols then we can't
             # cache this output.
             raise _BypassDispatchCache("unbacked symbol in output")
-
 
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
@@ -2917,10 +2916,13 @@ class FakeTensorMode(TorchDispatchMode):
 _StoragePointer = object
 
 
-def _has_unrepresented_unbacked_symbols(state: _CacheKeyState, output: Optional[FakeTensor]) -> bool:
-    from torch.fx.experimental.symbolic_shapes import _iterate_exprs
-    from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
+def _has_unrepresented_unbacked_symbols(
+    state: _CacheKeyState, output: Optional[FakeTensor]
+) -> bool:
     from sympy.core.traversal import iterargs
+
+    from torch.fx.experimental.symbolic_shapes import _iterate_exprs
+    from torch.utils._sympy.symbol import symbol_is_type, SymT
 
     for s in _iterate_exprs(output):
         for arg in iterargs(s):
@@ -2931,6 +2933,7 @@ def _has_unrepresented_unbacked_symbols(state: _CacheKeyState, output: Optional[
                     return True
 
     return False
+
 
 # NB: returns fake tensors
 def run_fallback_kernel(
@@ -2997,12 +3000,20 @@ def run_fallback_kernel(
     return pytree.tree_map(map_out, r)
 
 
-def _set_cache_key_for_shape_env(cache: dict[_DispatchCacheKey, _DispatchCacheEntry], key: _DispatchCacheKey, entry: Optional[_DispatchCacheEntry]) -> None:
+def _set_cache_key_for_shape_env(
+    cache: dict[_DispatchCacheKey, Optional[_DispatchCacheEntry]],
+    key: _DispatchCacheKey,
+    entry: Optional[_DispatchCacheEntry],
+) -> None:
     key.strip_shape_env()
     cache[key] = entry
 
 
-def _set_cache_key(cache: dict[_DispatchCacheKey, _DispatchCacheEntry], key: _DispatchCacheKey, entry: Optional[_DispatchCacheEntry]) -> None:
+def _set_cache_key(
+    cache: dict[_DispatchCacheKey, Optional[_DispatchCacheEntry]],
+    key: _DispatchCacheKey,
+    entry: Optional[_DispatchCacheEntry],
+) -> None:
     cache[key] = entry
 
 
