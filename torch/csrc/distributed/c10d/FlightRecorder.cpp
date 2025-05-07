@@ -1,4 +1,5 @@
 #ifdef USE_C10D_NCCL
+#include <ATen/cuda/CUDAEvent.h>
 #include <cuda_runtime.h>
 #endif // USE_C10D_NCCL
 
@@ -111,7 +112,21 @@ control_plane::RegisterHandler jsonDumpHandler{
               processedParams[onlyActiveStr]),
           "application/json");
     }};
+
+/* Helper used by work::getDuration() and nccl flight recorder */
+float getDurationFromEvent(
+    at::cuda::CUDAEvent& ncclStartEvent,
+    at::cuda::CUDAEvent& ncclEndEvent) {
+  TORCH_CHECK(
+      ncclEndEvent.query(),
+      "getDuration can only be called after work is succeeded.")
+  return ncclStartEvent.elapsed_time(ncclEndEvent);
+}
 #endif // USE_C10D_NCCL
+
+float getDurationFromEvent(c10::Event& startEvent, c10::Event& endEvent) {
+  TORCH_CHECK(false, "getDuration not supported by c10::Event.");
+}
 
 void DebugInfoWriter::write(const std::string& trace) {
   // Open a file for writing. The ios::binary flag is used to write data as
@@ -704,25 +719,12 @@ std::string FlightRecorder<EventType>::dump(
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
 std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
-float getDurationFromEvent(c10::Event& startEvent, c10::Event& endEvent) {
-  TORCH_CHECK(false, "getDuration not supported by c10::Event.");
-}
-
 // For any third party library that uses the flight recorder, if one wants to
 // use an Event type other than c10::Event, one also needs to registers here to
 // avoid linking errors.
 template struct FlightRecorder<c10::Event>;
 
 #ifdef USE_C10D_NCCL
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent) {
-  TORCH_CHECK(
-      ncclEndEvent.query(),
-      "getDuration can only be called after work is succeeded.")
-  return ncclStartEvent.elapsed_time(ncclEndEvent);
-}
-
 template struct FlightRecorder<at::cuda::CUDAEvent>;
 #endif // USE_C10D_NCCL
 } // namespace c10d
