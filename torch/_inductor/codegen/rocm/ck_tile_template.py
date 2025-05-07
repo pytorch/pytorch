@@ -34,16 +34,7 @@ class CKTileTemplate(ROCmTemplate):
     def globals(self) -> IndentedBuffer:
         res = super().globals()
         res.splice(
-            """
-                // CK globals
-
-                template <ck_tile::index_t... Is>
-                using S = ck_tile::sequence<Is...>;
-
-                template<typename... Ts>
-                using Tuple = ck_tile::tuple<Ts...>;    
-
-                // see "composable_kernel/include/ck_tile/core/numeric/float8.hpp"
+            """   
                 using F8  = ck_tile::fp8_t;
                 using BF8 = ck_tile::bf8_t;
                 using F16 = ck_tile::half_t;
