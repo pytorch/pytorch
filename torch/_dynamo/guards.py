@@ -3225,8 +3225,7 @@ def _format_reasons_for_shape_guards(compile_id: CompileId, reasons: list[str], 
         if (match := re.search(pattern, reason)) is not None:
             name, size_orig, size_new = match.groups()
             tensor = eval(name, scope)
-            size_new = int(size_new)
-            if size_new >= 2:  # these suggestions won't help for 0/1 specialization.
+            if int(size_new) >= 2:  # these suggestions won't help for 0/1 specialization.
                 if isinstance(tensor, torch.nn.Parameter):
                     has_parameter = True
                 shape_sources.add(name)
