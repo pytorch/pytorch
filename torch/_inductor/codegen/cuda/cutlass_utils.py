@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import atexit
 import functools
+import hashlib
 import logging
 import os
 import shutil
@@ -13,6 +14,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch._inductor.codecache import build_code_hash
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import config
@@ -200,12 +202,24 @@ def cutlass_key() -> Optional[bytes]:
 
     Note: OSS and fbcode will have different keys.
     """
-    if not config.is_fbcode():
+    if not try_import_cutlass():
         return None
 
-    from libfb.py import parutil
+    if config.is_fbcode():
+        from libfb.py import parutil
 
-    return parutil.get_file_contents("cutlass/src_hash.txt")
+        return parutil.get_file_contents("cutlass/src_hash.txt")
+
+    import cutlass  # type: ignore[import-not-found]
+    import cutlass_library  # type: ignore[import-not-found]
+
+    cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
+    cutlass_dir = os.path.dirname(cutlass.__file__)
+
+    combined_hash = hashlib.sha256()
+    build_code_hash([cutlass_library_dir], "", combined_hash)
+    build_code_hash([cutlass_dir], "", combined_hash)
+    return combined_hash.digest()
 
 
 @functools.lru_cache(8)
