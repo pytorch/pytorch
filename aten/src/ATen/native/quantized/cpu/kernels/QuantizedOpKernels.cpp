@@ -2672,29 +2672,12 @@ void q_batch_norm_cpu_kernel(
   auto in_ptr = input.const_data_ptr<uint8_t>();
   float* alpha_ptr = a.data_ptr<float>();
   float* beta_ptr = b.data_ptr<float>();
-  if (output.scalar_type() == c10::ScalarType::Float) {
-    auto out_ptr = output.data_ptr<float>();
-    q_batch_norm_cpu_kernel_impl<float>(
-        N, C, HxW, in_zero_point, out_zero_point, in_ptr, alpha_ptr, beta_ptr, out_ptr
-    );
-  } else if (output.scalar_type() == c10::ScalarType::BFloat16) {
-    auto out_ptr = output.data_ptr<at::BFloat16>();
-    q_batch_norm_cpu_kernel_impl<at::BFloat16>(
-        N, C, HxW, in_zero_point, out_zero_point, in_ptr, alpha_ptr, beta_ptr, out_ptr
-    );
-  } else if (output.scalar_type() == c10::ScalarType::Half) {
-    auto out_ptr = output.data_ptr<at::Half>();
-    q_batch_norm_cpu_kernel_impl<at::Half>(
-        N, C, HxW, in_zero_point, out_zero_point, in_ptr, alpha_ptr, beta_ptr, out_ptr
-    );
-  } else {
-    TORCH_CHECK(output.scalar_type() == c10::ScalarType::Byte,
-        "q_batch_norm_cpu: Unsupported output dtype: ", output.scalar_type());
-    auto out_ptr = output.data_ptr<uint8_t>();
-    q_batch_norm_cpu_kernel_impl<uint8_t>(
-        N, C, HxW, in_zero_point, out_zero_point, in_ptr, alpha_ptr, beta_ptr, out_ptr
-    );
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND3(
+      at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, output.scalar_type(), "int8_batch_norm2d_cpu", [&] {
+        auto out_ptr = output.data_ptr<scalar_t>();
+        q_batch_norm_cpu_kernel_impl<scalar_t>(
+            N, C, HxW, in_zero_point, out_zero_point, in_ptr, alpha_ptr, beta_ptr, out_ptr);
+      });
 }
 
 void _fake_quantize_tensor_helper(
@@ -4542,29 +4525,12 @@ void qmul_tensor_cpu_kernel(
   TORCH_CHECK(
       size == qy.numel() && size == out.numel(),
       "qmul_cpu: Expect qx, qy and out to have the same number of elements");
-  if (out.scalar_type() == c10::ScalarType::Float) {
-    auto out_ptr = out.data_ptr<float>();
-    _qmul_tensor_cpu_impl<float>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  } else if (out.scalar_type() == c10::ScalarType::BFloat16) {
-    auto out_ptr = out.data_ptr<at::BFloat16>();
-    _qmul_tensor_cpu_impl<at::BFloat16>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  } else if (out.scalar_type() == c10::ScalarType::Half) {
-    auto out_ptr = out.data_ptr<at::Half>();
-    _qmul_tensor_cpu_impl<at::Half>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  } else {
-    TORCH_CHECK(out.scalar_type() == c10::ScalarType::Byte,
-        "qmul_cpu: Unsupported output dtype: ", out.scalar_type());
-    auto out_ptr = out.data_ptr<uint8_t>();
-    _qmul_tensor_cpu_impl<uint8_t>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND3(
+      at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, out.scalar_type(), "int8_mul_cpu", [&] {
+        auto out_ptr = out.data_ptr<scalar_t>();
+        _qmul_tensor_cpu_impl<scalar_t>(
+            out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point);
+      });
 }
 
 template<typename T, bool ReLUFused>
@@ -4704,29 +4670,12 @@ void qadd_tensor_cpu_kernel(
   TORCH_CHECK(
       size == qy.numel() && size == out.numel(),
       "qadd_cpu: Expect qx, qy and out to have the same number of elements");
-  if (out.scalar_type() == c10::ScalarType::Float) {
-    auto out_ptr = out.data_ptr<float>();
-    _qadd_tensor_cpu_impl<float, ReLUFused>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  } else if (out.scalar_type() == c10::ScalarType::BFloat16) {
-    auto out_ptr = out.data_ptr<at::BFloat16>();
-    _qadd_tensor_cpu_impl<at::BFloat16, ReLUFused>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  } else if (out.scalar_type() == c10::ScalarType::Half) {
-    auto out_ptr = out.data_ptr<at::Half>();
-    _qadd_tensor_cpu_impl<at::Half, ReLUFused>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  } else {
-    TORCH_CHECK(out.scalar_type() == c10::ScalarType::Byte,
-        "qadd_cpu: Unsupported output dtype: ", out.scalar_type());
-    auto out_ptr = out.data_ptr<uint8_t>();
-    _qadd_tensor_cpu_impl<uint8_t, ReLUFused>(
-        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
-    );
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND3(
+      at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Byte, out.scalar_type(), "int8_add_cpu", [&] {
+        auto out_ptr = out.data_ptr<scalar_t>();
+        _qadd_tensor_cpu_impl<scalar_t, ReLUFused>(
+            out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point);
+      });
 }
 } // anonymous namespace
 
