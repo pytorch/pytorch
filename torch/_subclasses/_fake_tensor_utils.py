@@ -217,6 +217,7 @@ class _CacheKeyState:
     # We track the SymNodes so when we get the output we can see if it exactly
     # matches one of the inputs so we can uncache it properly.
     sym_node_lookup: dict[int, int]  # id(SymNode) -> index
+    known_symbols: set(sympy.Basic)
 
     # There are cases where we're asked to perform an op when we have no
     # ShapeEnv on the FakeTensorMode - but for SymNodes we MUST have a
@@ -226,6 +227,7 @@ class _CacheKeyState:
 
     def __init__(self, shape_env: Optional[ShapeEnv] = None) -> None:
         self.sym_node_lookup = {}
+        self.known_symbols = set()
         self.shape_env = shape_env
 
     def cache_on_shape_env(self) -> bool:
@@ -247,6 +249,7 @@ class _CacheKeyState:
             result.append(_InputBackref(self.sym_node_lookup[node_id]))
         else:
             self.sym_node_lookup[node_id] = len(result)
+            self.known_symbols.add(arg.node.expr)
             if self.shape_env is None:
                 self.shape_env = arg.node.shape_env
             result.append(_PySymInputStub(arg))
