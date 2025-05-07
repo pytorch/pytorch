@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
+import itertools
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
@@ -46,7 +48,7 @@ def _normalize_idx(index: int, total_length: int) -> int:
     return index if index >= 0 else index + total_length
 
 
-ValidLayoutSymbols = Literal["M", "N", "K", "lda", "ldb", "ldc", "ldd"]
+ValidLayoutSymbols = Literal["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
 ValidLayoutAttrs = Literal["size", "stride"]
 
 
@@ -70,7 +72,7 @@ class CUDAKernel(Kernel):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.layout_args: dict[str, LayoutArg] = {}
+        self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
 
@@ -84,7 +86,9 @@ class CUDAKernel(Kernel):
         self, node: IRNode, attr: ValidLayoutAttrs, dim: int
     ) -> Optional[LayoutArg]:
         matches = [
-            arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
+            arg
+            for arg in itertools.chain.from_iterable(self.layout_args.values())
+            if arg.matches(node, attr, dim)
         ]
         if len(matches) >= 1:
             # Verify all matches have the same node, attribute, and dimension
@@ -105,19 +109,27 @@ class CUDAKernel(Kernel):
         self, symbol: ValidLayoutSymbols, node: IRNode, attr: ValidLayoutAttrs, dim: int
     ):
         arg = LayoutArg(node, symbol, attr, dim)
-        self.layout_args.setdefault(symbol, arg)
+        self.layout_args[symbol].append(arg)
 
     def init_layout_args(self) -> None:
         X = self.named_nodes["X"]
         W = self.named_nodes["W"]
         Y = self.named_nodes["Y"]
         Bias = self.named_nodes.get("Bias", None)
-        mdim = _normalize_idx(-2, len(X.get_size()))
-        ndim = _normalize_idx(-1, len(W.get_size()))
-        kdim = _normalize_idx(-1, len(X.get_size()))
-        self.add_layout_arg("M", X, "size", mdim)
-        self.add_layout_arg("N", W, "size", ndim)
-        self.add_layout_arg("K", X, "size", kdim)
+        x_mdim = _normalize_idx(-2, len(X.get_size()))
+        x_kdim = _normalize_idx(-1, len(X.get_size()))
+        w_kdim = _normalize_idx(-2, len(W.get_size()))
+        w_ndim = _normalize_idx(-1, len(W.get_size()))
+        y_mdim = _normalize_idx(-2, len(Y.get_size()))
+        y_ndim = _normalize_idx(-1, len(Y.get_size()))
+        self.add_layout_arg("M", X, "size", x_mdim)
+        self.add_layout_arg("K", X, "size", x_kdim)
+        self.add_layout_arg("K", W, "size", w_kdim)
+        self.add_layout_arg("N", W, "size", w_ndim)
+        self.add_layout_arg("M", Y, "size", y_mdim)
+        self.add_layout_arg("N", Y, "size", y_ndim)
+        if len(X.get_size()) > 2:
+            self.add_layout_arg("B", X, "size", 0)
 
         lda_dim = self.find_ld_idx(X)
         ldb_dim = self.find_ld_idx(W)
@@ -145,11 +157,12 @@ class CUDAKernel(Kernel):
         M = X.get_size()[mdim]
         N = W.get_size()[ndim]
         K = X.get_size()[kdim]
+        B = X.get_size()[0] if len(X.get_size()) > 2 else 1
         LDA = get_ld(X)
         LDB = get_ld(W)
         LDC = get_ld(Bias) if Bias else 0
         LDD = get_ld(Y)
-        return (M, N, K, LDA, LDB, LDC, LDD)
+        return (M, N, K, B, LDA, LDB, LDC, LDD)
 
     @staticmethod
     def find_ld_idx(node: IRNode) -> int:
@@ -264,7 +277,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         self.init_layout_args()
         size_args = [
-            f"const int {s}" for s in ("M", "N", "K", "lda", "ldb", "ldc", "ldd")
+            f"const int {s}" for s in ("M", "N", "K", "B", "lda", "ldb", "ldc", "ldd")
         ]
 
         runtime_arg_decls = ",".join(
@@ -460,6 +473,29 @@ class CUDATemplateKernel(CUDAKernel):
         if V.graph.sizevars.statically_known_leq(stride, 1):
             return str(stride)
         return self.find_symbol(node, "stride", dim=index) or str(stride)
+
+    def batch_stride(self, node: IRNode, default_value: int = 0) -> str:
+        """
+        Hook called from template code to get the batch stride of an arg.
+        Returns 0 if batch dim is not present.
+
+        This method assumes that batch stride is the largest stride.
+        """
+
+        if node is None:
+            return str(default_value)
+
+        if len(node.get_size()) < 3:
+            return str(default_value)
+
+        batch_stride = node.get_stride()[0]
+        if V.graph.sizevars.statically_known_leq(batch_stride, 1):
+            return str(batch_stride)
+
+        return "{}*{}".format(
+            self.find_symbol(node, "size", dim=1) or node.get_size()[1],
+            self.find_symbol(node, "size", dim=2) or node.get_size()[2],
+        )
 
     def row_or_column_stride(self, node: IRNode, default_value: int = 0) -> str:
         """
