@@ -177,11 +177,11 @@ class CPythonTestCase(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Skip test if python versions doesn't match
-        prefix = os.path.join("dynamo", "cpython")
-        regex = prefix + os.sep + r"\d_\d{2}"
+        prefix = os.path.join("dynamo", "cpython") + os.path.sep
+        regex = prefix + r"\d_\d{2}"
         m = re.search(regex, inspect.getfile(cls))
         if m:
-            test_py_ver = tuple(map(int, m.group().strip(prefix).split("_")))
+            test_py_ver = tuple(map(int, m.group().removeprefix(prefix).split("_")))
             py_ver = sys.version_info[:2]
             if py_ver < test_py_ver:
                 expected = ".".join(map(str, test_py_ver))
