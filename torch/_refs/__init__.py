@@ -15,6 +15,7 @@ from typing import Any, Callable, cast, Optional, overload, Union
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
@@ -3728,6 +3729,75 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # reshape to get contiguous tensor with correct target shape
     return permuted_result.reshape(target_shape)
 
+# this function is python match of computeStride_impl in TensorUtils.cpp
+def _compute_stride(old_shape, old_stride,  new_shape):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+    if len(old_shape)==0:
+        return [1] * len(new_shape)
+
+    numel = reduce(operator.mul, old_shape, 1) 
+    zero_numel = guard_or_false(numel == 0)
+    if zero_numel and old_shape == new_shape:
+        return old_stride 
+
+    new_stride = [0] * len(new_shape)
+
+    if zero_numel:
+        for view_d in range(len(new_shape) - 1, -1, -1):
+            if view_d == len(new_shape) - 1:
+                new_stride[view_d] = 1
+            else:
+                new_stride[view_d] = max(new_shape[view_d + 1], 1) * new_stride[view_d + 1]
+        return new_stride
+
+    view_d = len(new_shape) - 1
+    chunk_base_stride = old_stride[-1]
+    tensor_numel = 1
+    view_numel = 1
+
+    for tensor_d in range(len(old_shape) - 1, -1, -1):
+        tensor_numel *= old_shape[tensor_d]
+
+        if tensor_d == 0 or ( guard_or_true(old_shape[tensor_d - 1] != 1) and guard_or_true(old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride)):
+            while view_d >= 0 and (guard_or_true(view_numel < tensor_numel) or guard_or_false(new_shape[view_d] == 1)):
+                new_stride[view_d] = view_numel * chunk_base_stride
+                view_numel *= new_shape[view_d]
+                view_d -= 1
+
+            if guard_or_true(view_numel != tensor_numel):
+                return None
+
+            if tensor_d > 0:
+                chunk_base_stride = old_stride[tensor_d - 1]
+                tensor_numel = 1
+                view_numel = 1
+    if view_d != -1:
+        return None
+    return new_stride
+
+# When _reshape_view_helper hits a data dependent error it fall back to this funciton to 
+# try to do the reshape/view using as_strided if it can.
+# if the a is contiguous, we can always reshape with as_strided. 
+# if a is not  contiguous
+def _unbacked_fallback_reshape_view_helper(a:TensorLikeType, shape,allow_copy: bool, data_dependent_error):
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+    if a.is_contiguous():
+         if len(shape) >= 1 and a.ndim >= 1:
+            if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
+                return prims.view_of(a)
+
+            strides = [1]
+            for x in reversed(shape[1:]):
+                strides.append(strides[-1] * x)
+            strides.reverse()
+            return a.as_strided(shape, strides)
+    else:
+        new_strides = _compute_stride(a.size(), a.stride(), shape)
+        if new_strides is not None:
+            return a.as_strided(shape, new_strides)
+
+    raise data_dependent_error
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
     from torch._dynamo.exc import UserError, UserErrorType
@@ -3781,6 +3851,12 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         a.numel() == shape_numel,
         f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
+
+    for s in shape:
+        torch._check(
+            a.numel()% s==0,
+            f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+        )
     deferred: list[Callable[[], bool]] = []
 
     # NOTE [Reshape Algorithm]
@@ -3800,83 +3876,85 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     # Note that a better version of this algorithm may exist. Regions which could be
     # flattened without creating a copy can be identified in advance, and that might
     # allow fewer flatten calls or faster short-circuiting to make a copy.
-    idx = 0
-    a_ = a
-    for length in shape:
-        # Handles tail unsqueezes
-        if idx >= a_.ndim:
-            assert length == 1
-            last_dim = a_.ndim - 1
-            # NOTE: using split_dim instead of unsqueeze may seem silly here,
-            # but it's necessary to get the strides correct
-            a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
+    try :
+        idx = 0
+        a_ = a
+        for length in shape:
+            # Handles tail unsqueezes
+            if idx >= a_.ndim:
+                assert length == 1
+                last_dim = a_.ndim - 1
+                # NOTE: using split_dim instead of unsqueeze may seem silly here,
+                # but it's necessary to get the strides correct
+                a_ = prims.split_dim(a_, last_dim, a_.shape[last_dim])
+                idx = idx + 1
+                continue
+
+            # Skips dimensions that are already the correct length
+            if guard_or_false(length == a_.shape[idx]):
+                idx = idx + 1
+                continue
+
+            # Gathers enough original dimensions such that this new dimension can be created
+            # Note that this accumulation will terminate because we've verified a and the shape
+            # specify the same number of elements above
+            def maybe_throw_dde():
+                # NOTE: if you've hit a data-dependent error here, it's because in trying to accumulate input
+                # tensor dimensions to match the target shape (length), we've hit data-dependent errors testing
+                # divisibility (accum % length != 0), and have deferred raising them, in the hope that we'd
+                # figure out a valid reshape later in the loop.
+                # But we failed, either by running out of dimensions, or we couldn't figure out the strides,
+                # and we've decided to re-raise to either graph break out, or provide the exact guard so the user
+                # can torch._check() to avoid this.
+                for f in deferred:
+                    f()
+
+            accum = a_.shape[idx]
+            end = idx
+            while guard_or_true(accum % length != 0):
+                deferred.append(lambda: bool(accum % length != 0))
+                if end == a_.ndim - 1:
+                    maybe_throw_dde()
+                end = end + 1
+                accum = accum * a_.shape[end]
+            if end != idx:
+                # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
+                # This flattening is why reshape sometimes creates a copy -- because flattening
+                # may return a view of a copy
+
+                # Checks if collapse can be a view and short-circuits to copying reshape if it can't
+                new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+                if new_shape is None:
+                    if allow_copy:
+                        return prims.reshape(a, shape)
+
+                    maybe_throw_dde()
+                    msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
+                    raise ValueError(msg)
+
+                a_ = flatten(a_, idx, end)
+
+            # Splits the (possibly flattened) dimension to create the desired dim length.
+            # guard_or_true is safe due to the tail unsqueeze routine.
+            if guard_or_true(accum != length):
+                a_ = prims.split_dim(a_, idx, length)
+
             idx = idx + 1
-            continue
 
-        # Skips dimensions that are already the correct length
-        if guard_or_false(length == a_.shape[idx]):
-            idx = idx + 1
-            continue
+        # Squeezes tail
+        while idx < a_.ndim:
+            torch._check(
+                a_.shape[idx] == 1,
+                lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
+            )
+            a_ = squeeze(a_, idx)
 
-        # Gathers enough original dimensions such that this new dimension can be created
-        # Note that this accumulation will terminate because we've verified a and the shape
-        # specify the same number of elements above
-        def maybe_throw_dde():
-            # NOTE: if you've hit a data-dependent error here, it's because in trying to accumulate input
-            # tensor dimensions to match the target shape (length), we've hit data-dependent errors testing
-            # divisibility (accum % length != 0), and have deferred raising them, in the hope that we'd
-            # figure out a valid reshape later in the loop.
-            # But we failed, either by running out of dimensions, or we couldn't figure out the strides,
-            # and we've decided to re-raise to either graph break out, or provide the exact guard so the user
-            # can torch._check() to avoid this.
-            for f in deferred:
-                f()
-
-        accum = a_.shape[idx]
-        end = idx
-        while guard_or_true(accum % length != 0):
-            deferred.append(lambda: bool(accum % length != 0))
-            if end == a_.ndim - 1:
-                maybe_throw_dde()
-            end = end + 1
-            accum = accum * a_.shape[end]
-        if end != idx:
-            # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
-            # This flattening is why reshape sometimes creates a copy -- because flattening
-            # may return a view of a copy
-
-            # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
-            if new_shape is None:
-                if allow_copy:
-                    return prims.reshape(a, shape)
-
-                maybe_throw_dde()
-                msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
-                raise ValueError(msg)
-
-            a_ = flatten(a_, idx, end)
-
-        # Splits the (possibly flattened) dimension to create the desired dim length.
-        # guard_or_true is safe due to the tail unsqueeze routine.
-        if guard_or_true(accum != length):
-            a_ = prims.split_dim(a_, idx, length)
-
-        idx = idx + 1
-
-    # Squeezes tail
-    while idx < a_.ndim:
-        torch._check(
-            a_.shape[idx] == 1,
-            lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
-        )
-        a_ = squeeze(a_, idx)
-
-    if a_ is a:
-        return prims.view_of(a)
-    else:
-        return a_
-
+        if a_ is a:
+            return prims.view_of(a)
+        else:
+            return a_
+    except GuardOnDataDependentSymNode as e:
+        return _unbacked_fallback_reshape_view_helper(a, shape, allow_copy, e)
 
 # CompositeImplicitAutograd - don't register decomp
 # NOTE: shape is a vararg because Tensor.reshape can be called with as
