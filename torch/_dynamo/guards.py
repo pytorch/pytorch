@@ -1740,6 +1740,9 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        # don't support this in serialization because it uses unsupported ID_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("NN_MODULE guard cannot be serialized.")
         self.ID_MATCH(guard)
         val = self.get(guard.name)
         if hasattr(val, "training"):
