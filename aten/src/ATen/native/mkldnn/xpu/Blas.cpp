@@ -73,7 +73,6 @@ Tensor& addmm_out(
             beta, self.scalar_type(), std::nullopt, at::kCPU, std::nullopt));
   }
 
-
   TORCH_CHECK(
       are_expandable(self.sizes(), result_shape),
       "addmm_out input must be expanable to:",
@@ -93,7 +92,7 @@ Tensor& addmm_out(
     bias = self;
   } else {
     Tensor binary = self.sizes().empty() ? self.unsqueeze(0) : self;
-    binary = binary.dim() == 1? binary.unsqueeze(0) : binary;
+    binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
     if (inplace) {
       attr.append_post_eltwise(
