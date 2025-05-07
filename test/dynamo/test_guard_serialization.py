@@ -37,6 +37,187 @@ class GlobalModule(torch.nn.Module):
         return x + 1
 
 
+class SubclassWithMeta(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, extra, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
+        shape = outer_size
+        kwargs = {}
+        kwargs["strides"] = outer_stride
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(self, a, extra, outer_size=None, outer_stride=None):
+        self.a = a
+        self.extra = extra
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(SubclassWithMeta, lambda x: x.a, args)
+        kwargs_a = pytree.tree_map_only(SubclassWithMeta, lambda x: x.a, kwargs)
+        out_a = func(*args_a, **kwargs_a)
+        if isinstance(out_a, torch.Tensor):
+            assert isinstance(args[0], SubclassWithMeta)
+            return SubclassWithMeta(out_a, extra=args[0].extra)
+        return out_a
+
+    def __tensor_flatten__(self):
+        # store extra in meta
+        return ["a"], {"extra": self.extra}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert isinstance(meta, dict)
+        a = inner_tensors["a"]
+        # pull out extra from meta
+        extra = meta["extra"]
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+        return SubclassWithMeta(a, extra, outer_size, outer_stride)
+
+
+class SubclassWithCustomMetadataGuard(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, extra, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
+        shape = outer_size
+        kwargs = {}
+        kwargs["strides"] = outer_stride
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(self, a, extra, outer_size=None, outer_stride=None):
+        self.a = a
+        self.extra = extra
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(
+            SubclassWithCustomMetadataGuard, lambda x: x.a, args
+        )
+        kwargs_a = pytree.tree_map_only(
+            SubclassWithCustomMetadataGuard, lambda x: x.a, kwargs
+        )
+        out_a = func(*args_a, **kwargs_a)
+        if isinstance(out_a, torch.Tensor):
+            assert isinstance(args[0], SubclassWithCustomMetadataGuard)
+            return SubclassWithCustomMetadataGuard(out_a, extra=args[0].extra)
+        return out_a
+
+    @classmethod
+    def __metadata_guard__(cls, meta1, meta2):
+        # Define custom metadata guard logic that only looks at "bar" to determine
+        # metadata equivalence. This is more purposefully more lax than the default
+        # guard behavior.
+        return meta1["extra"]["bar"] == meta2["extra"]["bar"]
+
+    def __tensor_flatten__(self):
+        # store extra in meta
+        return ["a"], {"extra": self.extra}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert isinstance(meta, dict)
+        a = inner_tensors["a"]
+        # pull out extra from meta
+        extra = meta["extra"]
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+        return SubclassWithCustomMetadataGuard(a, extra, outer_size, outer_stride)
+
+
+class SubclassWithSubclassInnerTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, extra, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
+        shape = outer_size
+        kwargs = {}
+        kwargs["strides"] = outer_stride
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(self, a, extra, outer_size=None, outer_stride=None):
+        self.a = a
+        self.inner_sub = SubclassWithMeta(a + 1, extra=extra)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(
+            SubclassWithSubclassInnerTensor, lambda x: x.a, args
+        )
+        kwargs_a = pytree.tree_map_only(
+            SubclassWithSubclassInnerTensor, lambda x: x.a, kwargs
+        )
+        out_a = func(*args_a, **kwargs_a)
+        if isinstance(out_a, torch.Tensor):
+            assert isinstance(args[0], SubclassWithSubclassInnerTensor)
+            return SubclassWithSubclassInnerTensor(out_a, extra=args[0].inner_sub.extra)
+        return out_a
+
+    def __tensor_flatten__(self):
+        return ["a", "inner_sub"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert meta is None
+        a = inner_tensors["a"]
+        extra = inner_tensors["inner_sub"].extra
+        if type(a) is torch.Tensor:
+            assert outer_size is not None
+            assert outer_stride is not None
+        return SubclassWithSubclassInnerTensor(a, extra, outer_size, outer_stride)
+
+
+# defines a custom __eq__() / __hash__() to be registered as a pytree constant type
+class CustomConstantType:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    def __eq__(self, other):
+        # custom eq ignores b
+        return self.a == other.a
+
+    def __hash__(self):
+        # custom hash ignores b
+        return hash(self.a)
+
+
+pytree.register_constant(CustomConstantType)
+
+
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
     def _tracefunc(self, frame, event, arg):
         if event != "call":
@@ -218,6 +399,210 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
+
+    def test_tensor_subclass_metadata_match(self):
+        class LocalSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a, outer_size=None, outer_stride=None):
+                if outer_size is None:
+                    outer_size = a.size()
+                if outer_stride is None:
+                    outer_stride = a.stride()
+
+                shape = outer_size
+                kwargs = {}
+                kwargs["strides"] = outer_stride
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = a.device
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+            def __init__(self, a, outer_size=None, outer_stride=None):
+                self.a = a
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args_a = pytree.tree_map_only(LocalSubclass, lambda x: x.a, args)
+                kwargs_a = pytree.tree_map_only(LocalSubclass, lambda x: x.a, kwargs)
+                out_a = func(*args_a, **kwargs_a)
+                if isinstance(out_a, torch.Tensor):
+                    return LocalSubclass(out_a)
+                return out_a
+
+            def __tensor_flatten__(self):
+                return ["a"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                assert meta is None
+                a = inner_tensors["a"]
+                if type(a) is torch.Tensor:
+                    assert outer_size is not None
+                    assert outer_stride is not None
+                return LocalSubclass(a, outer_size, outer_stride)
+
+        def fn(x):
+            return x * 2
+
+        # === example subclass defined locally (error) ===
+        local_sub = LocalSubclass(torch.randn(3))
+        with self.assertRaisesRegex(
+            RuntimeError, "Please define the class at global scope"
+        ):
+            self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, local_sub)
+
+        # === example subclass with None extra metadata ===
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3))
+        ref, loaded = self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, tt)
+        self._test_check_fn(ref, loaded, {"x": tt}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.ones_like(tt)}, True)
+
+        # used below for convenience; returned func accepts some metadata and whether the
+        # guard is expected to pass for the given subclass type
+        def _get_meta_test_check_fn(ref, loaded, subclass_type):
+            def _f(meta, expected, ref=ref, loaded=loaded, subclass_type=subclass_type):
+                self._test_check_fn(
+                    ref,
+                    loaded,
+                    {"x": subclass_type(torch.randn(3), extra=meta)},
+                    expected,
+                )
+
+            return _f
+
+        # === example subclass with extra metadata ===
+        extra_meta = {
+            "foo": 5,
+            "bar": "hello",
+        }
+        sub = SubclassWithMeta(torch.randn(3), extra=extra_meta)
+        ref, loaded = self._test_serialization(
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub
+        )
+        self._test_check_fn(ref, loaded, {"x": sub}, True)
+        check_with_meta = _get_meta_test_check_fn(ref, loaded, SubclassWithMeta)
+        check_with_meta(dict(extra_meta), True)
+        # different "foo"
+        check_with_meta({"foo": 6, "bar": "hello"}, False)
+        # different "bar"
+        check_with_meta({"foo": 5, "bar": "world"}, False)
+
+        # === example subclass with custom metadata guard logic ===
+        sub = SubclassWithCustomMetadataGuard(torch.randn(3), extra=extra_meta)
+        ref, loaded = self._test_serialization(
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub
+        )
+        self._test_check_fn(ref, loaded, {"x": sub}, True)
+        check_with_meta = _get_meta_test_check_fn(
+            ref, loaded, SubclassWithCustomMetadataGuard
+        )
+        check_with_meta(dict(extra_meta), True)
+        # different "foo"; custom logic says this is okay
+        check_with_meta({"foo": 6, "bar": "hello"}, True)
+        # different "bar"
+        check_with_meta({"foo": 5, "bar": "world"}, False)
+
+        # === example subclass with subclass inner tensor ===
+        sub = SubclassWithSubclassInnerTensor(torch.randn(3), extra=extra_meta)
+        ref, loaded = self._test_serialization(
+            "TENSOR_SUBCLASS_METADATA_MATCH", fn, sub
+        )
+        self._test_check_fn(ref, loaded, {"x": sub}, True)
+        check_with_meta = _get_meta_test_check_fn(
+            ref, loaded, SubclassWithSubclassInnerTensor
+        )
+        check_with_meta(dict(extra_meta), True)
+        # different "foo"
+        check_with_meta({"foo": 6, "bar": "hello"}, False)
+        # different "bar"
+        check_with_meta({"foo": 5, "bar": "world"}, False)
+
+    def test_equals_match(self):
+        def fn(x, y):
+            # CustomConstantType is registered as a pytree constant so this should
+            # result in an EQUALS_MATCH guard.
+            if x in y:
+                return torch.zeros(3)
+            return torch.ones(3)
+
+        x = CustomConstantType(4, 5)
+        y = [CustomConstantType(2, 3), CustomConstantType(4, 5)]
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        # custom __eq__ says that CustomConstantType(4, 5) == CustomConstantType(4, 9)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": CustomConstantType(4, 5),
+                "y": [CustomConstantType(2, 3), CustomConstantType(4, 9)],
+            },
+            True,
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "y": []}, False)
+        self._test_check_fn(
+            ref,
+            loaded,
+            {
+                "x": x,
+                "y": [CustomConstantType(2, 3), CustomConstantType(6, 7)],
+            },
+            False,
+        )
+
+    def test_constant_match(self):
+        # === bool constant ===
+        def fn(x, y):
+            if y:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3)
+        y = True
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": True}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": True}, True)
+        # guard should fail for different y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": False}, False)
+
+        # === None constant ===
+        def fn(x, y):
+            if y is None:
+                return x + 1
+            return x + 2
+
+        x = torch.randn(3)
+        y = None
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": None}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": None}, True)
+        # guard should fail for non-None y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 5}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": True}, False)
+
+        # === int constant ===
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(3)
+        y = 5
+
+        ref, loaded = self._test_serialization("CONSTANT_MATCH", fn, x, y)
+        self._test_check_fn(ref, loaded, {"x": x, "y": y}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 5}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4), "y": 5}, True)
+        # guard should fail for different y value
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 6}, False)
 
     def test_dict_version(self):
         def fn(x):
