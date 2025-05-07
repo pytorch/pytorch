@@ -73,6 +73,7 @@ Tensor& addmm_out(
             beta, self.scalar_type(), std::nullopt, at::kCPU, std::nullopt));
   }
 
+
   TORCH_CHECK(
       are_expandable(self.sizes(), result_shape),
       "addmm_out input must be expanable to:",
@@ -91,7 +92,10 @@ Tensor& addmm_out(
     // if result and self are the same tensor, we use post op sum.
     bias = self;
   } else {
-    Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+    // Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
+    // Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+    Tensor binary = self.sizes().empty() ? self.unsqueeze(0) : self;
+    binary = binary.dim() == 1? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
     if (inplace) {
       attr.append_post_eltwise(
@@ -219,7 +223,8 @@ Tensor& baddbmm_out(
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
-    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
+    Tensor binary = input.sizes().empty() ? input.unsqueeze(0) : input;
+    binary = binary.dim() < 3 ? binary.unsqueeze(0) : binary;
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
