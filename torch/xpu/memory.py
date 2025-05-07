@@ -7,9 +7,6 @@ from torch.types import Device
 from . import _get_device_index, is_initialized
 
 
-_device_t = Union[Device, str, int, None]
-
-
 def empty_cache() -> None:
     r"""Release all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other XPU application.
