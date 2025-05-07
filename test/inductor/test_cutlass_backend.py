@@ -1310,7 +1310,7 @@ class TestCutlassBackend(TestCase):
         from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 
         self.assertTrue(try_import_cutlass())
-        from torch._inductor.codegen.cuda.cutlass_utils import cutlass_key
+        from torch._inductor.codecache import cutlass_key
 
         self.assertIsNotNone(cutlass_key())
 

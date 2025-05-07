@@ -3115,6 +3115,22 @@ def _cutlass_include_paths() -> list[str]:
         os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
+@torch_key_cache
+def cutlass_key() -> bytes:
+    """
+    Compute a key representing the state of the CUTLASS library.
+
+    Note: OSS and fbcode will have different keys.
+    """
+    if config.is_fbcode():
+        from libfb.py import parutil
+
+        return parutil.get_file_contents("cutlass/src_hash.txt")
+
+    combined_hash = hashlib.sha256()
+    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    return combined_hash.digest()
+
 
 def _cuda_lib_options() -> list[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
