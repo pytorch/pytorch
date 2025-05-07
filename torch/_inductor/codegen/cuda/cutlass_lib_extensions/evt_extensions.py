@@ -150,7 +150,8 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
                 self.ast = ast.parse(self.source)
                 self.visit(self.ast)
 
-        epilogue_functor = EpilogueFunctor(**kwargs)
+        cc = int(cuda_env.get_cuda_arch())
+        epilogue_functor = EpilogueFunctor(cc=cc, **kwargs)
         epilogue_functor.trace(example_tensors)
         return epilogue_functor
 
