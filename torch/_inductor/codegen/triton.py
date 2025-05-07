@@ -504,7 +504,7 @@ class BlockPtrOptions:
 def triton_reshape(
     value: str, old_shape: Sequence[sympy.Expr], new_shape: Sequence[sympy.Expr]
 ) -> str:
-    """Workaround https://github.com/openai/triton/issues/2836"""
+    """Workaround https://github.com/triton-lang/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
 
     old_shape_str = [V.kernel.index_to_str(shape) for shape in old_shape]
@@ -841,7 +841,7 @@ class TritonOverrides(OpOverrides):
 
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
-            # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
+            # https://github.com/triton-lang/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
             fp8_dtypes = (
                 torch.float8_e4m3fn,
                 torch.float8_e5m2,
@@ -1828,7 +1828,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and len(mask_vars - dense_mask_vars) == 0
             and not self.is_indirect_indexing(index)
             and have_loop_vars
-            # workaround https://github.com/openai/triton/issues/2821
+            # workaround https://github.com/triton-lang/triton/issues/2821
             and self.index_dtype == "tl.int32"
         ):
 
@@ -2053,7 +2053,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> tuple[str, str]:
         check = indexing.boundary_check()
         if not check:
-            # workaround https://github.com/openai/triton/issues/2813
+            # workaround https://github.com/triton-lang/triton/issues/2813
             other = ""
         elif other:
             assert other == ", other=0.0"
@@ -2114,7 +2114,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value, indexing.final_shape, indexing.block_shape, False
         )
 
-        # workaround https://github.com/openai/triton/issues/2814
+        # workaround https://github.com/triton-lang/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
 
@@ -2260,7 +2260,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 line += ".to(tl.float32)"
                 dtype = torch.float32
             if dtype == torch.bool and torch.version.hip is None:
-                # Workaround for https://github.com/openai/triton/issues/2151
+                # Workaround for https://github.com/triton-lang/triton/issues/2151
                 # tl.load returns int8 when loading from pointer to int1
                 # NOTE: Currently causes hangs on bool UTs for ROCm
                 line += ".to(tl.int1)"
@@ -2302,7 +2302,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indexing = self.indexing(index, dense_indexing=True, block_ptr=mode is None)
 
         # Guard against write-after-read corruption in triton.
-        # See # https://github.com/openai/triton/issues/1615
+        # See # https://github.com/triton-lang/triton/issues/1615
         # This triton bug means that a load which is broadcasted over multiple
         # warps may see the result of a store that happens later in the triton
         # program. The workaround is to add a barrier before storing, which
@@ -3655,7 +3655,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
