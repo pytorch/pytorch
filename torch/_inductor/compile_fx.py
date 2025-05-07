@@ -95,7 +95,7 @@ from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
-from ..utils._triton import has_triton
+from ..utils._triton import has_triton_package
 from . import config, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
@@ -695,6 +695,8 @@ def compile_fx_inner(
                 "compile_fx_inner",
                 phase_name="inductor_compile",
                 log_pt2_compile_event=True,
+                log_waitcounter=True,
+                waitcounter_name_override="compile_inductor",
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
@@ -842,9 +844,11 @@ def _compile_fx_inner(
             assert mb_compiled_graph is None
             log.debug(
                 "FX cache bypass reason: %s",
-                cache_info.get("cache_bypass_reason", "unknown")
-                if cache_info is not None
-                else "FX cache disabled or key generation failed",
+                (
+                    cache_info.get("cache_bypass_reason", "unknown")
+                    if cache_info is not None
+                    else "FX cache disabled or key generation failed"
+                ),
             )
             mb_compiled_graph = fx_codegen_and_compile(
                 gm, example_inputs, inputs_to_check, **graph_kwargs
@@ -1165,8 +1169,15 @@ class _InProcessFxCompile(FxCompile):
                         colored=True,
                     ),
                 )
+
+                # We're printing the graph to be used as a cache key - so a
+                # printer which is a little less readable but faster is
+                # appropriate.
                 inductor_post_grad_graph_str = gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
+                    print_output=False,
+                    include_stride=True,
+                    include_device=True,
+                    fast_sympy_print=True,
                 )
                 trace_structured(
                     "inductor_post_grad_graph",
@@ -1266,12 +1277,12 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_wrapper_code=const_wrapper_code.value
-                    if const_wrapper_code
-                    else None,
-                    const_kernel_code=const_kernel_code.value
-                    if const_kernel_code
-                    else None,
+                    const_wrapper_code=(
+                        const_wrapper_code.value if const_wrapper_code else None
+                    ),
+                    const_kernel_code=(
+                        const_kernel_code.value if const_kernel_code else None
+                    ),
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )
@@ -1846,7 +1857,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
         "triton.autotune_at_compile_time": (
             config.triton.autotune_at_compile_time
             if config.triton.autotune_at_compile_time is not None
-            else has_triton()
+            else has_triton_package()
         ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
