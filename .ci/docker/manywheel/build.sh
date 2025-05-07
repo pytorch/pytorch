@@ -53,7 +53,13 @@ case ${image} in
         DOCKER_GPU_BUILD_ARG=""
         MANY_LINUX_VERSION="s390x"
         ;;
-    manylinux2_28-builder:cuda*)
+    manylinux2_28-builder:cuda11*)
+        TARGET=cuda_final
+        GPU_IMAGE=amd64/almalinux:8
+        DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
+        MANY_LINUX_VERSION="2_28"
+        ;;
+    manylinux2_28-builder:cuda12*)
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
