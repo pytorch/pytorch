@@ -72,7 +72,7 @@ def raise_hard_error_if_graph_break(reason):
         def graph_break_as_hard_error(*args, **kwargs):
             try:
                 return fn(*args, **kwargs)
-            except Unsupported as e:
+            except (Unsupported, Exception) as e:
                 msg = " Scroll up to find out what causes the graph break."
                 raise UncapturedHigherOrderOpError(reason + msg) from e
 
