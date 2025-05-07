@@ -391,21 +391,23 @@ class TensorVariable(VariableTracker):
         )
 
     def call_obj_hasattr(self, tx: "InstructionTranslator", name):
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+        from . import GetAttrVariable
+        from .builtin import BuiltinVariable
+
+        # TODO - This is not a good solution but solves an accuracy issue.
+        # Today, var_getattr returns GetAttrVariable for both non-existent
+        # attributes and existing attributes. This is a bug and requires more
+        # deep dive.
+        if name in ("size", "stride"):
             return ConstantVariable(True)
 
         try:
-            self.var_getattr(tx, name)
-            ret_val = True
-        except NotImplementedError:
-            unimplemented_v2(
-                gb_type=f"Cannot tell if tensor has attribute {name}",
-                context="",
-                explanation=f"Dynamo is unable to decipher if tensor with {self.source} has {name} attr",
-                hints=[
-                    "Consider rewriting your code to avoid hasattr(tensor, atrr_name)"
-                ],
+            var = BuiltinVariable(getattr).call_function(
+                tx, [self, ConstantVariable(name)], {}
             )
+            # in the event that TensorVariable returns NotImplemented
+            # BuiltinVariable.call_getattr returns GetAttrVariable
+            ret_val = not isinstance(var, GetAttrVariable)
         except AttributeError:
             ret_val = False
 
