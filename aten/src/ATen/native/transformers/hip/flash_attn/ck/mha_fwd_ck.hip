@@ -279,41 +279,61 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         p = at::empty({ 0 }, opts);
     }
 
+
+    // TROUBLE SPOT ===================================================
+    uint64_t drop_seed = 1, drop_offset = 0;
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
-    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
-    auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
+
+    auto rng_state_options = at::TensorOptions().dtype(at::kFLoat32).device(at::kCUDA);
+    auto rng_state = at::empty({2}, options(at::kLong));
+
+    
+
+//    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
+//    auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
 
 
 
-    at::Tensor seed_t, offset_t;
+//    at::Tensor seed_t, offset_t;
     std::cout << "CHECKPOINT 2" << std::endl;
+
+
     if (p_dropout > 0.0)  {
         std::cout << "CHECKPOINT 2.A.A" << std::endl;
+
+
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
             gen_, at::cuda::detail::getDefaultCUDAGenerator());
+
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
-
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
+        std::tie(drop_seed, drop_offset) = flash::unpack(philox_args);
 
+//        hipLaunchKernelGGL(
+//            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
+  
 
-        hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
-        seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[0])), at::dtype(at::kLong));
-        offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[1])), at::dtype(at::kLong));
+//        seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[0])), at::dtype(at::kLong));
+//        offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[1])), at::dtype(at::kLong));
         std::cout << "CHECKPOINT 2.A.B" << std::endl;
-        std::cout << "fwd Seed device  :" << seed_t.device() << std::endl;
-        std::cout << "fwd Offset device:" << offset_t.device() << std::endl;
+//        std::cout << "fwd Seed device  :" << seed_t.device() << std::endl;
+//        std::cout << "fwd Offset device:" << offset_t.device() << std::endl;
     }
-    else
+/*    else
     {
         std::cout << "CHECKPOINT 2.B.A" << std::endl;
         seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
         offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
         std::cout << "CHECKPOINT 2.B.B" << std::endl;
     }
-
+    */
+    //these are actual values allegedly on the GPU
+    rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
+    rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
+    std::cout << "RNG_STATE DEVICE: " << rng_state.device() << std::endl;
+// =============================================================================
     std::optional<at::Tensor> attn_bias;
     std::cout << "CHECKPOINT 3" << std::endl;
     if( attn_bias_.has_value())
@@ -322,7 +342,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     }
     std::cout << "CHECKPOINT 4" << std::endl;
     if (seqlen_k > 0) {
-        auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
+        //auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
+        auto drop_seed_os
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
