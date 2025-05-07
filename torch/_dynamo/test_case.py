@@ -15,6 +15,7 @@ import importlib
 import inspect
 import logging
 import os
+import pathlib
 import re
 import sys
 import unittest
@@ -105,7 +106,10 @@ class TestCase(TorchTestCase):
 
 class CPythonTestCase(TestCase):
     """
-    Enable certain features that are off by default (i.e. tracing through unittest)
+    Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
+
+    This class enables specific features that are disabled by default, such as
+    tracing through unittest methods.
     """
 
     _stack: contextlib.ExitStack
@@ -174,19 +178,21 @@ class CPythonTestCase(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Skip test if python versions doesn't match
-        m = re.search(r"\b\d+_\d+\b", inspect.getfile(cls))
+        normalized_path = pathlib.PurePath("dynamo/cpython").as_posix()
+        regex = re.escape(normalized_path) + r"\b\d+_\d{2}\b"
+        m = re.search(regex, inspect.getfile(cls))
         if m:
             test_py_ver = tuple(map(int, m.group().split("_")))
+            py_ver = sys.version_info[:2]
+            if py_ver != test_py_ver:
+                expected = ".".join(map(str, test_py_ver))
+                got = ".".join(map(str, py_ver))
+                raise unittest.SkipTest(
+                    f"Test requires Python {expected} but got Python {got}"
+                )
         else:
-            raise unittest.TestCase.failureException(
-                f"Test file {inspect.getfile(cls)} does not contain a valid Python version"
-            )
-        py_ver = sys.version_info[:2]
-        if py_ver != test_py_ver:
-            expected = ".".join(map(str, test_py_ver))
-            got = ".".join(map(str, py_ver))
             raise unittest.SkipTest(
-                f"Test requires Python {expected} but got Python {got}"
+                f"Test requires a specific Python version but not found in path {inspect.getfile(cls)}"
             )
 
         super().setUpClass()

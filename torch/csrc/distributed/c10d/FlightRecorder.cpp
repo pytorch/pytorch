@@ -174,7 +174,8 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
 // Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
 // the GIL. If you don't want to block the current thread or take the risk of a
 // GIL deadlock, you can use an asynchronous calling mechanism like std::async.
-std::string FlightRecorder::Entry::getTraceback() {
+template <typename EventType>
+std::string FlightRecorder<EventType>::Entry::getTraceback() {
   torch::CapturedTraceback* traceback = traceback_.get();
   torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});
   // We use 0 because we only have one traceback here.
@@ -197,7 +198,8 @@ std::string FlightRecorder::Entry::getTraceback() {
   return oss.str();
 }
 
-std::optional<size_t> FlightRecorder::record(
+template <typename EventType>
+std::optional<size_t> FlightRecorder<EventType>::record(
     size_t pg_id,
     const std::tuple<std::string, std::string>& pg_name,
     size_t collective_seq_id,
@@ -206,8 +208,8 @@ std::optional<size_t> FlightRecorder::record(
     std::string profiling_name,
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs,
-    Event* start,
-    Event* end,
+    EventType* start,
+    EventType* end,
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
@@ -271,7 +273,8 @@ std::optional<size_t> FlightRecorder::record(
   return id_++;
 }
 
-void FlightRecorder::record_pg_ranks(
+template <typename EventType>
+void FlightRecorder<EventType>::record_pg_ranks(
     const std::tuple<std::string, std::string>& pg_name,
     std::vector<uint64_t> ranks) {
   if (!enabled_) {
@@ -281,7 +284,8 @@ void FlightRecorder::record_pg_ranks(
   pg_name_to_ranks_[pg_name] = std::move(ranks);
 }
 
-void FlightRecorder::record_accelerator_version(
+template <typename EventType>
+void FlightRecorder<EventType>::record_accelerator_version(
     const std::string nccl_version) {
   if (!enabled_) {
     return;
@@ -290,7 +294,8 @@ void FlightRecorder::record_accelerator_version(
   nccl_version_ = std::move(nccl_version);
 }
 
-void FlightRecorder::update_state(Entry& r) {
+template <typename EventType>
+void FlightRecorder<EventType>::update_state(Entry& r) {
   if (r.start_ != nullptr) {
     bool started = r.start_->query();
     if (started && !r.time_discovered_started_) {
@@ -305,7 +310,9 @@ void FlightRecorder::update_state(Entry& r) {
   }
 }
 
-std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
+template <typename EventType>
+std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
+    EventType>::dump_entries() {
   std::lock_guard<std::mutex> guard(mutex_);
   std::vector<Entry> result;
   result.reserve(entries_.size());
@@ -325,10 +332,11 @@ std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
   return result;
 }
 
+template <typename EventType>
 // Returns the entry with the given id, if it exists. Otherwise, returns
 // std::nullopt.
-std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
-    std::optional<size_t> id) {
+std::optional<typename FlightRecorder<EventType>::Entry> FlightRecorder<
+    EventType>::getEntry(std::optional<size_t> id) {
   if (!enabled_ || !id) {
     return std::nullopt;
   }
@@ -342,7 +350,8 @@ std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
   }
 }
 
-void FlightRecorder::retire_id(
+template <typename EventType>
+void FlightRecorder<EventType>::retire_id(
     std::optional<size_t> id,
     bool compute_duration) {
   if (!enabled_ || !id) {
@@ -350,8 +359,8 @@ void FlightRecorder::retire_id(
   }
 
   bool can_compute_duration = false;
-  Event* startEvent = nullptr;
-  Event* endEvent = nullptr;
+  EventType* startEvent = nullptr;
+  EventType* endEvent = nullptr;
   std::optional<float> duration = std::nullopt;
 
   std::unique_lock<std::mutex> guard(mutex_);
@@ -391,7 +400,8 @@ void FlightRecorder::retire_id(
   }
 }
 
-const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
+template <typename EventType>
+const c10::List<c10::IValue> FlightRecorder<EventType>::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
@@ -495,7 +505,9 @@ const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
   return entries;
 }
 
-const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgConfig() {
+template <typename EventType>
+const c10::Dict<c10::IValue, c10::IValue> FlightRecorder<
+    EventType>::getPgConfig() {
   auto pg_config = new_dict();
   for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
     auto pg_info = new_dict();
@@ -507,8 +519,9 @@ const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgConfig() {
   return pg_config;
 }
 
-const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
-    getPgConfigJson() {
+template <typename EventType>
+const std::map<std::string, std::map<std::string, std::string>> FlightRecorder<
+    EventType>::getPgConfigJson() {
   std::map<std::string, std::map<std::string, std::string>> result;
   for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
     auto pg_info = std::map<std::string, std::string>();
@@ -520,7 +533,9 @@ const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
   return result;
 }
 
-const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgStatus() {
+template <typename EventType>
+const c10::Dict<c10::IValue, c10::IValue> FlightRecorder<
+    EventType>::getPgStatus() {
   auto all_pg_status = new_dict();
   for (const auto& [pg_id, status] : all_pg_status_) {
     auto pg_status = new_dict();
@@ -532,8 +547,9 @@ const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgStatus() {
   return all_pg_status;
 }
 
-const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
-    getPgStatusJson() {
+template <typename EventType>
+const std::map<std::string, std::map<std::string, std::string>> FlightRecorder<
+    EventType>::getPgStatusJson() {
   std::map<std::string, std::map<std::string, std::string>> result;
   for (const auto& [pg_id, status] : all_pg_status_) {
     auto pg_status = std::map<std::string, std::string>();
@@ -548,7 +564,8 @@ const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
   return result;
 }
 
-std::string FlightRecorder::dump_json(
+template <typename EventType>
+std::string FlightRecorder<EventType>::dump_json(
     const std::optional<std::unordered_map<
         std::string,
         std::unordered_map<std::string, std::string>>>& ncclDumpMap,
@@ -640,7 +657,8 @@ std::string FlightRecorder::dump_json(
   return result.dump();
 }
 
-std::string FlightRecorder::dump(
+template <typename EventType>
+std::string FlightRecorder<EventType>::dump(
     const std::optional<std::unordered_map<
         std::string,
         std::unordered_map<std::string, std::string>>>& ncclDumpMap,
@@ -676,6 +694,8 @@ std::string FlightRecorder::dump(
   }
   return pickle_str(result);
 }
+
+template struct FlightRecorder<at::cuda::CUDAEvent>;
 
 std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
 std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
