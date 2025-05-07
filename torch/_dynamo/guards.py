@@ -475,7 +475,11 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
                     extra = f"  # {format_frame(fs, line=True)}"
                     break
         elif guard.stack:
-            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+            summary = guard.stack.summary()
+            if len(summary) > 0:
+                extra = f"  # {format_frame(summary[-1])}"
+            else:
+                extra = "  # <unknown>"
     return f"{code_part:<60}{extra}"
 
 
@@ -1575,7 +1579,7 @@ class GuardBuilder(GuardBuilderBase):
     def DUAL_LEVEL(self, guard: Guard):
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
-        dual_level = torch.autograd.forward_ad._current_level
+        dual_level = self.check_fn_manager.output_graph.dual_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
         self._set_guard_export_info(guard, [code])
         # TODO(anijain2305) - Consider this moving this guard to C++
@@ -1591,7 +1595,7 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        cis = self.check_fn_manager.output_graph.functorch_layers
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._set_guard_export_info(guard, code)
@@ -1834,6 +1838,8 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
+        if self.serialization_mode == "save":
+            raise RuntimeError("DUPLICATE_INPUT guard cannot be serialized yet.")
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
@@ -1860,6 +1866,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def WEAKREF_ALIVE(self, guard):
+        if self.serialization_mode == "save":
+            raise RuntimeError("WEAKREF_ALIVE guard cannot be serialized.")
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -2220,7 +2228,7 @@ class GuardBuilder(GuardBuilderBase):
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
-                # For numpy tensors, since those are ephemeral, we dont have to
+                # For numpy tensors, since those are ephemeral, we don't have to
                 # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
@@ -2515,6 +2523,23 @@ class GuardsStatePickler(pickle.Pickler):
         )
 
     @classmethod
+    def _unpickle_traceable_wrapper_subclass(
+        cls, meta_tensor, device, pytype, dispatch_keys_raw, ctx, inner_data
+    ):
+        # Unpickle the inner tensor components. These could also be subclass instances.
+        inner_tensors = {}
+        for attr, unpickle_func, unpickle_func_args in inner_data:
+            inner_tensors[attr] = unpickle_func(*unpickle_func_args)
+
+        outer_size, outer_stride = meta_tensor.shape, meta_tensor.stride()
+        out = type(meta_tensor).__tensor_unflatten__(
+            inner_tensors, ctx, outer_size, outer_stride
+        )
+        out.pytype = pytype
+        out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
+        return out
+
+    @classmethod
     def _unpickle_python_module(cls, alias: str):
         return importlib.import_module(alias)
 
@@ -2522,8 +2547,41 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_dispatch_key_set(cls, raw_repr: int):
         return torch._C.DispatchKeySet.from_raw_repr(raw_repr)
 
+    @classmethod
+    def _unpickle_functorch_interpreter(cls, json: bytes):
+        return torch._C._functorch.CInterpreter.deserialize(json)
+
+    @classmethod
+    def _unpickle_mapping_proxy(cls, d):
+        return types.MappingProxyType(d)
+
     def reducer_override(self, obj):
+        import sympy
+
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
+            from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+            if is_traceable_wrapper_subclass(obj):
+                # inner_data is a list of tuples of:
+                #   (inner attr name, unpickle func, tuple of func inputs)
+                # This supports traceable wrapper subclass inner tensors.
+                inner_data = []
+                attrs, ctx = obj.__tensor_flatten__()
+                # recursively call for inner tensor components
+                for attr in attrs:
+                    inner = getattr(obj, attr)
+                    func, args_tuple = self.reducer_override(inner)
+                    inner_data.append((attr, func, args_tuple))
+
+                return type(self)._unpickle_traceable_wrapper_subclass, (
+                    torch.empty_like(obj, device="meta"),
+                    obj.device,
+                    type(obj),
+                    torch._C._dispatch_keys(obj).raw_repr(),
+                    ctx,
+                    inner_data,
+                )
+
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta"),
                 obj.device,
@@ -2542,6 +2600,23 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, torch._C.DispatchKeySet):
             return type(self)._unpickle_dispatch_key_set, (obj.raw_repr(),)
+
+        elif isinstance(obj, torch._C._functorch.CInterpreter):
+            return type(self)._unpickle_functorch_interpreter, (obj.serialize(),)
+
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, sympy.Function)
+            and hasattr(obj, "_torch_handler_name")
+        ):
+            assert hasattr(obj, "_torch_unpickler")
+            return obj._torch_unpickler, (obj._torch_handler_name,)
+
+        elif isinstance(obj, torch.SymInt):
+            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+
+        elif isinstance(obj, types.MappingProxyType):
+            return type(self)._unpickle_mapping_proxy, (obj.copy(),)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise RuntimeError(
@@ -3094,8 +3169,8 @@ def is_recompiles_verbose_enabled():
 
 
 # this will only be used if cpp guards are disabled
-def make_torch_function_mode_stack_guard(intial_stack):
-    types = [type(x) for x in intial_stack]
+def make_torch_function_mode_stack_guard(initial_stack):
+    types = [type(x) for x in initial_stack]
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()

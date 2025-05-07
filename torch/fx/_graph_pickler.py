@@ -37,6 +37,7 @@ def _ops_filter_safe(name: str) -> bool:
     )
 
 
+@dataclasses.dataclass
 class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
