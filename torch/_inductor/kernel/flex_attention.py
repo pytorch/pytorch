@@ -1455,8 +1455,9 @@ def flex_attention(
             ("n", torch.int32),
         ]
     ]
-    subgraph_inps = placeholder_inps + list(score_mod_other_buffers)
-    subgraph_buffer = build_subgraph_buffer(subgraph_inps, subgraph)
+    subgraph_buffer = build_subgraph_buffer(
+        placeholder_inps + list(score_mod_other_buffers), subgraph
+    )
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -1470,7 +1471,6 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-    subgraph_outs = get_subgraph_buffers(subgraph_buffer, mask_graph_buffer)
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -1485,7 +1485,7 @@ def flex_attention(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
     if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
-        out, logsumexp = create_flex_decoding_kernel(
+        return create_flex_decoding_kernel(
             query,
             key,
             value,
@@ -1497,11 +1497,6 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-        # need subgraph inputs and outputs to analyze all symints
-        # used in flex attention
-        out.data.data.subgraph_inps = subgraph_inps
-        out.data.data.subgraph_outs = subgraph_outs
-        return (out, logsumexp)
 
     (
         query,
