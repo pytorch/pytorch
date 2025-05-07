@@ -583,7 +583,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
     def test_unbacked_repeat(self):
         def f(x, n):
             m = x.item()
-            torch._check_is_size(m)
             x = torch.empty(x).repeat(n)  # s0*u0
             return torch.cat([x, x], dim=0)
 
