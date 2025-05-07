@@ -246,7 +246,7 @@ Adagrad.__doc__ = (
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
-        fused (bool, optional): whether the fused implementation (CPU only) is used.
+        fused (bool, optional): whether the fused implementation (CPU and CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. (default: None). Please note that the fused implementations does not
             support sparse or complex gradients.
