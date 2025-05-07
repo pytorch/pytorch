@@ -811,7 +811,7 @@ class _NoopSaveInputs(torch.autograd.Function):
 
 
 class _CheckpointFrame:
-    def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn):
+    def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn, layer_id=None):
         self.recompute_fn = recompute_fn
         self.input_saver = None
         self.weak_holders: List[ReferenceType] = []
@@ -835,6 +835,7 @@ class _CheckpointFrame:
         self.x_metadatas = []
         self.forward_completed = False
         self.ignore_saved_mismatch = False
+        self.layer_id = layer_id
 
     def check_recomputed_tensors_match(self, gid):
         if self.ignore_saved_mismatch:
@@ -894,7 +895,7 @@ class _CheckpointFrame:
             mismatched_tensors = ""
             for idx, x_meta, recomputed_meta in nb_meta_different:
                 mismatched_tensors += (
-                    f"tensor at position {idx}:\n"
+                    f"tensor at position {idx} layer_id {self.layer_id}:\n"
                     f"saved metadata: {x_meta}\n"
                     f"recomputed metadata: {recomputed_meta}\n"
                 )
@@ -1516,7 +1517,8 @@ def _checkpoint_without_reentrant_generator(
         recompute_fn,
         _enable_checkpoint_early_stop,
         unpack_error_cb,
-        metadata_fn
+        metadata_fn,
+        layer_id=getattr(fn, "layer_id", None)
     )
     dummy = torch.empty((0,), requires_grad=True)
     new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
