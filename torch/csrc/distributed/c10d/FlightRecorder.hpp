@@ -93,11 +93,13 @@ float getDurationFromEvent(
     at::cuda::CUDAEvent& ncclStartEvent,
     at::cuda::CUDAEvent& ncclEndEvent);
 
+template <typename EventType>
 struct FlightRecorder {
-  static FlightRecorder* get() {
+  static FlightRecorder<EventType>* get() {
     // intentionally leak on exit
     // because this will hold python state that may get destructed
-    static FlightRecorder* instance = new FlightRecorder();
+    static FlightRecorder<EventType>* instance =
+        new FlightRecorder<EventType>();
     return instance;
   }
   FlightRecorder() {
@@ -105,7 +107,6 @@ struct FlightRecorder {
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
-  using Event = at::cuda::CUDAEvent;
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
@@ -129,7 +130,7 @@ struct FlightRecorder {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
-    Event *start_, *end_;
+    EventType *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -164,6 +165,10 @@ struct FlightRecorder {
                            // a retired but not completed event has timed out
 
     // Returns the traceback of current entry, in string form.
+    // Note: `getTraceback` invokes `torch::symbolize`, which may need to
+    // acquire the GIL. If you don't want to block the current thread or take
+    // the risk of a GIL deadlock, you can use an asynchronous calling mechanism
+    // like std::async.
     std::string getTraceback();
   };
 
@@ -188,8 +193,8 @@ struct FlightRecorder {
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
-      Event* start,
-      Event* end,
+      EventType* start,
+      EventType* end,
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
