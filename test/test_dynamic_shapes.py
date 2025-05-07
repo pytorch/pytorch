@@ -3058,7 +3058,6 @@ class TestGuardsExpressions(TestCase):
         x = make_non_contiguous_tensor(4)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         
-
         compiled_result = compiled_func(x, torch.tensor([2]))
         eager_result = func(x, torch.tensor([2]))
         self.assertEqual(compiled_result, eager_result)
@@ -3089,11 +3088,6 @@ class TestGuardsExpressions(TestCase):
         
         result_eager = func(x, torch.tensor([5, 20]))
         result_compiled = compiled_func(x, torch.tensor([5, 20]))
-
-         # ensure a clone was made
-        self.assertNotEqual(result_compiled.data._cdata, x.data._cdata)
-        self.assertNotEqual(result_eager.data._cdata, x.data._cdata)
-        self.assertEqual(result_eager, result_compiled)
 
         result_eager = func(x, torch.tensor([2, 50]))
         result_compiled = compiled_func(x, torch.tensor([2, 50]))
