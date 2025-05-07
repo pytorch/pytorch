@@ -11577,7 +11577,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (sorted_sequence, values), check_lowp=False)
         cfn = torch.compile(fn)
-        _, code = run_and_get_code(cfn, sorted_sequence.cuda(), values.cuda())
+        _, code = run_and_get_code(
+            cfn, sorted_sequence.to(GPU_TYPE), values.to(GPU_TYPE)
+        )
 
         # make sure that we did not fuse the broadcast and the bucketize,
         # because bucketize is computationally expensive.
@@ -11673,7 +11675,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (inp, boundaries), check_lowp=False)
         cfn = torch.compile(fn)
-        _, code = run_and_get_code(cfn, inp.cuda(), boundaries.cuda())
+        _, code = run_and_get_code(cfn, inp.to(GPU_TYPE), boundaries.to(GPU_TYPE))
 
         # make sure that we did not fuse the broadcast and the bucketize,
         # because bucketize is computationally expensive.
