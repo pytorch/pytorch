@@ -240,6 +240,8 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     if (is_causal) { window_size_right = 0; }
 
     bool is_dropout = p_dropout > 0.0;
+    std::cout << "bwd Seed device  :" << philox_seed.device() << std::endl;
+    std::cout << "bwd Offset device:" << philox_offset.device() << std::endl;
     auto stream = at::cuda::getCurrentHIPStream().stream();
 
     auto q_dtype = q.dtype();
@@ -411,7 +413,9 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
+        std::cout << "CHECKPOINT BEFORE FMHA_BWD" << std::endl;
         float t = fmha_bwd(traits, args, stream_config);
+        std::cout << "CHECKPOINT AFTER FMHA_BWD" << std::endl;
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.

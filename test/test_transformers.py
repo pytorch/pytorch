@@ -3444,6 +3444,10 @@ class TestSDPACudaOnly(NNTestCase):
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str, enable_gqa: bool, n_heads: list[int]):
+
+
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        print(TEST_WITH_CK)
         if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3555,7 +3559,7 @@ class TestSDPACudaOnly(NNTestCase):
             *zip(grads_ref, grads_ref_lp, grads),
             fudge_factors=fudge_factors,
         )
-
+        
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
