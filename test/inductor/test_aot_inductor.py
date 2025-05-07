@@ -321,6 +321,32 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(self.device), example_inputs)
 
     @requires_gpu
+    def test_autotune_with_constant_folding(self):
+        class M(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device="cuda")
+
+            def _quantize(self, input):
+                return torch.abs(input)
+
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device="cuda"),)
+        model = M().cuda()
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
+        )
+
+    @requires_gpu
     def test_multi_device(self):
         if self.device == "cpu" and GPU_TYPE == "xpu":
             raise unittest.SkipTest(
