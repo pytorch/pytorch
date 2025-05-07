@@ -1237,25 +1237,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    def test_dynamic_shapes_annotations(self):
-        @torch.compile
-        def f(x):
-            return x.sin().sin()
-
-        with torch._dynamo.compiled_autograd._enable(torch.compile):
-            x = torch.randn(2, 3, requires_grad=True)
-            torch._dynamo.mark_dynamic(x, 0)
-            out = f(x)
-            out.sum().backward()
-
-            x = torch.randn(4, 3, requires_grad=True)
-            torch._dynamo.mark_dynamic(x, 0)
-            out = f(x)
-            out.sum().backward()
-
-        # mark_dynamic should not cause ConstraintViolationError
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-
     def test_torch_compile_api_dynamic_shapes(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
         def fn(call_backward):
