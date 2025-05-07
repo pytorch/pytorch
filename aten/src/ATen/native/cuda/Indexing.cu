@@ -1575,11 +1575,6 @@ void index_select_out_cuda_impl(
     return;
   }
 
-  std::vector<int64_t> tmpSize(newSize.size(), 1);
-  if (self.dim() > 0) {
-    tmpSize[dim] = numIndices;
-  }
-
   bool indContig = index.is_contiguous();
 
   // The `self` is partitioned into two parts:
@@ -1637,6 +1632,10 @@ void index_select_out_cuda_impl(
       }
     });
   } else {
+    std::vector<int64_t> tmpSize(newSize.size(), 1);
+    if (self.dim() > 0) {
+      tmpSize[dim] = numIndices;
+    }
     at::gather_out(out, self, dim, index.view(tmpSize).expand(newSize));
     return;
   }
