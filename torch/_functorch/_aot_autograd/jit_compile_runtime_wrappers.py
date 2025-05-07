@@ -186,7 +186,10 @@ def aot_dispatch_base(
     aot_forward_graph_str = None
     if aot_config.cache_info is not None:
         aot_forward_graph_str = fw_module.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            fast_sympy_print=True,
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
