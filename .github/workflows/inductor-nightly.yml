@@ -35,7 +35,7 @@ jobs:
     needs: get-default-label-prefix
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
