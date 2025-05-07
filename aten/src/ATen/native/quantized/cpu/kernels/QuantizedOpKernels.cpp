@@ -15,6 +15,7 @@
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <c10/util/Unroll.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -4245,6 +4246,150 @@ void index_put_kernel_quantized_cpu(TensorIterator& iter, IntArrayRef index_size
     }, /*serial_execution=*/is_deterministic);
   });
 }
+
+template<typename T>
+void _qmul_tensor_cpu_impl(
+    T* out_ptr,
+    int64_t size,
+    const uint8_t* x_ptr,
+    double x_scale,
+    int64_t x_zero_point,
+    const uint8_t* y_ptr,
+    double y_scale,
+    int64_t y_zero_point,
+    double output_scale,
+    int64_t output_zero_point) {
+  float multiplier = x_scale * y_scale / output_scale;
+#if defined(CPU_CAPABILITY_AVX512)
+  int64_t size_rem = size % 16;
+  int64_t size_com = size - size_rem;
+  int64_t steps = size_com / 16;
+  __m512 vs = _mm512_set1_ps(multiplier);
+  __m512i vza = _mm512_set1_epi32(x_zero_point);
+  __m512i vzb = _mm512_set1_epi32(y_zero_point);
+  __m512i vzc = _mm512_set1_epi32(output_zero_point);
+  __m512i v255 = _mm512_set1_epi32(255);
+  __m512i v0 = _mm512_set1_epi32(0);
+  at::parallel_for(0, steps, 1, [&](int64_t start, int64_t end) {
+    for (const auto d : c10::irange(start, end)) {
+      auto x_data = x_ptr + d * 16;
+      auto y_data = y_ptr + d * 16;
+      auto out_data = out_ptr + d * 16;
+      __m128i va = _mm_loadu_si128((__m128i*)x_data);
+      __m128i vb = _mm_loadu_si128((__m128i*)y_data);
+      __m512i va_i32 = _mm512_cvtepi8_epi32(va);
+      __m512i vb_i32 = _mm512_cvtepi8_epi32(vb);
+      va_i32 = _mm512_sub_epi32(va_i32, vza);
+      vb_i32 = _mm512_sub_epi32(vb_i32, vzb);
+      __m512i vc = _mm512_mullo_epi32(va_i32, vb_i32);
+      __m512 vc_f = _mm512_cvtepi32_ps(vc);
+      vc_f = _mm512_mul_ps(vc_f, vs);
+      if constexpr (std::is_same<T, float>::value) {
+        _mm512_storeu_ps(out_data, vc_f);
+      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
+        __m256i vc_bf16 = cvtfp32_bf16(vc_f);
+        _mm256_storeu_si256((__m256i*)out_data, vc_bf16);
+      } else if constexpr (std::is_same<T, at::Half>::value) {
+        __m256i vc_f16 = cvtfp32_fp16(vc_f);
+        _mm256_storeu_si256((__m256i*)out_data, vc_f16);
+      } else { //  T == uint8, requantization needed
+        __m512i vc_i32 = _mm512_cvtps_epi32(vc_f);
+        vc_i32 = _mm512_add_epi32(vc_i32, vzc);
+        vc_i32 = _mm512_min_epi32(vc_i32, v255);
+        vc_i32 = _mm512_max_epi32(vc_i32, v0);
+        __m128i vc_i8 = _mm512_cvtepi32_epi8(vc_i32);
+        _mm_storeu_si128((__m128i*)out_data, vc_i8);
+      }
+    }
+  });
+  if (size_rem > 0) {
+    for (const auto d : c10::irange(size_rem)) {
+      uint8_t x_data = *(x_ptr + size_com + d);
+      uint8_t y_data = *(y_ptr + size_com + d);
+      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
+      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
+      int32_t out_val = static_cast<int32_t>(x_val * y_val);
+      float out_val_f = (float)out_val * multiplier;
+      if constexpr (std::is_same<T, float>::value) {
+        *(out_ptr + size_com + d) = out_val_f;
+      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
+        *(out_ptr + size_com + d) = at::BFloat16(out_val_f);
+      } else if constexpr (std::is_same<T, at::Half>::value) {
+        *(out_ptr + size_com + d) = at::Half(out_val_f);
+      } else { //  T == uint8, requantization needed
+        out_val_f = std::round(out_val_f);
+        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
+        out_val_i32 = std::min(255, std::max(0, out_val_i32));
+        *(out_ptr + size_com + d) = static_cast<uint8_t>(out_val_i32);
+      }
+    }
+  }
+#else
+  at::parallel_for(0, size, 1, [&](int64_t start, int64_t end) {
+    for (const auto d : c10::irange(start, end)) {
+      uint8_t x_data = *(x_ptr + d);
+      uint8_t y_data = *(y_ptr + d);
+      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
+      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
+      int32_t out_val = static_cast<int32_t>(x_val * y_val);
+      float out_val_f = (float)out_val * multiplier;
+      if constexpr (std::is_same<T, float>::value) {
+        *(out_ptr + d) = out_val_f;
+      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
+        *(out_ptr + d) = at::BFloat16(out_val_f);
+      } else if constexpr (std::is_same<T, at::Half>::value) {
+        *(out_ptr + d) = at::Half(out_val_f);
+      } else { //  T == uint8, requantization needed
+        out_val_f = std::round(out_val_f);
+        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
+        out_val_i32 = std::min(255, std::max(0, out_val_i32));
+        *(out_ptr + d) = static_cast<uint8_t>(out_val_i32);
+      }
+    }
+  });
+#endif
+}
+
+void qmul_tensor_cpu_kernel(
+    Tensor& out,
+    const Tensor& qx,
+    double qx_scale,
+    int64_t qx_zero_point,
+    const Tensor& qy,
+    double qy_scale,
+    int64_t qy_zero_point,
+    double output_scale,
+    int64_t output_zero_point) {
+  auto qx_ptr = qx.const_data_ptr<uint8_t>();
+  auto qy_ptr = qy.const_data_ptr<uint8_t>();
+  int64_t size = qx.numel();
+  TORCH_CHECK(
+      size == qy.numel() && size == out.numel(),
+      "qmul_cpu: Expect qx, qy and out to have the same number of elements");
+  if (out.scalar_type() == c10::ScalarType::Float) {
+    auto out_ptr = out.data_ptr<float>();
+    _qmul_tensor_cpu_impl<float>(
+        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
+    );
+  } else if (out.scalar_type() == c10::ScalarType::BFloat16) {
+    auto out_ptr = out.data_ptr<at::BFloat16>();
+    _qmul_tensor_cpu_impl<at::BFloat16>(
+        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
+    );
+  } else if (out.scalar_type() == c10::ScalarType::Half) {
+    auto out_ptr = out.data_ptr<at::Half>();
+    _qmul_tensor_cpu_impl<at::Half>(
+        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
+    );
+  } else {
+    TORCH_CHECK(out.scalar_type() == c10::ScalarType::Byte,
+        "qmul_cpu: Unsupported output dtype: ", out.scalar_type());
+    auto out_ptr = out.data_ptr<uint8_t>();
+    _qmul_tensor_cpu_impl<uint8_t>(
+        out_ptr, size, qx_ptr, qx_scale, qx_zero_point, qy_ptr, qy_scale, qy_zero_point, output_scale, output_zero_point
+    );
+  }
+}
 } // anonymous namespace
 
 // Some quantization tests are flaky on Windows with AVX512. If --continue-through-error
@@ -4343,5 +4488,6 @@ REGISTER_DISPATCH(
     &index_put_kernel_quantized_cpu)
 REGISTER_DISPATCH(qmean_inner_dim_stub, &qmean_inner_dim_kernel)
 REGISTER_DISPATCH(qstd_inner_dim_stub, &qstd_inner_dim_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(qmul_tensor_cpu_stub, &qmul_tensor_cpu_kernel)
 } // namespace at::native
 // NOLINTEND(*-c-arrays)
