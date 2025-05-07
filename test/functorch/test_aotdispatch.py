@@ -40,6 +40,7 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
+from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
@@ -3979,6 +3980,142 @@ def forward(self, tangents_1):
         tensor = torch.rand(10)
         foo(tensor, tensor[1:-1], 2, 2)
 
+    @parametrize("use_autograd", [False, True])
+    def test_mark_outputs_dynamic(self, use_autograd: bool):
+        counters.clear()
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn2(z):
+            return z * 2
+
+        # 1. static
+        x = torch.randn(10, 10, requires_grad=use_autograd)
+        y = torch.randn(10, 10, requires_grad=use_autograd)
+        out = fn(x, y)
+        self.assertFalse(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        out2 = fn2(out)
+        self.assertFalse(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertEqual(counters["aot_autograd"]["total"], 2)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20)
+        y = torch.randn(20, 20)
+        out = fn(x, y)
+        self.assertTrue(hasattr(out, "_dynamo_weak_dynamic_indices"))
+        out2 = fn2(out)
+        self.assertTrue(hasattr(out2, "_dynamo_weak_dynamic_indices"))
+        self.assertEqual(counters["aot_autograd"]["total"], 2)
+        counters.clear()
+        torch._dynamo.reset()
+
+    def test_mark_activations_dynamic(self):
+        counters.clear()
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y):
+            out = torch.matmul(x, y)
+            out2 = torch.matmul(out, y)
+            out3 = torch.matmul(out2, y)
+            return torch.matmul(out3, y)
+
+        def make_assert_pack(dynamic):
+            def pack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return pack
+
+        def make_assert_unpack(dynamic):
+            def unpack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return unpack
+
+        # 1. static
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(False), make_assert_unpack(False)
+        ):
+            fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20, requires_grad=True)
+        y = torch.randn(20, 20, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(True), make_assert_unpack(True)
+        ):
+            fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+        torch._dynamo.reset()
+
+    def test_mark_activations_dynamic_with_nested(self):
+        # The flattened tensors of the nested tensor aren't
+        # marked as activations, but they add some offset
+        # to the fw_outs. This test ensures that we handle
+        # that offset properly.
+        counters.clear()
+        torch._dynamo.reset()
+
+        def make_assert_pack(dynamic):
+            def pack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return pack
+
+        def make_assert_unpack(dynamic):
+            def unpack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return unpack
+
+        # 1. static
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y, nt):
+            out = torch.matmul(x, y)
+            return out.sum() + nt.clone()
+
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(False), make_assert_unpack(False)
+        ):
+            fn(x, y, nt)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20, requires_grad=True)
+        y = torch.randn(20, 20, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(True), make_assert_unpack(True)
+        ):
+            fn(x, y, nt)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+        torch._dynamo.reset()
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -4428,13 +4565,11 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    select = torch.ops.aten.select.int(cos, 0, 0);  select = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
     getitem = map_impl[0];  map_impl = None
     sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
-    select_1 = torch.ops.aten.select.int(cos, 0, 0);  select_1 = None
     body_graph_1 = self.body_graph_1
     map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
     getitem_1 = map_impl_1[0];  map_impl_1 = None
@@ -4971,8 +5106,6 @@ def forward(self, arg0_1):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, 4)
-    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = add_1 = None
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     return (cos,)""",
         )
@@ -4981,8 +5114,6 @@ def forward(self, arg0_1):
             gm.false_graph_0.code.strip(),
             """\
 def forward(self, arg0_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, 5)
-    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = add_1 = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     return (sin,)""",
         )
