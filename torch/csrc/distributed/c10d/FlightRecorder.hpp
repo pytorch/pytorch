@@ -6,9 +6,6 @@
 #include <mutex>
 
 #include <ATen/ATen.h>
-#ifdef USE_C10D_NCCL
-#include <ATen/cuda/CUDAEvent.h>
-#endif // USE_C10D_NCCL
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
@@ -85,16 +82,6 @@ class TORCH_API DebugInfoWriter {
   static std::unique_ptr<DebugInfoWriter> writer_;
   static std::atomic<bool> hasWriterRegistered_;
 };
-
-/* Helper used by work::getDuration() and flight recorder */
-float getDurationFromEvent(c10::Event& startEvent, c10::Event& endEvent);
-
-#ifdef USE_C10D_NCCL
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent);
-#endif // USE_C10D_NCCL
 
 template <typename EventType>
 struct FlightRecorder {
