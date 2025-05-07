@@ -176,6 +176,11 @@ psutil
 #Pinned versions:
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
 
+pynvml>=11.4.1
+#Description: NVIDIA Management Library bindings for monitoring GPU info
+#Pinned versions: 11.4.1
+#test that import:
+
 pytest==7.3.2
 #Description: testing framework
 #Pinned versions:
