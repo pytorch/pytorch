@@ -5,7 +5,15 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
-from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
+from ...ir import (
+    Buffer,
+    ChoiceCaller,
+    IRNode,
+    Layout,
+    PrimitiveInfoType,
+    ShapeAsConstantBuffer,
+    TensorBox,
+)
 from ...virtualized import V
 from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
@@ -270,7 +278,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             **dict(self.info_kwargs["op"].dict_items()),  # type: ignore[union-attr, index]
         }
 
-    def output_node(self) -> TensorBox:
+    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             ROCmTemplateBuffer(

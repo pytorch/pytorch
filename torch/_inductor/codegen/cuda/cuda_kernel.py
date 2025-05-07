@@ -22,6 +22,7 @@ from ...ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
+    ShapeAsConstantBuffer,
     TensorBox,
 )
 from ...utils import sympy_product
@@ -600,7 +601,7 @@ class CUDATemplateCaller(ChoiceCaller):
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
 
-    def output_node(self) -> TensorBox:
+    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(

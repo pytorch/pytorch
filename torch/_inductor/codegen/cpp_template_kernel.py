@@ -32,7 +32,7 @@ def parse_expr_with_index_symbols(expr):
         return expr.subs(int_symbols)
 
 
-def wrap_with_tensorbox(node) -> ir.TensorBox:
+def wrap_with_tensorbox(node) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
     return (
         ir.TensorBox.create(node) if isinstance(node, ir.Buffer) else ir.TensorBox(node)
     )
@@ -160,6 +160,7 @@ class CppTemplateKernel(CppKernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
+        assert isinstance(sliced, ir.TensorBox)
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
@@ -172,10 +173,10 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
-    def view(self, node, sizes: list[Any]) -> ir.View:
+    def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data
+        return L.view(node, sizes).data  # type: ignore[arg-type]
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
@@ -568,7 +569,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
     ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
-    def output_node(self) -> ir.TensorBox:
+    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
         return ir.TensorBox.create(
             ir.CppTemplateBuffer(
                 layout=self.layout,
