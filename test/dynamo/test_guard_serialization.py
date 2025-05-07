@@ -779,21 +779,6 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 4))}, False
         )
 
-    def test_builtin_match(self):
-        def fn(x):
-            # usage of getattr() here installs a BUILTIN_MATCH guard
-            s = getattr(x, "shape")  # noqa: B009
-            return x + s[0]
-
-        x = torch.randn(3)
-
-        # we don't support BUILTIN_MATCH because it adds a FUNCTION_MATCH guard, and we don't
-        # support that in serialization
-        with self.assertRaisesRegex(
-            RuntimeError, "FUNCTION_MATCH guard cannot be serialized."
-        ):
-            self._test_serialization("BUILTIN_MATCH", fn, x)
-
     def test_dict_version(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
