@@ -8673,7 +8673,6 @@ for shape in [(1,), ()]:
         ):
             Func.apply(b)
 
-
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
         z = torch.ones((2, 1, 2, 2), requires_grad=True)
