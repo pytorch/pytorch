@@ -947,9 +947,9 @@ class CKGemmTemplate(CKTemplate):
         chosen_instances = (
             random.sample(
                 filtered_instances,
-                min(len(filtered_instances), config.rocm.n_max_profiling_configs),
+                min(len(filtered_instances), config.rocm.ck_max_profiling_configs),
             )
-            if config.rocm.n_max_profiling_configs
+            if config.rocm.ck_max_profiling_configs
             else filtered_instances
         )
         log.debug(

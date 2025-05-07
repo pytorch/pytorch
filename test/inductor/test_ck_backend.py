@@ -99,8 +99,9 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": autotune_in_subproc,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 2,
-                "rocm.n_max_profiling_configs": 2,
+                "compile_threads": 16,
+                "rocm.ck_max_profiling_configs": 8,
+                "rocm.ck_tile_max_profiling_configs": 8,
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
@@ -147,8 +148,9 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": autotune_in_subproc,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 2,
-                "rocm.n_max_profiling_configs": 2,
+                "compile_threads": 16,
+                "rocm.ck_max_profiling_configs": 8,
+                "rocm.ck_tile_max_profiling_configs": 8,
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
@@ -222,9 +224,10 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 2,
+                "compile_threads": 16,
                 "rocm.ck_dir": self.ck_dir,
-                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_max_profiling_configs": 8,
+                "rocm.ck_tile_max_profiling_configs": 8,
             }
         ):
 
@@ -260,7 +263,7 @@ class TestCKBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 2,
                 "rocm.ck_dir": self.ck_dir,
-                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_max_profiling_configs": 2,
             }
         ):
 
@@ -351,7 +354,7 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 24,
-                "rocm.n_max_profiling_configs": 24,
+                "rocm.ck_max_profiling_configs": 24,
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
@@ -395,7 +398,7 @@ class TestCKBackend(TestCase):
                 "max_autotune_conv_backends": max_autotune_conv_backends,
                 "compile_threads": 4,
                 "rocm.ck_dir": self.ck_dir,
-                "rocm.n_max_profiling_configs": 4,
+                "rocm.ck_max_profiling_configs": 4,
             }
         ):
 
@@ -436,7 +439,7 @@ class TestCKBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "compile_threads": 2,
-                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_max_profiling_configs": 2,
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
