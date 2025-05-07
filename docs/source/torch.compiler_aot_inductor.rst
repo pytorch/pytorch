@@ -16,31 +16,30 @@ These compiled artifacts are specifically crafted for deployment in non-Python e
 which are frequently employed for inference deployments on the server side.
 
 In this tutorial, you will gain insight into the process of taking a PyTorch model, exporting it,
-compiling it into a shared library, and conducting model predictions using C++.
+compiling it into an artifact, and conducting model predictions using C++.
 
 
 Model Compilation
 ---------------------------
 
-Using AOTInductor, you can still author the model in Python. The following
-example demonstrates how to invoke ``aoti_compile_and_package`` to transform the model into a
-shared library.
+To compile a model using AOTInductor, we first need to use
+:func:`torch.export.export` to capture a given PyTorch model into a
+computational graph. :ref:`torch.export <torch.export>` provides soundness
+guarantees and a strict specification on the IR captured, which AOTInductor
+relies on.
 
-This API uses ``torch.export.export`` to capture the model into a computational graph,
-and then uses TorchInductor to generate a .so which can be run in a non-Python
-environment.  For comprehensive details on the
-``torch._inductor.aoti_compile_and_package``
-API, you can refer to the code
-`here <https://github.com/pytorch/pytorch/blob/6ed237e5b528e3b01a7f1b6366b009dc6f30e6d6/torch/_inductor/__init__.py#L38-L105>`__.
-For more details on ``torch.export.export``, you can refer to the :ref:`torch.export docs <torch.export>`.
+We will then use :func:`torch._inductor.aoti_compile_and_package` to compile the
+exported program using TorchInductor, and save the compiled artifacts into one
+package.
 
 .. note::
 
    If you have a CUDA-enabled device on your machine and you installed PyTorch with CUDA support,
    the following code will compile the model into a shared library for CUDA execution.
    Otherwise, the compiled artifact will run on CPU. For better performance during CPU inference,
-   it is suggested to enable freezing by setting `export TORCHINDUCTOR_FREEZING=1`
-   before running the Python script below.
+   it is suggested to enable freezing by setting ``export TORCHINDUCTOR_FREEZING=1``
+   before running the Python script below. The same behavior works in an environment with Intel®
+   GPU as well.
 
 .. code-block:: python
 
@@ -90,7 +89,7 @@ To access this path from the C++ side, we save it to a file for later retrieval 
 Inference in Python
 ---------------------------
 There are multiple ways to deploy the compiled artifact for inference, and one of that is using Python.
-We have provided a convinient utility API in Python ``torch._inductor.aoti_load_package`` for loading
+We have provided a convinient utility API in Python :func:`torch._inductor.aoti_load_package` for loading
 and running the artifact, as shown in the following example:
 
 .. code-block:: python
@@ -102,6 +101,7 @@ and running the artifact, as shown in the following example:
     model = torch._inductor.aoti_load_package(os.path.join(os.getcwd(), "model.pt2"))
     print(model(torch.randn(8, 10, device=device)))
 
+The input at inference time should have the same size, dtype, and stride as the input at export time.
 
 Inference in C++
 ---------------------------
@@ -211,3 +211,11 @@ Below are some useful tools for debugging AOT Inductor.
 
    logging
    torch.compiler_aot_inductor_minifier
+
+To enable runtime checks on inputs, set the environment variable `AOTI_RUNTIME_CHECK_INPUTS` to 1. This will raise a `RuntimeError` if the inputs to the compiled model differ in size, data type, or strides from those used during export.
+
+API Reference
+-------------
+
+.. autofunction:: torch._inductor.aoti_compile_and_package
+.. autofunction:: torch._inductor.aoti_load_package

@@ -36,14 +36,14 @@ from torch.testing._internal.common_optimizers import (
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
-    IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
+    IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo, set_warn_always_context)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -1225,9 +1225,7 @@ class TestTorchDeviceType(TestCase):
             (':16:8', True)]
 
         cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        is_cuda10_2_or_higher = (torch.version.cuda is not None)
 
         def test_case_info(fn_name, config):
             return f'function "{fn_name}" with config "{"" if config is None else config}"'
@@ -1779,8 +1777,7 @@ else:
             self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
 
     @onlyCUDA
-    @largeTensorTest('24GB', device='cuda')
-    @largeTensorTest('24GB', device='cpu')
+    @largeTensorTest('49GB')
     def test_cumsum_64bit_indexing(self, device):
         b = torch.ones(2 * 4096 * 8, 100000, dtype=torch.float, device='cuda')
         b /= 100000
@@ -1820,14 +1817,16 @@ else:
                 'put_',
                 torch.device(device).type == 'cuda')
 
+    @dtypes(torch.float32)
+    @dtypesIfCUDA(torch.float32, torch.int32)
     @skipIfMPS
-    def test_nondeterministic_alert_histc(self, device):
-        a = torch.tensor([], device=device)
+    def test_nondeterministic_alert_histc(self, device, dtype):
+        a = torch.tensor([], device=device, dtype=dtype)
         for op_call in [torch.histc, torch.Tensor.histc]:
             self.check_nondeterministic_alert(
                 lambda: op_call(a, min=0, max=3),
-                '_histc_cuda',
-                torch.device(device).type == 'cuda')
+                '_histc_cuda with floating point input',
+                torch.device(device).type == 'cuda' and dtype.is_floating_point)
 
     @skipIfMPS
     def test_nondeterministic_alert_bincount(self, device):
@@ -2268,6 +2267,7 @@ else:
         if dtype != torch.int:
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
+    @tf32_on_and_off(0.005)
     @onlyNativeDeviceTypes
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_corrcoef(self, device, dtype):
@@ -2509,7 +2509,7 @@ else:
                         self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
     @bf32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -6469,6 +6469,11 @@ else:
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
+    def test__local_scalar_dense_with_empty_tensor(self, device):
+        input = torch.randn(0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Empty tensor not supported"):
+            torch.ops.aten._local_scalar_dense(input)
+
     @onlyNativeDeviceTypes
     def test_masked_scatter_inplace_noncontiguous(self, device):
         t = torch.zeros(5, 2, dtype=torch.long, device=device)
@@ -7166,6 +7171,18 @@ class TestTorch(TestCase):
     def test_tensor_set_errors(self):
         f_cpu = torch.randn((2, 3), dtype=torch.float32)
         d_cpu = torch.randn((2, 3), dtype=torch.float64)
+
+        storage_offset = 0x41414141
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage of size"):
+            t = torch.randn(1)
+            t.set_(t.untyped_storage(), storage_offset, t.size())
+
+        # if size changes, set_ will resize the storage inplace
+        t = torch.randn(1)
+        size = torch.Size([2, 3])
+        t.set_(t.untyped_storage(), storage_offset, size)
+        self.assertEqual(t.storage_offset(), storage_offset)
+        self.assertEqual(t.untyped_storage().nbytes(), (storage_offset + size[0] * size[1]) * 4)
 
         # change dtype
         self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu.storage()))
@@ -9433,10 +9450,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_to(self):
         self._test_to_with_layout(torch.strided)
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
-        if is_cuda10_2_or_higher:  # in cuda10_1 sparse_csr is beta
+        if torch.version.cuda is not None:
             self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
@@ -9592,8 +9606,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # FIXME: port to a distributed test suite
     @slowTest
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                        don't support multiprocessing with spawn start method")
     def test_multinomial_invalid_probs(self):
         def _spawn_method(self, method, arg):
             try:
@@ -10819,6 +10831,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
     def test_bf16_supported_on_cpu(self):
         self.assertFalse(torch.cuda.is_bf16_supported())
+
+    def test_tensor_with_grad_to_scalar_warning(self) -> None:
+        with (warnings.catch_warnings(record=True) as w,
+                set_warn_always_context(True)):
+            warnings.simplefilter("always")
+
+            x = torch.tensor(2.0, requires_grad=True)
+            math.pow(x, 3)  # calling this results in a warning
+
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, UserWarning))
+            self.assertIn(
+                "Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.",
+                str(w[0].message)
+            )
+
+    def test_tensor_item_no_warning(self):
+        with (warnings.catch_warnings(record=True) as w,
+                set_warn_always_context(True)):
+            warnings.simplefilter("always")
+
+            x = torch.tensor(2.0, requires_grad=True)
+            max(x, 3)  # No warning
+            x.item()  # No warning
+
+            self.assertEqual(len(w), 0)
 
 
 # The following block extends TestTorch with negative dim wrapping tests

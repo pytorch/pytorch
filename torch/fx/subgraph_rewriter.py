@@ -140,7 +140,7 @@ def replace_pattern(
 
 
         def pattern(w1, w2):
-            return torch.cat([w1, w2]).sum()
+            return torch.cat([w1, w2])
 
 
         def replacement(w1, w2):

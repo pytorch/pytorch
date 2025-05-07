@@ -21,7 +21,10 @@
 #include <llvm/Analysis/LoopAnalysisManager.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
+// Fixes compilation warnings when gcc-11 is used
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmismatched-new-delete")
 #include <llvm/IR/IRBuilder.h>
+C10_DIAGNOSTIC_POP()
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/PassManager.h>
@@ -532,7 +535,13 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
 
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
-  module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
+  module_->setTargetTriple(
+#if LLVM_VERSION_MAJOR >= 21
+      llvm::Triple(jit_->getTargetMachine().getTargetTriple())
+#else
+      jit_->getTargetMachine().getTargetTriple().str()
+#endif
+  );
 
   // We support float16 ops by casting expr inputs to float32
   // and then casting the result back to float16
@@ -2594,8 +2603,10 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
   }
 
 #if LLVM_VERSION_MAJOR > 17
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Instruction* I = irb_.CreateMalloc(
       LongTy_, dtypeToLLVM(v->dtype()), size, nullptr, nullptr, "");
+  varToVal_[v->buffer_var()] = I;
 #else
   llvm::Instruction* I = llvm::CallInst::CreateMalloc(
       irb_.GetInsertBlock(),
@@ -2604,11 +2615,11 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
       size,
       nullptr,
       nullptr);
-#endif
   // Insert the bitcast into the block.
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Value* malloc = irb_.Insert(I);
   varToVal_[v->buffer_var()] = malloc;
+#endif
 }
 
 void LLVMCodeGenImpl::visit(const PlacementAllocatePtr& v) {
@@ -2632,7 +2643,7 @@ void LLVMCodeGenImpl::visit(const FreePtr& v) {
 
   if (!llvm::isa<llvm::AllocaInst>(ptr)) {
 #if LLVM_VERSION_MAJOR > 17
-    irb_.Insert(irb_.CreateFree(ptr));
+    irb_.CreateFree(ptr);
 #else
     irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
 #endif

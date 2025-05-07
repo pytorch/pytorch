@@ -7,6 +7,8 @@ import typing
 from enum import auto, Enum
 from typing import Optional, Union
 
+from torch.utils._triton import has_triton_package
+
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
@@ -32,17 +34,9 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-def _is_triton_available() -> bool:
-    try:
-        import triton  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
-if _is_triton_available():
+if has_triton_package():
+    import triton
     import triton.backends.compiler
     import triton.compiler.compiler
 

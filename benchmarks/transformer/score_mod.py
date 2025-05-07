@@ -49,9 +49,9 @@ class ExperimentConfig:
     backends: list[str]
 
     def __post_init__(self):
-        assert (
-            len(self.shape) == 6
-        ), "Shape must be of length 6"  # [B, Hq, M, Hkv, N, D]
+        assert len(self.shape) == 6, (
+            "Shape must be of length 6"
+        )  # [B, Hq, M, Hkv, N, D]
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary

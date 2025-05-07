@@ -584,7 +584,9 @@ class ConfigModule(ModuleType):
         if self._is_dirty or self._hash_digest is None:
             dict_to_hash = self._get_dict(ignored_keys=list(self._compile_ignored_keys))
             string_to_hash = repr(sorted(dict_to_hash.items()))
-            self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
+            self._hash_digest = hashlib.md5(
+                string_to_hash.encode("utf-8"), usedforsecurity=False
+            ).digest()
             self._is_dirty = False
         return self._hash_digest
 
@@ -665,12 +667,15 @@ class ConfigModule(ModuleType):
         config = self
 
         class ConfigPatch(ContextDecorator):
+            def __init__(self) -> None:
+                self.changes = changes
+
             def __enter__(self) -> None:
                 assert not prior
-                for key in changes.keys():
+                for key in self.changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
-                for k, v in changes.items():
+                for k, v in self.changes.items():
                     config.__setattr__(k, v)
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]

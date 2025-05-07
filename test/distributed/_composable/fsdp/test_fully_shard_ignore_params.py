@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from typing import List
 
 import torch
 import torch.distributed as dist
@@ -119,7 +118,7 @@ def _find_name_param_mappings(module: torch.nn.Module, prefix: str):
 
 
 def _discover_ddp_ignored_params(module: torch.nn.Module, prefix: str):
-    ddp_ignore_parameters: List[str] = []
+    ddp_ignore_parameters: list[str] = []
     if isinstance(module, FSDP2):
         ddp_ignore_parameters = [name for name, _ in module.named_parameters(prefix)]
     else:

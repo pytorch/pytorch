@@ -10,6 +10,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
+from torch._higher_order_ops.schema import find_hop_schema
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -24,8 +25,8 @@ class InvokeQuantTest(torch._higher_order_ops.BaseHOP):
     def __init__(self):
         super().__init__("invoke_quant_test")
 
-    def __call__(self, subgraph, operands, *, scheme):
-        return super().__call__(subgraph, operands, scheme=scheme)
+    def __call__(self, subgraph, *operands, scheme):
+        return super().__call__(subgraph, *operands, scheme=scheme)
 
 
 invoke_quant_test = InvokeQuantTest()
@@ -45,7 +46,7 @@ class BaseHOPTest(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=backend)
         def f(x, y):
-            return invoke_quant_test(inner, (x, y), scheme="nf4")
+            return invoke_quant_test(inner, x, y, scheme="nf4")
 
         out = f(x, y)
         self.assertEqual(out, inner(x, y))
@@ -60,7 +61,7 @@ class GraphModule(torch.nn.Module):
         l_y_ = L_y_
 
         subgraph_0 = self.subgraph_0
-        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, (l_x_, l_y_), scheme = 'nf4');  subgraph_0 = l_x_ = l_y_ = None
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, l_x_, l_y_, scheme = 'nf4');  subgraph_0 = l_x_ = l_y_ = None
         getitem: "f32[3, 3]" = invoke_quant_test[0];  invoke_quant_test = None
         return (getitem,)
 
@@ -71,6 +72,171 @@ class GraphModule(torch.nn.Module):
             cos: "f32[3, 3]" = sin.cos();  sin = None
             return (cos,)
 """,  # NOQA: B950
+        )
+
+    def test_schema_gen_single_return(self):
+        def inner(x, y):
+            return (x @ y).sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=False)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        out = f(x.clone(), y)
+        self.assertEqual(out, inner(x.clone(), y))
+        schemas = find_hop_schema(backend.graphs[0], invoke_quant_test)
+        self.assertEqual(len(schemas), 1)
+        self.assertExpectedInline(
+            str(schemas[0]),
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, *, str scheme="nf4") -> ((Tensor))""",  # noqa: B950
+        )
+
+    def test_schema_gen_pytree_in_out(self):
+        def inner(x_y):
+            x, y = x_y
+            return [
+                (x @ y).sin().cos(),
+                (x + y, x - y),
+                {"out": (x @ y,)},
+            ]
+
+        # make x not require grad because we want to inplace mutate it
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend)
+        def f(x, y):
+            return invoke_quant_test(inner, [x, y], scheme="nf4")
+
+        out = f(x.clone(), y)
+        self.assertEqual(out, inner([x.clone(), y]))
+        schemas = find_hop_schema(backend.graphs[0], invoke_quant_test)
+        self.assertEqual(len(schemas), 1)
+        self.assertExpectedInline(
+            str(schemas[0]),
+            """invoke_quant_test(Any subgraph, Tensor arg0, Tensor arg1, *, str scheme="nf4") -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_schema_gen_single_return_with_mutation(self):
+        def inner(x, y):
+            x.add_(1)
+            y.mul_(-1)
+            return (x @ y).sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=False)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
+            f(x.clone(), y)
+
+    def test_schema_gen_pytree_in_out_with_mutation(self):
+        def inner(x_y):
+            x, y = x_y
+            x.add_(1)
+            return [
+                (x @ y).sin().cos(),
+                (x + y, x - y),
+                {"out": (x @ y,)},
+            ]
+
+        # make x not require grad because we want to inplace mutate it
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            return invoke_quant_test(inner, [x, y], scheme="nf4")
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
+            f(x.clone(), y)
+
+    def test_none_input(self):
+        def inner(x, y):
+            if x is not None:
+                return y.sin()
+            return y.cos()
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        x = None
+        y = torch.randn(3, 4)
+        out = f(x, y)
+        self.assertEqual(out, inner(x, y))
+        self.assertExpectedInline(
+            normalize_graph(backend.graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_: "f32[3, 4]"):
+        l_y_ = L_y_
+
+        subgraph_0 = self.subgraph_0
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, l_y_, scheme = 'nf4');  subgraph_0 = l_y_ = None
+        getitem: "f32[3, 4]" = invoke_quant_test[0];  invoke_quant_test = None
+        return (getitem,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_y_: "f32[3, 4]"):
+            cos: "f32[3, 4]" = l_y_.cos();  l_y_ = None
+            return (cos,)
+""",
+        )
+
+    def test_int_input(self):
+        def inner(x, y):
+            return x + y
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        x = 1
+        y = torch.randn(3, 4)
+        out = f(x, y)
+        self.assertEqual(out, inner(x, y))
+        self.assertExpectedInline(
+            normalize_graph(backend.graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_: "f32[3, 4]"):
+        l_y_ = L_y_
+
+        subgraph_0 = self.subgraph_0
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, l_y_, scheme = 'nf4');  subgraph_0 = l_y_ = None
+        getitem: "f32[3, 4]" = invoke_quant_test[0];  invoke_quant_test = None
+        return (getitem,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_y_: "f32[3, 4]"):
+            add: "f32[3, 4]" = 1 + l_y_;  l_y_ = None
+            return (add,)
+""",
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
@@ -85,7 +251,7 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def f(x, y):
-            return invoke_quant_test(inner, (x, y), scheme="nf4")
+            return invoke_quant_test(inner, x, y, scheme="nf4")
 
         out = f(x, y)
         result = torch.autograd.grad(out, x, y)
@@ -100,7 +266,7 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]"):
         subgraph0 = self.subgraph0
-        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph0, (primals_1, primals_2), scheme = 'nf4');  subgraph0 = None
+        invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph0, primals_1, primals_2, scheme = 'nf4');  subgraph0 = None
         getitem: "f32[3, 3]" = invoke_quant_test[0];  invoke_quant_test = None
         return (getitem, primals_1, primals_2)
 
@@ -120,7 +286,7 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", tangents_1: "f32[3, 3]"):
         subgraph1 = self.subgraph1
-        invoke_quant_test_1 = torch.ops.higher_order.invoke_quant_test(subgraph1, (primals_1, primals_2, tangents_1), scheme = 'nf4');  subgraph1 = primals_1 = primals_2 = tangents_1 = None
+        invoke_quant_test_1 = torch.ops.higher_order.invoke_quant_test(subgraph1, primals_1, primals_2, tangents_1, scheme = 'nf4');  subgraph1 = primals_1 = primals_2 = tangents_1 = None
         getitem_1: "f32[3, 3]" = invoke_quant_test_1[0]
         getitem_2: "f32[3, 3]" = invoke_quant_test_1[1];  invoke_quant_test_1 = None
         return (getitem_1, getitem_2)
@@ -130,7 +296,6 @@ class GraphModule(torch.nn.Module):
             mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg0_1, arg1_1)
             clone: "f32[3, 3]" = torch.ops.aten.clone.default(mm)
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(mm);  mm = None
-            cos: "f32[3, 3]" = torch.ops.aten.cos.default(sin);  cos = None
             sin_1: "f32[3, 3]" = torch.ops.aten.sin.default(sin);  sin = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin_1);  sin_1 = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, neg);  arg2_1 = neg = None
@@ -157,12 +322,17 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager", fullgraph=True)
         def f(inner, x, y):
-            return invoke_quant_test(inner, (x, y), scheme="nf4")
+            return invoke_quant_test(inner, x, y, scheme="nf4")
 
-        with self.assertRaisesRegex(RuntimeError, "aliases of the inputs"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Encountered aliasing during higher order op tracing for HOP"
+        ):
             f(inner, x, y)
 
-        with self.assertRaisesRegex(RuntimeError, "inputs are mutated"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Encountered input mutation during higher order op tracing for HOP",
+        ):
             f(inner2, x, y)
 
     def test_eager_call(self):
@@ -173,13 +343,13 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3, 3)
 
         with self.assertRaisesRegex(RuntimeError, "torch.fx.GraphModule"):
-            invoke_quant_test(inner, (x, y), scheme="nf4")
+            invoke_quant_test(inner, x, y, scheme="nf4")
 
         from functorch import make_fx
 
         result = make_fx(inner)(x, y)
         # smoke test
-        invoke_quant_test(result, (x, y), scheme="nf4")
+        invoke_quant_test(result, x, y, scheme="nf4")
 
 
 if __name__ == "__main__":

@@ -445,14 +445,14 @@ class Module:
     _is_full_backward_hook: Optional[bool]
     _forward_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
-    # As JIT does not support Set[int], this dict is used as a set, where all
+    # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_hooks_with_kwargs: dict[int, bool]
     # forward hooks that should always be called even if an exception is raised
     _forward_hooks_always_called: dict[int, bool]
     _forward_pre_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
-    # As JIT does not support Set[int], this dict is used as a set, where all
+    # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_pre_hooks_with_kwargs: dict[int, bool]
     _state_dict_hooks: dict[int, Callable]
@@ -1384,9 +1384,9 @@ class Module:
             hook (Callable): The user-defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``backward_pre`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``backward_pre`` hooks
-                on this :class:`torch.nn.modules.Module`. Note that global
+                on this :class:`torch.nn.Module`. Note that global
                 ``backward_pre`` hooks registered with
                 :func:`register_module_full_backward_pre_hook` will fire before
                 all hooks registered by this method.
@@ -1436,10 +1436,14 @@ class Module:
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
-        The hook will be called every time the gradients with respect to a module
-        are computed, i.e. the hook will execute if and only if the gradients with
-        respect to module outputs are computed. The hook should have the following
-        signature::
+        The hook will be called every time the gradients with respect to a module are computed, and its firing rules are as follows:
+
+            1. Ordinarily, the hook fires when the gradients are computed with respect to the module inputs.
+            2. If none of the module inputs require gradients, the hook will fire when the gradients are computed
+               with respect to module outputs.
+            3. If none of the module outputs require gradients, then the hooks will not fire.
+
+        The hook should have the following signature::
 
             hook(module, grad_input, grad_output) -> tuple(Tensor) or None
 
@@ -1464,9 +1468,9 @@ class Module:
             hook (Callable): The user-defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``backward`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``backward`` hooks on
-                this :class:`torch.nn.modules.Module`. Note that global
+                this :class:`torch.nn.Module`. Note that global
                 ``backward`` hooks registered with
                 :func:`register_module_full_backward_hook` will fire before
                 all hooks registered by this method.
@@ -1628,9 +1632,9 @@ class Module:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``forward_pre`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``forward_pre`` hooks
-                on this :class:`torch.nn.modules.Module`. Note that global
+                on this :class:`torch.nn.Module`. Note that global
                 ``forward_pre`` hooks registered with
                 :func:`register_module_forward_pre_hook` will fire before all
                 hooks registered by this method.
@@ -1689,9 +1693,9 @@ class Module:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If ``True``, the provided ``hook`` will be fired
                 before all existing ``forward`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``forward`` hooks on
-                this :class:`torch.nn.modules.Module`. Note that global
+                this :class:`torch.nn.Module`. Note that global
                 ``forward`` hooks registered with
                 :func:`register_module_forward_hook` will fire before all hooks
                 registered by this method.

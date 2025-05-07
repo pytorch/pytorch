@@ -37,7 +37,7 @@ except (unittest.SkipTest, ImportError) as e:
 
 def foreach_map_wrapper(op):
     def wrapper(*args, **kwargs):
-        return foreach_map(op, (args), **kwargs)
+        return foreach_map(op, *args, **kwargs)
 
     wrapper.__name__ = "foreach_map_" + op.__name__
     wrapper.original_op = op
@@ -431,7 +431,7 @@ class ForeachTests(TestCase):
     @requires_cuda
     @scalar_bin_ops
     @unittest.skip(
-        "Triton recursion depth exceeded: https://github.com/openai/triton/issues/1763"
+        "Triton recursion depth exceeded: https://github.com/triton-lang/triton/issues/1763"
     )
     def test_kernel_split_arg_limit_scalar(self, op):
         def fn(a):

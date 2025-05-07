@@ -38,7 +38,6 @@
 #include <iterator>
 #include <limits>
 #include <sstream>
-#include <stdexcept>
 
 #ifdef FBCODE_CAFFE2
 #include <common/logging/logging.h>
@@ -953,11 +952,11 @@ BlockRunner::BlockRunner(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 BlockRunner::BlockRunner(BlockRunner&&) noexcept = default;
 
 BlockRunner::~BlockRunner() = default;
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 void BlockRunner::set_arg(const size_t idx, std::vector<IValue>&& args) {
   DCHECK(idx < args.size());
   Input(idx + first_input_is_self_) = std::move(args[idx]);
@@ -977,6 +976,9 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
   // Fast path for most common case
   if (arg.isTensor() &&
       schema_arg.type()->kind() == c10::TypeKind::TensorType) {
+    return;
+  }
+  if (arg.isGenericDict() && arg.toGenericDict().empty()) {
     return;
   }
   TORCH_CHECK(

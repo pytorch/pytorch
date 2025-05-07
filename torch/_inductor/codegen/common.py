@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -8,8 +9,11 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
+import tempfile
 import typing
+from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -18,8 +22,6 @@ from typing import (
     cast,
     ClassVar,
     Generic,
-    Iterator,
-    MutableMapping,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
@@ -46,6 +48,7 @@ from ..utils import (
     boolean_ops,
     DeferredLineBase,
     generate_assert,
+    get_current_backend,
     IndentedBuffer,
     ir_dataclass,
     ScopedDict,
@@ -59,7 +62,9 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, MutableMapping, Sequence
+
+    from torch.fx import GraphModule
 
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
@@ -84,6 +89,38 @@ def data_type_logger(msg: str) -> None:
         schedule_log.debug("Data type propagation: %s", msg)
 
 
+@dataclasses.dataclass
+class FileBackedGraphModule:
+    """
+    Output of FX wrapper codegen. Exposes the same methods as ModuleType, but these
+    map back to a GraphModule instead of Python source.
+    """
+
+    gm: GraphModule
+    compiled_fn: Callable[..., Any]
+
+    def __post_init__(self) -> None:
+        # Write the code to a file for compatibility with debugging utilities.
+        # The file is deleted upon program termination.
+        self.tempfile = tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".py", delete=False
+        )
+        atexit.register(os.remove, self.tempfile.name)
+        with self.tempfile as f:
+            f.write(self.value)
+
+    @property
+    def __file__(self) -> str:
+        return self.tempfile.name
+
+    def call(self, args: list[Any]) -> Any:
+        return self.compiled_fn(*args)
+
+    @property
+    def value(self) -> str:
+        return self.gm.code
+
+
 class WorkspaceZeroMode(enum.Enum):
     UNINITIALIZED = 0
     ZERO_ON_CALL = 1  # kernel may leave workspace dirty
@@ -104,8 +141,22 @@ class WorkspaceZeroMode(enum.Enum):
         return WorkspaceZeroMode.UNINITIALIZED
 
 
+class CodegenSymbol(ABC):
+    """
+    An IR object possibly corresponding to a variable in the wrapper code.
+    """
+
+    @abstractmethod
+    def get_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        pass
+
+
 @ir_dataclass(frozen=True)
-class WorkspaceArg:
+class WorkspaceArg(CodegenSymbol):
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
@@ -168,6 +219,9 @@ class WorkspaceArg:
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        return self.get_layout().get_example()
+
     def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
 
@@ -185,6 +239,9 @@ class WorkspaceArg:
     get_output_spec = get_layout
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
+
+    def get_offset(self) -> sympy.Expr:
+        return sympy.S.Zero
 
     def get_size(self) -> list[sympy.Expr]:
         return [self.count]
@@ -289,6 +346,10 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        # optionally return (scratch definition, arg name)
+        raise NotImplementedError
+
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 
@@ -339,7 +400,7 @@ class BackendFeature(Enum):
 
 
 def get_backend_features(
-    device: Union[torch.device, str, None]
+    device: Union[torch.device, str, None],
 ) -> OrderedSet[BackendFeature]:
     if device is None:
         return OrderedSet()
@@ -538,8 +599,7 @@ def deduce_output_dtype_by_name(
     elif op_name == "reduction":
         return kwargs["dtype"] if "dtype" in kwargs else args[1]
     elif op_name == "constant":
-        dtype = kwargs["dtype"] if "dtype" in kwargs else args[-1]
-        return DTYPE_TO_COMPUTATION_DTYPE[dtype]  # type: ignore[index]
+        return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "load",
         "store",
@@ -550,6 +610,31 @@ def deduce_output_dtype_by_name(
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
+
+
+def check_dtype(
+    buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
+) -> None:
+    backend = get_current_backend()
+    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+        buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
+    elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
+        from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
+
+        assert isinstance(var, CppCSEVariable)
+        if dtype == torch.bool:
+            if var.is_vec:
+                is_same_dt = f"IsVecMaskType<decltype({var})>::value"
+            else:
+                # operator&(bool, bool) returns int and it can be used as boolean in C++
+                is_same_dt = f"std::is_same_v<decltype({var}), bool> || std::is_same_v<decltype({var}), int>"
+        else:
+            c_var_type = f"decltype({var})"
+            if var.is_vec:
+                c_var_type = f"typename {c_var_type}::value_type"
+            is_same_dt = f"std::is_same_v<{c_var_type}, {DTYPE_TO_CPP[dtype]}>"
+
+        buffer.writeline(f"static_assert({is_same_dt});")
 
 
 class DataTypePropagation:
@@ -781,35 +866,6 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return repr(value)
 
     @staticmethod
-    def libdevice_sigmoid(x: OpVarT) -> OpVarT:
-        one = ops.constant(1, torch.int32)
-        return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
-
-    @staticmethod
-    def libdevice_abs(x: OpVarT) -> OpVarT:
-        return ops.abs(x)
-
-    @staticmethod
-    def libdevice_sqrt(x: OpVarT) -> OpVarT:
-        return ops.sqrt(x)
-
-    @staticmethod
-    def libdevice_cos(x: OpVarT) -> OpVarT:
-        return ops.cos(x)
-
-    @staticmethod
-    def libdevice_sin(x: OpVarT) -> OpVarT:
-        return ops.sin(x)
-
-    @staticmethod
-    def libdevice_log(x: OpVarT) -> OpVarT:
-        return ops.log(x)
-
-    @staticmethod
-    def libdevice_exp(x: OpVarT) -> OpVarT:
-        return ops.exp(x)
-
-    @staticmethod
     def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
@@ -985,9 +1041,9 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                assert (
-                    funcname not in cls.__dict__
-                ), f"multiple definitions of {funcname} on {cls.__name__}"
+                assert funcname not in cls.__dict__, (
+                    f"multiple definitions of {funcname} on {cls.__name__}"
+                )
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1146,7 +1202,8 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     ),
     polygamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"{x} == 0 ? calc_digamma({y}) : calc_polygamma({y}, {x})",
+        cpp=lambda x,
+        y: f"{x} == 0 ? calc_digamma({y}) : ({x} == 1 ? trigamma({y}) : calc_polygamma({y}, {x}))",
         name="polygamma",
     ),
     # psi - alias to digamma
@@ -1235,6 +1292,18 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
+def is_buffer_removed(name: str) -> bool:
+    return any(
+        name in x
+        for x in (
+            V.graph.removed_buffers,
+            V.kernel.removed_buffers,
+            V.graph.inplaced_to_remove,
+            V.kernel.inplaced_to_remove,
+        )
+    )
+
+
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -1244,15 +1313,7 @@ class DeferredLine(DeferredLineBase):
         assert not isinstance(line, DeferredLineBase)
 
     def __call__(self) -> Optional[str]:
-        if all(
-            self.name not in x
-            for x in (
-                V.graph.removed_buffers,
-                V.kernel.removed_buffers,
-                V.graph.inplaced_to_remove,
-                V.kernel.inplaced_to_remove,
-            )
-        ):
+        if not is_buffer_removed(self.name):
             return self.line
         return None
 
@@ -1365,6 +1426,8 @@ class KernelArgs:
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name: str, output_name: str) -> None:
+        if input_name in V.graph.unaligned_buffers:
+            V.graph.unaligned_buffers.add(output_name)
         assert output_name not in self.inplace_buffers
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
@@ -1372,8 +1435,19 @@ class KernelArgs:
             buf.other_names.append(output_name)
             self.inplace_buffers[output_name] = buf
         else:
+            alive_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if not isinstance(val, RemovedArg)
+            ]
+            removed_buffers = [
+                val
+                for val in self.inplace_buffers.values()
+                if isinstance(val, RemovedArg)
+            ]
+            inplace_buffer_idx = len(unique(alive_buffers)) + len(removed_buffers)
             buf = InplacedBuffer(
-                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}",
+                f"in_out_ptr{inplace_buffer_idx}",
                 [input_name, output_name],
             )
             self.inplace_buffers[input_name] = buf
@@ -1534,7 +1608,7 @@ class KernelArgs:
 
     def python_argdefs(
         self,
-    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:
         arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
@@ -1790,13 +1864,17 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
 
+                    # cpp backend cannot determin is_vec at this point
                     if (
                         assignment
-                        and config.test_configs.runtime_triton_dtype_assert
+                        and (
+                            config.test_configs.runtime_triton_dtype_assert
+                            or config.test_configs.static_cpp_dtype_assert
+                        )
                         and dtype is not None
+                        and get_current_backend() != "cpp"
                     ):
-                        assert_line = f"tl.static_assert({self.prefix}{var}.dtype == {triton_type(dtype)})"
-                        buffer.writeline(assert_line)
+                        check_dtype(buffer, var, dtype)
 
         else:
             var.bounds = var.bounds.tighten(bounds)
@@ -2213,7 +2291,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: Union[list[Buffer], Buffer]
+        fake_outs: Union[list[Buffer], Buffer],
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):
@@ -2247,6 +2325,12 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
+            log.info(
+                "Cannot Append Choice: %s. KernelTemplate type is %s",
+                e,
+                type(self),
+                stack_info=log.getEffectiveLevel() < logging.INFO,
+            )
             return e
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
@@ -2274,34 +2358,38 @@ class CSEProxy(DefaultHandler):
         value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
         dtype_handler = DtypePropagationOpsHandler()
 
+        backend = get_current_backend()
+
+        output_dtype = None
+        if name == "masked" and backend == "triton":
+            output_dtype = value.dtype
+        elif name == "masked" and backend == "cpp":
+            output_dtype = V.interpreter.current_node.meta.get(
+                OptimizationContext.key, None
+            ).dtype
+        elif backend in ("triton", "cpp"):
+            dtype_op = getattr(dtype_handler, name)
+            output_dtype = dtype_op(*args, **kwargs)
+
+        if backend in ("triton", "cpp"):
+            # maybe there are some exceptions on mps?
+            assert output_dtype is not None
+
         output_idx = 0
 
         def do_cse(v: str) -> CSEVariable:
-            # cpp backend doesnt set current device - TODO: fix
-            if V.graph.current_device is not None:
-                device_str = V.graph.get_current_device_or_throw().type
-                triton_backend = (
-                    config.cpu_backend == "triton"
-                    if device_str == "cpu"
-                    else config.cuda_backend == "triton"
-                    if device_str != "mps"
-                    else False
-                )
-            else:
-                triton_backend = False
+            # we tree_map over the output, so we need to fetch corresponding dtype
+            nonlocal output_idx
+            var_dtype: torch.dtype = (
+                output_dtype[output_idx]  # type: ignore[assignment]
+                if isinstance(output_dtype, (list, tuple))
+                else output_dtype
+            )
+            output_idx += 1
 
-            # only triton backend tracks dtype currently
-            if triton_backend:
-                if name == "masked":
-                    output_dtype = value.dtype
-                else:
-                    output_dtype = getattr(
-                        dtype_handler,
-                        name,
-                    )(*args, **kwargs)
-            else:
-                # cpp backend doesnt track dtype yet
-                output_dtype = None
+            # some cpp op implementations don't set the dtype
+            if backend == "cpp" and isinstance(v, CSEVariable) and v.dtype is None:
+                v.dtype = var_dtype
 
             csevar = V.kernel.cse.generate(
                 V.kernel.compute,
@@ -2310,21 +2398,13 @@ class CSEProxy(DefaultHandler):
                 dtype=output_dtype,
             )
 
-            nonlocal output_idx
-            if config.test_configs.runtime_triton_dtype_assert and triton_backend:
-                from torch._inductor.codegen.triton import triton_type
-
-                # we tree_map over the output, so we need to fetch corresponding dtype
-                if isinstance(output_dtype, (list, tuple)):
-                    output_dtype = output_dtype[output_idx]
-
-                V.kernel.compute.writeline(
-                    f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
-                )
-            output_idx += 1
-
             csevar.update_on_args(name, args, kwargs)
 
+            if (
+                config.test_configs.runtime_triton_dtype_assert
+                or config.test_configs.static_cpp_dtype_assert
+            ):
+                check_dtype(V.kernel.compute, csevar, var_dtype)
             return csevar
 
         return pytree.tree_map(do_cse, value)

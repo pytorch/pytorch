@@ -57,10 +57,10 @@ def gh_fetch_url_and_headers(
             print(
                 f"""{url}
                 Rate limit exceeded:
-                Used: {err.headers['X-RateLimit-Used']}
-                Limit: {err.headers['X-RateLimit-Limit']}
-                Remaining: {err.headers['X-RateLimit-Remaining']}
-                Resets at: {err.headers['x-RateLimit-Reset']}"""
+                Used: {err.headers["X-RateLimit-Used"]}
+                Limit: {err.headers["X-RateLimit-Limit"]}
+                Remaining: {err.headers["X-RateLimit-Remaining"]}
+                Resets at: {err.headers["x-RateLimit-Reset"]}"""
             )
         else:
             print(f"Error fetching {url} {err}")
@@ -128,7 +128,7 @@ def gh_fetch_json_dict(
 
 def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
     rc = gh_fetch_url(
-        "https://api.github.com/graphql",
+        "https://api.github.com/graphql",  # @lint-ignore
         data={"query": query, "variables": kwargs},
         reader=json.load,
     )

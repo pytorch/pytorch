@@ -292,15 +292,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
-            largest_dim = -1
-            largest_dim_size = -1
-            for dim, dim_size in enumerate(param.shape):
-                if dim_size > largest_dim_size:
-                    largest_dim = dim
-                    largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
-            assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
-            return Shard(largest_dim)
+            return Shard(param.shape.index(max(param.shape)))
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
@@ -769,13 +761,7 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
 
         def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
-            largest_dim = -1
-            largest_dim_size = -1
-            for dim, dim_size in enumerate(param.shape):
-                if dim_size > largest_dim_size:
-                    largest_dim = dim
-                    largest_dim_size = dim_size
-            return Shard(largest_dim)
+            return Shard(param.shape.index(max(param.shape)))
 
         for layer in model.layers:
             fully_shard(layer, shard_placement_fn=shard_placement_fn)
@@ -1169,9 +1155,7 @@ class TestFullyShardNDTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
-                # is supported for FSDP+TP
-                "mlp_dim": [4, 16, 20],
+                "mlp_dim": [3, 5, 16, 17],
                 "foreach": [False],
             },
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),
@@ -1244,9 +1228,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
-                # is supported for FSDP+TP
-                "mlp_dim": [4, 16, 20],
+                "mlp_dim": [3, 5, 16, 17],
                 "foreach": [False],
             },
             functools.partial(self._test_3d_mlp_with_nd_mesh, global_mesh),
@@ -1275,6 +1257,12 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
             use_activation_checkpointing,
             reshard_after_forward=reshard_after_forward,
         )
+        # Checking paramters match orig model is critical to validate .full_tensor correctly replicates the
+        # strided-sharded layers.
+        for ref_p, p in zip(ref_model.parameters(), model.parameters()):
+            self.assertIsInstance(p, DTensor)
+            self.assertEqual(ref_p, p.full_tensor())
+
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)

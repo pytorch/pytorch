@@ -20,7 +20,7 @@
 #endif
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 // Mapping ScalarType to ideep tensor data_type
 TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
@@ -62,6 +62,6 @@ TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_cons
 // Set MKLDNN verbose level
 TORCH_API int set_verbose(int level);
 
-}}
+}
 
 #endif // AT_MKLDNN_ENABLED

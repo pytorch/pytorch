@@ -139,7 +139,6 @@ class GeneratedFileCleaner:
             for d in self.dirs_to_clean[::-1]:
                 os.rmdir(d)
 
-
 # Follow UNIX convention for paths to use '/' instead of '\\' on Windows
 def _to_unix_path(path: str) -> str:
     return path.replace(os.sep, '/')
@@ -681,7 +680,7 @@ class Trie:
     def __init__(self):
         """Initialize the trie with an empty root node."""
         self.root = TrieNode()
-        self._hash = hashlib.md5()
+        self._hash = hashlib.md5(usedforsecurity=False)
         self._digest = self._hash.digest()
 
     def add(self, word):
@@ -830,6 +829,7 @@ def preprocessor(
         show_progress: bool) -> HipifyResult:
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.abspath(os.path.join(output_directory, filepath))
+    filepath = _to_unix_path(filepath)
     hipify_result = HIPIFY_FINAL_RESULT[fin_path]
     if filepath not in all_files:
         hipify_result.hipified_path = None
@@ -932,8 +932,8 @@ def preprocessor(
                         return templ.format(os.path.relpath(header_fout_path if header_fout_path is not None
                                                             else header_filepath, header_dir))
                 hipified_header_filepath = HIPIFY_FINAL_RESULT[header_filepath].hipified_path
-                return templ.format(os.path.relpath(hipified_header_filepath if hipified_header_filepath is not None
-                                                    else header_filepath, header_dir))
+                return templ.format(_to_unix_path(os.path.relpath(hipified_header_filepath if hipified_header_filepath is not None
+                                                                  else header_filepath, header_dir)))
 
             return m.group(0)
         return repl
@@ -989,7 +989,7 @@ def preprocessor(
             hipify_result.status = "[ok]"
             hipify_result.current_state = CurrentState.DONE
             return hipify_result
-        except PermissionError as e:
+        except OSError as e:
             print(f'{bcolors.WARNING}Failed to save {fout_path} with "{e.strerror}", leaving {fin_path} unchanged.{bcolors.ENDC}',
                   file=sys.stderr)
             hipify_result.hipified_path = fin_path

@@ -224,6 +224,25 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
+def _to_scalar(x):
+    r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
+    if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
+    kept as is.
+
+    Args:
+        x (float or Tensor): A hyperparameter of the optimizer.
+            If it is Tensor, it is needed to be 1-element.
+
+    Returns:
+        float or Tensor:
+            a scalar tensor if x is Tensor otherwise Python scalar (float) value.
+    """
+    if isinstance(x, torch.Tensor) and x.dim() != 0:
+        return x.squeeze()
+    else:
+        return x
+
+
 # Common doc strings among optimizers
 _params_doc = r"""params (iterable): iterable of parameters or named_parameters to optimize
             or iterable of dicts defining parameter groups. When using named_parameters,
@@ -251,9 +270,10 @@ _fused_doc = r"""fused (bool, optional): whether the fused implementation is use
               implementation, pass False for either foreach or fused. """
 
 _capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
-            capture in a CUDA graph. Passing True can impair ungraphed performance,
-            so if you don't intend to graph capture this instance, leave it False
-            (default: False)"""
+            capture in a graph, whether for CUDA graphs or for torch.compile support.
+            Tensors are only capturable when on supported :ref:`accelerators<accelerators>`.
+            Passing True can impair ungraphed performance, so if you don't intend to graph
+            capture this instance, leave it False (default: False)"""
 
 _differentiable_doc = r"""differentiable (bool, optional): whether autograd should
             occur through the optimizer step in training. Otherwise, the step()
