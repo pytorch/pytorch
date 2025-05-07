@@ -234,8 +234,27 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
+            if isinstance(self.objvar, variables.UserDefinedClassVariable):
+                # super().classmethod is called from a classmethod itself. So,
+                # super was converted to super(__class__, cls) in bytecode and
+                # therefore we have to propagate the cls.
+                cls_variable = self.objvar
+            else:
+                # current function is an instance method, therefore super was
+                # converted to super(__class__, self). We have to find
+                # type(self) to bind the cls to the parent classmethod.
+                # Note that it can't be the self.typevar because __class__ is
+                # the class where the method is defined, which could be
+                # different from type(self) with polymorphism.
+                cls_source = None
+                if self.objvar.source:
+                    cls_source = AttrSource(self.objvar.source, "__class__")
+                cls_variable = VariableTracker.build(
+                    tx, self.objvar.value_type, cls_source
+                )
+
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.typevar, source=source
+                inner_fn.__func__, cls_variable, source=source
             ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(

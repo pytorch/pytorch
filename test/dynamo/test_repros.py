@@ -5057,11 +5057,45 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     return 4
                 if cls == Child:
                     return 3
+                if cls == GrandChild:
+                    return 5
                 return 2
 
         class Child(Parent):
             def greet(self, x):
                 return x * super().greet()
+
+        class GrandChild(Child):
+            pass
+
+        grand_child = GrandChild()
+
+        def fn(x):
+            return grand_child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_super_classmethod_inheritance(self):
+        class GrandParent:
+            @classmethod
+            def greet(cls, x):
+                return cls.A * x
+
+        class Parent(GrandParent):
+            @classmethod
+            def greet(cls, x):
+                return super().greet(x)
+
+        class Child(Parent):
+            A = 5
+
+            @classmethod
+            def greet(cls, x):
+                return super().greet(x)
 
         child = Child()
 
