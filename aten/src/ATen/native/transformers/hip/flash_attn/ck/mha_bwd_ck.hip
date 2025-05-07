@@ -261,6 +261,8 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     if (is_causal) { window_size_right = 0; }
 
     bool is_dropout = p_dropout > 0.0;
+    std::cout << "bwd Seed device  :" << philox_seed.device() << std::endl;
+    std::cout << "bwd Offset device:" << philox_offset.device() << std::endl;
     auto stream = at::cuda::getCurrentHIPStream().stream();
 
     auto q_dtype = q.dtype();
