@@ -170,12 +170,6 @@ html_theme_options = {
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
-# For these links to appear in the right nav, there is an override in
-# the theme:
-# pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
-# For these links to appear in the right nav, there is an override in
-# /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
-
 html_context = {
     "theme_variables": theme_variables,
     "github_url": "https://github.com",
