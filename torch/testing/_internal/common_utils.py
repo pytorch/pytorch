@@ -1231,7 +1231,7 @@ def run_tests(argv=UNITTEST_ARGS):
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
-            other_args += ['--save-xml', args.save_xml]
+            other_args += ['--save-xml', TEST_SAVE_XML]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1297,7 +1297,7 @@ def run_tests(argv=UNITTEST_ARGS):
         # exitcode of 5 means no tests were found, which happens since some test configs don't
         # run tests from certain files
         sys.exit(0 if exit_code == 5 else exit_code)
-    elif TEST_SAVE_XML is not None:
+    elif TEST_SAVE_XML:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
         from xmlrunner.result import _XMLTestResult  # type: ignore[import]
