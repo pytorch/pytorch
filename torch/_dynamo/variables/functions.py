@@ -47,7 +47,6 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
-    unimplemented,
     unimplemented_v2,
     Unsupported,
 )
@@ -400,16 +399,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
                 typ = fn_var.python_type()
-                unimplemented(
-                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                msg = f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                unimplemented_v2(
+                    gb_type="TypeError from user code",
+                    context=f"call_function({self.value}, {args}, {kwargs})",
+                    explanation=msg,
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
                 )
 
             if not isinstance(fn_var, UserFunctionVariable):
                 fn_name = fn_var.get_name()
-                unimplemented(
-                    f"""
-Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
-"""  # NOQA: B950
+                msg = f"Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region."  # noqa: B950
+                unimplemented_v2(
+                    gb_type="Limitation of `nonstrict_trace",
+                    context=f"{self}",
+                    explanation=msg,
+                    hints=[
+                        f"make sure definition of {fn_name} is outside ",
+                        "`torch.compile` region",
+                    ],
                 )
 
             fn = fn_var.fn
@@ -1310,14 +1320,6 @@ class SkipFunctionVariable(VariableTracker):
                     "Remove the `torch._dynamo.graph_break()` call.",
                 ],
             )
-        elif isinstance(self.value, types.WrapperDescriptorType):
-            msg = (
-                f"Graph break due to unsupported wrapper descriptor {self.value}. "
-                f"Please file an issue on GitHub "
-                f"so the PyTorch team can add support for it. "
-            )
-            torch._dynamo.utils.warn_once(msg)
-            unimplemented(msg)
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -1328,6 +1330,8 @@ class SkipFunctionVariable(VariableTracker):
                 if not isinstance(rebuilt_fn, SkipFunctionVariable):
                     return rebuilt_fn.call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
+            module_or = getattr(self.value, "__module__", None)
+            module_name = "<unknown module>" if module_or is None else str(module_or)
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
@@ -1349,10 +1353,10 @@ class SkipFunctionVariable(VariableTracker):
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
-                if self.value.__module__ in known_python_builtin_modules:
+                if module_or in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
-                        f"`{self.value.__module__}.{qualname}`."
+                        f"`{module_name}.{qualname}`."
                     )
                     hints = [
                         "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
@@ -1360,11 +1364,8 @@ class SkipFunctionVariable(VariableTracker):
                         "Please file an issue on GitHub "
                         "so the PyTorch team can add support for it. ",
                     ]
-                elif (
-                    self.value.__module__ is not None
-                    and self.value.__module__.startswith("optree")
-                ):
-                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
+                elif module_or is not None and module_or.startswith("optree"):
+                    explanation = f"Dynamo cannot trace optree C/C++ function {module_name}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
                         "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
@@ -1373,7 +1374,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
                     explanation = (
-                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
+                        f"Dynamo does not know how to trace the builtin `{module_name}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
@@ -1398,7 +1399,7 @@ class SkipFunctionVariable(VariableTracker):
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented_v2(
                 gb_type="Attempted to call function marked as skipped",
-                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
+                context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
             )
@@ -1548,8 +1549,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         args = ()
 
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
-            unimplemented(
-                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
+            unimplemented_v2(
+                gb_type="async_op=True for distributed collectives",
+                context=f"{self.fn}, {args=}, {kwargs=}",
+                explanation=f"`torch.compile` doesn't support `async_op=True for {self.fn}",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         if self.fn in (
@@ -1583,7 +1589,14 @@ class FunctoolsWrapsVariable(UserFunctionVariable):
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
                     return fn.clone(wrapped_fn=args[0])
-                unimplemented(f"functools.wraps({fn})")
+                unimplemented_v2(
+                    gb_type="functools.wraps",
+                    context=f"{fn}",
+                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
             return variables.LambdaVariable(wraps)
 
@@ -1609,7 +1622,14 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
             return variables.UserDefinedClassVariable(
                 value, mutation_type=ValueMutationNew()
             )
-        unimplemented("namedtuple with non constant args")
+        unimplemented_v2(
+            gb_type="namedtuple construction",
+            context=f"{args=}, {kwargs=}",
+            explanation="`torch.compile` only support certain input types for namedtuple",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 class FunctoolsPartialVariable(VariableTracker):
@@ -1856,10 +1876,8 @@ class SysFunctionVariable(VariableTracker):
     def call_function(self, tx, args, kwargs):
         if self.value is sys.exc_info:
             return self.exc_info(tx)
-        elif self.value is sys.exception:
-            return self.exception(tx)
-        else:
-            unimplemented(f"sys.{self.value.__name__}")
+        assert self.value is sys.exception
+        return self.exception(tx)
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -1886,7 +1904,14 @@ class DynamoTritonHOPifier(TritonHOPifier):
         if isinstance(grid, BaseListVariable):
             return grid.as_proxy()
         else:
-            unimplemented(f"grid for the triton kernel is {type(grid)}")
+            unimplemented_v2(
+                gb_type="unsupported grid type for triton hop check_grid",
+                context=f"grid type = {type(grid)}",
+                explanation="`torch.compile` only supports list-like grid for check_grid",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     def call_grid(self, grid, meta, tx):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
