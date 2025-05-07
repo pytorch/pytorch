@@ -1028,9 +1028,6 @@ class CosineAnnealingLR(LRScheduler):
         **without restarts**, so :math:`T_{cur} = t` and increases monotonically with each call
         to :meth:`step`.
 
-    To retrieve the exact closed-form learning rate at any point, use the
-    :meth:`_get_closed_form_lr` method.
-
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         T_max (int): Maximum number of iterations.
@@ -1041,13 +1038,13 @@ class CosineAnnealingLR(LRScheduler):
         https://arxiv.org/abs/1608.03983
 
     Example:
-    >>> # xdoctest: +SKIP
-    >>> num_epochs = 100
-    >>> scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
-    >>> for epoch in range(num_epochs):
-    >>>     train(...)
-    >>>     validate(...)
-    >>>     scheduler.step()
+        >>> # xdoctest: +SKIP
+        >>> num_epochs = 100
+        >>> scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
+        >>> for epoch in range(num_epochs):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
 
     .. image:: ../scripts/lr_scheduler_images/CosineAnnealingLR.png
     """
