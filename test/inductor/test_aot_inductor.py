@@ -336,7 +336,7 @@ class AOTInductorTestsTemplate:
                 return abs_weight, abs_y
 
         input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
-        model = Model().cuda()
+        model = Model(self.device).cuda()
 
         _ = model(*input1)
 
