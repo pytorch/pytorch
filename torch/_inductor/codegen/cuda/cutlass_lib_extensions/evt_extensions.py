@@ -69,11 +69,10 @@ if try_import_cutlass():
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
-
-            assert all(x.is_integer for x in shape), (
+            assert all(isinstance(x, int) or x.is_integer for x in shape), (
                 f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
             )
-            assert all(x.is_integer for x in stride), (
+            assert all(isinstance(x, int) or x.is_integer for x in stride), (
                 f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
             )
             shape = tuple(int(x) for x in shape)
