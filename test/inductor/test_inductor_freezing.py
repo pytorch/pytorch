@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import functools
 import importlib
 import itertools
@@ -374,6 +375,35 @@ class OptimizeForInferenceTemplate(TestCase):
             RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
         ):
             mod(x)
+
+    def test_static_indices_cudagraph(self):
+        if self.device != "cuda":
+            return
+
+        mod1 = torch.nn.Sequential(
+            torch.nn.Linear(2, 2).to(self.device), torch.nn.Linear(2, 2).to(self.device)
+        )
+        mod2 = copy.deepcopy(mod1)
+
+        def fn(x, y, mod):
+            x.add_(1)
+            getattr(mod, "0").bias.add_(2)
+            getattr(mod, "1").weight.add_(3)
+            return mod(x) + y
+
+        x1 = torch.randn(2, 2, device=self.device)
+        y1 = torch.randn(2, 2, device=self.device)
+        x2 = x1.clone()
+        y2 = y1.clone()
+
+        opt_fn = torch.compile(fn, mode="reduce-overhead")
+
+        with torch.no_grad():
+            ref = fn(x1, y1, mod1)
+            res = opt_fn(x2, y2, mod2)
+        self.assertEqual(ref, res)
+        self.assertEqual(x1, x2)
+        self.assertEqual(y1, y2)
 
     def test_rng_op(self):
         @torch.compile()

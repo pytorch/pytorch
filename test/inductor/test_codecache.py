@@ -1709,7 +1709,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_dynamic_shapes_from_example_inputs(self):
+    @parametrize("config_patches", [True, False])
+    def test_dynamic_shapes_from_example_inputs(self, config_patches):
         def f(x):
             return x.shape[0] * x
 
@@ -1720,9 +1721,17 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             gm, args, kwargs = self.capture(f)(x)
             assert not kwargs
 
+        if config_patches:
+            config_patches = {"fx_graph_cache": True}
+        else:
+            config_patches = None
+
         # specialized on example inputs
         compiled_artifact = torch._inductor.standalone_compile(
-            gm, (5, torch.ones(4)), dynamic_shapes="from_example_inputs"
+            gm,
+            (5, torch.ones(4)),
+            dynamic_shapes="from_example_inputs",
+            options={"config_patches": config_patches},
         )
         x = torch.ones(4)
         (result,) = compiled_artifact(3, x)

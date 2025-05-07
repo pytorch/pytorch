@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
 import inspect
 import contextlib
 import os
@@ -335,6 +335,8 @@ def xfailIfSM89(func):
 def xfailIfSM100OrLater(func):
     return func if not SM100OrLater else unittest.expectedFailure(func)
 
+def xfailIfDistributedNotSupported(func):
+    return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
