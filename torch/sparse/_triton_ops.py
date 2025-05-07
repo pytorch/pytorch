@@ -8,7 +8,7 @@ from typing import Optional
 
 import torch
 from torch._dynamo.utils import warn_once
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton_package
 
 from ._triton_ops_meta import get_meta
 
@@ -1323,7 +1323,7 @@ def bsr_dense_addmm(
     return out_backup
 
 
-if has_triton():
+if has_triton_package():
     import triton
     import triton.language as tl
 
