@@ -138,7 +138,7 @@ class TestMatmulCuda(TestCase):
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.bfloat16: xtol(atol=2e-1, rtol=1e-1),
+                        torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
                         torch.float32: xtol(atol=1e-1, rtol=1e-1)})
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("size", [100, 1000, 10000])
@@ -1481,7 +1481,7 @@ class TestFP8Matmul(TestCase):
             sqnr = compute_error(C_ref, C)
             assert sqnr.item() > approx_match_sqnr_target
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
         M, K, N = (1024, 512, 2048)
