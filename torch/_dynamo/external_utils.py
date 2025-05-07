@@ -209,12 +209,3 @@ def _dynamo_config_patch_proxy_dunder_call(
             return func(*args, **kwargs)
 
     return inner
-
-
-# Use only on ints marked dynamic via torch.empty(0, integer)
-# Currently only way to mark ints as dynamic: https://github.com/pytorch/pytorch/issues/129623
-def unwrap_maybe_dynamic_int(x: Union[torch.Tensor, int]) -> int:
-    if isinstance(x, torch.Tensor):
-        # x.size() is expected to be [0, dynamic_int]
-        return x.size(1)
-    return x
