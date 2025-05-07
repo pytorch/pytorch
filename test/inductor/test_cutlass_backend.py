@@ -28,7 +28,7 @@ from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
 from torch._inductor.exc import InductorError
-from torch._inductor.ir import ChoiceCaller, FixedLayout
+from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
@@ -106,34 +106,26 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_backend_min_gemm_size": 100000,
                 "cuda.cutlass_max_profiling_configs": 2,
-                # allow fallback to aten as intended
-                "autotune_fallback_to_aten": True,
             }
         ):
-            from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+            def select_no_algorithm(*args, **kwargs):
+                raise NoValidChoicesError
 
             with mock.patch(
-                "torch._inductor.select_algorithm.autotune_select_algorithm"
-            ) as mocked_select_algorithm:
-                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-                Y = mm(a, b)
-                passed_choice_callers: list[ChoiceCaller] = mocked_select_algorithm[0][
-                    1
-                ]
-                assert all(
-                    isinstance(cc, ChoiceCaller) for cc in passed_choice_callers
-                ), "Argument 1 to autotune_select_algorithm should be a list of ChoiceCaller instances"
-                # We expect that no Cutlass Kernels are considered, due to the threshold
-                assert all(
-                    not isinstance(cc, CUDATemplateCaller)
-                    for cc in passed_choice_callers
-                ), "Cutlass Kernels should have been filtered, GEMM size is too small"
-            torch.testing.assert_close(Y_compiled, Y)
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa:
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
+                    _ = torch.compile(mm, dynamic=False)(a, b)
+                args, _ = sa.call_args
+                _, choices, _, __ = args
+
+                self.assertEqual(choices, [])
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):

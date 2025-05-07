@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_CUDA,
+    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -1169,7 +1170,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if IS_CI:
+        if TEST_SAVE_XML:
             # Add the option to generate XML test report here as C++ tests
             # won't go into common_utils
             test_report_path = get_report_path(pytest=True)

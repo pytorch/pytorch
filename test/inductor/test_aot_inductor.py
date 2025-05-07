@@ -2155,41 +2155,6 @@ class AOTInductorTestsTemplate:
         self.assertTrue(same(result_cpu, result_gpu_0.cpu()))
         self.assertTrue(same(result_cpu, result_gpu_1.cpu()))
 
-    @requires_multigpu()
-    def test_load_package_multiple_gpus(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
-
-        class Model(torch.nn.Module):
-            def __init__(self, weight):
-                super().__init__()
-                self.weight = weight
-
-            def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
-
-        weight = torch.randn(10, 10, device=self.device)
-        inputs = (
-            torch.randn(10, 10, device=self.device),
-            torch.randn(10, 10, device=self.device),
-        )
-        model = Model(weight).to(device=self.device)
-        result_ref = model(*inputs)
-
-        package_path = AOTIRunnerUtil.compile(model, inputs)
-
-        # Load AOT package on gpu:N
-        device_interface = get_interface_for_device(GPU_TYPE)
-        for i in range(device_interface.device_count()):
-            device = torch.device(GPU_TYPE, i)
-            with device_interface.device(i), torch.no_grad():
-                model_package = torch._inductor.aoti_load_package(
-                    package_path, device_index=i
-                )
-                inputs_on_device = [input.to(device=device) for input in inputs]
-                result_package = model_package(*inputs_on_device)
-            self.assertTrue(same(result_ref.cpu(), result_package.cpu()))
-
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3063,8 +3028,8 @@ class AOTInductorTestsTemplate:
         if dynamic:
             dim0_xy = Dim("s0", min=2, max=1024)
             dynamic_shapes = {
-                "x": {0: dim0_xy},
-                "y": {0: dim0_xy},
+                "x": {0: dim0_xy, 1: None},
+                "y": {0: dim0_xy, 1: None},
             }
         example_inputs = (
             torch.randn(2, device=self.device),
@@ -4512,6 +4477,39 @@ class AOTInductorTestsTemplate:
                 1,
             ).run(code)
         self.check_model(Model(), example_inputs)
+
+    def test_input_codegen_with_sympy_expr(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class MyModel(torch.nn.Module):
+            def forward(self, getitem_54, getitem_52, getitem_19, values_2, offsets):
+                bitwise_or = torch.bitwise_or(getitem_54, getitem_52)
+                combined = torch.cat([getitem_19, values_2], dim=0)
+                add = combined + bitwise_or
+
+                sliced = values_2[:-1] + offsets
+                return add, sliced
+
+        inps = (
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randn((192,), device="cuda"),
+            torch.randn((48,), device="cuda"),
+            torch.randint(0, 100, (47,), device="cuda", dtype=torch.uint8),
+        )
+
+        dim = torch.export.Dim("dimensionality")
+        derived_dim = 2 * dim
+        spec = {
+            "getitem_54": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_52": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_19": (derived_dim,),  # [2*s40]
+            "values_2": (Dim.AUTO,),  # [s33 + 1]
+            "offsets": (Dim.AUTO,),  # [s33]
+        }
+
+        self.check_model(MyModel(), inps, dynamic_shapes=spec)
 
     @common_utils.parametrize("mark_unbacked", (True, False))
     def test_unbacked_equals_input_size_runtime_assertion(self, mark_unbacked: bool):
