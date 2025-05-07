@@ -148,10 +148,13 @@ def _replace_region_with_subgraph(
     if _has_aliasing(region, sub_args, inds_with_external_users):
         return
 
-    invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
+    invoke_args = (get_subgraph_node, subgraph_name, *sub_args)
 
     invoke_subgraph_node = graph.create_node(
-        "call_function", torch.ops.higher_order.invoke_subgraph, invoke_args, {}
+        "call_function",
+        torch.ops.higher_order.invoke_subgraph,
+        invoke_args,  # type: ignore[arg-type]
+        {},
     )
     for ind, external_user_ind in enumerate(inds_with_external_users):
         node = region[external_user_ind]
