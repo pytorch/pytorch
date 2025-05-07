@@ -150,12 +150,8 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(out, inp + 1))
 
     @make_dynamo_test
-    def test_isinstance_custom_exc(self):
-        if isinstance(CustomException, type):
-            x = True
-        else:
-            x = False
-        assert x is True
+    def test_isinstance_CustomException_type(self):
+        assert isinstance(CustomException, type)
 
     @make_dynamo_test
     def test_propagate_exception_inside_ctx_manager(self):
