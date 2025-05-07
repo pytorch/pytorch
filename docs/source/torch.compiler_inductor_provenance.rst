@@ -26,21 +26,21 @@ Using the Provenance Tracking Highlighter
 
 Follow these steps to enable and use provenance tracking in your PyTorch project:
 
-1. Install ``tlparse`` by ``cargo install tlparse``. If you don't have ``cargo``, see https://doc.rust-lang.org/cargo/getting-started/installation.html for instructions to install.
+1. Install ``tlparse`` by ``cargo install tlparse``. If you don't have ``cargo``, see `The Cargo Book <https://doc.rust-lang.org/cargo/getting-started/installation.html>`__ for instructions to install.
 2. Run your program with required flags:
 
    .. code-block:: bash
 
      TORCH_TRACE=~/my_trace_log_dir TORCH_LOGS="+inductor" TORCH_COMPILE_DEBUG=1 python your_program.py
 
-   This will generate a log file in `~/my_trace_log_dir`. The log file will be used by tlparse to generate the provenance tracking highlighter.
+   This will generate a log file in ``~/my_trace_log_dir``. The log file will be used by tlparse to generate the provenance tracking highlighter.
 3. Run ``tlparse`` on the log with ``--inductor-provenance`` flag. For example:
 
    .. code-block:: bash
 
       tlparse log_file_name.log --inductor-provenance
 
-   - Even if you don't add the --inductor-provenance flag, you should be able to see the mapping in json format in the ``inductor_provenance_tracking_node_mappings_<number>.json`` file in the ``index.html`` tlparse output.
+   - Even if you don't add the ``--inductor-provenance`` flag, you should be able to see the mapping in json format in the ``inductor_provenance_tracking_node_mappings_<number>.json`` file in the ``index.html`` tlparse output.
    - Run ``tlpare`` directly on the log file. It might not work if you run "tlparse parse <folder_name>  --inductor-provenance".
    - The ``tlparse`` artifacts used by the provenance tracking highlighter are:
 
