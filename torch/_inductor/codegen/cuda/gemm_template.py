@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
 import copy
 import enum
+import functools
 import logging
 import re
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Any, Optional, Union
+
+from torch._inductor.select_algorithm import create_inputs_key
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -392,11 +396,15 @@ int main(int argc, char** argv) {
 """  # noqa: B950
 
 
+@clear_on_fresh_inductor_cache
 class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     """
     CUTLASS GEMM Template, which is used to generate CUTLASS GEMM kernels
     including those which allow flexible fusions with epilogues.
     """
+
+    filtered_ops_cache: dict[str, list[Any]] = {}
+    cache_clear = staticmethod(filtered_ops_cache.clear)
 
     def __init__(
         self,
@@ -422,6 +430,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
         )
+
+        self.cache_key: str = create_inputs_key(self.input_nodes)
 
     @staticmethod
     @abstractmethod
@@ -621,6 +631,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return cutlass_lib.LayoutType.RowMajor
 
     @staticmethod
+    @functools.lru_cache(32)
     def layout_match(
         torch_layout: ir.Layout,
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined] # noqa: F821
@@ -902,6 +913,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
+        if self.cache_key in self.filtered_ops_cache:
+            log.debug("Using cached ops for %s", self.cache_key)
+            return self.filtered_ops_cache[self.cache_key]
+
         # if changed, need to also change CUTLASS_OPERATION_KIND
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
@@ -913,16 +928,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     filter_res = self.filter_op(op)
                     if (
                         filter_res is not None
-                        and filter_res.configuration_name() != op.configuration_name()
-                    ):
-                        log.debug(
-                            "Detected change in configuration name. Original "
-                            "name: %s, filtered configuration name: %s",
-                            op.configuration_name(),
-                            filter_res.configuration_name(),
-                        )
-                    if (
-                        filter_res is not None
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
@@ -932,7 +937,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        ret_res = sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        if len(self.filtered_ops_cache) < 50:
+            self.filtered_ops_cache[self.cache_key] = ret_res
+        else:
+            log.debug("Not caching ops since filtered_ops_cache has reached size 50.")
+        return ret_res
 
     def gemm_mode(self) -> str:
         """
@@ -1124,6 +1134,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
+    @functools.lru_cache(1)
     def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
