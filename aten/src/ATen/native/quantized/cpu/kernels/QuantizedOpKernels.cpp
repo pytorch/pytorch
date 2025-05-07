@@ -2562,24 +2562,16 @@ void q_batch_norm_cpu_kernel_impl(
     __m256i u16hi0 = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(v0, 1));
     __m256i u16lo1 = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(v1, 0));
     __m256i u16hi1 = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(v1, 1));
-
-    // --- Expand to uint32_t ---
-    __m512i i32_0 = _mm512_cvtepu16_epi32(u16lo0);
-    __m512i i32_1 = _mm512_cvtepu16_epi32(u16hi0);
-    __m512i i32_2 = _mm512_cvtepu16_epi32(u16lo1);
-    __m512i i32_3 = _mm512_cvtepu16_epi32(u16hi1);
-
-    // --- Convert to float and store in 4 __m512 vectors ---
-    dst[0] = _mm512_cvtepi32_ps(i32_0);
-    dst[1] = _mm512_cvtepi32_ps(i32_1);
-    dst[2] = _mm512_cvtepi32_ps(i32_2);
-    dst[3] = _mm512_cvtepi32_ps(i32_3);
+    // --- Expand to uint32_t and convert to float ---
+    dst[0] = _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(u16lo0));
+    dst[1] = _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(u16hi0));
+    dst[2] = _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(u16lo1));
+    dst[3] = _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(u16hi1));
   };
 
   auto load_convert_u8_to_f32_128bit = [&](const uint8_t* src) {
     // --- Load and expand uint8_t -> uint16_t ---
     __m256i v_u16 = _mm256_cvtepu8_epi16(_mm_loadu_si128((__m128i*)src));
-
     // --- Expand to uint32_t and convert to float ---
     return _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(v_u16));
   };
@@ -4419,6 +4411,26 @@ void _qmul_tensor_cpu_impl(
     double output_scale,
     int64_t output_zero_point) {
   float multiplier = x_scale * y_scale / output_scale;
+  auto compute_with_scalar = [&](int idx) {
+    uint8_t x_data = *(x_ptr + idx);
+    uint8_t y_data = *(y_ptr + idx);
+    int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
+    int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
+    int32_t out_val = static_cast<int32_t>(x_val * y_val);
+    float out_val_f = (float)out_val * multiplier;
+    if constexpr (std::is_same<T, float>::value) {
+      *(out_ptr + idx) = out_val_f;
+    } else if constexpr (std::is_same<T, at::BFloat16>::value) {
+      *(out_ptr + idx) = at::BFloat16(out_val_f);
+    } else if constexpr (std::is_same<T, at::Half>::value) {
+      *(out_ptr + idx) = at::Half(out_val_f);
+    } else { //  T == uint8, requantization needed
+      out_val_f = std::round(out_val_f);
+      int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
+      out_val_i32 = std::min(255, std::max(0, out_val_i32));
+      *(out_ptr + idx) = static_cast<uint8_t>(out_val_i32);
+    }
+  };
 #if defined(CPU_CAPABILITY_AVX512)
   int64_t size_rem = size % 16;
   int64_t size_com = size - size_rem;
@@ -4463,47 +4475,13 @@ void _qmul_tensor_cpu_impl(
   });
   if (size_rem > 0) {
     for (const auto d : c10::irange(size_rem)) {
-      uint8_t x_data = *(x_ptr + size_com + d);
-      uint8_t y_data = *(y_ptr + size_com + d);
-      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
-      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
-      int32_t out_val = static_cast<int32_t>(x_val * y_val);
-      float out_val_f = (float)out_val * multiplier;
-      if constexpr (std::is_same<T, float>::value) {
-        *(out_ptr + size_com + d) = out_val_f;
-      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
-        *(out_ptr + size_com + d) = at::BFloat16(out_val_f);
-      } else if constexpr (std::is_same<T, at::Half>::value) {
-        *(out_ptr + size_com + d) = at::Half(out_val_f);
-      } else { //  T == uint8, requantization needed
-        out_val_f = std::round(out_val_f);
-        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
-        out_val_i32 = std::min(255, std::max(0, out_val_i32));
-        *(out_ptr + size_com + d) = static_cast<uint8_t>(out_val_i32);
-      }
+      compute_with_scalar(size_com + d);
     }
   }
 #else
   at::parallel_for(0, size, 1, [&](int64_t start, int64_t end) {
     for (const auto d : c10::irange(start, end)) {
-      uint8_t x_data = *(x_ptr + d);
-      uint8_t y_data = *(y_ptr + d);
-      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
-      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
-      int32_t out_val = static_cast<int32_t>(x_val * y_val);
-      float out_val_f = (float)out_val * multiplier;
-      if constexpr (std::is_same<T, float>::value) {
-        *(out_ptr + d) = out_val_f;
-      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
-        *(out_ptr + d) = at::BFloat16(out_val_f);
-      } else if constexpr (std::is_same<T, at::Half>::value) {
-        *(out_ptr + d) = at::Half(out_val_f);
-      } else { //  T == uint8, requantization needed
-        out_val_f = std::round(out_val_f);
-        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
-        out_val_i32 = std::min(255, std::max(0, out_val_i32));
-        *(out_ptr + d) = static_cast<uint8_t>(out_val_i32);
-      }
+      compute_with_scalar(d);
     }
   });
 #endif
@@ -4546,6 +4524,30 @@ void _qadd_tensor_cpu_impl(
     double output_scale,
     int64_t output_zero_point) {
   float inv_output_scale = 1.0 / output_scale;
+  auto compute_with_scalar = [&](int idx) {
+    uint8_t x_data = *(x_ptr + idx);
+    uint8_t y_data = *(y_ptr + idx);
+    int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
+    int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
+    float x_val_f = static_cast<float>(x_val) * x_scale;
+    float y_val_f = static_cast<float>(y_val) * y_scale;
+    float out_val_f = x_val_f + y_val_f;
+    if constexpr (ReLUFused) {
+      out_val_f = std::max(out_val_f, 0.f);
+    }
+    if constexpr (std::is_same<T, float>::value) {
+      *(out_ptr + idx) = out_val_f;
+    } else if constexpr (std::is_same<T, at::BFloat16>::value) {
+      *(out_ptr + idx) = at::BFloat16(out_val_f);
+    } else if constexpr (std::is_same<T, at::Half>::value) {
+      *(out_ptr + idx) = at::Half(out_val_f);
+    } else { //  T == uint8, requantization needed
+      out_val_f = std::round(out_val_f * inv_output_scale);
+      int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
+      out_val_i32 = std::min(255, std::max(0, out_val_i32));
+      *(out_ptr + idx) = static_cast<uint8_t>(out_val_i32);
+    }
+  };
 #if defined(CPU_CAPABILITY_AVX512)
   int64_t size_rem = size % 16;
   int64_t size_com = size - size_rem;
@@ -4599,55 +4601,13 @@ void _qadd_tensor_cpu_impl(
   });
   if (size_rem > 0) {
     for (const auto d : c10::irange(size_rem)) {
-      uint8_t x_data = *(x_ptr + size_com + d);
-      uint8_t y_data = *(y_ptr + size_com + d);
-      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
-      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
-      float x_val_f = static_cast<float>(x_val) * x_scale;
-      float y_val_f = static_cast<float>(y_val) * y_scale;
-      float out_val_f = x_val_f + y_val_f;
-      if constexpr (ReLUFused) {
-        out_val_f = std::max(out_val_f, 0.f);
-      }
-      if constexpr (std::is_same<T, float>::value) {
-        *(out_ptr + size_com + d) = out_val_f;
-      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
-        *(out_ptr + size_com + d) = at::BFloat16(out_val_f);
-      } else if constexpr (std::is_same<T, at::Half>::value) {
-        *(out_ptr + size_com + d) = at::Half(out_val_f);
-      } else { //  T == uint8, requantization needed
-        out_val_f = std::round(out_val_f * inv_output_scale);
-        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
-        out_val_i32 = std::min(255, std::max(0, out_val_i32));
-        *(out_ptr + size_com + d) = static_cast<uint8_t>(out_val_i32);
-      }
+      compute_with_scalar(size_com + d);
     }
   }
 #else
   at::parallel_for(0, size, 1, [&](int64_t start, int64_t end) {
     for (const auto d : c10::irange(start, end)) {
-      uint8_t x_data = *(x_ptr + d);
-      uint8_t y_data = *(y_ptr + d);
-      int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
-      int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
-      float x_val_f = static_cast<float>(x_val) * x_scale;
-      float y_val_f = static_cast<float>(y_val) * y_scale;
-      float out_val_f = x_val_f + y_val_f;
-      if constexpr (ReLUFused) {
-        out_val_f = std::max(out_val_f, 0.f);
-      }
-      if constexpr (std::is_same<T, float>::value) {
-        *(out_ptr + d) = out_val_f;
-      } else if constexpr (std::is_same<T, at::BFloat16>::value) {
-        *(out_ptr + d) = at::BFloat16(out_val_f);
-      } else if constexpr (std::is_same<T, at::Half>::value) {
-        *(out_ptr + d) = at::Half(out_val_f);
-      } else { //  T == uint8, requantization needed
-        out_val_f = std::round(out_val_f * inv_output_scale);
-        int32_t out_val_i32 = (int32_t)out_val_f + output_zero_point;
-        out_val_i32 = std::min(255, std::max(0, out_val_i32));
-        *(out_ptr + d) = static_cast<uint8_t>(out_val_i32);
-      }
+      compute_with_scalar(d);
     }
   });
 #endif
