@@ -822,7 +822,7 @@ class TensorVariable(VariableTracker):
             unimplemented("Tensor.numpy(). NumPy is not available")
         if self.layout != torch.strided:
             raise TypeError(
-                f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
+                f"can't convert {self.layout} layout tensor to numpy. Use Tensor.to_dense() first"
             )
         from ..symbolic_convert import InstructionTranslator
 
