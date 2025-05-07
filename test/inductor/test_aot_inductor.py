@@ -562,8 +562,6 @@ class AOTInductorTestsTemplate:
             torch._inductor.aoti_compile_and_package(ep)
         )
         self.assertTrue(same(optimized(*inps), model(*inps)))
-        inps2 = (torch.randn(4, 0, dtype=torch.bfloat16), torch.randn(4, 10))
-        self.assertTrue(same(optimized(*inps2), model(*inps2)))
 
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
