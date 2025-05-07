@@ -1,5 +1,4 @@
 #include <cstdlib>
-#include <filesystem>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -10,6 +9,9 @@
 #include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_opt_limit.h>
+
+// NOTE: Don't try to migrate jit to C++17 yet
+// As it's used in some embedded platforms
 
 namespace torch::jit {
 
@@ -38,7 +40,7 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
     }
     auto index_at = line.find_last_of('=');
     auto pass_name = line.substr(0, index_at);
-    pass_name = std::filesystem::path(pass_name).replace_extension().string();
+    pass_name = c10::detail::ExcludeFileExtension(pass_name);
     auto opt_limit = parseOptLimit(line.substr(index_at + 1));
     passes_to_opt_limits.emplace(std::move(pass_name), opt_limit);
   }
@@ -55,7 +57,9 @@ bool opt_limit(const char* pass_name) {
 
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
       parseJITOptLimitOption(opt_limit.value());
-  std::string pass = std::filesystem::path(pass_name).stem().string();
+  std::string pass{pass_name};
+  pass = c10::detail::StripBasename(pass);
+  pass = c10::detail::ExcludeFileExtension(pass);
 
   auto opt_limit_it = passes_to_opt_limits.find(pass);
   if (opt_limit_it == passes_to_opt_limits.end()) {
