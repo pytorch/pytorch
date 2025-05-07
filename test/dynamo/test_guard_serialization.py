@@ -737,6 +737,48 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ref, loaded, {"t": iter((1, 2, 3, 4)), "x": torch.randn(4)}, False
         )
 
+    def test_range_iterator_match(self):
+        def fn(x, r):
+            y = x
+            for val in r:
+                y = x + val
+            return y
+
+        x = torch.randn(3)
+
+        def _gen_kwargs(x=x):
+            return {"x": x, "r": iter(range(2, 15, 3))}
+
+        ref, loaded = self._test_serialization(
+            "RANGE_ITERATOR_MATCH", fn, _gen_fn=_gen_kwargs
+        )
+
+        # same range
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 15, 3))}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 3))}, True
+        )
+        # equivalent even with different end
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 16, 3))}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 16, 3))}, True
+        )
+        # different start
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(1, 15, 3))}, False)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(1, 15, 3))}, False
+        )
+        # different end resulting in different values
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 18, 3))}, False)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 18, 3))}, False
+        )
+        # different step
+        self._test_check_fn(ref, loaded, {"x": x, "r": iter(range(2, 15, 4))}, False)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4), "r": iter(range(2, 15, 4))}, False
+        )
+
     def test_dict_version(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
