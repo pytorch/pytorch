@@ -6,7 +6,7 @@ from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
-    _maybe_run_with_interpreter,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     UnsupportedAliasMutationException,
 )
@@ -246,7 +246,7 @@ def map_fake_tensor_mode(mode, f, xs, args):
 def map_functionalize(ctx, f, xs, pos_args):
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
-    wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
+    wrapped_fn = FunctionalizeCtxWrapper(ctx, f)
 
     with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():

@@ -6,6 +6,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     autograd_not_implemented,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     unique_graph_id,
     UnsupportedAliasMutationException,
@@ -95,7 +96,7 @@ def hints_wrapper_functionalize(ctx, body_fn, args, kwargs, hints):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     unwrapped_hints = ctx.unwrap_tensors(hints)
     with ctx.redispatch_to_next():
-        functional_body_fn = ctx.functionalize(body_fn)
+        functional_body_fn = FunctionalizeCtxWrapper(ctx, body_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         if _has_potential_branch_input_mutation(
             body_fn, unwrapped_args, pre_dispatch=pre_dispatch
