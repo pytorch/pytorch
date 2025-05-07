@@ -3,9 +3,9 @@
 # Script for installing sccache on the xla build job, which uses xla's docker
 # image, which has sccache installed but doesn't write the stubs.  This is
 # mostly copied from .ci/docker/install_cache.sh.  Changes are: removing checks
-# that will always return the same thing, ex checks for for rocm, CUDA, not
-# changing /etc/environment, and not installing/downloading sccache as it is
-# already in the docker image.
+# that will always return the same thing, ex checks for for rocm, CUDA, changing
+# the path where sccache is installed, not changing /etc/environment, and not
+# installing/downloading sccache as it is already in the docker image.
 
 set -ex -o pipefail
 
@@ -18,7 +18,7 @@ function write_sccache_stub() {
   if [ $1 == "gcc" ]; then
     # Do not call sccache recursively when dumping preprocessor argument
     # For some reason it's very important for the first cached nvcc invocation
-    cat >"/opt/cache/bin/$1" <<EOF
+    cat >"/tmp/cache/bin/$1" <<EOF
 #!/bin/sh
 
 # sccache does not support -E flag, so we need to call the original compiler directly in order to avoid calling this wrapper recursively
@@ -35,7 +35,7 @@ else
 fi
 EOF
   else
-    cat >"/opt/cache/bin/$1" <<EOF
+    cat >"/tmp/cache/bin/$1" <<EOF
 #!/bin/sh
 
 if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
@@ -45,7 +45,7 @@ else
 fi
 EOF
   fi
-  chmod a+x "/opt/cache/bin/$1"
+  chmod a+x "/tmp/cache/bin/$1"
 }
 
 write_sccache_stub cc
