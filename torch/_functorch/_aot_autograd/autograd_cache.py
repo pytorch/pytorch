@@ -57,7 +57,6 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
-    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
@@ -390,36 +389,6 @@ class InductorOutput(Generic[TOut], ABC):
 
 
 @dataclass
-class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
-    """
-    A full compiled fx graph that doesn't need to lookup the FxGraphCache
-    to run
-    """
-
-    result: CompiledFxGraph
-
-    def load(self, example_inputs) -> CompiledFxGraph:
-        return self.result
-
-    def post_compile(
-        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
-    ) -> CompiledFxGraph:
-        constants = CompiledFxGraphConstants()
-        graph, cache_info = FxGraphCache.cache_hit_post_compile(result, {}, constants)
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "fx_graph_bundled_cache_hit",  # always a hit
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(cache_info),
-        )
-        if graph is None:
-            raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
-        return graph
-
-
-@dataclass
 class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_cache_info: tuple[str, list[str]]
     fx_graph_guard_expr: Optional[str]
@@ -529,18 +498,6 @@ class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoa
         return True
 
 
-# Forward types don't have any extra parameters, so this is just a TypeAlias, in essence
-class BundledCompiledForward(CompiledFxGraphLoadable):
-    pass
-
-
-@dataclass
-class BundledCompiledBackward(
-    GenericCompiledBackward[CompiledFxGraph], CompiledFxGraphLoadable
-):
-    pass
-
-
 TForward = TypeVar("TForward", bound=InductorOutput)
 TBackward = TypeVar("TBackward", bound=GenericCompiledBackward)
 
@@ -593,9 +550,6 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
     sanitized_aot_config: AOTConfig
 
     guards_expr: Optional[str]
-
-    # # Used by compiled autograd
-    cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo]
 
     # Turn cache entry into the original callable
     def wrap_post_compile(
@@ -742,7 +696,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                self.cached_lazy_backward_info,
+                None,  # lazy_backward_info
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
@@ -779,15 +733,6 @@ class AOTAutogradCacheEntry(
     """
     Regular AOTAutogradCacheEntry: saves the forward/backward FxGraphCache keys
     and looks them up in FxGraphCache on load
-    """
-
-
-class BundledAOTAutogradCacheEntry(
-    GenericAOTAutogradCacheEntry[BundledCompiledForward, BundledCompiledBackward]
-):
-    """
-    AOTAutogradCacheEntry where we save the entire CompiledFxGraph instead
-    of relying on cache keys from FxGraphCache
     """
 
 

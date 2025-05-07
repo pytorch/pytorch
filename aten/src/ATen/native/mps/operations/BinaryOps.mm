@@ -336,11 +336,6 @@ TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Te
   });
 }
 
-TORCH_IMPL_FUNC(div_out_mode_mps)
-(const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode, const Tensor& output) {
-  mps::div_mode_template(self, other, rounding_mode, output, "div_mode_out");
-}
-
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
   mps::add_sub_lerp_template(self, other, alpha, output, "add");
 }
@@ -355,10 +350,6 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   } else {
     at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
-}
-
-static void div_floor_kernel_mps(TensorIteratorBase& iter) {
-  mps::div_mode_template(iter.input(0), iter.input(1), "floor", iter.output(0), "floor_divide_out");
 }
 
 TORCH_IMPL_FUNC(remainder_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
@@ -434,5 +425,4 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
   mps::binaryOpTensor(self, other, output, "xlogy_out_mps", xlogy_op_block);
 }
 
-REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel_mps);
 } // namespace at::native
