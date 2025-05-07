@@ -90,7 +90,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
-from . import config, convert_frame, exc, mutation_guard
+from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
@@ -1782,9 +1782,6 @@ class GuardBuilder(GuardBuilderBase):
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def PYMODULE_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
-
     def SEQUENCE_LENGTH(self, guard):
         # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
@@ -1925,9 +1922,6 @@ class GuardBuilder(GuardBuilderBase):
             # This is unsafe if you add/remove a hook on nn module variable
             return
         self.SEQUENCE_LENGTH(guard)
-
-    def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
         pass  # we always guard on this via GlobalStateGuard()
