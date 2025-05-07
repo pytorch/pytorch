@@ -5464,6 +5464,15 @@ class LoopNest:
             num_steps = num_steps * FloorDiv(loop.size, loop.steps)
             max_depth += 1
 
+        def get_simd_vec_depth(loops):
+            # Return the first loop level which is simd_vec
+            for i, loop in enumerate(loops):
+                if loop.simd_vec:
+                    return i
+            return None
+
+        simd_vec_depth = get_simd_vec_depth(self.loops)
+
         # When the number of steps of the first inner loop is much larger than the number of steps of
         # all outer loops, change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
@@ -5472,6 +5481,12 @@ class LoopNest:
             and isinstance(self.loops[max_depth].size, sympy.Integer)
             and num_steps * 300
             < FloorDiv(self.loops[max_depth].size, self.loops[max_depth].steps)
+            and not (
+                # Disable parallel reduction under the vec loop
+                simd_vec_depth is not None
+                and max_depth > simd_vec_depth
+                and self.loops[max_depth].is_reduction
+            )
         ):
             start_depth = max_depth
             max_depth = 0
