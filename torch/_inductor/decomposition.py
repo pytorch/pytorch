@@ -362,9 +362,6 @@ def cat(
     tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
-    def all_tensors_same_dtype(tensors: list[torch.Tensor]) -> bool:
-        return all(t.dtype == tensors[0].dtype for t in tensors)
-
     def non_empty_tensor(x: torch.Tensor) -> bool:
         # For better or worse, this is a valid cat:
         #
@@ -394,18 +391,12 @@ def cat(
 
     if len(filtered_tensors) == 1:
         # check dtype promotion
-        if (
-            not all_tensors_same_dtype(tensors)
-            and (
-                promoted_dtype := elementwise_dtypes(
-                    *tensors,
-                    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-                )[1]
-            ) != filtered_tensors[0].dtype
-        ):
-            return filtered_tensors[0].to(dtype=promoted_dtype)
-        else:
-            return filtered_tensors[0].clone()
+        promoted_dtype = elementwise_dtypes(
+            *tensors,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )[1]
+        filtered_t = filtered_tensors[0]
+        return filtered_t.clone() if promoted_dtype == filtered_t.dtype else filtered_t.to(dtype=promoted_dtype)
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
