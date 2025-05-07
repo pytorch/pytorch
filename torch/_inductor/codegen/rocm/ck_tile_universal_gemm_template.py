@@ -863,6 +863,9 @@ class CKTileGemmTemplate(CKTileTemplate):
             )
 
     def size_args(self):
+        """
+        Sizes and strides to be used for the kernel call
+        """
         X = self.input_nodes[0]
         W = self.input_nodes[1]
         Y = self.output_node
