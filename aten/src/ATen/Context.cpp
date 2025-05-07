@@ -176,7 +176,6 @@ void Context::setUserEnabledNNPACK(bool e) {
 }
 
 bool Context::allowTF32CuDNN(const std::string& op) const {
-  warn_deprecated_fp32_precision_api();
   if (op.size() == 0){
     bool allow_tf32_rnn = float32Precision("cuda", "rnn") == "tf32";
     bool allow_tf32_conv = float32Precision("cuda", "conv") == "tf32";
@@ -190,14 +189,15 @@ bool Context::allowTF32CuDNN(const std::string& op) const {
   } else {
     return float32Precision("cuda", op) == "tf32";
   }
+  warn_deprecated_fp32_precision_api();
   return allow_tf32_cudnn;
 }
 
 void Context::setAllowTF32CuDNN(bool b) {
-  warn_deprecated_fp32_precision_api();
   setFloat32Precision("cuda", "rnn", b ? "tf32" : "none");
   setFloat32Precision("cuda", "conv", b ? "tf32" : "none");
   allow_tf32_cudnn = b;
+  warn_deprecated_fp32_precision_api();
 }
 
 void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
@@ -336,7 +336,6 @@ bool Context::allowTF32CuBLAS() const {
       return false;
     }
 #endif
-  warn_deprecated_fp32_precision_api();
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32_new = float32Precision("cuda", "matmul") == "tf32";
   TORCH_CHECK(
@@ -345,6 +344,7 @@ bool Context::allowTF32CuBLAS() const {
       "Current status indicate that you have used mix of the legacy and new APIs to set the TF32 status for cublas matmul. ",
       "We suggest only using the new API to set the TF32 flag. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
+  warn_deprecated_fp32_precision_api();
   return allow_tf32_new;
 }
 
@@ -362,7 +362,6 @@ void Context::setAllowTF32CuBLAS(bool b) {
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
-  warn_deprecated_fp32_precision_api();
   bool invalid = float32Precision("cuda", "matmul") == "tf32" &&
       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST;
   invalid = invalid ||
@@ -374,6 +373,7 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
       "Current status indicate that you have used mix of the legacy and new APIs to set the matmul precision. ",
       "We suggest only using the new API for matmul precision. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
+  warn_deprecated_fp32_precision_api();
   return float32_matmul_precision;
 }
 
@@ -389,8 +389,8 @@ std::string Context::float32Precision(const std::string& backend, const std::str
 }
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
-  warn_deprecated_fp32_precision_api();
   auto match = [this](const std::string & s_) {
+    warn_deprecated_fp32_precision_api();
     // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
     if (s_ == "highest") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
