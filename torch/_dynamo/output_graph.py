@@ -1122,7 +1122,7 @@ class OutputGraph(OutputGraphGuardsState):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for value in stack_values:
-            value.realize()
+            variables.LazyVariableTracker.realize_all(value)
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -2438,21 +2438,12 @@ class SubgraphTracer(fx.Tracer):
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
-            if not is_strict_export and not is_non_strict_export:
-                if isinstance(example_value, torch.Tensor):
-                    self._lift_basic_symbols(example_value, source)
-                elif isinstance(example_value, (list, tuple)):
-                    for i, e in enumerate(example_value):
-                        if not isinstance(e, torch.Tensor):
-                            continue
-
-                        e_source = None
-                        if source:
-                            e_source = GetItemSource(
-                                base=source, index=i, index_is_slice=False
-                            )
-
-                        self._lift_basic_symbols(e, e_source)
+            if (
+                not is_strict_export
+                and not is_non_strict_export
+                and isinstance(example_value, torch.Tensor)
+            ):
+                self._lift_basic_symbols(example_value, source)
 
             # Bound the symbol to ph if example_value is a SymInt with basic symbol.
             if isinstance(example_value, torch.SymInt) and isinstance(
