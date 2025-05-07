@@ -1,5 +1,4 @@
-#ifndef THP_UTILS_H
-#define THP_UTILS_H
+#pragma once
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -11,10 +10,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#ifdef USE_CUDA
-#include <c10/cuda/CUDAStream.h>
-#endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP, Real, Utils_, NAME)
 
@@ -204,14 +199,6 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char* func);
 
-// NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
-#ifdef USE_CUDA
-std::vector<std::optional<at::cuda::CUDAStream>>
-THPUtils_PySequence_to_CUDAStreamList(PyObject* obj);
-#endif
-
 void storage_fill(const at::Storage& self, uint8_t value);
 void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value);
 uint8_t storage_get(const at::Storage& self, ptrdiff_t idx);
-
-#endif
