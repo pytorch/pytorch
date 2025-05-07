@@ -659,7 +659,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertTrue(
                 used_after < used_before * 1.7,
                 f"{device} used {used_after} bytes after collective, "
-                f"50% more than the status before ({used_before} bytes). "
+                f"70% more than the status before ({used_before} bytes). "
                 f"Extra CUDA context may have been created.",
             )
 
