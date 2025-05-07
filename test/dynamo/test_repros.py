@@ -6832,6 +6832,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2, _ = torch.compile(moe_mlp, backend="eager")(x)
         self.assertEqual(out1, out2)
 
+    def test_tensor_size_hasattr(self):
+        def fn(x):
+            if hasattr(x, "size"):
+                x = x * 2
+            if hasattr(x, "stride"):
+                x = x * 3
+            return x * 5
+
+        x = torch.ones(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     @requires_cuda
     def test_memleak_when_graph_input_has_tensor_attr(self, device):
         @torch.compile(backend="eager")
