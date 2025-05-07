@@ -1548,7 +1548,7 @@ def record_compilation_metrics(
         "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton() else "",
+        "triton_version": triton.__version__ if has_triton_package() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
@@ -3152,12 +3152,20 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
-    flat_args_kwargs = get_fake_values_from_nodes(
-        tx, _get_flat_args(node, {}), allow_non_graph_fake
-    )
-    id_to_initial_version = {
-        id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
-    }
+
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        flat_args_kwargs = get_fake_values_from_nodes(
+            tx, _get_flat_args(node, {}), allow_non_graph_fake
+        )
+        id_to_initial_version = {
+            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+        }
+    else:
+        flat_args_kwargs = []
+        id_to_initial_version = {}
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -3822,15 +3830,14 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type):
+def is_compile_supported(device_type: str) -> bool:
     from .eval_frame import is_dynamo_supported
 
-    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if type == "cpu":
+    if device_type == "cpu":
         pass
-    elif type in ["cuda", "xpu"] and compile_supported:
-        compile_supported = has_triton()
+    elif device_type in ["cuda", "xpu"] and compile_supported:
+        compile_supported = has_triton(device_type)
     else:
         compile_supported = False
     return compile_supported
