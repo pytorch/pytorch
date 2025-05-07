@@ -16,7 +16,8 @@ psutil
 pyyaml
 requests
 # issue on Windows after >= 75.8.2 - https://github.com/pytorch/pytorch/issues/148877
-setuptools>=62.3.0,<75.9
+# setuptools COMMAND support is deprecated after 80
+setuptools>=62.3.0,!=75.9,!=76.*,!=77.*,!=78.0,<80
 sympy>=1.13.3
 types-dataclasses
 typing-extensions>=4.10.0
