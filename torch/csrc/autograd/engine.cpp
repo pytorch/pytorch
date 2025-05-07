@@ -1067,20 +1067,26 @@ void Engine::evaluate_function(
   auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
-  if (opt_parent_stream.has_value()) {
-    for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
-      if (!inputs.buffer[pos].defined()) {
-        continue;
-      }
-      TORCH_INTERNAL_ASSERT(inputs.ready_events[pos].has_value())
-      // Ensure that the incoming gradients are ready
-      const auto& ready_stream = inputs.ready_streams[pos];
-      TORCH_INTERNAL_ASSERT(ready_stream.has_value());
-      if (*opt_parent_stream != *ready_stream) {
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        opt_parent_stream->wait(inputs.ready_events[pos].value());
-        _record_stream_any_impl(inputs.buffer[pos], *opt_parent_stream);
-      }
+  // Ensure that the incoming gradients are ready
+  for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
+    if (!inputs.buffer[pos].defined()) {
+      continue;
+    }
+    const auto device = inputs.buffer[pos].device();
+    // TODO: Use at::accelerator::isAccelerator(device->type()) instead
+    bool is_accelerator =
+        device.is_cuda() || device.is_mtia() || device.is_privateuseone();
+    if (!is_accelerator) {
+      continue;
+    }
+    TORCH_INTERNAL_ASSERT(inputs.ready_events[pos].has_value());
+    TORCH_INTERNAL_ASSERT(inputs.ready_streams[pos].has_value());
+    TORCH_INTERNAL_ASSERT(opt_parent_stream.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (opt_parent_stream.value() != inputs.ready_streams[pos].value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      opt_parent_stream->wait(inputs.ready_events[pos].value());
+      _record_stream_any_impl(inputs.buffer[pos], opt_parent_stream.value());
     }
   }
 

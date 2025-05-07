@@ -178,7 +178,7 @@ void _record_stream_any_impl(Variable& var, const c10::Stream& stream) {
 // ============
 // 1) Synchronize for accumulation. Accumulation operates on both the new
 //   incoming gradient and the existing gradient in the buffer.
-//   (1) wait stream and (2) record stream to make sure both are ready to be
+//   (i) wait stream and (ii) record stream to make sure both are ready to be
 //   used on the accumulation stream.
 // 2) Accumulation on the accumulation straem
 // 3) Update the ready event and stream for the current position.
@@ -194,12 +194,11 @@ void InputBuffer::add(
   if (!var.defined()) {
     return;
   }
-  auto const device = device_of(var);
-  TORCH_INTERNAL_ASSERT(device.has_value());
-  const auto device_type = device->type();
+  const auto device = var.device();
+  const auto device_type = device.type();
+  // TODO: Use at::accelerator::isAccelerator(device->type()) instead
   bool is_accelerator =
-      device->is_cuda() || device->is_mtia() || device->is_privateuseone();
-
+      device.is_cuda() || device.is_mtia() || device.is_privateuseone();
   //
   // [ Non-accelerator case ]
   //
@@ -212,34 +211,33 @@ void InputBuffer::add(
     }
     return;
   }
-
   // Handle the case where var is on an accelerator but producer node has no
   // canonical stream, e.g. this can happen if forward is DtoH
   const std::optional<c10::Stream>& opt_producer_stream =
       (opt_producer_stream_.has_value()
            ? opt_producer_stream_
            : std::optional<c10::Stream>(
-                 at::accelerator::getCurrentStream(device->index())));
+                 at::accelerator::getCurrentStream(device.index())));
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
   // See Note: [Autograd Producer-Consumer Stream Syncs]
   if (!opt_accum_streams[pos].has_value()) {
+    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
     // [ First producer ]
     // 1)
-    if (opt_consumer_stream->device() == *device) {
+    if (opt_consumer_stream->device() == device) {
       // Case A
       opt_accum_streams[pos] = opt_consumer_stream;
-    } else if (opt_producer_stream->device() == *device) {
+    } else if (opt_producer_stream->device() == device) {
       // Case B
       opt_accum_streams[pos] = opt_producer_stream;
     } else {
       // Case C
       opt_accum_streams[pos] =
-          at::accelerator::getCurrentStream(device->index());
+          at::accelerator::getCurrentStream(device.index());
     }
     // 2)
-    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
     buffer[pos] = std::move(var);
     // 3)
     ready_events[pos] = c10::Event{device_type};
