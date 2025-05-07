@@ -532,7 +532,7 @@ Lazy Modules Initialization
     nn.modules.lazy.LazyModuleMixin
 
 Aliases
-_______
+-------
 
 The following are aliases to their counterparts in ``torch.nn``:
 
