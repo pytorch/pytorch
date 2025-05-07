@@ -66,7 +66,10 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                         val = subnode.value
                         if isinstance(val, ast.Constant) and DEVICE_BIAS in val.value:
                             # detect: device="cuda"
-                            self.record(subnode, f"{msg_prefix} device='{val.value}'")
+                            self.record(
+                                subnode,
+                                f"{msg_prefix} device='{val.value}', suggest to use device=GPU_TYPE",
+                            )
                         elif isinstance(val, ast.Call):
                             # detect: device=torch.device("cuda")
                             if (
@@ -78,7 +81,7 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                             ):
                                 self.record(
                                     val,
-                                    f"{msg_prefix} torch.device('{val.args[0].value}')",
+                                    f"{msg_prefix} torch.device('{val.args[0].value}'), suggest to use torch.device(GPU_TYPE)",
                                 )
                 if isinstance(subnode, ast.Call) and isinstance(
                     subnode.func, ast.Attribute
@@ -86,7 +89,10 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                     method_name = subnode.func.attr
                     if method_name == DEVICE_BIAS:
                         # detect: .cuda()
-                        self.record(subnode, f"{msg_prefix} .{DEVICE_BIAS}() call")
+                        self.record(
+                            subnode,
+                            f"{msg_prefix} .{DEVICE_BIAS}(), suggest to use to(GPU_TYPE)",
+                        )
                     elif method_name == "to":
                         # detect: to("cuda")
                         if subnode.args:
@@ -96,7 +102,8 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                                 and DEVICE_BIAS in arg.value
                             ):
                                 self.record(
-                                    subnode, f"{msg_prefix} .to('{arg.value}') call"
+                                    subnode,
+                                    f"{msg_prefix} .to('{arg.value}'), suggest to use to(GPU_TYPE)",
                                 )
 
         self.generic_visit(node)
