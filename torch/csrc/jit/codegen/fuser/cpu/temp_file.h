@@ -73,7 +73,11 @@ struct TempFile {
     // mkstemps edits its first argument in places
     // so we make a copy of the string here, including null terminator
     std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
+#ifdef _AIX
+    int fd = mkstemp(tt.data() + suffix);
+#else
     int fd = mkstemps(tt.data(), suffix);
+#endif // _AIX
     AT_ASSERT(fd != -1);
     file_ = fdopen(fd, "r+");
     // - 1 because tt.size() includes the null terminator,
