@@ -548,7 +548,7 @@ class AOTInductorTestsTemplate:
                 model = LinearModel(device=self.device)
                 self.check_model(model, example_inputs)
 
-    def test_dtype_promotion(self):
+    def test_empty_cat_dtype_promotion(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
                 z = torch.cat([x, y], dim=1)
@@ -563,7 +563,7 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(same(optimized(*inps), model(*inps)))
         inps2 = (torch.randn(4, 0, dtype=torch.bfloat16), torch.randn(4, 10))
-        self.assertTrue(same(optimized(*inps), model(*inps)))
+        self.assertTrue(same(optimized(*inps2), model(*inps2)))
 
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
