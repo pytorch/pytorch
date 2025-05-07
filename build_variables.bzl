@@ -592,6 +592,10 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/TensorMeta.cpp",
 ]
 
+libtorch_nativert_standalone_headers = [
+    "torch/nativert/executor/ExecutorConfig.h",
+]
+
 torch_mobile_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
@@ -624,7 +628,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_nativert_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_nativert_sources + libtorch_nativert_standalone_headers
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
@@ -666,6 +670,9 @@ def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     return (
         libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources + libtorch_nativert_sources
     )
+
+def libtorch_standalone_headers():
+    return libtorch_nativert_standalone_headers;
 
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
