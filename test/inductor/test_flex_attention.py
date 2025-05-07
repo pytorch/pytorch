@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -63,6 +64,18 @@ Tensor = torch.Tensor
 
 T = TypeVar("T")
 M = TypeVar("M", bound=Callable)
+
+
+def large_tensor_test_class(
+    size: str, device: Optional[Union[torch.device, str]] = None
+) -> Callable[[type[T]], type[T]]:
+    def decorator(cls: type[T]) -> type[T]:
+        for name, method in list(cls.__dict__.items()):
+            if callable(method) and name.startswith("test_"):
+                setattr(cls, name, largeTensorTest(size, device)(method))
+        return cls
+
+    return decorator
 
 
 @contextmanager
@@ -376,6 +389,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
+@large_tensor_test_class("2GB", device="cuda")
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -3767,7 +3781,6 @@ class GraphModule(torch.nn.Module):
 
     class joint_graph0(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
-            mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
             mul_2: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1);  arg5_1 = arg0_1 = None
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
@@ -3775,8 +3788,8 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
-            return full
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            return full_default
 """.replace(  # noqa: B950
             "GPU_TYPE", torch.device(device).type
         )
@@ -4459,6 +4472,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
 
+@large_tensor_test_class("2GB", device="cuda")
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4908,9 +4922,14 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
+@large_tensor_test_class("2GB", device="cuda")
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
+        skipCPUIf(
+            LONG_COMPILATION_ON_CPU,
+            "skip UT for CPU due to long compilation time found in CI",
+        )
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
@@ -4976,6 +4995,7 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5009,6 +5029,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5042,6 +5063,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5076,6 +5098,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5111,6 +5134,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5143,6 +5167,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5177,6 +5202,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5209,6 +5235,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5245,6 +5272,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5284,6 +5312,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5321,6 +5350,7 @@ class TestLearnableBiases(InductorTestCase):
                 (query, key, value, bias),
             )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5354,6 +5384,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5387,6 +5418,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, gate_score),
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5435,6 +5467,7 @@ class TestLearnableBiases(InductorTestCase):
             ],
         )
 
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )
@@ -5471,6 +5504,7 @@ class TestLearnableBiases(InductorTestCase):
             out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
         )
 
+    @skip_on_cpu
     def test_flex_attention_with_dynamic_max_autotune(self, device):
         query = torch.randn(2, 16, 512, 64, device=device)
         key = torch.randn(2, 16, 512, 64, device=device)
@@ -5511,6 +5545,7 @@ class TestLearnableBiases(InductorTestCase):
             out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
         )
 
+    @skip_on_cpu
     def test_inspect_bug(self, device):
         # https://github.com/pytorch/pytorch/issues/139374
         def sliding_window(b, h, q_idx, kv_idx, val):
@@ -5525,6 +5560,7 @@ class TestLearnableBiases(InductorTestCase):
         opt_fn(sliding_window2, None, None, 1024, 1024, device=device)
 
     @supported_platform
+    @skip_on_cpu
     def test_head_bias_req_grad(self, device):
         B, H, S, D = 1, 4, 256, 64
         bias = torch.randn(H, device=device, dtype=torch.float16, requires_grad=True)
@@ -5558,6 +5594,7 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @supported_platform
+    @skip_on_cpu
     def test_comparison_vs_sdpa_with_learnable_bias(self, device):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
@@ -5771,7 +5808,7 @@ class TestLearnableBiases(InductorTestCase):
 instantiate_device_type_tests(TestFlexAttention, globals(), only_for=test_device)
 instantiate_device_type_tests(TestPagedAttention, globals(), only_for=test_device)
 instantiate_device_type_tests(TestBlockMask, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestLearnableBiases, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestLearnableBiases, globals(), only_for=test_device)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

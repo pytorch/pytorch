@@ -232,8 +232,6 @@ class TestDynamoTimed(TestCase):
  '_recursive_pre_grad_passes': [0.0],
  'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
- 'bytecode_tracing': [0.0],
- 'compile_attempt_0': [0.0],
  'compile_file': [0.0, 0.0],
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
