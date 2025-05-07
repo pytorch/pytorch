@@ -1630,8 +1630,9 @@ def _export_to_aten_ir_make_fx(
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)
                 buffer_input_names = {
-                    buf: input_names[param_len + i]
-                    for i, buf in enumerate(non_strict_root._buffers)
+                    name: input_names[param_len + i]
+                    for i, (name, buf) in enumerate(non_strict_root._buffers.items())
+                    if buf is not None
                 }
                 output_node = list(gm.graph.nodes)[-1]
                 # We copy nodes corresponding to buffer assignments to buffers in the graph.
