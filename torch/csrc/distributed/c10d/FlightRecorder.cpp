@@ -710,7 +710,7 @@ float getDurationFromEvent(c10::Event& startEvent, c10::Event& endEvent) {
 // For any third party library that uses the flight recorder, if one wants to
 // use an Event type other than c10::Event, one also needs to registers here to
 // avoid linking errors.
-template class FlightRecorder<c10::Event>;
+template struct FlightRecorder<c10::Event>;
 
 #ifdef USE_C10D_NCCL
 float getDurationFromEvent(
@@ -722,6 +722,6 @@ float getDurationFromEvent(
   return ncclStartEvent.elapsed_time(ncclEndEvent);
 }
 
-template class FlightRecorder<at::cuda::CUDAEvent>;
+template struct FlightRecorder<at::cuda::CUDAEvent>;
 #endif // USE_C10D_NCCL
 } // namespace c10d
