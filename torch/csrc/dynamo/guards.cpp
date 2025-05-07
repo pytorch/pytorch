@@ -1088,11 +1088,6 @@ bool is_immutable_object(py::handle example_value) {
       (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
-bool is_parameter(py::handle tensor) {
-  py::object parameter = py::module::import("torch.nn").attr("Parameter");
-  return py::isinstance(tensor, parameter);
-}
-
 /**
  * Dispatches metadata functions to the methods that return integer values,
  * i.e. used whenever static shapes are being used.
@@ -2622,15 +2617,21 @@ class GuardManager {
   GuardDebugInfo check_accessors_verbose_nopybind(
       PyObject* value,
       int& num_guards_executed) {
+    bool guards_failed = false;
+    py::list verbose_code_parts;
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
           accessor->check_verbose_nopybind(value);
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
-        return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+        guards_failed = true;
+        verbose_code_parts += debug_info.verbose_code_parts;
       }
+    }
+    if (guards_failed) {
+      return GuardDebugInfo(
+        false, verbose_code_parts, num_guards_executed);
     }
 
     return GuardDebugInfo(true, num_guards_executed);
@@ -3523,12 +3524,6 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
-      if (is_parameter(py::handle(value))) {
-        fail_reason += ". Guard failed on a parameter, consider using ";
-        fail_reason +=
-            "torch._dynamo.config.force_parameter_static_shapes = False ";
-        fail_reason += "to allow dynamism on parameters.";
-      }
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);
