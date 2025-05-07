@@ -1667,10 +1667,6 @@ class TestPatternMatcher(TestCase):
         def bar_out(x: torch.Tensor, out: torch.Tensor) -> None:
             out.copy_(x + 2)
 
-        @register_fake("mylib::bar")
-        def bar_out_fake(x: torch.Tensor, out: torch.Tensor) -> None:
-            return None
-
         @torch.library.custom_op("mylib::foobar_out", mutates_args={"out"})
         def foobar_out(x: torch.Tensor, out: torch.Tensor) -> None:
             x.add_(1)
