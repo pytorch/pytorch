@@ -55,7 +55,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -79,7 +79,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -103,7 +103,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -124,7 +124,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -151,7 +151,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -171,7 +171,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -195,7 +195,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -219,7 +219,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -240,7 +240,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -267,7 +267,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -287,7 +287,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -311,7 +311,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -335,7 +335,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -356,7 +356,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -383,7 +383,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -403,7 +403,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -427,7 +427,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -451,7 +451,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -472,7 +472,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -499,7 +499,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -519,7 +519,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -543,7 +543,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -567,7 +567,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -588,7 +588,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -615,7 +615,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -635,7 +635,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -659,7 +659,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -683,7 +683,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -704,7 +704,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -731,7 +731,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8-aarch64
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"

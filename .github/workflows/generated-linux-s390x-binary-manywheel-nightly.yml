@@ -55,7 +55,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runs_on: linux.s390x
@@ -78,7 +78,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-s390x
@@ -100,7 +100,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-s390x
@@ -119,7 +119,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runs_on: linux.s390x
@@ -142,7 +142,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
@@ -164,7 +164,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
@@ -183,7 +183,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runs_on: linux.s390x
@@ -206,7 +206,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
@@ -228,7 +228,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
@@ -247,7 +247,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runs_on: linux.s390x
@@ -270,7 +270,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
@@ -292,7 +292,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
@@ -311,7 +311,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runs_on: linux.s390x
@@ -334,7 +334,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
@@ -356,7 +356,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-2.7
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
