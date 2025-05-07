@@ -8626,7 +8626,7 @@ class DistributedTest:
 
             # rebuilt bucket could be disabled when find_unused_parameters=True
             # by setting environment variable for debugging purpose.
-            os.environ["DISABLE_REBUILT_BUCKET"] = "1"
+            os.environ["DISABLE_BUCKET_REBUILD"] = "1"
             base_model_1 = self._test_different_graph_across_ranks(
                 find_unused_parameters=True
             )

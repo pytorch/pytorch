@@ -530,6 +530,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
   for (const auto variable_index : c10::irange(variable_count)) {
     push_rebuilt_params(variable_index);
   }
+  rebuild_bucket_iter_counter = 0;
 }
 
 void Reducer::push_rebuilt_params(const size_t& index) {
@@ -1870,6 +1871,7 @@ bool Reducer::rebuild_buckets() {
   // exception below.
   std::lock_guard<std::mutex> lock(mutex_);
   ensure_prior_reduction_finished();
+  rebuild_bucket_iter_counter += 1;
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }

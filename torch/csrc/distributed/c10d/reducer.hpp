@@ -134,24 +134,27 @@ class TORCH_API Reducer {
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
   // buckets once after the first iteration.
-  // We always rebuild bucket when find_unused_parameters=False, as graph is
-  // static when find_unused_parameters=False.
+  // We always rebuild buckets when find_unused_parameters=False, as the 
+  // graph is static when find_unused_parameters=False.
   // There are two major cases when find_unused_parameters=True:
-  // 1. grad ready order does not change over iterations, in this case,
-  // enable rebuilt bucket after first iteration can potentially improve
-  // performance.
-  // 2. grad ready order changes over iterations, in this case,
-  // use static bucket order or dynamic bucket order in the first iteration
-  // does not matter much, as order changes per iteration. It will be expensive
-  // to rebuild bucket every iteration for this case though, as rebuilt bucket
-  // requires a broadcast collective call.
-  // So in default buckets are rebuilt when find_unused_parameters=True, but
-  // it could be disabled by setting os.environ["DISABLE_REBUILT_BUCKET"] = "1"
-  // if users want to disable this feature for debugging purpose.
+  // 1. If grad ready order does not change over iterations, then
+  // enabling bucket rebuild after the first iteration can potentially 
+  // improve performance.
+  // 2. If grad ready order changes over iterations, then using static bucket 
+  // order or dynamic bucket order in the first iteration does not matter
+  // much, as order changes per iteration. It is expensive to rebuild 
+  // buckets every iteration for this case though, as bucket rebuild
+  // requires a broadcast collective call. In fact, the benefit of rebuilding
+  // buckets is almost completely outweighed by the collective broadcast.
+  // So by default buckets are rebuilt when find_unused_parameters=True, but
+  // setting os.environ["DISABLE_BUCKET_REBUILD"] = "1" overrides the 
+  // behavior if users want to disable this feature for debugging purposes.
   inline bool should_rebuild_buckets() const {
-    return (static_graph_ || !find_unused_parameters_ ||
-            (getCvarString({"DISABLE_REBUILT_BUCKET"}, "1") != "0")) &&
-        !has_rebuilt_bucket_;
+    return (static_graph_ || 
+        !find_unused_parameters_ ||
+        (find_unused_parameters_ && (rebuild_bucket_iter_counter >= rebuild_bucket_after_every)) ||
+        (getCvarString({"DISABLE_BUCKET_REBUILD"}, "1") != "0")
+    ) && !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
@@ -569,6 +572,11 @@ class TORCH_API Reducer {
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   // Retrieves parameter corresponding to the given VariableIndex.
   at::Tensor& get_param_from_index(size_t index);
+  // Counter that determines the number of iterations we wait
+  // to rebuild buckets
+  std::size_t rebuild_bucket_after_every = 1;
+  // Number of iterations since last bucket rebuild
+  std::size_t rebuild_bucket_iter_counter;
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.
