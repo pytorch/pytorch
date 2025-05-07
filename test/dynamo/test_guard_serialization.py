@@ -5,6 +5,7 @@ import importlib
 import pickle
 import sys
 import types
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import torch
@@ -239,6 +240,11 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         )
 
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
+        # kwargs might contain a callable that generates kwargs
+        kwarg_gen_fn = kwargs.get("_gen_fn", None)
+        if kwarg_gen_fn is not None:
+            kwargs = kwarg_gen_fn()
+
         self._frame_state = None
         sys.settrace(self._tracefunc)
         if isinstance(fn, torch.nn.Module):
@@ -249,6 +255,14 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             sys.settrace(None)
 
         assert self._frame_state is not None
+
+        # Set f_locals from regenerated kwargs to handle exhausted input iterators
+        # NB: This is super janky and might cause unforeseen problems
+        if kwarg_gen_fn is not None:
+            kwargs = kwarg_gen_fn()
+            for key in self._frame_state.f_locals.keys():
+                if key in kwargs and isinstance(kwargs[key], Iterator):
+                    self._frame_state.f_locals[key] = kwargs[key]
 
         def guard_filter_fn(guards):
             ret = [
@@ -686,6 +700,41 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 "t": tuple(torch.randn(3) for _ in range(4)),
             },
             False,
+        )
+
+    def test_tuple_iterator_len(self):
+        def fn(t, x):
+            if len(list(t)) > 2:
+                return x * 2
+            return x + 1
+
+        tup = (1, 2, 3)
+        x = torch.randn(3)
+
+        # func to generate kwargs; useful for avoiding iterator exhaustion issues
+        def _gen_kwargs(tup=tup, x=x):
+            return {"t": iter(tup), "x": x}
+
+        ref, loaded = self._test_serialization(
+            "TUPLE_ITERATOR_LEN", fn, _gen_fn=_gen_kwargs
+        )
+
+        # same tuple
+        self._test_check_fn(ref, loaded, {"t": iter(tup), "x": x}, True)
+        self._test_check_fn(ref, loaded, {"t": iter(tup), "x": torch.randn(4)}, True)
+        # same length tuple, different contents
+        self._test_check_fn(ref, loaded, {"t": iter((3, 2, 1)), "x": x}, True)
+        self._test_check_fn(
+            ref, loaded, {"t": iter((3, 2, 1)), "x": torch.randn(4)}, True
+        )
+        # different tuple lengths
+        self._test_check_fn(ref, loaded, {"t": iter((1, 2)), "x": x}, False)
+        self._test_check_fn(
+            ref, loaded, {"t": iter((1, 2)), "x": torch.randn(4)}, False
+        )
+        self._test_check_fn(ref, loaded, {"t": iter((1, 2, 3, 4)), "x": x}, False)
+        self._test_check_fn(
+            ref, loaded, {"t": iter((1, 2, 3, 4)), "x": torch.randn(4)}, False
         )
 
     def test_dict_version(self):
