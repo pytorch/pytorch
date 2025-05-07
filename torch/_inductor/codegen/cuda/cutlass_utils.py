@@ -205,7 +205,7 @@ def cutlass_key() -> Optional[bytes]:
 
     from libfb.py import parutil
 
-    return parutil.get_file_contents("cutlass-3/src_hash.txt")
+    return parutil.get_file_contents("cutlass/src_hash.txt")
 
 
 @functools.lru_cache(8)
