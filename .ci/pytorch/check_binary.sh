@@ -306,16 +306,17 @@ fi
 ###############################################################################
 if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   pushd /tmp
-  # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html gcc-13 is ABI18
-  #
-  # On s390x gcc 14 is used because it contains fix for interaction
-  # between precompiled headers and vectorization builtins.
-  # This fix is not available in earlier gcc versions.
-  # gcc-14 uses ABI19.
-  if [[ "$DESIRED_CUDA" == '11.8' ]]; then
-    cxx_abi="16"
-  elif [[ "$(uname -m)" != "s390x" ]]; then
+  # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html
+  # gcc-11 is ABI16, gcc-13 is ABI18, gcc-14 is ABI19
+  # gcc 11 - CUDA 11.8
+  # gcc 13 - CUDA 12.6, 12.8 and cpu
+  # Please see issue for reference: https://github.com/pytorch/pytorch/issues/152426
+  if [[ "$(uname -m)" == "s390x" ]]; then
+    cxx_abi="19"
+  elif [[ "$DESIRED_CUDA" != '11.8' ]]; then
     cxx_abi="18"
+  else
+    cxx_abi="16"
   fi
   python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi10${cxx_abi}' else 1)"
   popd
