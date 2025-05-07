@@ -1768,6 +1768,9 @@ class GuardBuilder(GuardBuilderBase):
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
+        # don't support this in serialization because it uses unsupported FUNCTION_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("CLOSURE_MATCH guard cannot be serialized.")
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):

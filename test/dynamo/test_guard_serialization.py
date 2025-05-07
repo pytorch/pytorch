@@ -38,6 +38,10 @@ class GlobalModule(torch.nn.Module):
         return x + 1
 
 
+def global_func(x):
+    return x + 1
+
+
 class SubclassWithMeta(torch.Tensor):
     @staticmethod
     def __new__(cls, a, extra, outer_size=None, outer_stride=None):
@@ -636,6 +640,20 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             RuntimeError, "FUNCTION_MATCH guard cannot be serialized."
         ):
             self._test_serialization("FUNCTION_MATCH", fn, x)
+
+    def test_closure_match(self):
+        def fn(x):
+            # usage of this global function installs a CLOSURE_MATCH guard
+            return global_func(x)
+
+        x = torch.randn(3)
+
+        # we don't support CLOSURE_MATCH because it adds a FUNCTION_MATCH guard, and we don't
+        # support that in serialization
+        with self.assertRaisesRegex(
+            RuntimeError, "CLOSURE_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("CLOSURE_MATCH", fn, x)
 
     def test_dict_version(self):
         def fn(x):
