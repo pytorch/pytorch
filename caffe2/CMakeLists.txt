@@ -982,7 +982,7 @@ elseif(USE_CUDA)
   set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Whether to build with NVSHMEM support")
   # If user has specified NVSHMEM_HOME, we use it;
   # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
-  if ($ENV{NVSHMEM_HOME})
+  if($ENV{NVSHMEM_HOME})
     set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
   endif()
 
@@ -1013,10 +1013,10 @@ elseif(USE_CUDA)
     target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
     target_link_directories(nvshmem_extension PRIVATE ${NVSHMEM_LIB_DIR})
     target_link_libraries(nvshmem_extension PRIVATE
-      # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
-      # otherwise, we could just write `nvshmem_host`
-      ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
-      nvshmem_device
+        # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
+        # otherwise, we could just write `nvshmem_host`
+        ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
+        nvshmem_device
     )
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
