@@ -381,9 +381,6 @@ autotune_num_choices_displayed: Optional[int] = 10
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition = False
 
-# whether enabling debug mode for graph partition
-debug_graph_partition = False
-
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
