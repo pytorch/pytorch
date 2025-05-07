@@ -92,8 +92,6 @@ Tensor& addmm_out(
     // if result and self are the same tensor, we use post op sum.
     bias = self;
   } else {
-    // Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
-    // Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
     Tensor binary = self.sizes().empty() ? self.unsqueeze(0) : self;
     binary = binary.dim() == 1? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
