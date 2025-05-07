@@ -294,9 +294,9 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
 };
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
-  PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
+  PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
-    PyList_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
+    PyTuple_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
   }
   return pyinput;
 }
