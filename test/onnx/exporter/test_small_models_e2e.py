@@ -155,12 +155,13 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
     def test_empty(self):
-        def func(x):
-            return torch.empty(x.size(), dtype=torch.int64)
+        class EmptyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.empty(x.size(), dtype=torch.int64)
 
         # Since `torch.empty` returns tensor with uninitialized data, we cannot
         # test this under `test_fx_to_onnx_with_onnxruntime.py` with result comparison.
-        _ = self.export(func, (torch.randn(1, 2),))
+        _ = self.export(EmptyModel(), (torch.randn(1, 2),))
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
