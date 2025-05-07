@@ -15,7 +15,7 @@ export PATH="/tmp/cache/bin:$PATH"
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
-  if [ $1 == "gcc" ]; then
+  if [ "$1" == "gcc" ]; then
     # Do not call sccache recursively when dumping preprocessor argument
     # For some reason it's very important for the first cached nvcc invocation
     cat >"/tmp/cache/bin/$1" <<EOF
@@ -24,14 +24,14 @@ function write_sccache_stub() {
 # sccache does not support -E flag, so we need to call the original compiler directly in order to avoid calling this wrapper recursively
 for arg in "\$@"; do
   if [ "\$arg" = "-E" ]; then
-    exec $(which $1) "\$@"
+    exec $(which "$1") "\$@"
   fi
 done
 
 if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
-  exec sccache $(which $1) "\$@"
+  exec sccache $(which "$1") "\$@"
 else
-  exec $(which $1) "\$@"
+  exec $(which "$1") "\$@"
 fi
 EOF
   else
@@ -39,9 +39,9 @@ EOF
 #!/bin/sh
 
 if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
-  exec sccache $(which $1) "\$@"
+  exec sccache $(which "$1") "\$@"
 else
-  exec $(which $1) "\$@"
+  exec $(which "$1") "\$@"
 fi
 EOF
   fi
