@@ -608,7 +608,7 @@ class TestFxGraphCache(TestCase):
         compiled_fn = torch.compile(fn, dynamic=dynamic)
 
         mod = MyModelConv2d().to(device=device, dtype=dtype)
-        inp = torch.randn(2, 3, 16, 16, device=device, dtype=dtype)
+        inp = torch.randn(2, 3, 16, 32, device=device, dtype=dtype)
 
         # The first call should see all cache misses.
         counters.clear()
@@ -2139,7 +2139,6 @@ class TestFxGraphCacheHashing(TestCase):
 
 class TestCudaCompileCommand(TestCase):
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
             ["abc.cu", "def.cu"], "output", "so"
@@ -2161,7 +2160,7 @@ class TestCudaCompileCommand(TestCase):
             CUDACodeCache.compile("test123.cu", "so", ["-Wsomething"])
             check_output_mock.assert_called()
             cmd_parts: list[str] = check_output_mock.call_args[0][0]
-            assert cmd_parts[0] == "nvcc", cmd_parts
+            assert cmd_parts[0].endswith("nvcc"), cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
 

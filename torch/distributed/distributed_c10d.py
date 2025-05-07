@@ -4730,7 +4730,7 @@ def barrier(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        device_ids ([int], optional): List of device/GPU ids.
+        device_ids ([int], optional): List of device/GPU ids. Only one id is expected.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4738,22 +4738,35 @@ def barrier(
 
     .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
     """
+    group = group or _get_default_group()
+
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")
         return
 
     opts = BarrierOptions()
-    opts.device = torch.device(_get_object_coll_device(group))
     opts.asyncOp = async_op
-    if device_ids is not None:
-        if isinstance(device_ids, list):
-            opts.device_ids = device_ids
-        else:
-            raise TypeError(
-                "Invalid function argument: device_ids type should be List[int]"
-            )
+    # Detect the accelerator on the machine. If no accelerator is available, it
+    # returns CPU.
+    device = torch._C._get_accelerator()
+    if isinstance(device_ids, list):
+        opts.device_ids = device_ids
+        # use only the first device id
+        opts.device = torch.device(device.type, device_ids[0])
+    elif getattr(group, "bound_device_id", None) is not None:
+        # Use device id from `init_process_group(device_id=...)`
+        opts.device = group.bound_device_id  # type: ignore[assignment]
+    elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
+        opts.device = torch.device("cpu")
+    else:
+        # Use the current device set by the user. If user did not set any, this
+        # may use default device 0, causing issues like hang or all processes
+        # creating context on device 0.
+        opts.device = device
+        warnings.warn(  # warn only once
+            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
+        )
 
-    group = group or _get_default_group()
     work = group.barrier(opts=opts)
 
     if async_op:
@@ -5361,6 +5374,8 @@ def new_subgroups(
             the default subgroup size is equal to the number of devices on each machine,
             based on the assumption that each machine has exactly the same
             number of devices. Default is ``None``.
+        group (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used. Default is ``None``.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values are ``gloo`` and ``nccl``.
@@ -5406,7 +5421,7 @@ def new_subgroups(
     if group_size <= 0:
         raise ValueError(f"The arg 'group_size' ({group_size}) must be positive")
 
-    world_size = get_world_size()
+    world_size = get_world_size(group=group)
     if world_size < group_size:
         raise ValueError(
             f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
@@ -5417,10 +5432,9 @@ def new_subgroups(
     subgroups = []
     cur_subgroup = None
 
-    for subgroup_id in range(world_size // group_size):
-        start_rank = subgroup_id * group_size
-        end_rank = start_rank + group_size
-        ranks_in_subgroup = list(range(start_rank, end_rank))
+    # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
+    ranks_iterator = iter(get_process_group_ranks(group=group or _get_default_group()))
+    while ranks_in_subgroup := tuple(itertools.islice(ranks_iterator, group_size)):
         subgroup = new_group(
             ranks=ranks_in_subgroup,
             timeout=timeout,
@@ -5430,8 +5444,7 @@ def new_subgroups(
         )
         subgroups.append(subgroup)
 
-        rank = get_rank()
-        if rank in ranks_in_subgroup:
+        if rank := get_rank(group=group) in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
 
