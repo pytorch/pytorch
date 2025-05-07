@@ -383,6 +383,12 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'ruamel.yaml==0.17.4',
+]
 
 [[linter]]
 code = 'NEWLINE'
