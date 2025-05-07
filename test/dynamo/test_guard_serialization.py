@@ -621,6 +621,22 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ):
                 self._test_serialization("NN_MODULE", fn, m, x)
 
+    def test_function_match(self):
+        def fn(x):
+            # usage of this context manager installs a FUNCTION_MATCH guard
+            with torch.no_grad():
+                y = x * 2
+            return y
+
+        x = torch.randn(3)
+
+        # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
+        # support that in serialization
+        with self.assertRaisesRegex(
+            RuntimeError, "FUNCTION_MATCH guard cannot be serialized."
+        ):
+            self._test_serialization("FUNCTION_MATCH", fn, x)
+
     def test_dict_version(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
