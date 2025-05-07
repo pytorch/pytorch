@@ -16,7 +16,6 @@ __all__ = [
     "current_device_index",
     "current_stream",
     "device_count",
-    "empty_cache",
     "device_index",
     "empty_cache",
     "is_available",
