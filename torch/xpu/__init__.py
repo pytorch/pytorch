@@ -192,7 +192,7 @@ class device_of(device):
         super().__init__(idx)
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: torch.types.Device) -> None:
     r"""Set the current device.
 
     Args:
@@ -410,7 +410,7 @@ def get_stream_from_external(
     )
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: torch.types.Device = None) -> None:
     r"""Wait for all kernels in all streams on a XPU device to complete.
 
     Args:

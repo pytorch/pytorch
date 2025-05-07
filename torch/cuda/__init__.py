@@ -208,7 +208,7 @@ def is_bf16_supported(including_emulation: bool = True):
 
 
 @lru_cache(maxsize=16)
-def _check_bf16_tensor_supported(device: _device_t):
+def _check_bf16_tensor_supported(device: torch.types.Device):
     try:
         torch.tensor([1.0], dtype=torch.bfloat16, device=device)
         return True
@@ -524,7 +524,7 @@ class device_of(device):
         super().__init__(idx)
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: torch.types.Device) -> None:
     r"""Set the current device.
 
     Usage of this function is discouraged in favor of :any:`device`. In most
@@ -590,7 +590,7 @@ def get_device_properties(device: Optional[_device_t] = None) -> _CudaDeviceProp
     return _get_device_properties(device)  # type: ignore[name-defined]
 
 
-def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
+def can_device_access_peer(device: torch.types.Device, peer_device: torch.types.Device) -> bool:
     r"""Check if peer access between two devices is possible."""
     _lazy_init()
     device = _get_device_index(device, optional=True)

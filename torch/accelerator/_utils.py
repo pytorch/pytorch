@@ -1,10 +1,9 @@
 from typing import Optional
 
 import torch
-from torch.types import Device as _device_t
 
 
-def _get_device_index(device: _device_t, optional: bool = False) -> int:
+def _get_device_index(device: torch.types.Device, optional: bool = False) -> int:
     if isinstance(device, int):
         return device
     if isinstance(device, str):
