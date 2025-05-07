@@ -23,6 +23,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
     compute_required_storage_length,
@@ -49,6 +50,7 @@ from . import config, ir, metrics
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
+    FileBackedGraphModule,
     get_backend_features,
     get_device_op_overrides,
     get_wrapper_codegen_for_device,
@@ -85,6 +87,7 @@ from .lowering import (
     maybe_layout_constraints,
     needs_realized_inputs,
     require_contiguous,
+    tag_to_layout_constraint,
     unsupported_output_tensor,
 )
 from .runtime import autotune_cache
@@ -113,8 +116,11 @@ if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
     from torch.fx import GraphModule
     from torch.fx.graph import Graph
+
     from .codegen.wrapper import PythonWrapperCodegen
     from .scheduler import BaseSchedulerNode
+
+    CompiledModule = Union[ModuleType, FileBackedGraphModule]
 
 from torch._inductor.codecache import output_code_log
 
@@ -241,6 +247,14 @@ def mark_nodes_dislike_padding(
         if isinstance(
             cur.target,
             torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
+        ):
+            cur.meta["dislike_padding"] = True
+            continue
+
+        if (
+            isinstance(cur.target, torch._ops.OpOverload)
+            and get_layout_constraint_tag(cur.target)
+            == torch._C.Tag.needs_exact_strides
         ):
             cur.meta["dislike_padding"] = True
             continue
@@ -1163,34 +1177,26 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                # use contiguous unless the (custom) op asks something else
-                # explicitly
-                if torch._C.Tag.needs_exact_strides in target.tags:
-                    decided_constraint = constrain_to_fake_tensors  # type: ignore[assignment]
-                elif torch._C.Tag.needs_fixed_stride_order in target.tags:
-                    decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
-                elif torch._C.Tag.flexible_layout in target.tags:
-                    decided_constraint = None  # type: ignore[assignment]
-                else:
-                    # If there are no tags, we do different things depending on
-                    # if it's a builtin ATen/prim ops or custom ops.
-                    # For ATen ops, we require_contiguous to fix https://github.com/pytorch/pytorch/issues/140452
-                    # For custom ops, we constrain_to_fx_strides to maintain the
-                    # behavior of PyTorch 2.5: https://github.com/pytorch/pytorch/issues/148356
+                tag = get_layout_constraint_tag(target, with_default=False)
+                if (
+                    tag is None
+                    and torch._library.utils.is_builtin(target)
+                    and self.is_backward
+                ):
+                    # for implicit fallback ATen ops during backward, if there
+                    # is no layout constraint tag, we conservatively require contiguous
+                    # input since some eager kernels do not
+                    # support non-contiguous inputs. Otherwise they may silently cause
+                    # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
+                    # We only do this For ATen ops and for backward.
                     #
-                    # For ATen ops, only apply the constraint for backward
-                    # ops since fwd ops should work for any strides.
-                    if torch._library.utils.is_builtin(target) and self.is_backward:
-                        decided_constraint = require_contiguous  # type: ignore[assignment]
-                    else:
-                        # maybe_layout_constraints will decide the layout constraint for the custom op
-                        # lazily
-                        decided_constraint = None  # type: ignore[assignment]
+                    # TODO: should really switch to "needs_fixed_stride" constraint on these
+                    # and identify them one by one.
+                    decided_constraint = require_contiguous  # type: ignore[assignment]
+                else:
+                    tag = get_layout_constraint_tag(target, with_default=True)
+                    decided_constraint = tag_to_layout_constraint(tag)
 
-                # for implicitly fallback ops, we conservatively requires
-                # contiguous input since some eager kernels does not
-                # support non-contiguous inputs. They may silently cause
-                # accuracy problems. Check https://github.com/pytorch/pytorch/issues/140452
                 make_fallback(target, layout_constraint=decided_constraint)
 
             elif get_decompositions([target]):
@@ -2222,7 +2228,7 @@ class GraphLowering(torch.fx.Interpreter):
     # No-op to be patched for unit tests
     save_output_code: Optional[Callable[[str], None]] = None
 
-    def compile_to_module(self) -> ModuleType:
+    def compile_to_module(self) -> CompiledModule:
         with dynamo_timed(
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
@@ -2231,14 +2237,41 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             return self._compile_to_module()
 
-    def _compile_to_module(self) -> ModuleType:
-        from .codecache import PyCodeCache
-
+    def _compile_to_module(self) -> CompiledModule:
         # Currently, if we're here, we don't have to worry about the kernel code, which
         # is only available in AOTInductor mode.
         wrapper_code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
+
+        if isinstance(wrapper_code, ValueWithLineMap):
+            mod = self._compile_to_module_lines(wrapper_code)
+        elif isinstance(wrapper_code, FileBackedGraphModule):
+            mod = wrapper_code
+        else:
+            raise NotImplementedError(
+                f"Unrecognized wrapper code type: {type(wrapper_code)}"
+            )
+
+        # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
+        # TODO. Revisit this once the logging API is more mature
+        assert mod.__file__ is not None
+
+        log_module_code(mod.__file__)
+        log.debug("Output code written to: %s", mod.__file__)
+        output_code_log.info("Output code written to: %s", mod.__file__)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
+        V.debug.output_code(mod.__file__)
+        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
+
+        return mod
+
+    def _compile_to_module_lines(
+        self, wrapper_code: ValueWithLineMap
+    ) -> CompiledModule:
+        from .codecache import PyCodeCache
+
         if config.triton.autotune_at_compile_time:
             tuning_code = (
                 '"""\n'
@@ -2289,17 +2322,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
             mod.benchmark_compiled_module(times=1, repeat=1)
-        # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
-        # TODO. Revisit this once the logging API is more mature
-        assert mod.__file__ is not None
 
-        log_module_code(mod.__file__)
-        log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.info("Output code written to: %s", mod.__file__)
-        if config.benchmark_kernel:
-            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
-        V.debug.output_code(mod.__file__)
-        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
     def get_output_names(self) -> list[str]:
