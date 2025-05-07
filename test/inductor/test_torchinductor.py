@@ -13255,6 +13255,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
                 assert len(inps) == 0
 
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_pad_dynamic(self):
+        def get_same_padding(x: int, k: int, s: int, d: int):
+            return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
+
+        def pad_same(x, k, s, d=(1, 1), value=0):
+            ih, iw = x.size()[-2:]
+            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
+                iw, k[1], s[1], d[1]
+            )
+            if pad_h > 0 or pad_w > 0:
+                x = torch.nn.functional.pad(
+                    x,
+                    [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2],
+                    value=value,
+                )
+            return x
+
+        x = torch.randn(2, 24, 110, 110, device=self.device)
+        opt = torch.compile(pad_same, dynamic=True)
+        res = opt(x, (5, 5), (2, 2))
+        ref = pad_same(x, (5, 5), (2, 2))
+        self.assertEqual(res, ref, atol=0, rtol=0)
+
     def test_remove_noop_view_default(self):
         def f(x):
             batch_size = x.shape[0]
