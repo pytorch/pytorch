@@ -12,7 +12,6 @@ on:
 
 jobs:
   lint-urls:
-    name: Lint URLs
     if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
@@ -25,9 +24,9 @@ jobs:
       script: |
         ./scripts/lint_urls.sh $(
           [ "${{ github.event_name }}" = "pull_request" ] \
-            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} \
           || [ "${{ github.event_name }}" = "push" ] \
-            && git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+            && git diff --name-only ${{ github.event.before }}...${{ github.sha }}
         ) || {
           echo
           echo "URL lint failed."
@@ -37,8 +36,7 @@ jobs:
         }
 
   lint-xrefs:
-    name: Lint Xrefs
-    needs: lint-urls
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-xref-lint') }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       timeout: 60
@@ -50,7 +48,7 @@ jobs:
       script: |
         ./scripts/lint_xrefs.sh $(
           [ "${{ github.event_name }}" = "pull_request" ] \
-            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} \
           || [ "${{ github.event_name }}" = "push" ] \
-            && git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+            && git diff --name-only ${{ github.event.before }}...${{ github.sha }}
         )
