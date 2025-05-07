@@ -407,7 +407,9 @@ class _OpPickleData:
             type["_OpOverloadPickleData"], type["_OpOverloadPacketPickleData"]
         ],
     ) -> "_OpPickleData":
-        if not name.startswith("torch.ops.aten"):  # TODO: What's the full list?
+        if not name.startswith(
+            ("torch.ops.aten", "torch.ops.fbgemm")
+        ):  # TODO: What's the full list?
             from torch._inductor.codecache import BypassFxGraphCache
 
             raise BypassFxGraphCache(f"Unable to pickle non-standard op: {name}")

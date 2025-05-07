@@ -53,8 +53,8 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
 )
 import operator
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class TestSkip(NamedTuple):
