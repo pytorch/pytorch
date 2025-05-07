@@ -332,12 +332,10 @@ case "$tag" in
     # We will need to update mypy version eventually, but that's for another day. The task
     # would be to upgrade mypy to 1.0.0 with Python 3.11
     PYTHON_VERSION=3.9
-    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter)
     PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
-    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
@@ -438,8 +436,6 @@ docker build \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
-       --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
-       --build-arg "PIP_CMAKE=${PIP_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
@@ -526,9 +522,9 @@ elif [ "$HAS_TRITON" = "yes" ]; then
   exit 1
 fi
 
-# I don't want to have to parse requirements-ci.txt to find the version, so it's
-# just going to be hardcoded here as well, sorry.  Executorch reinstalls cmake
-# and I'm not sure if they support 4.0.0 yet, so exclude them from this check.
+# I don't want to parse requirements-ci.txt to find the version, so it's going
+# to be hardcoded here as well, sorry.  Executorch reinstalls cmake and I'm not
+# sure if they support 4.0.0 yet, so exclude them from this check.
 CMAKE_VERSION=$(drun cmake --version)
 if [[ "$EXECUTORCH" != *yes* && "$CMAKE_VERSION" != *4.0.0* ]]; then
   echo "CMake version is not 4.0.0:"
