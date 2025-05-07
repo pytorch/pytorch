@@ -285,13 +285,12 @@ TORCH_IMPL_FUNC(cat_out_mps)
     return;
   }
 
-  //auto t1 = std::chrono::high_resolution_clock::now();
-  cat_out_mps_new(input_tensors, dimension, out);
+  bool is_macos_15_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS); 
+  if (is_macos_15_or_newer) {
+    cat_out_mps_new(input_tensors, dimension, out);
+    return;
+  }
 
-  //auto t2 = std::chrono::high_resolution_clock::now();
-  //auto duration = std::chrono::duration_cast<std::chrono::microseconds>( t2 - t1 ).count();
-  //std::cout<<"Took: "<<duration<<" us"<<std::endl;
-  return;
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
