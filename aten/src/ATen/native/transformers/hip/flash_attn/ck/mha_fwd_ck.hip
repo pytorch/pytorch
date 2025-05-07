@@ -284,8 +284,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     uint64_t drop_seed = 1, drop_offset = 0;
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
 
-    auto rng_state_options = at::TensorOptions().dtype(at::kFLoat32).device(at::kCUDA);
-    auto rng_state = at::empty({2}, options(at::kLong));
+    auto rng_state_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
+    auto rng_state = at::empty({2}, rng_state_options.dtype(at::kUInt64));
 
     
 
@@ -309,7 +309,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         std::lock_guard<std::mutex> lock(gen->mutex_);
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
-        std::tie(drop_seed, drop_offset) = flash::unpack(philox_args);
+        std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
 
 //        hipLaunchKernelGGL(
 //            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
@@ -332,6 +332,10 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     //these are actual values allegedly on the GPU
     rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
     rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
+
+    auto drop_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
+    auto seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[0].data_ptr<uint64_t>())), drop_options);
+    auto offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[1].data_ptr<uint64_t>())), drop_options);
     std::cout << "RNG_STATE DEVICE: " << rng_state.device() << std::endl;
 // =============================================================================
     std::optional<at::Tensor> attn_bias;
@@ -343,7 +347,10 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     std::cout << "CHECKPOINT 4" << std::endl;
     if (seqlen_k > 0) {
         //auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
-        auto drop_seed_os
+        //auto drop_seed_offset = std::make_pair(rng_state[0].data_ptr<uint64_t>(),
+        //                                       rng_state[1].data_ptr<uint64_t>());
+        auto drop_seed_offset = std::make_pair(static_cast<uint64_t*>(seed_t.data_ptr<uint64_t>()),
+                                               static_cast<uint64_t*>(offset_t.data_ptr<uint64_t>()));
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
