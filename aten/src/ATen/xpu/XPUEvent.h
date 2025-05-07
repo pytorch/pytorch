@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/xpu/XPUContext.h>
+#include <ATen/core/AcceleratorEvent.h>
 
 #include <optional>
 
@@ -17,7 +18,7 @@ namespace at::xpu {
  * not available. This could impact some applications that rely on cross-process
  * synchronization and communication.
  */
-struct TORCH_XPU_API XPUEvent {
+struct TORCH_XPU_API XPUEvent : public at::AcceleratorEvent {
   // Constructors
   XPUEvent(bool enable_timing = false) noexcept
       : enable_timing_{enable_timing} {}
@@ -62,7 +63,7 @@ struct TORCH_XPU_API XPUEvent {
     return *event_;
   }
 
-  bool query() const {
+  bool query() const override {
     using namespace sycl::info;
     if (!isCreated()) {
       return true;
@@ -125,15 +126,16 @@ struct TORCH_XPU_API XPUEvent {
     }
   }
 
-  double elapsed_time(const XPUEvent& other) const {
+  double elapsed_time(const at::AcceleratorEvent& other) const override {
+    const auto& other_event = static_cast<const XPUEvent&>(other);
     TORCH_CHECK(
-        isCreated() && other.isCreated(),
+        isCreated() && other_event.isCreated(),
         "Both events must be recorded before calculating elapsed time.");
     TORCH_CHECK(
-        query() && other.query(),
+        query() && other_event.query(),
         "Both events must be completed before calculating elapsed time.");
     TORCH_CHECK(
-        enable_timing_ && other.enable_timing_,
+        enable_timing_ && other_event.enable_timing_,
         "Both events must be created with argument 'enable_timing=True'.");
 
 #if SYCL_COMPILER_VERSION < 20250000
@@ -144,7 +146,7 @@ struct TORCH_XPU_API XPUEvent {
 
     using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
-    uint64_t end_time_ns = other.event().get_profiling_info<command_end>();
+    uint64_t end_time_ns = other_event.event().get_profiling_info<command_end>();
     uint64_t start_time_ns = event().get_profiling_info<command_end>();
     // Return the eplased time in milliseconds.
     return 1e-6 *

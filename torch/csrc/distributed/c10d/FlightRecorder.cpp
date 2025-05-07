@@ -1,5 +1,5 @@
 // TODO: Make Fligth Recorder device agnostic
-#ifdef USE_C10D_NCCL
+#if defined(USE_C10D_NCCL) || defined(USE_C10D_XCCL)
 
 #include <cuda_runtime.h>
 #include <nlohmann/json.hpp>
@@ -11,7 +11,6 @@
 #include <c10/util/WaitCounter.h>
 
 #include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 namespace c10d {
@@ -149,7 +148,7 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     auto defaultLocation = cacheDirPath / "nccl_trace_rank_";
 
     std::string fileNamePrefix = getCvarString(
-        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, defaultLocation.c_str());
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE", "TORCH_XCCL_DEBUG_INFO_TEMP_FILE"}, defaultLocation.c_str());
     // Using std::unique_ptr here to auto-delete the writer object
     // when the pointer itself is destroyed.
     std::unique_ptr<DebugInfoWriter> writerPtr(
@@ -206,8 +205,8 @@ std::optional<size_t> FlightRecorder::record(
     std::string profiling_name,
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs,
-    Event* start,
-    Event* end,
+    at::AcceleratorEvent* start,
+    at::AcceleratorEvent* end,
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
@@ -350,8 +349,8 @@ void FlightRecorder::retire_id(
   }
 
   bool can_compute_duration = false;
-  Event* startEvent = nullptr;
-  Event* endEvent = nullptr;
+  at::AcceleratorEvent* startEvent = nullptr;
+  at::AcceleratorEvent* endEvent = nullptr;
   std::optional<float> duration = std::nullopt;
 
   std::unique_lock<std::mutex> guard(mutex_);
@@ -681,8 +680,8 @@ std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
 std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
 
 float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent) {
+    at::AcceleratorEvent& ncclStartEvent,
+    at::AcceleratorEvent& ncclEndEvent) {
   TORCH_CHECK(
       ncclEndEvent.query(),
       "getDuration can only be called after work is succeeded.")

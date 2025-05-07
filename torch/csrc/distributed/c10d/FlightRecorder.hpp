@@ -1,7 +1,7 @@
 #pragma once
 
-// TODO: Make Fligth Recorder device agnostic
-#ifdef USE_C10D_NCCL
+// TODO: Make Flight Recorder device agnostic
+#if defined(USE_C10D_NCCL) || defined(USE_C10D_XCCL)
 
 #include <cstdio>
 #include <cstdlib>
@@ -10,7 +10,7 @@
 #include <mutex>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAEvent.h>
+#include <ATen/core/AcceleratorEvent.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
@@ -90,8 +90,8 @@ class TORCH_API DebugInfoWriter {
 
 /* Helper used by work::getDuration() and nccl flight recorder */
 float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent);
+    at::AcceleratorEvent& ncclStartEvent,
+    at::AcceleratorEvent& ncclEndEvent);
 
 struct FlightRecorder {
   static FlightRecorder* get() {
@@ -101,11 +101,12 @@ struct FlightRecorder {
     return instance;
   }
   FlightRecorder() {
-    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
-    capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
+    max_entries_ = getCvarInt(
+      {"TORCH_NCCL_TRACE_BUFFER_SIZE", "TORCH_XCCL_TRACE_BUFFER_SIZE"}, 0);
+    capture_cpp_stack_ = getCvarBool(
+      {"TORCH_NCCL_TRACE_CPP_STACK", "TORCH_XCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
-  using Event = at::cuda::CUDAEvent;
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
@@ -129,7 +130,7 @@ struct FlightRecorder {
     // we borrow pointers to start_ and end_ so we can query the state
     // on reporting. However, once the event is completed, the call
     // to `complete` will clear these.
-    Event *start_, *end_;
+    at::AcceleratorEvent *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -188,8 +189,8 @@ struct FlightRecorder {
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
-      Event* start,
-      Event* end,
+      at::AcceleratorEvent* start,
+      at::AcceleratorEvent* end,
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
@@ -209,7 +210,7 @@ struct FlightRecorder {
   std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
-  Mark an Event as completed and free its events.
+  Mark an at::AcceleratorEvent as completed and free its events.
   This is called by the watchdog thread, and is asynchronous from the
   perspective of the main thread.
   compute_duration defaults to true since retire_id is only called in the
@@ -255,4 +256,4 @@ struct FlightRecorder {
 
 } // namespace c10d
 
-#endif // USE_C10D_NCCL
+#endif // USE_C10D_NCCL || USE_C10D_XCCL
