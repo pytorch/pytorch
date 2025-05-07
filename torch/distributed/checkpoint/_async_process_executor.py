@@ -101,7 +101,9 @@ class _AsyncCheckpointProcess:
         )
 
         self._save_process.start()
-        response = self._wait_for_response()
+        # Wait for the checkpoint background process to initialize.
+        # Using default GLOO init timeout.
+        response = self._wait_for_response(timeout=1800)
         assert response == _CheckpointSaveProcessControlOpts.INIT_COMPLETE
 
     def __del__(self) -> None:
@@ -132,12 +134,12 @@ class _AsyncCheckpointProcess:
         assert isinstance(result, Metadata)
         return result
 
-    def _wait_for_response(self) -> Any:
+    def _wait_for_response(self, timeout: Optional[float] = None) -> Any:
         if not self._save_process.is_alive():
             logger.info("Checkpoint background process is dead calling join()...")
             self._save_process.join()
             raise RuntimeError("Checkpoint background process is dead.")
-        response = self._mp_queue_recv.get()
+        response = self._mp_queue_recv.get(timeout=timeout)
         if isinstance(response, BaseException):
             raise response
         return response

@@ -128,6 +128,28 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_autocast_with_exception(self):
+        class Optimizer(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                raise NotImplementedError("Not implemented")
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out
+
+        @torch.compile
+        def f(x: torch.Tensor):
+            try:
+                with torch.autocast(device_type="cpu", dtype=None):
+                    Optimizer.apply(x)
+            except NotImplementedError:
+                return x + 1
+
+        inp = torch.ones(3)
+        out = f(inp)
+        self.assertTrue(torch.equal(out, inp + 1))
+
     @make_dynamo_test
     def test_propagate_exception_inside_ctx_manager(self):
         @contextlib.contextmanager
