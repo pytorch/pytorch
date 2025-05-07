@@ -6,7 +6,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, final, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Concatenate, ParamSpec
 
 import torch
@@ -306,12 +306,42 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
         return super().py_impl(k)
 
+    def py_autograd_impl(
+        self,
+        fn: Callable[_P, _T],
+    ) -> Callable[_P, _T]:
+        def maybe_run_autograd(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            if not torch.is_grad_enabled() or pytree.tree_all_only(
+                torch.Tensor,
+                lambda t: not t.requires_grad,  # type: ignore[union-attr]
+                (*args, kwargs),
+            ):
+                with torch._C._AutoDispatchBelowAutograd():
+                    return self(*args, **kwargs)
+
+            return fn(*args, **kwargs)
+
+        self.py_impl(DispatchKey.Autograd)(maybe_run_autograd)
+
+        return fn
+
     @property
     def namespace(self):
         return self._ns
 
-    def cacheable(self):
-        return self._cacheable
+    @final
+    def cacheable(self) -> bool:
+        from torch._functorch.autograd_function import AutogradFunctionApply
+
+        return (
+            self._cacheable
+            or f"{self.__module__}.{self.__name__}"
+            in torch._inductor.config.unsafe_marked_cacheable_functions
+            or (
+                isinstance(self, AutogradFunctionApply)
+                and torch._functorch.config.autograd_cache_allow_custom_autograd_functions
+            )
+        )
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
@@ -469,6 +499,26 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             )
 
         return wrapper()
+
+    # NOTE [HigherOrderOprator Schema]
+    # Each invocation of a HigherOrderOperator (hop) should have its own schema because
+    # the subgraphs and the arguments can be different even for the same hop.
+    #
+    # Each hop should implement its own gen_schema method, which should
+    # take the same input as the __call__ method and returns a FunctionSchema.
+    # The schema provides a unified way to check if the hop mutates its inputs,
+    # which can be useful in implementing optimizations.
+    #
+    # If the hop doesn't implement the gen_schema method,
+    # we expect it to be functional. It should not mutate its inputs and there
+    # are no input, output aliasing via views or direct referencing.
+    def gen_schema(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"HigherOrderOperator {self._name} does not implement a gen_schema. "
+            f"This is OK as long as the hop is functional. "
+            f"e.g. it should not mutate its inputs and there are no input, output aliasing "
+            f"via views or direct referencing."
+        )
 
     def __str__(self):
         return f"{self.name()}"

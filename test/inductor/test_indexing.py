@@ -95,7 +95,7 @@ class TestIndexingSimplification(InductorTestCase):
             ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
         )
 
-        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/openai/triton/issues/619
+        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/triton-lang/triton/issues/619
         self.assertEqual(
             ModularIndexing(-i0 + i1 * 20, 2, 10), ModularIndexing(-i0 + i1 * 20, 2, 10)
         )
@@ -432,9 +432,9 @@ class ExprPrinterTests(InductorTestCase):
             )
             self.assertEqual(
                 cexpr(expr),
-                f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                f"std::{s}<int64_t>({{x, 2LL*x, 3LL*x}})"
                 if sys.platform in ["darwin", "win32"]
-                else f"std::{s}({{x, 2L*x, 3L*x}})",
+                else f"std::{s}<int64_t>({{x, 2L*x, 3L*x}})",
             )
 
 

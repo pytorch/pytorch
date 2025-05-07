@@ -18,6 +18,8 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
+    # CPython tests
+    'test/dynamo/cpython/**',
     # Tests from the NumPy test suite
     'test/torch_np/numpy_test/**/*.py',
     'third_party/**',
@@ -368,7 +370,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruamel.yaml==0.17.4',
+    'ruamel.yaml==0.18.10',
 ]
 is_formatter = true
 
@@ -380,6 +382,12 @@ command = [
     'tools/linter/adapters/gha_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'ruamel.yaml==0.18.10',
 ]
 
 [[linter]]
@@ -398,6 +406,7 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    'test/dynamo/cpython/**',
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
@@ -936,6 +945,7 @@ include_patterns = [
 exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
+    'test/dynamo/cpython/3.13/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
@@ -1131,6 +1141,7 @@ exclude_patterns = [
     'caffe2/**/*.pyi',
     'fb/**',
     '**/fb/**',
+    'test/dynamo/cpython/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_vendor/**',
@@ -1165,14 +1176,6 @@ exclude_patterns = [
     'test/quantization/core/test_utils.py',
     'test/quantization/core/test_workflow_module.py',
     'test/quantization/core/test_workflow_ops.py',
-    'test/quantization/eager/__init__.py',
-    'test/quantization/eager/test_bias_correction_eager.py',
-    'test/quantization/eager/test_equalize_eager.py',
-    'test/quantization/eager/test_fuse_eager.py',
-    'test/quantization/eager/test_model_numerics.py',
-    'test/quantization/eager/test_numeric_suite_eager.py',
-    'test/quantization/eager/test_quantize_eager_ptq.py',
-    'test/quantization/eager/test_quantize_eager_qat.py',
     'test/quantization/fx/__init__.py',
     'test/quantization/fx/test_equalize_fx.py',
     'test/quantization/fx/test_model_report_fx.py',
@@ -1404,10 +1407,7 @@ exclude_patterns = [
     'torch/utils/backend_registration.py',
     'torch/utils/benchmark/__init__.py',
     'torch/utils/benchmark/examples/__init__.py',
-    'torch/utils/benchmark/examples/blas_compare.py',
-    'torch/utils/benchmark/examples/blas_compare_setup.py',
     'torch/utils/benchmark/examples/compare.py',
-    'torch/utils/benchmark/examples/end_to_end.py',
     'torch/utils/benchmark/examples/fuzzer.py',
     'torch/utils/benchmark/examples/op_benchmark.py',
     'torch/utils/benchmark/examples/simple_timeit.py',
@@ -1547,6 +1547,7 @@ exclude_patterns = [
     'functorch/notebooks/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'test/dynamo/cpython/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
@@ -1723,7 +1724,7 @@ command = [
     '@{{PATHSFILE}}'
 ]
 include_patterns = [
-   'torch/**/not-exist.py'
+   'torch/_inductor/**/*.py'
 ]
 is_formatter = false
 

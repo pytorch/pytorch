@@ -2554,5 +2554,188 @@ class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
             is_debug_mode=True,
         )
 
+    def test_dynamic_affine_act_per_channel_weights(self):
+        import operator
+
+        from torch.ao.quantization.observer import (
+            MappingType,
+            PerChannelMinMaxObserver,
+            PerToken,
+        )
+        from torch.ao.quantization.pt2e._affine_quantization import (
+            AffineQuantizedMovingAverageMinMaxObserver,
+        )
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.linear.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+
+                        activation_dtype = torch.int8
+                        act_qspec = QuantizationSpec(
+                            dtype=activation_dtype,
+                            quant_min=-128,
+                            quant_max=127,
+                            qscheme=None,
+                            is_dynamic=True,
+                            observer_or_fake_quant_ctr=AffineQuantizedMovingAverageMinMaxObserver.with_args(
+                                # TODO: maybe align the arg name here
+                                target_dtype=activation_dtype,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerToken(),
+                                averaging_constant=1,
+                            ),
+                        )
+
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.int8,
+                            quant_min=-127,
+                            quant_max=127,
+                            qscheme=torch.per_channel_symmetric,
+                            ch_axis=0,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=PerChannelMinMaxObserver.with_args(),
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                            },
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(128, 20)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        node_occurrence = {
+            torch.ops.pt2e_quant.choose_qparams_affine: 1,
+            operator.getitem: 2,
+            torch.ops.pt2e_quant.quantize_affine: 1,
+            torch.ops.pt2e_quant.dequantize_affine: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+            torch.ops.pt2e_quant.choose_qparams_affine,
+            operator.getitem,
+            torch.ops.pt2e_quant.quantize_affine,
+            torch.ops.pt2e_quant.dequantize_affine,
+        ]
+        example_inputs = (torch.randn(5, 128),)
+        self._test_quantizer(
+            M().eval(),
+            example_inputs,
+            BackendAQuantizer(),
+            node_occurrence,
+            node_list,
+            is_debug_mode=True,
+        )
+
+    def test_dynamic_per_tok_act_per_group_weights(self):
+        import operator
+
+        from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
+        from torch.ao.quantization.pt2e._affine_quantization import (
+            AffineQuantizedMinMaxObserver,
+            AffineQuantizedPlaceholderObserver,
+        )
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.linear.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+
+                        activation_dtype = torch.int8
+                        act_qspec = QuantizationSpec(
+                            dtype=activation_dtype,
+                            quant_min=-128,
+                            quant_max=127,
+                            qscheme=None,
+                            is_dynamic=True,
+                            observer_or_fake_quant_ctr=AffineQuantizedPlaceholderObserver.with_args(
+                                # TODO: maybe align the arg name here
+                                target_dtype=activation_dtype,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerToken(),
+                            ),
+                        )
+
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.int8,
+                            quant_min=-127,
+                            quant_max=127,
+                            qscheme=torch.per_channel_symmetric,
+                            ch_axis=0,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                target_dtype=torch.int8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerGroup(group_size=128),
+                            ),
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                            },
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(128, 20)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        node_occurrence = {
+            torch.ops.pt2e_quant.choose_qparams_affine: 1,
+            operator.getitem: 2,
+            torch.ops.pt2e_quant.quantize_affine: 1,
+            torch.ops.pt2e_quant.dequantize_affine: 2,
+        }
+        node_list = [
+            torch.ops.pt2e_quant.dequantize_affine,
+            torch.ops.pt2e_quant.choose_qparams_affine,
+            operator.getitem,
+            torch.ops.pt2e_quant.quantize_affine,
+            torch.ops.pt2e_quant.dequantize_affine,
+        ]
+        example_inputs = (torch.randn(5, 128),)
+        self._test_quantizer(
+            M().eval(),
+            example_inputs,
+            BackendAQuantizer(),
+            node_occurrence,
+            node_list,
+            is_debug_mode=True,
+        )
+
 
 instantiate_parametrized_tests(TestQuantizePT2E)
