@@ -1667,11 +1667,7 @@ class TestPatternMatcher(TestCase):
         def bar_out(x: torch.Tensor, out: torch.Tensor) -> None:
             out.copy_(x + 2)
 
-        @register_fake("mylib::bar")
-        def bar_out_fake(x: torch.Tensor, out: torch.Tensor) -> None:
-            return None
-
-        @torch.library.custom_op("mylib::foobar_out", mutates_args={"out"})
+        @torch.library.custom_op("mylib::foobar_out", mutates_args={"x", "out"})
         def foobar_out(x: torch.Tensor, out: torch.Tensor) -> None:
             x.add_(1)
             out.copy_(x + 7)  # intentionally different from bar_out
@@ -1711,22 +1707,48 @@ class TestPatternMatcher(TestCase):
             current_config["post_grad_custom_post_pass"] = custom_pass
             return compile_fx(graph, example_inputs, config_patches=current_config)
 
-        # user-function
+        # Case 1: mutates a clone of graph input
         @torch.compile(fullgraph=True, backend=custom_backend)
-        def f(x):
+        def f1(x):
             x = x.clone()
             out = torch.zeros_like(x)
             foo_inplace(x)
             bar_out(x, out)
             return out
 
-        def f_replaced(x):
+        def f1_replaced(x):
             x = x.clone()
             out = torch.zeros_like(x)
             foobar_out(x, out)
             return out
 
-        self.assertEqual(f(inp.clone().detach()), f_replaced(inp.clone().detach()))
+        f1_inp = inp.clone().detach()
+        f1_replaced_inp = inp.clone().detach()
+        f1_out = f1(f1_inp)
+        f1_replaced_out = f1_replaced(f1_replaced_inp)
+        self.assertEqual(f1_inp, f1_replaced_inp)
+        self.assertEqual(f1_out, f1_replaced_out)
+        self.assertEqual(count, 1)
+
+        # Case 2: mutates graph input
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f2(x):
+            out = torch.zeros_like(x)
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def f2_replaced(x):
+            out = torch.zeros_like(x)
+            foobar_out(x, out)
+            return out
+
+        f2_inp = inp.clone().detach()
+        f2_replaced_inp = inp.clone().detach()
+        f2_out = f2(f2_inp)
+        f2_replaced_out = f2_replaced(f2_replaced_inp)
+        self.assertEqual(f2_inp, f2_replaced_inp)
+        self.assertEqual(f2_out, f2_replaced_out)
         self.assertEqual(count, 1)
 
     def test_mutable_op_view_inputs_register_replacement(self):
@@ -1800,7 +1822,6 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(f(inp.clone().detach()), f_replaced(inp.clone().detach()))
         self.assertEqual(count, 1)
-
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
