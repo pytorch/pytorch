@@ -193,6 +193,21 @@ def try_import_cutlass() -> bool:
     return False
 
 
+@functools.lru_cache(1)
+def cutlass_key() -> Optional[bytes]:
+    """
+    Compute a key representing the state of the CUTLASS library.
+
+    Note: OSS and fbcode will have different keys.
+    """
+    if not config.is_fbcode():
+        return None
+
+    from libfb.py import parutil
+
+    return parutil.get_file_contents("cutlass-3/src_hash.txt")
+
+
 @functools.lru_cache(8)
 def _normalize_cuda_arch(arch: str) -> str:
     if int(arch) >= 100:
