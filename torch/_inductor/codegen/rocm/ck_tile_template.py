@@ -34,7 +34,7 @@ class CKTileTemplate(ROCmTemplate):
     def globals(self) -> IndentedBuffer:
         res = super().globals()
         res.splice(
-            """   
+            """
                 using F8  = ck_tile::fp8_t;
                 using BF8 = ck_tile::bf8_t;
                 using F16 = ck_tile::half_t;
