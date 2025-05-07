@@ -1480,7 +1480,7 @@ class NumpyVariable(VariableTracker):
                 )
             except NotImplementedError as exc:
                 unimplemented_v2(
-                    gb_type="Unsupported NumPy usage",
+                    gb_type="Non-constant argument in NumPy function call",
                     context=f"call_function {self} {args} {kwargs}",
                     explanation="Dynamo expects all arguments to be constants, "
                     f"but encountered a non-constant argument in `numpy.{self.value.__name__}`.",
@@ -1771,11 +1771,11 @@ class ConstantLikeVariable(VariableTracker):
             ckwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError as exc:
             unimplemented_v2(
-                gb_type="Unsupported operation on constant-like object",
+                gb_type="Non-constant argument on constant-like object",
                 context=f"call_method {self} {name} {args} {kwargs}",
                 explanation="Dynamo expects all arguments to be constants, but "
                 "encountered a non-constant argument in the method call "
-                f"`{self._error_prefix}.{name}`.",
+                f"`{self._error_prefix}.{name}()`.",
                 hints=[
                     "Ensure arguments passed to methods of these objects are constants.",
                 ],
@@ -1865,7 +1865,7 @@ class RandomClassVariable(VariableTracker):
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
         if len(args) > 1:
             unimplemented_v2(
-                gb_type="Unsupported random usage",
+                gb_type="Unsupported usage of random.Random() with > 1 arg",
                 context=f"call_function {self} {args} {kwargs}",
                 explanation="Dynamo only supports calling `random.Random()` "
                 "with zero or one argument (the seed).",
@@ -1876,7 +1876,7 @@ class RandomClassVariable(VariableTracker):
             )
         elif kwargs:
             unimplemented_v2(
-                gb_type="Unsupported random usage",
+                gb_type="Unsupported usage of random.Random() with kwargs",
                 context=f"call_function {self} {args} {kwargs}",
                 explanation="Dynamo does not support calling `random.Random()` "
                 "with keyword arguments.",
