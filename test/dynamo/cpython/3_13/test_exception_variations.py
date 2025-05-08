@@ -10,7 +10,6 @@ import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHDYNAMO,
     run_tests,
     xfailIfTorchDynamo,
 )

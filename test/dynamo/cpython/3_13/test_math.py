@@ -16,10 +16,8 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
 )
 
-if TEST_WITH_TORCHDYNAMO:
-    __TestCase = CPythonTestCase
-else:
-    __TestCase = unittest.TestCase
+__TestCase = CPythonTestCase
+
 
 # redirect import statements
 import sys
@@ -2916,15 +2914,17 @@ class FMATests(__TestCase):
         )
 
 
-if not TEST_WITH_TORCHDYNAMO:
-    def load_tests(loader, tests, pattern):
-        from doctest import DocFileSuite
-        tests.addTest(DocFileSuite(os.path.join("mathdata", "ieee754.txt")))
-        return tests
+def load_tests(loader, tests, pattern):
+    from doctest import DocFileSuite
+    suite = DocFileSuite(os.path.join("mathdata", "ieee754.txt"))
+    # ======= BEGIN Dynamo patch =======
+    for test in suite:
+        # Dynamically change base class
+        test.__class__ = type(test.__class__.__name__, (__TestCase, test.__class__), {})
+    # ======== END Dynamo patch ========
+    tests.addTests(suite)
+    return tests
 
 
 if __name__ == "__main__":
-    if TEST_WITH_TORCHDYNAMO:
-        run_tests()
-    else:
-        unittest.main()
+    run_tests()
