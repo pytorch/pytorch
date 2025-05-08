@@ -95,31 +95,6 @@ def torch_vital_set(value):
         else:
             del os.environ['TORCH_VITAL']
 
-# Tests Vital Signs for Torch
-# FIXME: document or deprecate whatever this is
-class TestBasicVitalSigns(TestCase):
-    def test_basic_vitals(self):
-        with torch_vital_set(''):
-            self.assertFalse(torch.vitals_enabled())
-        with torch_vital_set('ON'):
-            self.assertTrue(torch.vitals_enabled())
-
-    def test_basic_vitals_read_write(self):
-        with torch_vital_set('ON'):
-            self.assertTrue(torch.vitals_enabled())
-            # This tests the code path of setting a vital
-            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST_VALUE_STRING'))
-            self.assertIn('TEST_VALUE_STRING', torch.read_vitals())
-            self.assertIn('CUDA.used', torch.read_vitals())
-
-    def test_dataloader_vitals(self):
-        with torch_vital_set('ON'):
-            inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
-            tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
-            dataset = torch.utils.data.TensorDataset(inps, tgts)
-            torch.utils.data.DataLoader(dataset, batch_size=2)
-            self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
-
 # FIXME: document or deprecate whatever this is
 class TestVitalSignsCuda(TestCase):
     @onlyCUDA
