@@ -3115,6 +3115,7 @@ def _cutlass_include_paths() -> list[str]:
         os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
+
 @torch_key_cache
 def cutlass_key() -> bytes:
     """
@@ -3123,9 +3124,10 @@ def cutlass_key() -> bytes:
     Note: OSS and fbcode will have different keys.
     """
     if config.is_fbcode():
-        from libfb.py import parutil
-
-        return parutil.get_file_contents("cutlass/src_hash.txt")
+        with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
+            with open(resource_path) as resource_file:
+                ret = resource_file.read()
+                return ret
 
     combined_hash = hashlib.sha256()
     build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
@@ -3133,6 +3135,9 @@ def cutlass_key() -> bytes:
 
 
 def _cuda_lib_options() -> list[str]:
+    """
+    Util function for CUTLASS backend to find the correct CUDA libraries.
+    """
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
@@ -3141,6 +3146,9 @@ def _cuda_lib_options() -> list[str]:
     if is_linux():
         _transform_cuda_paths(lpaths)
         for path in lpaths:
+            if "torch/lib" in path:
+                # don't want to depend on pytorch
+                continue
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
             extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
