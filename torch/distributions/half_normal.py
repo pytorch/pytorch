@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 import torch
 from torch import inf, Tensor
@@ -32,7 +32,7 @@ class HalfNormal(TransformedDistribution):
     """
 
     arg_constraints = {"scale": constraints.positive}
-    support = constraints.nonnegative
+    support: ClassVar[constraints.NonNegative] = constraints.nonnegative  # type: ignore[assignment]
     has_rsample = True
     base_dist: Normal
 

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 import torch
 from torch import Tensor
@@ -35,7 +35,7 @@ class Weibull(TransformedDistribution):
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }
-    support = constraints.positive
+    support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
 
     def __init__(
         self,
