@@ -1,10 +1,8 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/core/Stream.h>
 
-namespace c10 {
-namespace CachingDeviceAllocator {
+namespace c10::CachingDeviceAllocator {
 
 using namespace c10::CachingAllocator;
 
@@ -60,90 +58,4 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-} // namespace CachingDeviceAllocator
-
-struct C10_API DeviceAllocator : public c10::Allocator {
-  virtual void* raw_alloc(size_t nbytes) = 0;
-  virtual void* raw_alloc_with_stream(size_t nbytes, c10::Stream stream) = 0;
-  virtual void raw_delete(void* ptr) = 0;
-  virtual void init(int device_count) = 0;
-  virtual bool initialized() = 0;
-  virtual void empty_cache() = 0;
-  virtual void enable(bool value) = 0;
-  virtual bool is_enabled() const = 0;
-  virtual void* get_base_allocation(void* ptr, size_t* size) = 0;
-  virtual void record_stream(const DataPtr&, c10::Stream stream) = 0;
-  virtual CachingDeviceAllocator::DeviceStats get_device_stats(
-      c10::DeviceIndex device) = 0;
-  virtual void reset_accumulated_stats(c10::DeviceIndex device) = 0;
-  virtual void reset_peak_stats(c10::DeviceIndex device) = 0;
-  virtual std::string name() = 0;
-};
-
-// This function is used to get the DeviceAllocator for a specific device type
-// and keep backward compatibility with c10::GetAllocator.
-C10_API inline DeviceAllocator* GetDeviceAllocator(const DeviceType& t) {
-  auto* allocator = c10::GetAllocator(t);
-  auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
-  TORCH_INTERNAL_ASSERT(
-      device_allocator, "Allocator for ", t, " is not a DeviceAllocator.");
-  return device_allocator;
-}
-
-template <typename T>
-struct CachingDeviceAllocatorInterface : public DeviceAllocator {
-  CachingDeviceAllocatorInterface() : impl_(std::make_unique<T>()) {}
-
-  at::DataPtr allocate(size_t size) override {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
-  }
-
-  void free(void* ctx) {
-    impl_->free(ctx);
-  }
-
-  template <typename S>
-  bool record_event(void* ptr, void* ctx, S stream) {
-    return impl_->record_event(ptr, ctx, stream);
-  }
-
-  void empty_cache() {
-    impl_->empty_cache();
-  }
-
-  void copy_data(void* dest, const void* src, std::size_t count)
-      const override {
-    impl_->copy_data(dest, src, count);
-  }
-
-  DeviceStats getDeviceStats() {
-    return impl_->getStats();
-  }
-
-  void resetAccumulatedStats() {
-    impl_->resetAccumulatedStats();
-  }
-
-  void resetPeakStats() {
-    impl_->resetPeakStats();
-  }
-
-  std::unique_ptr<T> impl_;
-};
-
-/**
- * Note [DeviceAllocator design]
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- */
-
-template <typename S, typename E, typename B = Block<S>>
-struct CachingDeviceAllocatorImpl {
-  virtual ~CachingDeviceAllocatorImpl() = default;
-
- public:
- private:
- protected:
-};
-
-} // namespace c10
+} // namespace c10::CachingDeviceAllocator

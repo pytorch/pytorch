@@ -512,7 +512,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class XPUAllocator : public DeviceAllocator {
+class XPUAllocator : public Allocator {
  private:
   std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;

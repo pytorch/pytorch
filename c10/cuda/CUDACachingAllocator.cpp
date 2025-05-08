@@ -4058,7 +4058,6 @@ struct BackendStaticInitializer {
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
-    at::SetAllocator(kCUDA, r, 0);
     allocator.store(r);
   }
 };
