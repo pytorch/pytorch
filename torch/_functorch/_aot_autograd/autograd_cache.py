@@ -15,9 +15,9 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
+from copy import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
-from copy import copy
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
@@ -380,6 +380,7 @@ class InductorOutput(Generic[TOut], ABC):
     """
     Class representing a single inductor output
     """
+
     @abstractmethod
     def pre_save(self) -> None:
         ...
