@@ -4030,6 +4030,12 @@ class GraphModule(torch.nn.Module):
             )
         ),
     )
+    # Skipping the autograd=True because
+    # associative_scan does currently not support gradients for lifted parameters
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise" and params["autograd"]),
+    )
     def test_associative_scan_downstream_scan_scan_different_dim(
         self,
         combine_mode,
