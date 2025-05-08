@@ -131,6 +131,15 @@ struct VecReduceAllSIMD<float, Op> {
     return v[0];
   }
 };
+
+template <>
+struct VecReduceAllSIMD<float, std::plus<Vectorized<float>>> {
+  static inline float apply(
+      const std::plus<Vectorized<float>>& vec_fun,
+      const Vectorized<float>& acc_vec) {
+    return vaddvq_f32(acc_vec);
+  }
+};
 #endif // defined(__aarch64__)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
