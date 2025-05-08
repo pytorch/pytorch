@@ -237,6 +237,7 @@ class CKTileGemmTemplate(CKTileTemplate):
         using {{instance_namespace}}::TilePartitioner;
 
         constexpr auto TileK = {{instance_namespace}}::TileK;
+        constexpr auto kPrefetchStages = BaseGemmPipeline::PrefetchStages;
 
         auto kargs = ck_tile::GemmKernelArgs {
            X,
@@ -652,20 +653,22 @@ class CKTileGemmTemplate(CKTileTemplate):
         """
             elif epilogue_type == "CShuffle":
                 return r"""
+            constexpr auto kMemoryOperation = ck_tile::memory_operation_enum::set;
             using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                                      BDataType,
                                                                      AccDataType,
                                                                      CDataType,
                                                                      CLayout,
                                                                      GemmPipelineProblem::kBlockSize,
-                                                                     TilePartitioner::MPerBlock,
-                                                                     TilePartitioner::NPerBlock,
+                                                                     TileM,
+                                                                     TileN,
                                                                      WarpM,
                                                                      WarpN,
                                                                      WarpTileM,
                                                                      WarpTileN,
                                                                      WarpTileK,
-                                                                     TransposeC>;
+                                                                     TransposeC,
+                                                                     kMemoryOperation>;
 
             using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;
         """
@@ -736,7 +739,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                     std::ostringstream err;
                     err << "Unsupported dispatch: "
                         << "Pipeline: " << "{{pipeline}}"
-                        << "Prefetch stages: " << BaseGemmPipeline::PrefetchStages
+                        << "Prefetch stages: " << kPrefetchStages
                         << "Tail num: " << tail_num;
                     throw std::runtime_error(err.str());
             } // switch tail_num
@@ -768,7 +771,7 @@ class CKTileGemmTemplate(CKTileTemplate):
                 )
             elif pipeline_type == "Mem":
                 return self._template_from_string(dispatch_template).render(
-                    rendered_with_hot_loop="dispatch_memory_pipeline_hot_loop<BaseGemmPipeline::PrefetchStages>(tail_num, dispatch);",
+                    rendered_with_hot_loop="dispatch_memory_pipeline_hot_loop<kPrefetchStages>(tail_num, dispatch);",
                     rendered_without_hot_loop=self._template_from_string(
                         switch_tailnum_template
                     ).render(
