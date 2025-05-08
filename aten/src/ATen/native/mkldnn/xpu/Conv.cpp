@@ -402,8 +402,8 @@ Tensor _convolution_out(
     Attr attr,
     IntArrayRef pad_nd = IntArrayRef({})) {
   CheckedFrom c = "xpu_convolution";
-  checkAllSameType(c, {input, weight});
-  checkAllSameGPU(c, {input, weight});
+  checkAllSameType(c, {input_r, weight_r});
+  checkAllSameGPU(c, {input_r, weight_r});
   c10::DeviceGuard device_guard(input_r.device());
   auto ndim = input_r.ndimension();
   TORCH_CHECK(
