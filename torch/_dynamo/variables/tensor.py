@@ -441,7 +441,8 @@ class TensorVariable(VariableTracker):
                     context=f"var_getattr {self} {name}",
                     explanation=f"Getattr invocation '{name}' in strict mode is not supported.",
                     hints=[
-                        "This operation is banned in strict mode due to potential issues with autograd.",
+                        f"Remove `{name}` from the list of banned ops by "
+                        "setting `torch._dynamo.config._autograd_backward_strict_mode_banned_ops`.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
