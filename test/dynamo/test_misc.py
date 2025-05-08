@@ -12502,6 +12502,16 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
         f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
 
+    def test_scalar_isin_decomposition(self):
+        def f():
+            x = torch.tensor(0)
+            return torch.isin(x, x)
+
+        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+        ref = f()
+        res = opt_f()
+        self.assertEqual(ref, res)
+
 
 devices = ("cuda", "hpu")
 instantiate_device_type_tests(MiscTestsDevice, globals(), only_for=devices)
