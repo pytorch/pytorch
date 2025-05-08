@@ -342,7 +342,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
     const bool run_single_threaded,
-    const size_t num_runners) {
+    const size_t num_runners,
+    const c10::DeviceIndex device_index) {
   if (run_single_threaded) {
     if (num_runners != 1) {
       throw std::runtime_error(
@@ -470,22 +471,25 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   load_metadata(cpp_filename);
 
   // Construct the runner depending on the device information
-  std::string device = metadata_["AOTI_DEVICE_KEY"];
+  std::string device_key = metadata_["AOTI_DEVICE_KEY"];
 
-  if (device.empty()) {
+  if (device_key.empty()) {
     throw std::runtime_error("No device information found.");
   }
 
   std::unordered_map<std::string, CreateAOTIModelRunnerFunc>
       registered_aoti_runner = getAOTIModelRunnerRegistry();
 
-  if (registered_aoti_runner.find(device) == registered_aoti_runner.end()) {
-    throw std::runtime_error("Unsupported device found: " + device);
+  if (registered_aoti_runner.find(device_key) == registered_aoti_runner.end()) {
+    throw std::runtime_error("Unsupported device key found: " + device_key);
   }
 
+  c10::Device device = c10::Device(device_key);
+  device.set_index(device_index);
+
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
-  runner_ = registered_aoti_runner[device](
-      so_path, num_runners, device, cubin_dir, run_single_threaded);
+  runner_ = registered_aoti_runner[device_key](
+      so_path, num_runners, device.str(), cubin_dir, run_single_threaded);
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {

@@ -85,7 +85,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Hashable, Sequence
+    from collections.abc import Container, Hashable
 
     from torch._guards import CompileId
 
@@ -208,6 +208,7 @@ class CachingAutotuner(KernelInterface):
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
         filename: Optional[str] = None,
         reset_to_zero_arg_names: Optional[list[str]] = None,
+        autotune_cache_info: Optional[dict[str, Any]] = None,
     ):
         super().__init__()
 
@@ -234,6 +235,7 @@ class CachingAutotuner(KernelInterface):
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
+        self.autotune_cache_info = autotune_cache_info
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "CachingAutotuner gets %d configs for %s",
@@ -1486,7 +1488,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
             # we want to burn None in to the launch args with zero overhead.
             # See https://github.com/pytorch/pytorch/issues/123597
-            if binary.__class__.launch_enter_hook:
+            if launch_enter:
                 launch_metadata = f"bin.launch_metadata((grid_0, grid_1, grid_2), stream, {', '.join(call_args)})"
             else:
                 launch_metadata = "None"
@@ -1697,6 +1699,7 @@ def cached_autotune(
 
     # on disk caching logic and/or remote caching
     autotune_cache = None
+    autotune_cache_info = {}
     if (
         not disabled
         and filename is not None
@@ -1709,9 +1712,28 @@ def cached_autotune(
         if autotune_cache:
             if best_config := autotune_cache.read_best(inductor_meta, configs):
                 configs = [best_config]
-
+                autotune_cache_info["best_config"] = triton_config_to_hashable(
+                    best_config
+                )
+                autotune_cache_info["autotune_cache_state"] = "hit"
+            else:
+                autotune_cache_info["autotune_cache_state"] = "miss"
+                autotune_cache_info["num_configs"] = len(configs)
+                if inductor_meta.get("coordinate_descent_tuning"):
+                    autotune_cache_info["coordesc_tuning"] = True
+                    if len(configs) == 1:
+                        # This is the config that coordinate descent tuning started at, which
+                        # is not the same as the final config chosen (i.e. only_config, best_config)
+                        autotune_cache_info["coordesc_tuning_start_config"] = (
+                            triton_config_to_hashable(configs[0])
+                        )
     else:
+        if len(configs) == 1:
+            autotune_cache_info["autotune_cache_state"] = "only 1 config"
+            autotune_cache_info["only_config"] = triton_config_to_hashable(configs[0])
+
         if disabled:
+            autotune_cache_info["autotune_cache_state"] = "force_disabled"
             log.debug("autotune caching is disabled by config.force_disable_caches")
 
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
@@ -1770,6 +1792,7 @@ def cached_autotune(
             size_hints=size_hints,
             custom_kernel=custom_kernel,
             filename=filename,
+            autotune_cache_info=autotune_cache_info,
         )
 
     return decorator
@@ -2541,13 +2564,15 @@ class GridExpr:
 
     inductor_meta: dict[str, Any]
     mode: Literal["python", "cpp"] = "python"
-    prefix: Sequence[str] = ()
+    prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: Union[str, int] = 1
     y_grid: Union[str, int] = 1
     z_grid: Union[str, int] = 1
 
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
+        if self.mode == "python":
+            self.prefix.append("from torch.utils._sympy.functions import FloorDiv")
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
@@ -2560,7 +2585,9 @@ class GridExpr:
         if isinstance(numel, int) and isinstance(block, int):
             return ceildiv(numel, block)  # constant fold
         if self.mode == "python":
-            return f"-(({numel}) // -({block}))"
+            # Use FloorDiv instead of // so we can get better sympy expressions for
+            # dynamic shapes.
+            return f"-FloorDiv(({numel}), -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
@@ -2643,12 +2670,16 @@ class Grid3D(GridExpr):
 class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.prefix = [
-            self.assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
-            self.assign_tmp(
-                "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
-            ),
-        ]
+        self.prefix.extend(
+            [
+                self.assign_tmp(
+                    "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
+                ),
+                self.assign_tmp(
+                    "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
+                ),
+            ]
+        )
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
 

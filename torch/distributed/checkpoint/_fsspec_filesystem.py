@@ -92,7 +92,9 @@ class FileSystem(FileSystemBase):
         self.fs.rm(path)
 
     def ls(self, path: Union[str, os.PathLike]) -> list[str]:
-        return self.fs.ls(path)
+        # setting detail to False explictly to keep the list[str] return type,
+        # instead of the list[Dict] return type when detail=True
+        return self.fs.ls(path, detail=False)
 
 
 # TODO: add the dcp.async_save mixin

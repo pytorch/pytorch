@@ -54,7 +54,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -83,7 +83,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang10
-      docker-image-name: pytorch-linux-focal-py3.9-clang10
+      docker-image-name: ci-image:pytorch-linux-focal-py3.9-clang10
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -110,7 +110,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2", owners: ["module:rocm"] },
@@ -140,7 +140,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang15-asan
-      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },

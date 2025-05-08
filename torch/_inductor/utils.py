@@ -56,6 +56,10 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
+OPTIMUS_EXCLUDE_POST_GRAD = [
+    "activation_quantization_aten_pass",
+]
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
@@ -436,6 +440,23 @@ def convert_shape_to_inductor(
     return [sympy.sympify(i) for i in lst]
 
 
+def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
+    """
+    Like convert_shape_to_symint, but operates on a single expression.
+    """
+    from .virtualized import V
+
+    return (
+        i
+        if isinstance(i, int)
+        else (
+            int(i)
+            if isinstance(i, sympy.Integer)
+            else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        )
+    )
+
+
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]],
 ) -> list[Union[int, torch.SymInt]]:
@@ -443,20 +464,7 @@ def convert_shape_to_symint(
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
-    from .virtualized import V
-
-    return [
-        (
-            i
-            if isinstance(i, int)
-            else (
-                int(i)
-                if isinstance(i, sympy.Integer)
-                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
-            )
-        )
-        for i in lst
-    ]
+    return [convert_to_symint(i) for i in lst]
 
 
 def is_view(op: torch._ops.OpOverload) -> bool:
@@ -1420,12 +1428,15 @@ def get_num_sms() -> int:
 def get_tma_workspace_arg(
     num_tma_descriptors: int,
     device: torch.device,
+    num_programs: Optional[int] = None,
 ) -> WorkspaceArg:
     """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
     from .codegen.common import WorkspaceArg, WorkspaceZeroMode
 
+    if num_programs is None:
+        num_programs = get_num_sms()
     zero_mode = WorkspaceZeroMode.from_bool(False)
-    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    size = num_programs * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
     return WorkspaceArg(
         count=size,
         zero_mode=zero_mode,
@@ -1493,7 +1504,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma_device
+    from torch.utils._triton import has_triton_tma
 
     from .virtualized import V
 
@@ -1524,7 +1535,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
     return (
         config.triton.enable_persistent_tma_matmul
-        and has_triton_tma_device()
+        and has_triton_tma()
         and all(_is_tma_compatible(m) for m in matrices)
     )
 

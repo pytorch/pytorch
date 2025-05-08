@@ -30,7 +30,6 @@ from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
-    unwrap_maybe_dynamic_int,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
@@ -323,20 +322,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-
-        # We want to mark every size as dynamic, but since there's no way to
-        # mark a primitive `int` as dynamic, we need to wrap it in a tensor.
-        # In the graph, we unwrap it with `unwrap_maybe_dynamic_int` back into a primitive.
-        proxies = [self.sizes_proxy[i] for i in range(len(sizes))]  # type: ignore[index]
+        proxies = self.bind_objects_to_proxies(sizes, self.sizes_proxy, sizes_origins)
         for i, symint in enumerate(sizes):
-            proxies[i] = self.fx_tracer.create_proxy(
-                "call_function",
-                unwrap_maybe_dynamic_int,
-                (proxies[i],),
-                {},
-            )
             self.symnode_proxy_lookup[symint.node] = proxies[i]
-        proxies = self.bind_objects_to_proxies(sizes, proxies, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -421,11 +409,7 @@ class AutogradCompilerInstance:
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
-        bw_module = ctx._bw_module
-        aot_symints = ctx.symints
-        symints = ctx._get_compiled_autograd_symints()
         del CompiledFunction
-        del ctx
 
         @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
@@ -467,12 +451,13 @@ class AutogradCompilerInstance:
 
             # set up the proxy inputs to ctx._bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(bw_module.graph)
+            num_args = num_inputs(ctx._bw_module.graph)
             pall_args = [
                 pgrads[i] for i in range(num_args - int(pbackward_state is not None))
             ]
             # replace the symints with our symints
-            assert len(symints) == len(aot_symints)
+            symints = ctx._get_compiled_autograd_symints()
+            assert len(symints) == len(ctx.symints)
             psymints = [self.to_proxy(e) for e in symints]
             pall_args[: len(symints)] = psymints
             # Add backward_state
@@ -496,7 +481,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in bw_module.graph.nodes:
+            for node in ctx._bw_module.graph.nodes:
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -513,7 +498,9 @@ class AutogradCompilerInstance:
                 elif node.op == "get_attr":
                     name = node.target
                     qualname = self.fx_tracer.get_fresh_qualname(name)
-                    setattr(self.fx_tracer.root, qualname, getattr(bw_module, name))
+                    setattr(
+                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
+                    )
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
                     result.name = make_unique(node.name)
                     value_remap[node] = result
@@ -884,40 +871,6 @@ class AutogradCompilerInstance:
         after = len(self.fx_tracer.graph.nodes)
         verbose_log.debug("DCE removed %d nodes", before - after)
 
-    def remove_unused_sizes(self):
-        used_sizes = []
-        unused_sizes = []
-
-        # seek placeholder, should be at nodes[1]
-        it = iter(self.fx_tracer.graph.nodes)
-        next(it)
-        sizes_node = next(it)
-        assert sizes_node.name == "sizes"
-
-        for getitem_node in sizes_node.users.keys():
-            assert getitem_node.target == operator.getitem
-            if getitem_node.users:
-                used_sizes.append(getitem_node)
-            else:
-                # remove from the graph
-                unused_sizes.append(getitem_node)
-
-        used_sizes_idx: set[int] = set()
-        for used in used_sizes:
-            assert isinstance(used.args, tuple)
-            assert used.args[0] == sizes_node
-            assert isinstance(used.args[1], int)
-            next_size_idx = len(used_sizes_idx)
-            # used later reindex the runtime sizes arg
-            used_sizes_idx.add(used.args[1])
-            # reindex the graph
-            used.args = (used.args[0], next_size_idx)
-
-        for unused in unused_sizes:
-            self.fx_tracer.graph.erase_node(unused)
-
-        return used_sizes_idx
-
     def create_graph_module(self, id):
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
@@ -980,9 +933,6 @@ class AutogradCompilerInstance:
         if self.nan_checker:
             self.nan_checker.prep_with_graph(self.fx_tracer.graph)
 
-        # keep only sizes that are actually used in the graph
-        used_sizes_idx = self.remove_unused_sizes()
-
         graph = self.create_graph_module(f"CompiledAutograd{self.id}")
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
@@ -1003,27 +953,14 @@ class AutogradCompilerInstance:
             global in_compiled_autograd_region
             try:
                 in_compiled_autograd_region = True
-
                 if self.nan_checker:
                     self.nan_checker.prep_with_inputs(inputs)
-
-                filtered_sizes = []
-                for idx, integer in enumerate(sizes):
-                    if idx in used_sizes_idx:
-                        # can't create negative size
-                        if integer > 0:
-                            filtered_sizes.append(torch.empty(0, integer))
-                            torch._dynamo.maybe_mark_dynamic(filtered_sizes[-1], 1)
-                        else:
-                            filtered_sizes.append(integer)
 
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    out = compiled_fn(
-                        inputs, filtered_sizes, scalars, hooks, packed_inputs
-                    )
+                    out = compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
                     if self.nan_checker:
                         self.nan_checker.check(out)
                     return out
@@ -1333,6 +1270,11 @@ class AutogradCompilerInstance:
             forward_cls = pyobj._forward_cls  # type: ignore[attr-defined]
             if hasattr(forward_cls, "_aot_id"):
                 # backward was created by AOT Dispatcher
+                if forward_cls._lazy_backward_info is None:
+                    raise RuntimeError(
+                        """This compiled backward function was saved by AOTAutogradCache, which does not support
+                    compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+                    )
                 maybe_aot_id = forward_cls._aot_id
         new_code = f"{node_name}{maybe_aot_id} (NodeCall {nodecall_index})"
         raw_stack_trace = CapturedTraceback.extract().format()[-1]

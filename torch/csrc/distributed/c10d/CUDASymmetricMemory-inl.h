@@ -60,7 +60,7 @@ __device__ __forceinline__ void trap() {
 __device__ __forceinline__ size_t global_timer_ns() {
 #if defined(USE_ROCM)
   static constexpr double MI300_FREQ_GHZ = 2.1;
-  return __builtin_amdgcn_s_memtime() / MI300_FREQ_GHZ;
+  return clock64() / MI300_FREQ_GHZ;
 #else
   size_t val;
   asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");

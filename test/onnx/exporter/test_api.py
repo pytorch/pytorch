@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 
 import numpy as np
@@ -493,6 +494,15 @@ class TestFakeTensorExport(common_utils.TestCase):
 
         node_names = [n.op_type for n in onnx_program.model.graph]
         self.assertIn("Sin", node_names)
+
+    def test_torchscript_exporter_raises_deprecation_warning(self):
+        # Test that the deprecation warning is raised when using torchscript exporter
+        with self.assertWarnsRegex(
+            DeprecationWarning, "You are using the legacy TorchScript-based ONNX export"
+        ):
+            torch.onnx.export(
+                SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
+            )
 
 
 if __name__ == "__main__":

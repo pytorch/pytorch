@@ -278,21 +278,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
             elif isinstance(sym_or_exp, sympy.Expr):
-                free_symbol = None
-                for sym in sym_or_exp.free_symbols:
-                    if sym not in bound_vars:
-                        if free_symbol is None:
-                            free_symbol = sym
-                        else:
-                            raise AssertionError(
-                                str(sym_or_exp)
-                                + " contains more than one undefined symbols"
-                            )
-                if free_symbol is None:
+                undefined_symbols = [
+                    sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
+                ]
+                if len(undefined_symbols) != 1:
+                    # Skip if expression contains no symbols or if multiple
+                    # symbols exists since we assume each base symbol is defined
+                    # by other codegen_symbol calls.
                     return
 
                 from torch.utils._sympy.solve import try_solve
 
+                free_symbol = undefined_symbols.pop()
                 base_name = name_fn(base_name)
                 # Use a size symbol to solve the free symbol
                 size_symbol = sympy.Symbol(f"{base_name}_{dim}", integer=True)

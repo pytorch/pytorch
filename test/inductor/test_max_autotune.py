@@ -1200,17 +1200,27 @@ class TestMaxAutotune(TestCase):
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @parametrize("dynamic", (True, False))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
     )
-    def test_max_autotune_decompose_k(self, sizes, dynamic):
+    def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
+        fp16_red_setting = (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        )
+        bf16_red_setting = (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        )
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
         M, N, K = sizes
 
-        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
-        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+        a = torch.randn(M, K, dtype=dtype, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=dtype, device="cuda", requires_grad=True)
 
         possible_splits = range(2, min(K // M, K // N) + 1)
 
@@ -1282,6 +1292,13 @@ class TestMaxAutotune(TestCase):
                 atol=1e-2,
                 rtol=1e-2,
             )
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            fp16_red_setting
+        )
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            bf16_red_setting
+        )
 
 
 @instantiate_parametrized_tests

@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
@@ -238,6 +239,9 @@ C10_API std::optional<double> tryToNumber<double>(const char* symbol);
 template <>
 C10_API std::optional<double> tryToNumber<double>(const std::string& symbol);
 
+C10_API std::vector<std::string_view> split(
+    std::string_view target,
+    char delimiter);
 } // namespace c10
 
 C10_CLANG_DIAGNOSTIC_POP()

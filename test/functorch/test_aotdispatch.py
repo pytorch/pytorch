@@ -4565,13 +4565,11 @@ def forward(self, arg0_1, arg1_1):
             """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    select = torch.ops.aten.select.int(cos, 0, 0);  select = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
     getitem = map_impl[0];  map_impl = None
     sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
-    select_1 = torch.ops.aten.select.int(cos, 0, 0);  select_1 = None
     body_graph_1 = self.body_graph_1
     map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
     getitem_1 = map_impl_1[0];  map_impl_1 = None
@@ -5108,8 +5106,6 @@ def forward(self, arg0_1):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, 4)
-    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = add_1 = None
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     return (cos,)""",
         )
@@ -5118,8 +5114,6 @@ def forward(self, arg0_1):
             gm.false_graph_0.code.strip(),
             """\
 def forward(self, arg0_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, 5)
-    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = add_1 = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     return (sin,)""",
         )

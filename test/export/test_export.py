@@ -343,6 +343,23 @@ class TestDynamismExpression(TestCase):
         seq_len = torch.tensor(5)
         torch.export.export(MySlice(), args=(x, seq_len))
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_reshape_view_backed_size_oblivious(self):
+        N = 3
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                y = x[:-1, :]  # [s0 - 1, 32]
+                stacked = torch.stack([y] * N, dim=0)  # [N * (s0 - 1), 32]
+                reshaped = stacked.reshape(-1, N, 32)  # [(s0 - 1), N, 32]
+                return reshaped
+
+        inps = (torch.randn(10, 32),)
+        spec = {
+            "x": (Dim.AUTO, Dim.STATIC),
+        }
+        ep = export(MyModel(), inps, dynamic_shapes=spec)
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
@@ -4421,10 +4438,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}.*\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}(.*\n)+"
+            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}.*\n"
+            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}(.*\n)+"
             f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
-            f".*{re.escape('or r.shape[1], `u2` with items[2] in Ne(Mod(u1, u2), 0) and its negation.')}",
+            f".*{re.escape('or r.shape[1], `u2` with items[2] in Eq(Mod(u1, u2), 0) and its negation.')}",
         ):
             export(N(), (t,), strict=strict)
 

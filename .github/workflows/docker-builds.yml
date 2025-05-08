@@ -86,8 +86,6 @@ jobs:
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
-    env:
-      DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:
       - name: Clean workspace
         shell: bash
@@ -108,9 +106,21 @@ jobs:
         id: build-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: ${{ matrix.docker-image-name }}
+          docker-image-name: ci-image:${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
+
+      - name: Push docker image to old name
+        shell: bash
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
+        run: |
+          # This can be deleted after people have rebased their PRs/the new name has been in main for a while
+          set -euox pipefail
+          docker_image_name="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}"
+          foldersha=${ECR_DOCKER_IMAGE##*-}
+          docker tag "${ECR_DOCKER_IMAGE}" "${docker_image_name}:${foldersha}"
+          docker push "${docker_image_name}:${foldersha}"
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -124,7 +134,6 @@ jobs:
         env:
           ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          IMAGE_NAME: ${{ matrix.docker-image-name }}
         with:
           shell: bash
           timeout_minutes: 30
@@ -135,8 +144,8 @@ jobs:
             tag=${ECR_DOCKER_IMAGE##*:}
             # Push docker image to the ghcr.io
             echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
-            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
-            docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
+            docker push "${ghcr_image}:${tag}"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace

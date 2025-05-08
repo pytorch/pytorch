@@ -14,8 +14,9 @@ import pickle
 import shutil
 import time
 import traceback
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
@@ -39,7 +40,11 @@ from torch._inductor.codecache import (
     sha256_hash,
     write_atomic,
 )
-from torch._inductor.output_code import CompiledFxGraphConstants
+from torch._inductor.output_code import (
+    CompiledFxGraph,
+    CompiledFxGraphConstants,
+    OutputCode,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
@@ -52,7 +57,6 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
-    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
@@ -65,7 +69,6 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.cudagraph_utils import BoxedDeviceIndex
-    from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -368,12 +371,29 @@ def autograd_cache_key(
     return key, debug_lines
 
 
+TOut = TypeVar("TOut", bound=OutputCode)
+
+
+class InductorOutput(Generic[TOut], ABC):
+    """
+    Class representing a single inductor output
+    """
+
+    @abstractmethod
+    def load(self, example_inputs) -> TOut:
+        ...
+
+    @abstractmethod
+    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut:
+        ...
+
+
 @dataclass
-class FXGraphCacheLoadable:
+class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_cache_info: tuple[str, list[str]]
     fx_graph_guard_expr: Optional[str]
 
-    def is_backward(self) -> bool:
+    def _is_backward(self) -> bool:
         return False
 
     def load(self, example_inputs) -> CompiledFxGraph:
@@ -411,7 +431,7 @@ class FXGraphCacheLoadable:
             example_inputs,
             local=True,
             remote_cache=remote_cache,
-            is_backward=self.is_backward(),
+            is_backward=self._is_backward(),
             constants=constants,
             evaluate_guards=check_exact_guard_match,
         )
@@ -452,36 +472,54 @@ class FXGraphCacheLoadable:
 
 
 @dataclass
-class CompiledForward(FXGraphCacheLoadable):
+class CompiledForward(FxGraphCacheLoadable):
     """
     Cacheable entry for a forward function
     """
 
-    def is_backward(self) -> bool:
+    def _is_backward(self) -> bool:
         return False
 
 
 @dataclass
-class CompiledBackward(FXGraphCacheLoadable):
-    """
-    Cacheable entry for a forward function
-    """
-
+class GenericCompiledBackward(InductorOutput[TOut]):
     # Used by AOTDispatchAutograd.post_compile
     backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
 
-    def is_backward(self) -> bool:
+
+@dataclass
+class CompiledBackward(GenericCompiledBackward[CompiledFxGraph], FxGraphCacheLoadable):
+    """
+    Cacheable entry for a forward function
+    """
+
+    def _is_backward(self) -> bool:
         return True
 
 
+TForward = TypeVar("TForward", bound=InductorOutput)
+TBackward = TypeVar("TBackward", bound=GenericCompiledBackward)
+
+
 @dataclass
-class AOTAutogradCacheEntry:
-    """A single entry into the cache."""
+class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
+    """A single entry into the cache, genericized by Forward and Backward types.
+
+    A TForward is always an InductorOutput of some sort, which represents the
+    forward graph of the compile.
+    A TBackward is an InductorOutput + metadata about the backward, useful for specific
+    backward-only wrappers. This type is encapsulated by GenericCompiledBackward.
+
+    Each AOTAutogradCacheEntry is essentially parameterized by 1. the method of loading
+    from the cache (either Bundled or UnBundled), and 2. The type of the output. For now,
+    the only type of output we support is Python Wrapper output, i.e. OutputCode.CompiledFxGraph,
+    but the same technique works for C++ wrapper code; we'd just add an extra InductorOutput type.
+    """
 
     # Forward and Backward info
-    compiled_fw: CompiledForward
-    compiled_bw: Optional[CompiledBackward]
+    compiled_fw: TForward
+    compiled_bw: Optional[TBackward]
 
     # Code of the joint graph using print_readable()
     # Used for logging purposes
@@ -512,9 +550,6 @@ class AOTAutogradCacheEntry:
     sanitized_aot_config: AOTConfig
 
     guards_expr: Optional[str]
-
-    # # Used by compiled autograd
-    cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo]
 
     # Turn cache entry into the original callable
     def wrap_post_compile(
@@ -661,7 +696,7 @@ class AOTAutogradCacheEntry:
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                self.cached_lazy_backward_info,
+                None,  # lazy_backward_info
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
@@ -690,6 +725,15 @@ class AOTAutogradCacheEntry:
             assert check is True
 
         return compiled_function
+
+
+class AOTAutogradCacheEntry(
+    GenericAOTAutogradCacheEntry[CompiledForward, CompiledBackward]
+):
+    """
+    Regular AOTAutogradCacheEntry: saves the forward/backward FxGraphCache keys
+    and looks them up in FxGraphCache on load
+    """
 
 
 @contextlib.contextmanager
@@ -722,7 +766,7 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
             setattr(gm, field, value)
 
 
-class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
+class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """
     Caches the results of running AOTAutograd. This class mostly handles the save and load logic, whereas
     AOTAutogradCacheEntry handles the wrapping/unwrapping logic.
@@ -796,9 +840,9 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(
-                    cache_key, local, remote, args
-                )
+                entry: Optional[
+                    GenericAOTAutogradCacheEntry
+                ] = AOTAutogradCache._lookup(cache_key, local, remote, args)
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
@@ -948,7 +992,7 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
     @staticmethod
     def _lookup(
         key: str, local: bool, remote: bool, args: list[Any]
-    ) -> Optional[AOTAutogradCacheEntry]:
+    ) -> Optional[GenericAOTAutogradCacheEntry]:
         """Given a key generated by AOTAutogradCachePickler, look up its location in the cache."""
         remote_cache: Optional[RemoteCache[JsonDataTy]] = None
         if remote:
@@ -993,7 +1037,7 @@ class AOTAutogradCache(GuardedCache[AOTAutogradCacheEntry]):
         write_atomic(path, content)
 
     @staticmethod
-    def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
+    def save(key: str, entry: GenericAOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
             check_metadata_cacheable(entry.runtime_metadata)
