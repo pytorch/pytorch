@@ -396,17 +396,21 @@ class _MinimizerBase:
             if self.module_exporter:
                 if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
                     result_key = result_key[-1]
+                # If the result is still a tuple (happens in non-sequential mode),
+                # we only use the first element as name.
+                if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
+                    result_key = str(result_key[0])
                 # pyre-ignore[29]: not a function
                 self.module_exporter(
                     a_input,
                     submodule,
-                    str(result_key[0]) + "_cpu",  # type: ignore[index]
+                    result_key + "_cpu",
                 )
                 # pyre-ignore[29]: not a function
                 self.module_exporter(
                     b_input,
                     submodule,
-                    str(result_key[0]) + "_acc",  # type: ignore[index]
+                    result_key + "_acc",
                 )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
 
