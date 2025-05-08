@@ -91,7 +91,7 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
   uint64_t s = 0;
   if (!is_cuda) {
 #ifdef _WIN32
-    s = (uint64_t)std::chrono::high_resolution_clock::now()
+    s = (uint64_t)std::chrono::steady_clock::now()
             .time_since_epoch()
             .count();
 #elif defined(__SGX_ENABLED__)
