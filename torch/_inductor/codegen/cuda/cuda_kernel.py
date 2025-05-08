@@ -237,7 +237,6 @@ class CUDATemplateKernel(CUDAKernel):
         inputs: list[IRNode],
         outputs: list[IRNode],
         epilogue_inputs: list[IRNode],
-        epilogue_outputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -283,13 +282,6 @@ class CUDATemplateKernel(CUDAKernel):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
-
-        for epilogue_output in epilogue_outputs:
-            if epilogue_output is not None:
-                self.named_nodes[epilogue_output.get_name()] = epilogue_output
-                self.args.output_buffers[epilogue_output.get_name()] = (
-                    epilogue_output.get_name()
-                )
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
@@ -538,6 +530,12 @@ class CUDATemplateKernel(CUDAKernel):
             raise RuntimeError(
                 f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
             )
+
+    def store(self, name: str, index: Expr, value: Any, mode: Any = None) -> None:
+        """
+        Mock store function for memory planning to optimize allocations properly.
+        """
+        self.store_buffer_names.add(name)
 
 
 class CUDATemplateCaller(ChoiceCaller):

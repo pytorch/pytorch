@@ -92,6 +92,12 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
     bundle_triton_into_fx_graph_cache_default()
 )
 
+non_blocking_remote_cache_write: bool = Config(
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
+    default=True,
+)
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
@@ -1325,6 +1331,12 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+
+    # Whether to use CUTLASS EVT for epilogue fusion
+    cutlass_epilogue_fusion_enabled = False
+
+    # Whether to only use TMA-compatible kernels in CUTLASS
+    cutlass_tma_only = False
 
     # Path to CUDA NVCC.
     # NVCC search order:

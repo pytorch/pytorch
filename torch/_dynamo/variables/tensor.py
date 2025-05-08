@@ -394,6 +394,13 @@ class TensorVariable(VariableTracker):
         from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
+        # TODO - This is not a good solution but solves an accuracy issue.
+        # Today, var_getattr returns GetAttrVariable for both non-existent
+        # attributes and existing attributes. This is a bug and requires more
+        # deep dive.
+        if name in ("size", "stride"):
+            return ConstantVariable(True)
+
         try:
             var = BuiltinVariable(getattr).call_function(
                 tx, [self, ConstantVariable(name)], {}

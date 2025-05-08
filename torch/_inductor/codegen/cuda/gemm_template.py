@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import enum
+import functools
 import logging
 import re
 import time
@@ -9,6 +10,8 @@ from typing import Any, Optional, Union
 
 import torch
 from torch._inductor.scheduler import BaseSchedulerNode
+from torch._inductor.select_algorithm import create_inputs_key
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -400,11 +403,15 @@ int main(int argc, char** argv) {
 """  # noqa: B950
 
 
+@clear_on_fresh_inductor_cache
 class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     """
     CUTLASS GEMM Template, which is used to generate CUTLASS GEMM kernels
     including those which allow flexible fusions with epilogues.
     """
+
+    filtered_ops_cache: dict[str, list[Any]] = {}
+    cache_clear = staticmethod(filtered_ops_cache.clear)
 
     def __init__(
         self,
@@ -430,6 +437,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
         )
+
+        self.cache_key: str = create_inputs_key(self.input_nodes)
 
     @staticmethod
     @abstractmethod
@@ -630,6 +639,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return cutlass_lib.LayoutType.RowMajor
 
     @staticmethod
+    @functools.lru_cache(32)
     def layout_match(
         torch_layout: ir.Layout,
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined] # noqa: F821
@@ -852,6 +862,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             return None
 
+        if inductor_cuda_config.cutlass_tma_only and not self._has_tma_epilogue(op):
+            return None
+
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
@@ -911,6 +924,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
+        if self.cache_key in self.filtered_ops_cache:
+            log.debug("Using cached ops for %s", self.cache_key)
+            return self.filtered_ops_cache[self.cache_key]
+
         # if changed, need to also change CUTLASS_OPERATION_KIND
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
@@ -922,16 +939,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     filter_res = self.filter_op(op)
                     if (
                         filter_res is not None
-                        and filter_res.configuration_name() != op.configuration_name()
-                    ):
-                        log.debug(
-                            "Detected change in configuration name. Original "
-                            "name: %s, filtered configuration name: %s",
-                            op.configuration_name(),
-                            filter_res.configuration_name(),
-                        )
-                    if (
-                        filter_res is not None
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
@@ -941,7 +948,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        ret_res = sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        if len(self.filtered_ops_cache) < 50:
+            self.filtered_ops_cache[self.cache_key] = ret_res
+        else:
+            log.debug("Not caching ops since filtered_ops_cache has reached size 50.")
+        return ret_res
 
     def gemm_mode(self) -> str:
         """
@@ -1056,32 +1068,43 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             read_names = OrderedSet(evt_read_names) - OrderedSet(evt_write_names)
             write_names = OrderedSet(evt_write_names)
-
+            assert write_names, "There should be at least one write"
+            output_D_name = next(
+                name for name, rename in buffer_renames.items() if rename == "D"
+            )
             name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
-            epilogue_inputs = [name_to_buffer[name] for name in read_names]
-            epilogue_outputs = [name_to_buffer[name] for name in write_names]
-
+            output_D = name_to_buffer[output_D_name]
             evt_name, evt_args, evt_code = self._render_evt(
                 op,
                 evt_py_code,
                 evt_read_names,
                 evt_write_names,
                 buffer_renames,
+                name_to_buffer[output_D_name].get_layout().dtype,
                 Y.get_layout().dtype,
-                W.get_layout().dtype,
             )
+
+            # Don't include implicit accumulator input in epilogue inputs
+            epilogue_inputs = [
+                name_to_buffer[name] for name in read_names if name != Y.get_name()
+            ]
+            epilogue_outputs = [name_to_buffer[name] for name in write_names]
+
+            # In the template above, Y is set to D. However in the EVT case, it's possible that
+            # the original accumulator isn't returned, and a different write is assigned to D
+            assert isinstance(output_D, Buffer)
+            Y = output_D
         else:
             evt_name = None
             epilogue_inputs = []
-            epilogue_outputs = []
+            epilogue_outputs = [Y]
             evt_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
             evt_code = ""
 
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs,  # type: ignore[arg-type]
-            outputs=[Y],
+            outputs=epilogue_outputs,  # type: ignore[arg-type]
             epilogue_inputs=epilogue_inputs,
-            epilogue_outputs=epilogue_outputs,
             names_str=names_str,
             input_reorder=input_reorder,
         )
@@ -1191,6 +1214,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
+    @functools.lru_cache(1)
     def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
@@ -1313,14 +1337,15 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
+        examples = create_example_tensors(
+            read_names,
+            write_names,
+            buffer_renames,
+            name_to_buffer,  # type: ignore[arg-type]
+        )
         evt_name, evt_args, evt_code = trace(
             evt_py_code,
-            create_example_tensors(
-                read_names,
-                write_names,
-                buffer_renames,
-                name_to_buffer,  # type: ignore[arg-type]
-            ),
+            examples,
             acc_dtype,
             output_dtype,
             op.tile_description,  # type: ignore[attr-defined]

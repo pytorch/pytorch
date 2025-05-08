@@ -4,6 +4,7 @@ import math
 import os
 import re
 import sysconfig
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -28,7 +29,7 @@ from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
 from torch._inductor.exc import InductorError
-from torch._inductor.ir import ChoiceCaller, FixedLayout
+from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
@@ -59,6 +60,32 @@ def _get_path_without_sccache() -> str:
     path_envs = os.environ.get("PATH", "").split(":")
     path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
     return ":".join(path_envs)
+
+
+un_ops_under_test = [torch.relu, torch.sigmoid, torch.tanh]
+bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
+
+evt_all_ops = evt_bin_ops = parametrize("op", [torch.add], name_fn=lambda f: f.__name__)
+
+
+def gen_args(op, shape):
+    if op in bin_ops_under_test:
+        return (torch.rand(*shape, device="cuda:0").half(),)
+    else:
+        return ()
+
+
+use_evt_config = config.patch(
+    {
+        "max_autotune": True,
+        "max_autotune_gemm_backends": "CUTLASS",
+        "cuda.cutlass_max_profiling_configs": 1,
+        "autotune_fallback_to_aten": False,
+        "benchmark_epilogue_fusion": False,
+        "cuda.cutlass_tma_only": True,  # EVT doesn't support benchmark fusion yet
+        "cuda.cutlass_epilogue_fusion_enabled": True,
+    }
+)
 
 
 @instantiate_parametrized_tests
@@ -106,34 +133,26 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
                 "cuda.cutlass_backend_min_gemm_size": 100000,
                 "cuda.cutlass_max_profiling_configs": 2,
-                # allow fallback to aten as intended
-                "autotune_fallback_to_aten": True,
             }
         ):
-            from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+            def select_no_algorithm(*args, **kwargs):
+                raise NoValidChoicesError
 
             with mock.patch(
-                "torch._inductor.select_algorithm.autotune_select_algorithm"
-            ) as mocked_select_algorithm:
-                Y_compiled = torch.compile(mm, dynamic=False)(a, b)
-                Y = mm(a, b)
-                passed_choice_callers: list[ChoiceCaller] = mocked_select_algorithm[0][
-                    1
-                ]
-                assert all(
-                    isinstance(cc, ChoiceCaller) for cc in passed_choice_callers
-                ), "Argument 1 to autotune_select_algorithm should be a list of ChoiceCaller instances"
-                # We expect that no Cutlass Kernels are considered, due to the threshold
-                assert all(
-                    not isinstance(cc, CUDATemplateCaller)
-                    for cc in passed_choice_callers
-                ), "Cutlass Kernels should have been filtered, GEMM size is too small"
-            torch.testing.assert_close(Y_compiled, Y)
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa:
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
+                    _ = torch.compile(mm, dynamic=False)(a, b)
+                args, _ = sa.call_args
+                _, choices, _, __ = args
+
+                self.assertEqual(choices, [])
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
@@ -864,8 +883,8 @@ class TestCutlassBackend(TestCase):
             f"('cuda', 'torch.float16', {k}, {n}, {n}, 1, 0)]"
         ]["high"]
         cutlass_kernels_count = 0
-        for kernel, time in high.items():
-            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+        for kernel, duration in high.items():
+            if kernel.startswith("cutlass_gemm") and not math.isinf(duration):
                 cutlass_kernels_count += 1
         assert cutlass_kernels_count > 0
 
@@ -1316,6 +1335,9 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @config.patch(
+        {"benchmark_epilogue_fusion": False, "cuda.cutlass_tma_only": True}
+    )  # EVT doesn't support benchmark fusion yet
     def test_evt_flexible_layout(self):
         class TestModel(torch.nn.Module):
             def forward(self, B):
@@ -1329,15 +1351,95 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "benchmark_epilogue_fusion": False,  # does not support benchmark fusion yet
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 20,
+                "cuda.cutlass_max_profiling_configs": 1,
                 "autotune_fallback_to_aten": False,
             }
         ):
             _ = torch.compile(model)(B)
 
-        self.assertEqual(torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1)
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_filtered_ops_cache(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, B):
+                A = torch.zeros_like(B)
+                for _ in range(100):
+                    A = A @ B
+                return A
+
+        M = 1024
+        B = torch.randn(M, M).cuda().half()
+        model = TestModel().cuda()
+
+        start_time = time.time()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            _ = torch.compile(model)(B)
+        self.assertTrue(time.time() - start_time < 100)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_fusions_basic(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                res = (a @ b).relu()  # add extra activation to not hit addmm path
+                return res  # op(res, *extra_args)
+
+        M = 16
+        N = 16
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_broadcasting(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_mixed_dtypes(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_multi_op(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_multi_output(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_return_accumulator(self):
+        pass
 
 
 if __name__ == "__main__":
