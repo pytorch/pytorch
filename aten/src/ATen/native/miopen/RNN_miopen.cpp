@@ -76,14 +76,14 @@ namespace {
 
     struct DropoutState {
         DropoutState(size_t size) : size(size), data(NULL) {
-            data = c10::hip::HIPCachingAllocator::raw_alloc(size);
+            data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
         }
         DropoutState(const DropoutState&) = delete;
         DropoutState(DropoutState&&) = default;
         DropoutState& operator=(DropoutState&&) = default;
         ~DropoutState() {
             if (data) {
-                c10::hip::HIPCachingAllocator::raw_delete(data);
+                c10::cuda::CUDACachingAllocator::raw_delete(data);
             }
         }
 
