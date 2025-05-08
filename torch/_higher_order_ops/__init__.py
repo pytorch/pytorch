@@ -41,6 +41,7 @@ __all__ = [
     "while_loop",
     "invoke_subgraph",
     "scan",
+    "map",
     "flex_attention",
     "flex_attention_backward",
     "hints_wrapper",
