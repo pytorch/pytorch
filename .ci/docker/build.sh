@@ -95,12 +95,10 @@ if [[ "$image" == *rocm* ]]; then
   _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
 fi
 
-tag=$(echo $image | awk -F':' '{print $2}')
-
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
-case "$tag" in
+case "$image" in
   pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11)
     CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
