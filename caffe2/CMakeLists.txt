@@ -979,10 +979,21 @@ elseif(USE_CUDA)
   endif()
 
   # Use env var for these for now for prototyping purposes
-  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Enable NVSHMEM support")
-  set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
+  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Whether to build with NVSHMEM support")
+  # If user has specified NVSHMEM_HOME, we use it;
+  # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
+  if($ENV{NVSHMEM_HOME})
+    set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
+  endif()
+
+  if(USE_NVSHMEM AND NOT DEFINED NVSHMEM_HOME)
+    message(WARNING "USE_NVSHMEM set to 1 but NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to the NVSHMEM build dir")
+    # Disable nvshmem if NVSHMEM_HOME is not found
+    set(USE_NVSHMEM FALSE CACHE BOOL "Whether to build with NVSHMEM support")
+  endif()
 
   if(USE_NVSHMEM)
+    message("Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
     set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
     set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
 
@@ -1000,18 +1011,17 @@ elseif(USE_CUDA)
     set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
     target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
+    target_link_directories(nvshmem_extension PRIVATE ${NVSHMEM_LIB_DIR})
     target_link_libraries(nvshmem_extension PRIVATE
-        ${NVSHMEM_LIB_DIR}/libnvshmem.a
-        ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
+        # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
+        # otherwise, we could just write `nvshmem_host`
+        ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
+        nvshmem_device
     )
-    target_link_libraries(nvshmem_extension PRIVATE mlx5)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
-    install(
-        FILES ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
-        DESTINATION lib
-    )
   endif()
+
   if(USE_UCC)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
