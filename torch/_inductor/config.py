@@ -41,7 +41,7 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
 
 def static_cuda_launcher_default() -> bool:
     result = get_tristate_env(
-        "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", True if not is_fbcode() else False
+        "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", True
     )
     assert result is not None
     return result
