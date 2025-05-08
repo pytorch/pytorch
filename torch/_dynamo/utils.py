@@ -2728,7 +2728,8 @@ def same(
     res,
     fp64_ref=None,
     cos_similarity=False,
-    tol=1e-4,
+    atol=1e-4,
+    rtol=1e-4,
     equal_nan=False,
     exact_dtype=True,
     relax_numpy_equality=False,
@@ -2755,7 +2756,8 @@ def same(
                 bi,
                 fp64_refi,
                 cos_similarity,
-                tol,
+                atol,
+                rtol,
                 equal_nan,
                 exact_dtype,
                 relax_numpy_equality,
@@ -2775,7 +2777,8 @@ def same(
             res.loss,
             fp64_ref.loss,
             cos_similarity,
-            tol,
+            atol,
+            rtol,
             equal_nan,
             exact_dtype,
             relax_numpy_equality,
@@ -2796,7 +2799,8 @@ def same(
                     res[k],
                     fp64_ref[k],
                     cos_similarity=cos_similarity,
-                    tol=tol,
+                    atol=atol,
+                    rtol=rtol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
                     relax_numpy_equality=relax_numpy_equality,
@@ -2838,8 +2842,8 @@ def same(
                 r = torch.allclose(
                     ref.to(dtype=torch.uint8),
                     res.to(dtype=torch.uint8),
-                    atol=tol,
-                    rtol=tol,
+                    atol=atol,
+                    rtol=rtol,
                     equal_nan=equal_nan,
                 )
                 if not r:
@@ -2849,7 +2853,7 @@ def same(
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
-            if torch.allclose(ref, res, atol=tol, rtol=tol, equal_nan=True):
+            if torch.allclose(ref, res, atol=atol, rtol=rtol, equal_nan=True):
                 # early exit that handles zero/nan better
                 # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
                 return True
@@ -2862,7 +2866,7 @@ def same(
                 ref = ref.to(res.dtype)
 
             # First try usual allclose
-            if torch.allclose(ref, res, atol=tol, rtol=tol, equal_nan=equal_nan):
+            if torch.allclose(ref, res, atol=atol, rtol=rtol, equal_nan=equal_nan):
                 return True
 
             # Check error from fp64 version
@@ -2922,8 +2926,8 @@ def same(
                     elif (
                         fp64_ref.numel() < 1000
                         or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
-                        # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
-                        or tol >= 2 * 1e-2
+                        # large atol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                        or atol >= 2 * 1e-2
                     ):
                         # In the presence of noise, noise might dominate our error
                         # metric for smaller tensors.
@@ -2933,7 +2937,7 @@ def same(
 
                 multiplier = get_multiplier()
 
-                passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
+                passes_test = res_error <= (multiplier * ref_error + atol / 10.0)
                 if (
                     not passes_test
                     and equal_nan
@@ -2946,14 +2950,14 @@ def same(
                     passes_test = True
                 if not passes_test:
                     log_error(
-                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f"
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, atol: %f"
                         ", use_larger_multiplier_for_smaller_tensor: %d",
                         res_error,
                         ref_error,
                         res.size(),
                         res.dtype,
                         multiplier,
-                        tol,
+                        atol,
                         use_larger_multiplier_for_smaller_tensor,
                     )
                 return passes_test
@@ -2961,7 +2965,7 @@ def same(
             if ignore_non_fp:
                 return True
 
-            log_error("Accuracy failed: allclose not within tol=%s", tol)
+            log_error("Accuracy failed: allclose not within atol=%s", atol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
         if ignore_non_fp:
@@ -2985,7 +2989,8 @@ def same(
             torch.as_tensor(res),
             fp64_ref,
             cos_similarity=cos_similarity,
-            tol=tol,
+            atol=atol,
+            rtol=rtol,
             equal_nan=equal_nan,
             exact_dtype=exact_dtype,
             relax_numpy_equality=relax_numpy_equality,
@@ -3013,7 +3018,8 @@ def same(
                 getattr(res, key),
                 getattr(fp64_ref, key),
                 cos_similarity=cos_similarity,
-                tol=tol,
+                atol=atol,
+                rtol=rtol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
                 relax_numpy_equality=relax_numpy_equality,
