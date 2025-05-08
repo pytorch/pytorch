@@ -173,11 +173,18 @@ class Interpreter:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
                     msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
-                    if (
-                        isinstance(self.module, GraphModule)
+                    can_print_graph = (
+                        isinstance(self.module, torch.fx.GraphModule)
                         and self.module.graph is not None
                         and isinstance(self.module.graph, torch.fx.Graph)
-                    ):
+                    )
+                    can_print_graph_children = all(
+                        isinstance(x, torch.fx.GraphModule)
+                        and x.graph is not None
+                        and isinstance(x.graph, torch.fx.Graph)
+                        for _, x in self.module.named_children()
+                    )
+                    if can_print_graph and can_print_graph_children:
                         msg += f"\nGraphModule: {self.module.print_readable(print_output=False, include_stride=True)}\n"
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     e.args = (msg,) + e.args[1:]
