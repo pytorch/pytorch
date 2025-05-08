@@ -70,5 +70,4 @@ from torch.backends import (
     nnpack as nnpack,
     openmp as openmp,
     quantized as quantized,
-    xpu as xpu,
 )

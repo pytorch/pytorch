@@ -194,10 +194,8 @@ sycl::event matmul(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   if (m1_dt == dnnl::memory::data_type::f32) {
-    auto precision = at::globalContext().float32MatmulPrecision();
-    if (precision == at::Float32MatmulPrecision::MEDIUM) {
-      pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16);
-    } else if (precision == at::Float32MatmulPrecision::HIGH) {
+    bool allow_tf32 = at::globalContext().allowTF32OneDNN();
+    if (allow_tf32) {
       pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
     } else {
       pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);

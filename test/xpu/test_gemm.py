@@ -28,23 +28,24 @@ from torch.testing._internal.common_utils import (
 
 @contextlib.contextmanager
 def tf32_off():
-    old_matmul_precision = torch.backends.xpu.matmul.allow_tf32
-    try:
+    enabled = torch.backends.mkldnn.enabled
+    deterministic = torch.backends.mkldnn.deterministic
+    with torch.backends.mkldnn.flags(enabled=enabled, deterministic=deterministic, allow_tf32=False):
         yield
-    finally:
-        torch.backends.xpu.matmul.allow_tf32 = old_matmul_precision
+        
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_matmul_precision = torch.backends.xpu.matmul.allow_tf32
+    old_matmul_precision = torch.backends.mkldnn.allow_tf32
+    enabled = torch.backends.mkldnn.enabled
+    deterministic = torch.backends.mkldnn.deterministic
     old_precision = self.precision
     try:
-        torch.backends.xpu.matmul.allow_tf32 = True
         self.precision = tf32_precision
-        yield
+        with torch.backends.mkldnn.flags(enabled=enabled, deterministic=deterministic, allow_tf32=True):
+            yield
     finally:
-        torch.backends.xpu.matmul.allow_tf32 = old_matmul_precision
         self.precision = old_precision
 
 
