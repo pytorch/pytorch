@@ -522,9 +522,8 @@ elif [ "$HAS_TRITON" = "yes" ]; then
   exit 1
 fi
 
-# I don't want to parse requirements-ci.txt to find the version, so it's going
-# to be hardcoded here as well, sorry.  Executorch reinstalls cmake and I'm not
-# sure if they support 4.0.0 yet, so exclude them from this check.
+# Sanity check cmake version.  Executorch reinstalls cmake and I'm not sure if
+# they support 4.0.0 yet, so exclude them from this check.
 CMAKE_VERSION=$(drun cmake --version)
 if [[ "$EXECUTORCH" != *yes* && "$CMAKE_VERSION" != *4.* ]]; then
   echo "CMake version is not 4.0.0:"
