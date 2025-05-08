@@ -217,6 +217,8 @@ def max_clock_rate():
         # functionality in triton.testing or via pyamdsmi enablement. Required
         # for test_snode_runtime unit tests.
         gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+        if "gfx950" in gcn_arch:
+            return 1700
         if "gfx94" in gcn_arch:
             return 1700
         elif "gfx90a" in gcn_arch:
