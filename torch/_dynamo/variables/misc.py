@@ -1089,44 +1089,13 @@ class GetAttrVariable(VariableTracker):
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not isinstance(self.obj, variables.NNModuleVariable):
-            unimplemented_v2(
-                gb_type="Unsupported instance variable access",
-                context=f"const_getattr {self} {name}",
-                explanation="Dynamo only supports constant attribute lookups "
-                "on NNModuleVariable instances.",
-                hints=[
-                    f"Ensure that `{self.obj}` is an `NNModuleVariable` instance.",
-                ],
-            )
+            raise NotImplementedError
         step1 = tx.output.get_submodule(self.obj.module_key)
         if self.name not in step1.__dict__:
-            unimplemented_v2(
-                gb_type="Unsupported constant folding",
-                context=f"const_getattr {self} {name}",
-                explanation="Dynamo tried to access the nested attribute "
-                f"`{self.obj}.{self.name}.{name}` during constant folding, "
-                "but could not find the intermediate attribute "
-                f"`{self.name}` directly in the `{self.obj}` instance "
-                f"(key: {self.obj.module_key}).",
-                hints=[
-                    f"Ensure that the attribute `{self.name}` is defined "
-                    f"directly in the `__dict__` of `{self.obj}`.",
-                ],
-            )
+            raise NotImplementedError
         step2 = inspect.getattr_static(step1, self.name)
         if name not in step2.__dict__:
-            unimplemented_v2(
-                gb_type="Unsupported constant folding",
-                context=f"const_getattr {self} {name}",
-                explanation="Dynamo tried to access the nested attribute "
-                f"`{self.obj}.{self.name}.{name}` during constant folding. "
-                f"but could not find the attribute `{name}` directly in the "
-                f"`{self.obj}.{self.name}` instance (type: {type(step2).__name__}). ",
-                hints=[
-                    f"Ensure that the attribute `{name}` is defined "
-                    f"directly in the `__dict__` of `{self.obj}.{self.name}`.",
-                ],
-            )
+            raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
     def reconstruct(self, codegen: "PyCodegen"):
