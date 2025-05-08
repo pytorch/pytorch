@@ -9,7 +9,7 @@
 #pragma once
 
 #include <stddef.h>
-#ifdef _MSC_VER
+#if defined _MSC_VER || defined __QNX__
 #undef min
 #undef max
 #endif
