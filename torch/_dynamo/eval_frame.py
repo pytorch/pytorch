@@ -1896,7 +1896,26 @@ def export(
         return inner
 
 
-def optimize_assert(
+def optimize_assert(*args, **kwargs):
+    if kwargs.get("rebuild_ctx", None) is None:
+
+        def rebuild_ctx():
+            ca_kwargs_override = config.compiled_autograd_kwargs_override
+            if ca_kwargs_override:
+                assert not ca_kwargs_override["fullgraph"], (
+                    "can't override fullgraph if using optimize_assert"
+                )
+                # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
+                # is more complicated, we will add it in the future when needed.
+                assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
+                    f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
+                )
+
+        kwargs["rebuild_ctx"] = rebuild_ctx
+    return _optimize_assert(*args, **kwargs)
+
+
+def _optimize_assert(
     backend,
     *,
     hooks=Hooks(None, None, None),
