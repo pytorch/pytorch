@@ -838,12 +838,6 @@ aten::grid_sampler_3d_backward
 aten::grid_sampler_3d_backward.out
 aten::hamming_window
 aten::hamming_window.out
-aten::hamming_window.periodic
-aten::hamming_window.periodic_alpha
-aten::hamming_window.periodic_alpha_beta
-aten::hamming_window.periodic_alpha_beta_out
-aten::hamming_window.periodic_alpha_out
-aten::hamming_window.periodic_out
 aten::hann_window
 aten::hann_window.out
 aten::hann_window.periodic
