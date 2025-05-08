@@ -1028,6 +1028,11 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   TORCH_CHECK(iter.output().scalar_type() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
+  // Skip for empty iterators
+  if (iter.numel() == 0) {
+    return;
+  }
+
   auto convert_double_scalar = [](Tensor& t) {
     if (t.dim() != 0) {
       return;
