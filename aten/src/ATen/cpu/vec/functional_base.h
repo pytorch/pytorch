@@ -6,8 +6,24 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at::vec {
+namespace at {
+namespace detail {
+// We prefer to convert through float for reduced-precision floating
+// point types if we have a Vectorized specialization for float and we
+// don't have one for the actual type in question.
+template <typename T>
+struct should_prefer_converting_through_float
+    : std::bool_constant<
+          is_reduced_floating_point_v<T> &&
+          vec::is_vec_specialized_for_v<float> &&
+          !vec::is_vec_specialized_for_v<T>> {};
 
+template <typename T>
+constexpr auto should_prefer_converting_through_float_v =
+    should_prefer_converting_through_float<T>::value;
+} // namespace detail
+
+namespace vec {
 // slow path
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
@@ -444,4 +460,5 @@ inline void map4(
   }
 }
 
-} // namespace at::vec
+} // namespace vec
+} // namespace at
