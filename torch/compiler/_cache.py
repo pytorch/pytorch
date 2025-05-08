@@ -3,9 +3,10 @@ import dataclasses
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import chain
-from typing import Generator, Optional
+from typing import Optional
 
 from torch.utils._appending_byte_serializer import (
     AppendingByteSerializer,

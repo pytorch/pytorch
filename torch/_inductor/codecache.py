@@ -25,22 +25,22 @@ import threading
 import warnings
 from bisect import bisect_right
 from copy import copy
-from ctypes import CDLL, c_void_p, cdll
+from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from time import time, time_ns
 from types import ModuleType
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
+    cast,
     Generic,
     NoReturn,
     Optional,
+    TYPE_CHECKING,
     TypeVar,
     Union,
-    cast,
 )
 from typing_extensions import Self, override
 
@@ -58,12 +58,12 @@ from torch._inductor.codegen.rocm.compile_command import (
 from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
     _LINKER_SCRIPT,
+    _set_gpu_runtime_env,
     _TORCH_PATH,
+    _transform_cuda_paths,
     CppBuilder,
     CppOptions,
     CppTorchDeviceOptions,
-    _set_gpu_runtime_env,
-    _transform_cuda_paths,
     get_compiler_version_info,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
@@ -81,9 +81,9 @@ from torch._inductor.utils import (
 )
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
     FakeTensor,
     TensorMetadata,
-    extract_tensor_metadata,
 )
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
@@ -92,7 +92,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, has_hint, hint_int
+from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
@@ -424,9 +424,9 @@ def write_atomic(
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    assert isinstance(
-        content, (str, bytes)
-    ), "Only strings and byte arrays can be saved in the cache"
+    assert isinstance(content, (str, bytes)), (
+        "Only strings and byte arrays can be saved in the cache"
+    )
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1258,9 +1258,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         """
         from .compile_fx import CompiledFxGraph
 
-        assert isinstance(
-            compiled_graph, CompiledFxGraph
-        ), f"serialization for {type(compiled_graph)} NYI"
+        assert isinstance(compiled_graph, CompiledFxGraph), (
+            f"serialization for {type(compiled_graph)} NYI"
+        )
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
@@ -1462,9 +1462,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                     time_saved_ns // 1000,
                 )
                 if (
-                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                        time_saved_ns
-                    )
+                    ephemeral_increase
+                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
@@ -1750,9 +1749,9 @@ class AotCodeCompiler:
                 )
             )
             for k, v in config.aot_inductor.metadata.items():
-                assert isinstance(k, str) and isinstance(
-                    v, (str)
-                ), "Metadata must only contain strings"
+                assert isinstance(k, str) and isinstance(v, (str)), (
+                    "Metadata must only contain strings"
+                )
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
@@ -1915,9 +1914,7 @@ class AotCodeCompiler:
             # nodes json. The key in model_constants_config.json produced by package_sigmoid is the attribute name in the
             # user model code.
 
-            qual_name_to_id = (
-                {}
-            )  # Map from constant name to its name in constants folder
+            qual_name_to_id = {}  # Map from constant name to its name in constants folder
             for custom_obj_idx, (name, constant) in enumerate(
                 graph.torchbind_constants.items()
             ):
@@ -1967,11 +1964,9 @@ class AotCodeCompiler:
 
             so_builder = CppBuilder(
                 name=output_name,
-                sources=(
-                    [wrapper_o, kernel_o, consts_o, gpu_kernels_o]
-                    if gpu_kernels_o
-                    else [wrapper_o, kernel_o, consts_o]
-                ),
+                sources=[wrapper_o, kernel_o, consts_o, gpu_kernels_o]
+                if gpu_kernels_o
+                else [wrapper_o, kernel_o, consts_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -2150,9 +2145,9 @@ def _precompile_header(
     hashable_cmd_line: str,
     **compile_command: Any,
 ) -> str:
-    assert (
-        not _IS_WINDOWS
-    ), "CppBuilder does not currently support precompiling on Windows!"
+    assert not _IS_WINDOWS, (
+        "CppBuilder does not currently support precompiling on Windows!"
+    )
 
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.  This

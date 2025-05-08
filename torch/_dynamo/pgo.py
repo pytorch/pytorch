@@ -22,7 +22,7 @@ import pickle
 import re
 import zlib
 from collections import defaultdict
-from typing import TYPE_CHECKING, Optional, TypeVar, Union
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self, override
 
 import torch._dynamo.config

@@ -23,6 +23,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
     BypassFxGraphCache,
+    cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
@@ -30,14 +31,13 @@ from torch._inductor.codecache import (
     PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
-    cuda_compile_command,
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.graph import GraphLowering
-from torch._inductor.mock_cache import PatchCaches, Stats, global_stats
+from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.autotune_cache import AutotuneCacheArtifact
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.test_case import TestCase, run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
 from torch._library import capture_triton
 from torch.compiler._cache import (
@@ -45,13 +45,13 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    TEST_WITH_ROCM,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -163,7 +163,6 @@ class TestFxGraphCache(TestCase):
                 compiled_result.sum().backward()
                 self.assertEqual(a1.grad, a2.grad)
                 self.assertEqual(b1.grad, b2.grad)
-
             self.assertEqual(
                 counters["inductor"]["fxgraph_cache_miss"], grad_multiplier * 1
             )

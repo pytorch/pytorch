@@ -16,7 +16,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Generic, Optional, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override
 
 import torch
@@ -29,15 +29,15 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config
 from torch._inductor.codecache import (
+    _ident,
+    add_ephemeral_timeout_increase_for_distributed,
     BypassFxGraphCache,
+    create_cache,
+    extract_tensor_metadata_for_cache_key,
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     GuardedCache,
-    _ident,
-    add_ephemeral_timeout_increase_for_distributed,
-    create_cache,
-    extract_tensor_metadata_for_cache_key,
     sha256_hash,
     write_atomic,
 )
@@ -64,9 +64,9 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
+    post_compile,
     RuntimeWrapper,
     SubclassMeta,
-    post_compile,
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
 
@@ -385,10 +385,12 @@ class InductorOutput(Generic[TOut], ABC):
     """
 
     @abstractmethod
-    def load(self, example_inputs) -> TOut: ...
+    def load(self, example_inputs) -> TOut:
+        ...
 
     @abstractmethod
-    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut: ...
+    def post_compile(self, result: TOut, fx_config: _CompileFxKwargs) -> TOut:
+        ...
 
 
 @dataclass
@@ -850,9 +852,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                entry: Optional[GenericAOTAutogradCacheEntry] = (
-                    AOTAutogradCache._lookup(cache_key, local, remote, args)
-                )
+                entry: Optional[
+                    GenericAOTAutogradCacheEntry
+                ] = AOTAutogradCache._lookup(cache_key, local, remote, args)
                 if entry is not None:
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     log.info("AOTAutograd cache hit for key %s", cache_key)
@@ -1074,9 +1076,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             return None
 
         if remote:
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
-                AOTAutogradCache.get_remote_cache()
-            )
+            remote_cache: Optional[
+                RemoteCache[JsonDataTy]
+            ] = AOTAutogradCache.get_remote_cache()
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
