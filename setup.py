@@ -763,7 +763,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 os.makedirs(target_hipblaslt_dir, exist_ok=True)
                 self.copy_tree(hipblaslt_dir, target_hipblaslt_dir)
             else:
-                print("The specified environment variable does not exist.") 
+                report("The specified environment variable does not exist.") 
 
     def build_extensions(self):
         self.create_compile_commands()
