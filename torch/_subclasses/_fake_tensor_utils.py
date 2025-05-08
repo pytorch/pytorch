@@ -217,6 +217,10 @@ class _CacheKeyState:
     # We track the SymNodes so when we get the output we can see if it exactly
     # matches one of the inputs so we can uncache it properly.
     sym_node_lookup: dict[int, int]  # id(SymNode) -> index
+
+    # This is a list of all seen input sympy.Symbols. We use it when building
+    # the cache entry to see if the output value has any symbols that we didn't
+    # see on input. See _has_unrepresented_symbols().
     known_symbols: set[sympy.Symbol]
 
     # There are cases where we're asked to perform an op when we have no
@@ -249,8 +253,7 @@ class _CacheKeyState:
             result.append(_InputBackref(self.sym_node_lookup[node_id]))
         else:
             self.sym_node_lookup[node_id] = len(result)
-            for symbol in arg.node.expr.free_symbols:
-                self.known_symbols.add(symbol)
+            self.known_symbols.update(arg.node.expr.free_symbols)
             if self.shape_env is None:
                 self.shape_env = arg.node.shape_env
             result.append(_PySymInputStub(arg))

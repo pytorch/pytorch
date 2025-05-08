@@ -1669,7 +1669,9 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
         output: Optional[FakeTensor],
     ) -> None:
-        # Is this even possible?
+        # Is this even possible? According to the signature this can be None but
+        # not `int`. So either the signature is a lie or (part of) this line is
+        # unnecessary...
         if isinstance(output, (int, type(None))):
             return
 
