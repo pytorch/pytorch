@@ -525,6 +525,14 @@ class CKTileGemmTemplate(CKTileTemplate):
         else:
             raise AssertionError(f"Invalid layout {op.layout_b=}")
 
+        if op.epilogue == "CShuffle":
+            if (
+                op.layout_c == "Row"
+                and is_static_int(N)
+                and N % (16 / ck_dtype_to_size[op.datatype_c]) != 0
+            ):
+                return False
+
         return True
 
     def filter_op(self, op: "CKTileGemmOperation"):
