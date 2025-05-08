@@ -55,7 +55,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm-py3.10
+      build-environment: linux-focal-rocm-py3.10-mi300
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -75,7 +75,7 @@ jobs:
       - linux-focal-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm-py3.10
+      build-environment: linux-focal-rocm-py3.10-mi300
       docker-image: ${{ needs.linux-focal-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit
