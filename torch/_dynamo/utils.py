@@ -4588,3 +4588,7 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
             yield
     else:
         yield
+
+
+def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
+    return node is None or "example_value" in node.meta or "val" in node.meta
