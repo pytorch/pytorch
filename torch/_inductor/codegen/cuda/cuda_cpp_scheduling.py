@@ -3,6 +3,10 @@ import logging
 from collections.abc import Sequence
 from typing import cast
 
+from torch._inductor.codegen.cuda.cutlass_python_evt import (
+    CutlassEVTCodegen,
+    MockCutlassHandler,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from ...._dynamo.utils import counters
@@ -138,6 +142,18 @@ class CUDACPPScheduling(BaseScheduling):
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
+
+            # typically there is a codegen pass which runs after mark_run
+            # for this kernel we've already generated the C++ code, but we still
+            # need to let the kernel know about loads/stores that occur in the fused
+            # kernel for memory planning to properly optimize allocations
+            ctb.emulate_store_fn()
+            for node in epilogue_ir_nodes:
+                with V.set_ops_handler(MockCutlassHandler(V.get_ops_handler())):
+                    assert isinstance(
+                        node, ComputedBuffer
+                    )  # Not sure why we need to do this again
+                    node.get_store_function()(CutlassEVTCodegen.get_index_vars(node))
             src_code = render()
 
         with V.set_kernel_handler(kernel):

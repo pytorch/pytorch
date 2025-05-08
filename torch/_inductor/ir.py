@@ -4775,6 +4775,10 @@ class CUDATemplateBuffer(TemplateBuffer):
     def get_workspace_size(self):  # type: ignore[no-untyped-def]
         return self.workspace_size if self.workspace_size is not None else 0
 
+    def emulate_store_fn(self) -> None:
+        for output in self.get_outputs():
+            ops.store(output.get_name(), None, None)
+
 
 class CppTemplateBuffer(TemplateBuffer):
     def __init__(self, layout, inputs, make_kernel_render, template, choice) -> None:  # type: ignore[no-untyped-def]
