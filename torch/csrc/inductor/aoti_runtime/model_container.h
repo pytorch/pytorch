@@ -162,7 +162,7 @@ class AOTInductorModelContainer {
     auto* model = available_models_[0];
 
     ConstantState& const_folded =
-        use_secondary_ ? constant_folded_secondary_: constant_folded_;
+        use_secondary_ ? constant_folded_secondary_ : constant_folded_;
     if (const_folded == ConstantState::INITIALIZED) {
       auto folded_const_map = model->run_const_fold(
           stream, proxy_executor, /* initialization = */ true);
@@ -260,7 +260,7 @@ class AOTInductorModelContainer {
     std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
 
-    ConstantState& const_folded = use_inactive == use_secondary_
+    ConstantState& const_folded = inactive_buffer == use_secondary_
         ? constant_folded_
         : constant_folded_secondary_;
     if (!inactive_buffer) {
@@ -759,4 +759,3 @@ class AOTInductorModelContainer {
 };
 
 } // namespace torch::aot_inductor
-  
