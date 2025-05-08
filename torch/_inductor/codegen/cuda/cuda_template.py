@@ -2,7 +2,7 @@
 import functools
 import itertools
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override
 from unittest.mock import patch
 
@@ -17,6 +17,12 @@ from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+
+
+if TYPE_CHECKING:
+    from ...scheduler import BaseSchedulerNode  # noqa: TC004
+else:
+    BaseSchedulerNode = Any
 
 
 autotuning_log = getArtifactLogger(__name__, "autotuning")
@@ -118,8 +124,8 @@ class CUDATemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: CUDATemplateBuffer,
-            epilogue_nodes: Optional[list[IRNode]] = None,
-        ):
+            epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
+        ) -> tuple[CUDATemplateKernel, functools.partial[str]]:
             kernel = CUDATemplateKernel(
                 kernel_name="KERNEL_NAME",
                 runtime_arg_info=self.get_runtime_arg_info(),
