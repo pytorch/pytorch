@@ -760,8 +760,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
                 hipblaslt_dir = os.path.join(rocm_bin_path, 'hipblaslt')
                 target_hipblaslt_dir = os.path.join(target_dir, 'hipblaslt')
-                if not os.path.exists(target_hipblaslt_dir):
-                    os.makedirs(target_hipblaslt_dir)
+                os.makedirs(target_hipblaslt_dir, exist_ok=True)
                 self.copy_tree(hipblaslt_dir, target_hipblaslt_dir)
             else:
                 print("The specified environment variable does not exist.") 
