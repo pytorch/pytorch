@@ -6,7 +6,6 @@
 #include <ATen/cpu/vec/vec.h>
 
 namespace at::vec {
-
 // BFloat16 specification
 template <typename scalar_t>
 struct VecScalarType {
@@ -445,7 +444,10 @@ inline float map3_reduce_all(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !(!detail::should_prefer_converting_through_float_v<scalar_t> &&
+          std::is_invocable_v<Op, vec::Vectorized<scalar_t>>),
+        int> = 0>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -513,7 +515,13 @@ inline void map(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !(!detail::should_prefer_converting_through_float_v<scalar_t> &&
+          std::is_invocable_v<
+              Op,
+              vec::Vectorized<scalar_t>,
+              vec::Vectorized<scalar_t>>),
+        int> = 0>
 inline void map2(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -548,7 +556,14 @@ inline void map2(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !(!detail::should_prefer_converting_through_float_v<scalar_t> &&
+          std::is_invocable_v<
+              Op,
+              vec::Vectorized<scalar_t>,
+              vec::Vectorized<scalar_t>,
+              vec::Vectorized<scalar_t>>),
+        int> = 0>
 inline void map3(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -588,7 +603,15 @@ inline void map3(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !(!detail::should_prefer_converting_through_float_v<scalar_t> &&
+          std::is_invocable_v<
+              Op,
+              vec::Vectorized<scalar_t>,
+              vec::Vectorized<scalar_t>,
+              vec::Vectorized<scalar_t>,
+              vec::Vectorized<scalar_t>>),
+        int> = 0>
 inline void map4(
     const Op& vec_fun,
     scalar_t* output_data,
