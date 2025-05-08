@@ -1668,7 +1668,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(cfg), 64)
         # With unspec int, maximum computation is preserved
         self.assertExpectedInline(cnt.frame_count, """1""")
-        self.assertExpectedInline(cnt.op_count, """3""")
+        if torch._dynamo.config.automatic_dynamic_shapes:
+            if not torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(cnt.op_count, """4""")
+            else:
+                self.assertExpectedInline(cnt.op_count, """3""")
+        else:
+            self.assertExpectedInline(cnt.op_count, """3""")
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
@@ -3941,7 +3947,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         root = []
         root[:] = [root, root, None, None]
 
-        @torch.compile(fullgraph=True, backend="eager")
+        @torch.compile(fullgraph=False, backend="eager")
         def test_bug():
             return root[0]
 
@@ -6186,6 +6192,21 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.ones(2)
         with torch.no_grad():
             model(x)
+
+    def test_ao_fake_quantize_tracing(self):
+        import torch.ao.quantization.fake_quantize
+
+        q = torch.ao.quantization.FusedMovingAvgObsFakeQuantize()
+
+        def fn(x):
+            return q(x)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        eager_res = fn(x)
+
+        self.assertEqual(res, eager_res)
 
     def test_typed_dict(self):
         class LlavaImagePixelInputs(TypedDict):

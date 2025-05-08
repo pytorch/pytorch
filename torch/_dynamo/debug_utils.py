@@ -780,7 +780,7 @@ def aot_graph_input_parser(
     forward(**kwargs)
     """
 
-    from torch.fx.graph import dtype_abbrs
+    from torch.utils._dtype_abbrs import dtype_abbrs
 
     dtype_map = {value: key for key, value in dtype_abbrs.items()}
     dtype_pattern = "|".join(dtype_abbrs.values())
