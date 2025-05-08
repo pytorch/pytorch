@@ -40,6 +40,7 @@ from ..utils import (
     dict_items,
     dict_keys,
     dict_values,
+    istype,
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -846,7 +847,9 @@ class SetVariable(ConstDictVariable):
                 "issubset": operator.le,
                 "issuperset": operator.ge,
             }
-            other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
+            other = args[0]
+            if not istype(other, SetVariable):
+                other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
@@ -908,6 +911,15 @@ class FrozensetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
+        elif name == "__init__":
+            # frozenset is immutable. Calling __init__ again shouldn't have any effect
+            # In[1]: s = frozenset([1, 2])
+            #
+            # In[2]: s.__init__([3, 4])
+            #
+            # In[3]: s
+            # frozenset({1, 2})
+            return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
 
