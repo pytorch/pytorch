@@ -65,6 +65,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   class TORCH_API AsyncWork : public Work {
    public:
     explicit AsyncWork(
+        std::shared_ptr<gloo::Context> context,
         std::vector<std::vector<at::Tensor>> outputTensors,
         OpType opType,
         uint64_t seq,
@@ -82,7 +83,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
-    virtual std::chrono::milliseconds getTimeout() const = 0;
+    std::chrono::milliseconds getTimeout() const;
     virtual const std::vector<at::Tensor> getInputTensors() = 0;
     virtual const std::vector<at::Tensor> getOutputTensors() = 0;
     inline std::string getProfilerTitle() const {
@@ -97,6 +98,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // unique id used to tell the trace buffer that this
     // work has completed
     std::optional<uint64_t> trace_id_;
+    std::shared_ptr<gloo::Context> context_;
 
    private:
     void finishWorkGloo();
