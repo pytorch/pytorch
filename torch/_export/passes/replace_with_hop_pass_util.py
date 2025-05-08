@@ -149,7 +149,7 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
                 else node
             ),
         )
-    new_gm.recompile()
+    #new_gm.recompile()
     new_gm.graph.lint()
     return new_gm, new_signature
 
@@ -182,6 +182,6 @@ def _replace_with_hop_pass_helper(
             )
             setattr(new_gm, node.target, new_subgm)
 
-    new_gm.recompile()
+    #new_gm.recompile()
     new_gm.graph.lint()
     return new_gm, new_signature
