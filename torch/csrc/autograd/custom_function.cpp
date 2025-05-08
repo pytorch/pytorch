@@ -338,6 +338,7 @@ static optional_variable_list _process_backward_mode_ad(
         auto& grad_acc = dynamic_cast<AccumulateGrad&>(*grad_acc_fn);
         grad_acc.variable.reset();
       }
+      // This repeats checks like mutation of leaf variables already done above
       check_inplace(var, true);
       impl::rebase_history(var, {cdata, output_nr});
     } else if (is_input) {
