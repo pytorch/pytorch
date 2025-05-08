@@ -401,6 +401,10 @@ Tensor _convolution_out(
     int64_t groups_,
     Attr attr,
     IntArrayRef pad_nd = IntArrayRef({})) {
+  CheckedFrom c = "xpu_convolution";
+  checkAllSameType(c, {input, weight});
+  checkAllSameGPU(c, {input, weight});
+  c10::DeviceGuard device_guard(input_r.device());
   auto ndim = input_r.ndimension();
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
@@ -611,6 +615,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     IntArrayRef output_padding,
     int64_t groups,
     std::array<bool, 3> output_mask) {
+  CheckedFrom c = "xpu_convolution_backward";
+  checkAllSameType(c, {input, weight});
+  checkAllSameGPU(c, {input, weight});
+  c10::DeviceGuard device_guard(input.device());
   auto ndim = input.ndimension();
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
