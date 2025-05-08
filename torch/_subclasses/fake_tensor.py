@@ -74,12 +74,6 @@ except ValueError as e:
         raise e
 
 
-class _Unassigned:
-    pass
-
-
-_UNASSIGNED = _Unassigned()
-
 DimList = list
 
 pytree = torch.utils._pytree
@@ -1118,7 +1112,7 @@ class _DispatchCacheEntryOutputInfo:
 
 @dataclass_slots
 @dataclass(frozen=True)
-class _DispatchCacheEntry:
+class _DispatchCacheValidEntry:
     """
     Entry type for the FakeTensor dispatch cache. It supports two types of outputs
     1) tensor
@@ -1129,6 +1123,20 @@ class _DispatchCacheEntry:
 
     output_infos: tuple[_DispatchCacheEntryOutputInfo]
     is_output_tuple: bool = False
+
+
+@dataclass_slots
+@dataclass(frozen=True)
+class _DispatchCacheBypassEntry:
+    """
+    Entry type for a negative cache entry.
+    """
+
+    reason: str
+
+
+if TYPE_CHECKING:
+    _DispatchCacheEntry = Union[_DispatchCacheValidEntry, _DispatchCacheBypassEntry]
 
 
 @dataclass_slots
@@ -1164,7 +1172,7 @@ class DispatchCacheInfo:
 
 
 class FakeTensorMode(TorchDispatchMode):
-    cache: dict[_DispatchCacheKey, Optional[_DispatchCacheEntry]] = {}
+    cache: dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses: dict[str, int] = defaultdict(int)
@@ -1433,17 +1441,16 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             cache = FakeTensorMode.cache
             set_cache_key = _set_cache_key
-        entry = cache.get(key, _UNASSIGNED)
+        entry = cache.get(key, None)
 
-        if entry is None:
-            # This represents a negative cache entry - we already saw that the
-            # output is uncachable. Compute it from first principals.
-            return self._dispatch_impl(func, types, args, kwargs)
+        if entry is not None:
+            if isinstance(entry, _DispatchCacheBypassEntry):
+                # This represents a negative cache entry - we already saw that the
+                # output is uncachable. Compute it from first principals.
+                FakeTensorMode.cache_bypasses[entry.reason] += 1
+                return self._dispatch_impl(func, types, args, kwargs)
 
-        if entry is not _UNASSIGNED:
             # We have a cache entry.
-            if TYPE_CHECKING:
-                assert isinstance(entry, _DispatchCacheEntry)
             output = self._output_from_cache_entry(state, entry, key, func, args)
             FakeTensorMode.cache_hits += 1
             if self.cache_crosscheck_enabled:
@@ -1454,6 +1461,8 @@ class FakeTensorMode(TorchDispatchMode):
             return output
 
         # We don't have a cache entry.
+        output = self._dispatch_impl(func, types, args, kwargs)
+
         try:
             self._validate_cache_key(func, args, kwargs)
         except _BypassDispatchCache as e:
@@ -1461,26 +1470,20 @@ class FakeTensorMode(TorchDispatchMode):
             # good. Record the reason and mark it so we don't bother validating
             # again.
             FakeTensorMode.cache_bypasses[e.reason] += 1
-            set_cache_key(cache, key, None)
-            return self._dispatch_impl(func, types, args, kwargs)
+            set_cache_key(cache, key, _DispatchCacheBypassEntry(e.reason))
+            return output
 
-        output = self._dispatch_impl(func, types, args, kwargs)
         try:
             entry = self._make_cache_entry(state, key, func, args, kwargs, output)
         except _BypassDispatchCache as e:
             # We had trouble making the cache entry. Record the reason and mark
-            # it - but note that at this point we DO have a valid output already
-            # so no reason to recompute it.
+            # it.
             FakeTensorMode.cache_bypasses[e.reason] += 1
-            set_cache_key(cache, key, None)
+            set_cache_key(cache, key, _DispatchCacheBypassEntry(e.reason))
             return output
 
         set_cache_key(cache, key, entry)
         FakeTensorMode.cache_misses += 1
-
-        if output is _UNASSIGNED:
-            output = self._dispatch_impl(func, types, args, kwargs)
-
         return output
 
     def _cache_key(
@@ -1670,11 +1673,11 @@ class FakeTensorMode(TorchDispatchMode):
         if isinstance(output, (int, type(None))):
             return
 
-        if _has_unrepresented_unbacked_symbols(state, output):
+        if _has_unrepresented_symbols(state, output):
             # Unbacked symbols are fine - but only if they're also represented
             # in the input. If there are any new unbacked symbols then we can't
             # cache this output.
-            raise _BypassDispatchCache("unbacked symbol in output")
+            raise _BypassDispatchCache("unrepresented symbol in output")
 
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
@@ -1748,7 +1751,7 @@ class FakeTensorMode(TorchDispatchMode):
         # we can synthesize a tensor here and do the checks on that instance.
         # This approach keeps the (more frequent) cache-hit path as lightweight
         # as possible.
-        entry_for_synth_output = _DispatchCacheEntry(
+        entry_for_synth_output = _DispatchCacheValidEntry(
             output_infos=(entry,), is_output_tuple=False
         )
         synth_output = self._output_from_cache_entry(
@@ -1772,7 +1775,7 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
         output: Optional[FakeTensor],
-    ) -> _DispatchCacheEntry:
+    ) -> _DispatchCacheValidEntry:
         """
         Make a cache entry object for the given 'output' Tensor. Raises
         _BypassDispatchCache if the output tensor has characteristics that
@@ -1803,7 +1806,7 @@ class FakeTensorMode(TorchDispatchMode):
             output_info = _DispatchCacheEntryOutputInfo(
                 inplace_idx=None, metadata=None, view_idx=None, constant_value=output
             )
-            return _DispatchCacheEntry(
+            return _DispatchCacheValidEntry(
                 output_infos=(output_info,), is_output_tuple=False
             )
 
@@ -1824,7 +1827,7 @@ class FakeTensorMode(TorchDispatchMode):
                 )
                 for out_elem in output
             ]
-            return _DispatchCacheEntry(
+            return _DispatchCacheValidEntry(
                 output_infos=tuple(output_infos), is_output_tuple=True
             )
 
@@ -1832,7 +1835,7 @@ class FakeTensorMode(TorchDispatchMode):
             output_info = self._get_output_info_for_cache_entry(
                 state, key, func, args, kwargs, output
             )
-            return _DispatchCacheEntry(
+            return _DispatchCacheValidEntry(
                 output_infos=(output_info,), is_output_tuple=False
             )
 
@@ -1912,7 +1915,7 @@ class FakeTensorMode(TorchDispatchMode):
     def _output_from_cache_entry(
         self,
         state: _CacheKeyState,
-        entry: _DispatchCacheEntry,
+        entry: _DispatchCacheValidEntry,
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
@@ -2916,21 +2919,15 @@ class FakeTensorMode(TorchDispatchMode):
 _StoragePointer = object
 
 
-def _has_unrepresented_unbacked_symbols(
+def _has_unrepresented_symbols(
     state: _CacheKeyState, output: Optional[FakeTensor]
 ) -> bool:
-    from sympy.core.traversal import iterargs
-
     from torch.fx.experimental.symbolic_shapes import _iterate_exprs
-    from torch.utils._sympy.symbol import symbol_is_type, SymT
 
     for s in _iterate_exprs(output):
-        for arg in iterargs(s):
-            if arg.is_Symbol and symbol_is_type(
-                arg, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
-            ):
-                if arg not in state.known_symbols:
-                    return True
+        for symbol in s.free_symbols:
+            if symbol not in state.known_symbols:
+                return True
 
     return False
 
@@ -3001,18 +2998,18 @@ def run_fallback_kernel(
 
 
 def _set_cache_key_for_shape_env(
-    cache: dict[_DispatchCacheKey, Optional[_DispatchCacheEntry]],
+    cache: dict[_DispatchCacheKey, _DispatchCacheEntry],
     key: _DispatchCacheKey,
-    entry: Optional[_DispatchCacheEntry],
+    entry: _DispatchCacheEntry,
 ) -> None:
     key.strip_shape_env()
     cache[key] = entry
 
 
 def _set_cache_key(
-    cache: dict[_DispatchCacheKey, Optional[_DispatchCacheEntry]],
+    cache: dict[_DispatchCacheKey, _DispatchCacheEntry],
     key: _DispatchCacheKey,
-    entry: Optional[_DispatchCacheEntry],
+    entry: _DispatchCacheEntry,
 ) -> None:
     cache[key] = entry
 

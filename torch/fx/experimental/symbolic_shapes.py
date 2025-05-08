@@ -3307,7 +3307,7 @@ class ShapeEnv:
         # with the GC.
         self.fake_tensor_cache: dict[
             torch._subclasses.fake_tensor._DispatchCacheKey,
-            Optional[torch._subclasses.fake_tensor._DispatchCacheEntry],
+            torch._subclasses.fake_tensor._DispatchCacheEntry,
         ] = {}
 
     @contextlib.contextmanager
