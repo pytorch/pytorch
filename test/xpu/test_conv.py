@@ -1195,7 +1195,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypes(torch.double, torch.float, torch.half)
     def test_conv2d_on_multi_device(self, dtype):
         input = torch.randn(3, 256, 224, 224, dtype=dtype, requires_grad=True)
-        conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to(dtype=dtype)
+        conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1, dtype=dtype)
         output_grad = torch.randn(3, 256, 224, 224, dtype=dtype)
         input_0 = input.to(device="xpu:0")
         conv_0 = conv.to(device="xpu:0")
