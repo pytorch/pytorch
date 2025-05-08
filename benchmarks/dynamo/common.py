@@ -1050,7 +1050,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
+            frozen_model_iter_fn = export_aot_inductor(
+                model, example_inputs, args.inductor_compile_mode
+            )
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1384,7 +1386,7 @@ class AOTInductorModelCache:
     cache = {}
 
     @classmethod
-    def load(cls, model, example_inputs):
+    def load(cls, model, example_inputs, mode):
         import torch._inductor
         import torch.export._trace
         from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
@@ -1422,6 +1424,9 @@ class AOTInductorModelCache:
             elif current_device == "hpu":
                 torch.hpu.reset_peak_memory_stats()
 
+            inductor_configs = {}
+            if mode == "max-autotune":
+                inductor_configs["max_autotune"] = True
             ep = torch.export.export(
                 model,
                 example_args,
@@ -1430,7 +1435,9 @@ class AOTInductorModelCache:
                 strict=False,
             )
             with torch.no_grad():
-                package_path = torch._inductor.aoti_compile_and_package(ep)  # type: ignore[arg-type]
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep, inductor_configs=inductor_configs
+                )  # type: ignore[arg-type]
 
             cls.cache[key] = torch._inductor.aoti_load_package(package_path)
 
@@ -1460,8 +1467,8 @@ def export(model, example_inputs):
     return opt_export
 
 
-def export_aot_inductor(model, example_inputs):
-    optimized = AOTInductorModelCache.load(model, example_inputs)
+def export_aot_inductor(model, example_inputs, mode):
+    optimized = AOTInductorModelCache.load(model, example_inputs, mode)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -3752,7 +3759,9 @@ def run(runner, args, original_dir=None):
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
             assert not args.training, "AOTInductor only supports inference"
-            optimize_ctx = functools.partial(export_aot_inductor)
+            optimize_ctx = functools.partial(
+                export_aot_inductor, mode=args.inductor_compile_mode
+            )
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)

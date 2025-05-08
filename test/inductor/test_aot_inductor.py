@@ -192,6 +192,26 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
+    def test_empty_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                return torch.matmul(x, self.w) + self.b
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+            # We should have 1 input, 1 output, 2 constants for the model.
+            check_str = "AOTInductorModelBase(1, 1, 2"
+            FileCheck().check_count(check_str, 1).run(code)
+
     def test_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -207,9 +227,7 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            model = Model(device=self.device)
-            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
-            self.assertTrue(same(model(*example_inputs), actual))
+            self.check_model(Model(self.device), example_inputs)
 
     def test_constant_folding_with_update(self):
         class Model(torch.nn.Module):
@@ -300,9 +318,7 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            model = Model(device=self.device)
-            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
-            self.assertTrue(same(model(*example_inputs), actual))
+            self.check_model(Model(self.device), example_inputs)
 
     @requires_gpu
     def test_multi_device(self):
@@ -342,6 +358,29 @@ class AOTInductorTestsTemplate:
         model = Model()
         model = model.to(self.device)
         AOTIRunnerUtil.compile(model, example_inputs)
+
+    def test_constant_type_propagation(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w_transpose = torch.transpose(self.w_pre, 0, 1)
+                w_relu = torch.nn.functional.relu(w_transpose)
+                w = w_relu + self.b
+                return torch.matmul(x, w)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+            FileCheck().check_not("torch::aot_inductor::ConstantType::Unknown").run(
+                code
+            )
 
     def test_subclasses(self):
         device_to_init = self.device
@@ -624,11 +663,8 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        # Had to use legacy_run. Bug to be fixed
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            model = Model()
-            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
-            self.assertTrue(same(model(*example_inputs), actual))
+            self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -3838,7 +3874,7 @@ class AOTInductorTestsTemplate:
 
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         aot_inductor_module(x)
-        x_casted = x.to("cuda")
+        x_casted = x.to(GPU_TYPE)
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
@@ -4441,6 +4477,39 @@ class AOTInductorTestsTemplate:
                 1,
             ).run(code)
         self.check_model(Model(), example_inputs)
+
+    def test_input_codegen_with_sympy_expr(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class MyModel(torch.nn.Module):
+            def forward(self, getitem_54, getitem_52, getitem_19, values_2, offsets):
+                bitwise_or = torch.bitwise_or(getitem_54, getitem_52)
+                combined = torch.cat([getitem_19, values_2], dim=0)
+                add = combined + bitwise_or
+
+                sliced = values_2[:-1] + offsets
+                return add, sliced
+
+        inps = (
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randn((192,), device="cuda"),
+            torch.randn((48,), device="cuda"),
+            torch.randint(0, 100, (47,), device="cuda", dtype=torch.uint8),
+        )
+
+        dim = torch.export.Dim("dimensionality")
+        derived_dim = 2 * dim
+        spec = {
+            "getitem_54": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_52": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_19": (derived_dim,),  # [2*s40]
+            "values_2": (Dim.AUTO,),  # [s33 + 1]
+            "offsets": (Dim.AUTO,),  # [s33]
+        }
+
+        self.check_model(MyModel(), inps, dynamic_shapes=spec)
 
     @common_utils.parametrize("mark_unbacked", (True, False))
     def test_unbacked_equals_input_size_runtime_assertion(self, mark_unbacked: bool):
