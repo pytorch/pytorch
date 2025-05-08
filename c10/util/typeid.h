@@ -41,13 +41,6 @@
 // called.  This requires us to fix all of the call-sites, which I want to do
 // later.  So the namespace is not fixed at the moment.
 
-// Make at::Half a fundamental type.
-
-namespace c10::guts {
-template <>
-struct is_fundamental<at::Half> : std::true_type {};
-} // namespace c10::guts
-
 namespace caffe2 {
 
 /**
@@ -182,7 +175,8 @@ template <
     typename T,
     std::enable_if_t<std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
+  return (std::is_fundamental_v<T> || std::is_same_v<T, at::Half> ||
+          std::is_pointer_v<T>)
       ? nullptr
       : &_PlacementNew<T>;
 }
@@ -192,7 +186,8 @@ template <
     std::enable_if_t<!std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
   static_assert(
-      !c10::guts::is_fundamental<T>::value && !std::is_pointer_v<T>,
+      !std::is_fundamental_v<T> && !std::is_same_v<T, at::Half> &&
+          !std::is_pointer_v<T>,
       "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
@@ -247,7 +242,8 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
 
 template <typename T, std::enable_if_t<std::is_copy_assignable_v<T>>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
+  return (std::is_fundamental_v<T> || std::is_same_v<T, at::Half> ||
+          std::is_pointer_v<T>)
       ? nullptr
       : &_Copy<T>;
 }
@@ -257,7 +253,8 @@ template <
     std::enable_if_t<!std::is_copy_assignable_v<T>>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
   static_assert(
-      !c10::guts::is_fundamental<T>::value && !std::is_pointer_v<T>,
+      !std::is_fundamental_v<T> && !std::is_same_v<T, at::Half> &&
+          !std::is_pointer_v<T>,
       "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
@@ -275,7 +272,8 @@ inline void _PlacementDelete(void* ptr, size_t n) {
 
 template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
+  return (std::is_fundamental_v<T> || std::is_same_v<T, at::Half> ||
+          std::is_pointer_v<T>)
       ? nullptr
       : &_PlacementDelete<T>;
 }
