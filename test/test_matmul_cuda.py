@@ -21,9 +21,10 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     SM53OrLater,
-    SM89OrLater,
     SM90OrLater,
+    xfailIfSM89,
     xfailIfSM100OrLater,
+    xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -55,10 +56,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, _floatx_unpacked_to_f32, ceil_div, to_blocked
 
 _IS_SM8X = False
-_IS_SM12X = False
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    _IS_SM12X = torch.cuda.get_device_capability(0)[0] == 12
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -1014,8 +1013,9 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @xfailIfSM89
+    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.expectedFailure(not SM89OrLater or _IS_SM12X, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
@@ -1119,8 +1119,9 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+    @xfailIfSM89
+    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.expectedFailure(not SM89OrLater or _IS_SM12X, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)
