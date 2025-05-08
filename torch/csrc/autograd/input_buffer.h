@@ -51,6 +51,4 @@ struct InputBuffer {
   std::vector<std::optional<c10::Stream>> ready_streams;
 };
 
-void _record_stream_any_impl(Variable& var, const c10::Stream& stream);
-
 } // namespace torch::autograd

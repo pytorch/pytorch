@@ -1086,9 +1086,6 @@ void Engine::evaluate_function(
     if (opt_parent_stream.value() != inputs.ready_streams[pos].value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       opt_parent_stream->wait(inputs.ready_events[pos].value());
-      if (opt_parent_stream->device() == device) {
-        _record_stream_any_impl(inputs.buffer[pos], opt_parent_stream.value());
-      }
     }
   }
 
