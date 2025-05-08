@@ -282,8 +282,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
 
-        # These tests are expected to throw SIGABRT(6) from watchdog; adding the
-        # negative sign bc the test return code is actually -6
+        # These tests are expected to throw SIGABRT(6); adding the negative sign
+        # bc the test return code is actually -6
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: -signal.SIGABRT,
             self.test_nan_assert_float32.__wrapped__: -signal.SIGABRT,
