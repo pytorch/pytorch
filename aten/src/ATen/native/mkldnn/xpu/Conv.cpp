@@ -402,8 +402,9 @@ Tensor _convolution_out(
     Attr attr,
     IntArrayRef pad_nd = IntArrayRef({})) {
   CheckedFrom c = "xpu_convolution";
-  checkAllSameType(c, {input_r, weight_r});
-  checkAllSameGPU(c, {input_r, weight_r});
+  TensorArg input_t{input_r, "input", 1}, weight_t{weight_r, "weight", 2};
+  checkAllSameType(c, {input_t, weight_t});
+  checkAllSameGPU(c, {input_t, weight_t});
   c10::DeviceGuard device_guard(input_r.device());
   auto ndim = input_r.ndimension();
   TORCH_CHECK(
@@ -616,9 +617,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     int64_t groups,
     std::array<bool, 3> output_mask) {
   CheckedFrom c = "xpu_convolution_backward";
-  checkAllSameType(c, {input, weight});
-  checkAllSameGPU(c, {input, weight});
-  c10::DeviceGuard device_guard(input.device());
+  c10::DeviceGuard device_guard(grad_output.device());
   auto ndim = input.ndimension();
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
@@ -683,6 +682,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     grad_bias = at::empty({grad_output_.size(1)}, opt);
 
   if (output_mask[0]) {
+    TensorArg grad_output_t{grad_output, "grad_output", 1},
+        input_t{input, "input", 2};
+    checkAllSameType(c, {grad_output_t, input_t});
+    checkAllSameGPU(c, {grad_output_t, input_t});
     if (input.numel() > 0) {
       if (transposed_) {
         onednn::deconvolution_backward_data(
@@ -709,6 +712,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     }
   }
   if (output_mask[1] || output_mask[2]) {
+    TensorArg grad_output_t{grad_output, "grad_output", 1},
+        weight_t{weight, "weight", 2};
+    checkAllSameType(c, {grad_output_t, weight_t});
+    checkAllSameGPU(c, {grad_output_t, weight_t});
     if (input.numel() > 0) {
       if (transposed_) {
         onednn::deconvolution_backward_weights(
