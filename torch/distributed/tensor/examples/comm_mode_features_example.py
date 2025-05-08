@@ -26,14 +26,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils.checkpoint import checkpoint
 
 
-def get_device_type() -> str:
-    return (
-        "cuda"
-        if torch.cuda.is_available() and torch.cuda.device_count() >= 4
-        else "cpu"
-    )
-
-
 c10d_functional = torch.ops.c10d_functional
 
 aten = torch.ops.aten
@@ -49,7 +41,7 @@ class CommDebugModeExample:
     def __init__(self, world_size: int, rank: int) -> None:
         self.world_size = world_size
         self.rank = rank
-        self.device_type = get_device_type()
+        self.device_type = torch.accelerator.current_accelerator().type
 
     def _MLP_model_setup(
         self, model_type: type, parallelize_plan: Union[None, dict] = None
