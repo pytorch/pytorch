@@ -62,6 +62,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.functional_tensor import dispatch_functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.graph_module import _get_attr
@@ -2082,6 +2083,7 @@ def fwd_only(
     fn: Callable[..., Any],
     args: Sequence[Any],
     *,
+    apply_auto_functionalize: bool = False,
     run_functional_passes: bool = True,
     get_decomp_fn: Optional[Callable[..., Any]] = None,
 ) -> torch.fx.GraphModule:
@@ -2091,6 +2093,9 @@ def fwd_only(
         decompositions = (
             get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
         )
+        # When true, apply auto_functionalize to the pattern to functionalize any mutable ops.
+        if apply_auto_functionalize:
+            fn = dispatch_functionalize(fn)
         gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops

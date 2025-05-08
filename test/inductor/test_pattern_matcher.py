@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import functools
 import itertools
 import os
 import unittest
@@ -32,6 +33,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.library import register_fake
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
@@ -1655,6 +1657,99 @@ class TestPatternMatcher(TestCase):
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
 
+    def test_mutable_op_nonview_inputs_register_replacement(self):
+        @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x"})
+        def foo_inplace(x: torch.Tensor) -> None:
+            x.add_(1)
+
+        # NOTE: only returning None is supported; the custom op cannot return `out` because it's part of op input.
+        @torch.library.custom_op("mylib::bar", mutates_args={"out"})
+        def bar_out(x: torch.Tensor, out: torch.Tensor) -> None:
+            out.copy_(x + 2)
+
+        @torch.library.custom_op("mylib::foobar_out", mutates_args={"x", "out"})
+        def foobar_out(x: torch.Tensor, out: torch.Tensor) -> None:
+            x.add_(1)
+            out.copy_(x + 7)  # intentionally different from bar_out
+
+        def mutable_ops_pattern(x, out):
+            foo_inplace(x)
+            bar_out(x, out)
+            return x, out
+
+        def mutable_ops_replacement(x, out):
+            foobar_out(x, out)
+            return x, out
+
+        inp = torch.randn(3)
+
+        my_patterns = PatternMatcherPass()
+        register_replacement(
+            search_fn=mutable_ops_pattern,
+            replace_fn=mutable_ops_replacement,
+            example_inputs=[inp.clone().detach(), inp.clone().detach()],
+            trace_fn=functools.partial(fwd_only, apply_auto_functionalize=True),
+            pass_dicts=my_patterns,
+        )
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        # Case 1: mutates a clone of graph input
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f1(x):
+            x = x.clone()
+            out = torch.zeros_like(x)
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def f1_replaced(x):
+            x = x.clone()
+            out = torch.zeros_like(x)
+            foobar_out(x, out)
+            return out
+
+        f1_inp = inp.clone().detach()
+        f1_replaced_inp = inp.clone().detach()
+        f1_out = f1(f1_inp)
+        f1_replaced_out = f1_replaced(f1_replaced_inp)
+        self.assertEqual(f1_inp, f1_replaced_inp)
+        self.assertEqual(f1_out, f1_replaced_out)
+        self.assertEqual(count, 1)
+
+        # Case 2: mutates graph input (not supported yet)
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f2(x):
+            out = torch.zeros_like(x)
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def f2_replaced(x):
+            out = torch.zeros_like(x)
+            foobar_out(x, out)
+            return out
+
+        f2_inp = inp.clone().detach()
+        f2_replaced_inp = inp.clone().detach()
+        f2_out = f2(f2_inp)
+        f2_replaced_out = f2_replaced(f2_replaced_inp)
+        self.assertEqual(f1_inp, f1_replaced_inp)
+        self.assertEqual(f2_out, f2_replaced_out)
+        self.assertEqual(count, 1)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
