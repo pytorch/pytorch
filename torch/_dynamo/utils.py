@@ -2578,7 +2578,10 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     if search.is_python_constant():
         found_const = any(
             x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            and (
+                x.as_python_constant() is search.as_python_constant()
+                or x.as_python_constant() == search.as_python_constant()
+            )
             for x in items
         )
         return ConstantVariable.create(found_const)
