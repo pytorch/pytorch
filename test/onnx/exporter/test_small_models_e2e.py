@@ -594,7 +594,9 @@ class DynamoExporterTest(common_utils.TestCase):
 
         inputs = (torch.zeros((2, 2)),)
         dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
-        onnx_program = self.export(SymNotModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_program = self.export(
+            SymFloatModel(), inputs, dynamic_shapes=dynamic_shapes
+        )
         onnx_testing.assert_onnx_program(onnx_program, args=inputs)
         self.assertIn(
             "Cast",
