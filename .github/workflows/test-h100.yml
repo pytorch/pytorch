@@ -1,4 +1,4 @@
-name: Limit CI on H100
+name: Limited CI on H100
 
 on:
   pull_request:
