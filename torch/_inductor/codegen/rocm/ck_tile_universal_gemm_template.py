@@ -525,6 +525,10 @@ class CKTileGemmTemplate(CKTileTemplate):
         else:
             raise AssertionError(f"Invalid layout {op.layout_b=}")
 
+        # the `default` epilogue writes C to memory by 1 tensor element
+        # (divisibility check not necessary)
+        # the `cshuffle` epilogue writes C to memory by 16 bytes
+        # (so the contiguous C dimension size must be divisible by the number of tensor elements in 16 bytes)
         if op.epilogue == "CShuffle":
             if (
                 op.layout_c == "Row"
