@@ -8,6 +8,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <optional>
 
 namespace c10d {
