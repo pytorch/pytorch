@@ -17,6 +17,7 @@ import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from copy import copy
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
@@ -379,6 +380,9 @@ class InductorOutput(Generic[TOut], ABC):
     """
     Class representing a single inductor output
     """
+    @abstractmethod
+    def pre_save(self) -> None:
+        ...
 
     @abstractmethod
     def load(self, example_inputs) -> TOut:
@@ -397,6 +401,12 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
     """
 
     result: CompiledFxGraph
+
+    def pre_save(self) -> None:
+        disk_compiled_graph = copy(self.result)
+        disk_compiled_graph.prepare_for_serialization()
+        self.result = disk_compiled_graph
+        return
 
     def load(self, example_inputs) -> CompiledFxGraph:
         return self.result
@@ -423,6 +433,9 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
 class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_cache_info: tuple[str, list[str]]
     fx_graph_guard_expr: Optional[str]
+
+    def pre_save(self):
+        return
 
     def _is_backward(self) -> bool:
         return False
@@ -596,6 +609,15 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
 
     # # Used by compiled autograd
     cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo]
+
+    def pre_save(self):
+        """
+        Perform any preparations to make the cache entry ready for serialization.
+        """
+        check_metadata_cacheable(self.runtime_metadata)
+        self.compiled_fw.pre_save()
+        if self.compiled_bw is not None:
+            self.compiled_bw.pre_save()
 
     # Turn cache entry into the original callable
     def wrap_post_compile(
@@ -1095,7 +1117,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     def save(key: str, entry: GenericAOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
-            check_metadata_cacheable(entry.runtime_metadata)
+            entry.pre_save()
             content = pickle.dumps(entry)
             CacheArtifactManager.record_artifact(
                 CacheArtifactType.AOT_AUTOGRAD, key, content
