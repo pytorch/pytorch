@@ -1162,7 +1162,7 @@ class PythonMemoryTracer final : public python_tracer::PythonMemoryTracerBase {
   ~PythonMemoryTracer() override = default;
   void start() override;
   void stop() override;
-  void export_memory_history(const std::string path) override;
+  void export_memory_history(const std::string& path) override;
 };
 
 static void toggle_memory_tracing(bool enable) {
@@ -1197,7 +1197,7 @@ void PythonMemoryTracer::start() {
   toggle_memory_tracing(true);
 }
 
-void PythonMemoryTracer::export_memory_history(const std::string path) {
+void PythonMemoryTracer::export_memory_history(const std::string& path) {
   PyGILState_STATE gil_state = PyGILState_Ensure();
   THPObjectPtr torch_cuda_memory_module(
       PyImport_ImportModule("torch.cuda.memory"));
@@ -1275,7 +1275,9 @@ void init() {
   TORCH_CHECK(PyType_Ready(&torch::profiler::impl::TraceContextType) == 0);
   torch::profiler::impl::python_tracer::registerTracer(
       &torch::profiler::impl::getTracer);
-  torch::profiler::impl::python_tracer::registerMemoryTracer(
-      &torch::profiler::impl::getMemoryTracer);
+  if (at::hasCUDA()) {
+    torch::profiler::impl::python_tracer::registerMemoryTracer(
+        &torch::profiler::impl::getMemoryTracer);
+  }
 }
 } // namespace torch::autograd::profiler::python_tracer
