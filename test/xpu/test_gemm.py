@@ -38,7 +38,6 @@ def tf32_off():
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_matmul_precision = torch.backends.mkldnn.allow_tf32
     enabled = torch.backends.mkldnn.enabled
     deterministic = torch.backends.mkldnn.deterministic
     old_precision = self.precision
@@ -90,8 +89,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
 
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
-            for k, v in zip(arg_names, args):
-                kwargs[k] = v
+            kwargs.update(zip(arg_names, args))
             cond = True
             if "device" in kwargs:
                 cond = cond and (torch.device(kwargs["device"]).type == "xpu")
