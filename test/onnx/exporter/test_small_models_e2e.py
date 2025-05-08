@@ -587,7 +587,7 @@ class DynamoExporterTest(common_utils.TestCase):
         )
 
     def test_export_sym_float(self):
-        class SymNotModel(torch.nn.Module):
+        class SymFloatModel(torch.nn.Module):
             def forward(self, x):
                 a = x.shape[0]
                 return torch.sym_float(a)
