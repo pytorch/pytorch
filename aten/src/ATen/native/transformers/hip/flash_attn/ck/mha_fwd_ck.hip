@@ -286,7 +286,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
     auto rng_state_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
     auto rng_state = at::empty({2}, rng_state_options.dtype(at::kUInt64));
-
+    auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA)); 
     
 
 //    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
@@ -310,7 +310,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
         std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
-
+        std::cout << "DROP_SEED: " << drop_seed << std::endl;
+        std::cout << "DROP_OFST: " << drop_offset << std::endl;
 //        hipLaunchKernelGGL(
 //            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
   
@@ -330,13 +331,15 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     }
     */
     //these are actual values allegedly on the GPU
-    rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
-    rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
+    rng_state[0] = drop_seed;
+    rng_state[1] = drop_offset;
 
-    auto drop_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
-    auto seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[0].data_ptr<uint64_t>())), drop_options);
-    auto offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[1].data_ptr<uint64_t>())), drop_options);
+    auto drop_options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
+ //   auto seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[0].data_ptr<uint64_t>())), drop_options.dtype(at::kLong));
+//    auto offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[1].data_ptr<uint64_t>())), drop_options.dtype(at::kLong));
+
     std::cout << "RNG_STATE DEVICE: " << rng_state.device() << std::endl;
+    std::cout << "RNG_STATE ADDR  : " << rng_state.data_ptr() << std::endl;
 // =============================================================================
     std::optional<at::Tensor> attn_bias;
     std::cout << "CHECKPOINT 3" << std::endl;
@@ -349,8 +352,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         //auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
         //auto drop_seed_offset = std::make_pair(rng_state[0].data_ptr<uint64_t>(),
         //                                       rng_state[1].data_ptr<uint64_t>());
-        auto drop_seed_offset = std::make_pair(static_cast<uint64_t*>(seed_t.data_ptr<uint64_t>()),
-                                               static_cast<uint64_t*>(offset_t.data_ptr<uint64_t>()));
+        auto drop_seed_offset = std::make_pair(rng_state[0].data_ptr<uint64_t>(),
+                                               rng_state[1].data_ptr<uint64_t>());
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
@@ -402,6 +405,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
     std::cout << "CHECKPOINT OUT" << std::endl;
-    return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
+    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
 }
 } //namespace pytorch_flash

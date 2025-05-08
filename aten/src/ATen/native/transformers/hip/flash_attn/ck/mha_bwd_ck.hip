@@ -242,6 +242,8 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     bool is_dropout = p_dropout > 0.0;
     std::cout << "bwd Seed device  :" << philox_seed.device() << std::endl;
     std::cout << "bwd Offset device:" << philox_offset.device() << std::endl;
+    std::cout << "bwd seed dtype   :" << philox_seed.dtype() << std::endl;
+    std::cout << "bwd offset dtype :" << philox_offset.dtype() << std::endl;
     auto stream = at::cuda::getCurrentHIPStream().stream();
 
     auto q_dtype = q.dtype();
@@ -369,11 +371,42 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
         dv_expanded = dv;
     }
 
-    uint64_t drop_seed = 1, drop_offset = 0;
-    drop_seed = *philox_seed.data_ptr<int64_t>();
-    drop_offset = *philox_offset.data_ptr<int64_t>();
-    auto drop_seed_offset = std::make_pair(&drop_seed, &drop_offset);
+// TROUBLE SPOT =========================================================
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+            std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
+    uint64_t* drop_seed, drop_offset;
+    int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
+    std::pair<uint64_t*, uint64_t*> drop_seed_offset = {nullptr,nullptr};
+    if(is_dropout) {
+        /*
+        std::cout << "FALLING INTO NEW BLOCK IN BWD" << std::endl;
+        //drop_seed = *philox_seed.data_ptr<int64_t>();
+        //drop_offset = *philox_offset.data_ptr<int64_t>();
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        auto philox_args = gen->philox_cuda_state(counter_offset);
+        std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
+        */
+
+        drop_seed_offset.first = philox_seed[0].data_ptr<uint64_t>();
+        drop_seed_offset.second = philox_seed[1].data_ptr<uint64_t>();
+
+
+
+
+
+    }
+    
+    //auto drop_seed_offset = std::make_pair(&drop_seed, &drop_offset);
+    std::cout << "drop_seed address  : " << static_cast<const void*>(drop_seed_offset.first) << std::endl;
+    std::cout << "drop_ofst address  : " << static_cast<const void*>(drop_seed_offset.second) << std::endl;
+    std::cout << "philox_seed address: " << static_cast<const void*>(philox_seed.data_ptr()) << std::endl;
+    std::cout << "philox_ofst address: " << static_cast<const void*>(philox_offset.data_ptr()) << std::endl;
+    std::cout << "bad PHILOX_SEED device: " << philox_seed.device() << std::endl;
+    std::cout << "bad PHILOX_OFST device: " << philox_offset.device() << std::endl;
+    std::cout << "bad PHILOX_SEED dtype : " << philox_seed.dtype() << std::endl;
+    std::cout << "bad PHILOX_OFST dtype : " << philox_offset.dtype() << std::endl;
+// ===========================================================================
 
     if (seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};
