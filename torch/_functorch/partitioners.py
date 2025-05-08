@@ -1780,8 +1780,14 @@ def choose_saved_values_set(
         ]
 
     recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes)
-    # sort first by name, to ensure determinism when multiple nodes have same size
-    recomputable_banned_nodes = sorted(recomputable_banned_nodes, key=lambda x: x.name)
+    must_save_nodes = [
+        i
+        for i in recomputable_banned_nodes
+        if i.meta.get("recompute", False) == CheckpointPolicy.MUST_SAVE
+    ]
+    recomputable_banned_nodes = [
+        i for i in recomputable_banned_nodes if i not in must_save_nodes
+    ]
 
     # default: runtime_optimized_saved_values
     # more aggressive: more_aggressive_saved_values
@@ -1791,7 +1797,7 @@ def choose_saved_values_set(
         recomputable_banned_nodes, key=_size_of, reverse=True
     )
     if len(all_recomputable_banned_nodes) == 0:
-        return node_info.inputs
+        return node_info.inputs + must_save_nodes
     memories_banned_nodes = [
         get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
     ]
@@ -1921,7 +1927,9 @@ def choose_saved_values_set(
     )[0]
 
 
-def _broadcast_rank0_decision(joint_graph, saved_values):
+def _broadcast_rank0_decision(
+    joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
+):
     # use the same policy across different GPUs
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
@@ -1953,13 +1961,12 @@ def _broadcast_rank0_decision(joint_graph, saved_values):
         and has_same_nodes(joint_graph)
     ):
         with no_dispatch(), unset_fake_temporarily():
-            objects = [saved_values]
             objects = [[x.name for x in saved_values]]
             # TODO: maybe use a different process group for this
             torch.distributed.broadcast_object_list(objects, src=0)
-            saved_values = objects[0]
+            saved_values_names = objects[0]
             name_to_node = get_name_to_node(joint_graph)
-            saved_values = [name_to_node[n] for n in saved_values]
+            saved_values = [name_to_node[n] for n in saved_values_names]
     return saved_values
 
 
@@ -2102,7 +2109,7 @@ def min_cut_rematerialization_partition(
         memory_budget=memory_budget,
     )
     if config._broadcast_rank0_decision:
-        saved_values = _broadcast_rank0_decision(joint_module, saved_values)
+        saved_values = _broadcast_rank0_decision(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
