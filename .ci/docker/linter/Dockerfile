@@ -16,6 +16,7 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG PYTHON_VERSION
+ARG PIP_CMAKE
 ENV PATH /var/lib/jenkins/ci_env/bin:$PATH
 ENV VIRTUAL_ENV /var/lib/jenkins/ci_env
 COPY requirements-ci.txt /opt/requirements-ci.txt

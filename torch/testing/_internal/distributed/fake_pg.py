@@ -1,10 +1,7 @@
 # mypy: allow-untyped-defs
 
 import torch.distributed as dist
-
-from torch._C._distributed_c10d import (
-    FakeProcessGroup,
-)
+from torch._C._distributed_c10d import FakeProcessGroup
 
 
 class FakeStore(dist.Store):
@@ -28,4 +25,4 @@ def _create_fake_pg(prefix_store, rank, world_size, timeout):
     return FakeProcessGroup(rank, world_size)
 
 
-dist.Backend.register_backend("fake", _create_fake_pg, devices=['cpu', 'cuda'])
+dist.Backend.register_backend("fake", _create_fake_pg, devices=["cpu", "cuda"])

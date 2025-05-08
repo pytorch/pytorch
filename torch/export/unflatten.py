@@ -1171,7 +1171,13 @@ class _ModuleFrame:
             for output in signature.outputs:
                 if isinstance(
                     output,
-                    (TensorArgument, SymIntArgument, SymBoolArgument, SymFloatArgument),
+                    (
+                        TensorArgument,
+                        SymIntArgument,
+                        SymBoolArgument,
+                        SymFloatArgument,
+                        ConstantArgument,
+                    ),
                 ):
                     if output.name in self.seen_nodes:
                         orig_outputs.append(self.seen_nodes[output.name])

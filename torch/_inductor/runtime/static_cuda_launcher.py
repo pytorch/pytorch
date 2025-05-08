@@ -1,4 +1,5 @@
 import functools
+import os
 from typing import Any, Optional
 from typing_extensions import Unpack
 
@@ -34,6 +35,7 @@ class StaticallyLaunchedCudaKernel:
 
     def __init__(self, kernel: CompiledKernel) -> None:
         self.name = kernel.src.fn.__name__
+        self.cubin_raw = kernel.asm.get("cubin", None)
         self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
@@ -87,6 +89,19 @@ class StaticallyLaunchedCudaKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
+    def reload_cubin_from_raw(self, filepath: str) -> str:
+        """
+        If the cubin file triton generated gets deleted under us, we can
+        reload it from the raw cubin file.
+        """
+        if self.cubin_path is None:
+            assert self.cubin_raw is not None
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, "wb") as f:
+                f.write(self.cubin_raw)
+                self.cubin_path = filepath
+        return self.cubin_path
+
     def load_kernel(self, device: int) -> None:
         from torch._C import _StaticCudaLauncher
 
@@ -100,6 +115,7 @@ class StaticallyLaunchedCudaKernel:
         )
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
+        self.cubin_raw = None
 
     @staticmethod
     @functools.lru_cache

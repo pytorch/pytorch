@@ -54,6 +54,11 @@ class TestStaticCudaLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = StaticallyLaunchedCudaKernel(compiled_kernel)
+        # Test reload cubin from raw here
+        old_cubin_path = result.cubin_path
+        assert old_cubin_path is not None
+        result.cubin_path = None
+        result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device("cuda")
         result.load_kernel(device_interface.current_device())
         return result

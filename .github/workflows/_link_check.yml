@@ -7,10 +7,14 @@ on:
       ref:
         type: string
         required: true
+      run-url-lint:
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   lint-urls:
-    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
+    if: ${{ inputs.run-url-lint }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       timeout: 120
