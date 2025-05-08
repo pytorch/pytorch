@@ -4000,7 +4000,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             tl.store(dst + offsets, x, mask=offsets < N)
 
         torch._dynamo.reset()
-        counter = torch._dynamo.testing.CompileCounterWithBackend(backend=backend)
+        counter = torch.testing.CompileCounterWithBackend(backend=backend)
 
         @torch.compile(fullgraph=True, backend=counter)
         def f(dst, src, add_float, N):

@@ -44,7 +44,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y = torch.ones([2, 2], dtype=torch.int64)
         z = np.int64(12)
         res1 = fn(x, y, z)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertEqual(res1, res2)
@@ -55,7 +55,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return {"a": x + 1, "b": y / 2}
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         for i in range(10):
             opt_fn(x, np.int64(i))
@@ -95,7 +95,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
             return query, key, value, mask
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
 
         q, k, v, mask = make_q_k_v_mask(16, 16, 64, 15)
@@ -116,7 +116,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y = 10
         z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         res1 = fn(x, y, z)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2, relax_numpy_equality=True))
@@ -130,7 +130,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         shape = [2, 3]
         random.seed(1)
         res1 = fn(shape)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(shape)
@@ -149,7 +149,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         random.seed(1)
         res1 = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(x)
@@ -174,7 +174,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         random.seed(1)
         res1 = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(x)
@@ -306,7 +306,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = list(range(50))
         ref = fn(x, 48)  # 48 is unspecialized
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, 48)
         self.assertTrue(same(ref, res))
@@ -376,7 +376,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([3, 427, 640])
         scale_factor = 1.873536229133606
         ref = fn(x, scale_factor)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
@@ -589,7 +589,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compl_fn(inputs, op_inputs_dict), fn(inputs, op_inputs_dict))
 
     def test_symbol_guard_limit_before_specialize(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts, dynamic=True)
         def fn(x):
@@ -659,7 +659,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_input(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def f(x, y):
             if y == 5.0:
@@ -701,7 +701,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def f(x, y):
             return x + y
@@ -715,7 +715,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_output(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def f(x, y):
             return x + 1, y * 2
@@ -729,7 +729,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_data_dependent_evaluate_expr_graph_break(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         # To ensure that the continuation frame is compiled,
         # have to write the test function in this funny way.
@@ -784,7 +784,7 @@ def forward(self):
         print(f(torch.randn(10, requires_grad=True), torch.tensor([7, 3])))
 
     def test_bool_tensor_ctor(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts, dynamic=True, fullgraph=True)
         def f(x):
@@ -876,7 +876,7 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
         x = torch.randn([3, 6], device=device)
         scaler = 0.23  # 0.23 is unspecialized
         ref = fn(x, scaler)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, scaler)
         self.assertTrue(same(ref, res))

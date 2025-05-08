@@ -56,7 +56,7 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         input2 = torch.randn(2, 4, 8, requires_grad=True)
         optimizer = torch.optim.Adam([input2], lr=0.1)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_training_iter_fn = torch.compile(training_iter_fn, backend=cnts)
         batch = {"x": input1, "y": input2}
         for _ in range(2):

@@ -6462,7 +6462,7 @@ torch.cuda.synchronize()
         def fn(values, same_size):
             return values + same_size
 
-        compile_counter = torch._dynamo.testing.CompileCounter()
+        compile_counter = torch.testing.CompileCounter()
 
         compiled_fn = torch.compile(fn, backend=compile_counter, fullgraph=True)
         check_results(fn, compiled_fn, generate_inp(18))

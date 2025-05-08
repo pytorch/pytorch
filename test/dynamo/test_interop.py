@@ -42,7 +42,7 @@ class InteropTests(torch._dynamo.test_case.TestCase):
 
             return wrapper
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         x = torch.randn(3, 5, 3)
 
         def fn(x):

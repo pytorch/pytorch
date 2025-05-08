@@ -83,7 +83,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         args = [torch.randn(10), torch.randn(10)]
         obj1 = fn(*args)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
         self.assertTrue(same(obj1.last_hidden_state, obj2.last_hidden_state))
@@ -99,7 +99,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             )
         ]
         obj1 = fn(*args)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
         self.assertTrue(same(obj1, obj2))
@@ -186,7 +186,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         correct1 = fn(obj1)
 
         obj2 = MyDataClass(*tensors)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(obj2), correct1))
         self.assertEqual(cnts.frame_count, 1)

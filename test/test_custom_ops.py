@@ -1774,7 +1774,7 @@ def forward(self, x_1):
         from torch._dynamo.utils import counters
 
         counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):
@@ -1804,7 +1804,7 @@ Dynamic shape operator
         from torch._dynamo.utils import counters
 
         counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt, dynamic=True)
         def f(x, s, i):

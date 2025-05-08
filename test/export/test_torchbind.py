@@ -1214,7 +1214,7 @@ class TestCompileTorchbind(TestCase):
                 return x_sin, tq
 
         mod = Model()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        cnt = torch.testing.CompileCounterWithBackend(backend)
         x = torch.randn(2, 3)
 
         tq1 = _empty_tensor_queue()
@@ -1265,7 +1265,7 @@ class TestCompileTorchbind(TestCase):
                 return x_sin, tq
 
         mod = Model()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         x = torch.randn(2, 3)
 
         tq1 = _empty_tensor_queue()
@@ -1464,7 +1464,7 @@ def forward(self, token, obj, x):
         _assertEqualScriptObject(self, eager_ret, opt_ret)
 
     def test_compile_obj_graph_breaks(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         def f(tq, x):
             tq.push(x.sin())

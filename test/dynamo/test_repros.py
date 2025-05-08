@@ -973,7 +973,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt__do_paste_mask = torch.compile(_do_paste_mask, backend=cnt)
         opt__do_paste_mask(
             torch.randn(1, 1, 28, 28),
@@ -1026,7 +1026,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         correct1 = convert_boxes_to_pooler_format(boxes1)
         correct2 = convert_boxes_to_pooler_format(boxes2)
         fn = convert_boxes_to_pooler_format
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         self.assertTrue(same(opt_fn(boxes1), correct1))
         self.assertTrue(same(opt_fn(boxes2), correct2))
@@ -1046,7 +1046,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return len(boxes) + boxes.__len__() + boxes.tensor
 
         boxes1 = Boxes(torch.arange(0, 8).reshape((2, 4)))
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(boxes1), boxes1.tensor + 4.0))
 
@@ -1062,7 +1062,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         model = ReformerEncoder()
         torch.manual_seed(1337)
         correct = copy.deepcopy(model)(input)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         torch.manual_seed(1337)
         opt_model = torch.compile(model, backend=cnt, fullgraph=nopython)
         self.assertTrue(same(opt_model(input), correct))
@@ -1265,7 +1265,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         correct1 = longformer_chunk(input1)
         correct2 = longformer_chunk(input2)
         fn = longformer_chunk
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(input1), correct1))
         self.assertTrue(same(opt_fn(input2), correct2))
@@ -1287,7 +1287,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         input = torch.randn([1, 2048, 512])
         model = PartialT5()
         correct = model(input)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_model = torch._dynamo.optimize_assert(cnt)(model)
         self.assertTrue(same(opt_model(input), correct))
 
@@ -1300,13 +1300,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         torch.compile(model, backend=cnt, fullgraph=True)(torch.randn([5, 10]))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
     def test_function_in_skipfiles(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         torch.compile(torch.sin, backend=cnt, fullgraph=True)(torch.randn([5, 10]))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
@@ -1318,7 +1318,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             out = x[idx:]
             return (out + 3) * 5
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
         out = opt_fn(torch.ones(10, dtype=torch.long))
         # idx should be 1 -> slicing off [1:] of 8 elem tensor
@@ -1373,7 +1373,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
         correct = model(input)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_model = torch._dynamo.optimize_assert(cnt)(model)
         self.assertTrue(same(opt_model(input), correct))
 
@@ -1394,7 +1394,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         d = torch.zeros(75, dtype=torch.int64)
         model = PartialMaml()
         correct = model(a, b, c, d)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_model = torch.compile(model, backend=cnt)
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
@@ -1415,7 +1415,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         d = torch.zeros(75, dtype=torch.int64)
         model = PartialMaml()
         correct = model(a, b, c, d)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_model = torch.compile(model, backend=cnt)
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
@@ -1440,7 +1440,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def fn4(x):
             return x[0] + 1
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         for fn in (fn1, fn2, fn3, fn4):
             cnt.clear()
             opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
@@ -1463,7 +1463,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         correct = create_rand_mask_from_inputs(*args)
         fn = create_rand_mask_from_inputs
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
         if torch._dynamo.config.assume_static_by_default:
@@ -1481,7 +1481,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             after = torch.rand(1000)
             return before, after
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
 
         before, after = opt_fn()
@@ -1504,7 +1504,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return torch.cat([x, foo.x])
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnt, fullgraph=True)
 
         inp = torch.ones(1)
@@ -1525,7 +1525,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         l1 = [x]
         l2 = [x]
         correct, _ = model(x, l1)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_model = torch._dynamo.optimize_assert(cnt)(model)
         result, l3 = opt_model(x, l2)
         self.assertTrue(same(result, correct))
@@ -1538,7 +1538,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(5, 1, 28, 28)
         model = BatchNormAct2d(1).eval()
         correct = model(a)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         if not torch._dynamo.config.specialize_int:
             # _local_scalar_dense causes graph break w 0-dim tensor
             opt_model = torch.compile(model, backend=cnt)
@@ -1559,7 +1559,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def fn(model, x):
             return x + torch.randn(10, dtype=get_parameter_dtype(model))
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertEqual(opt_fn(model, torch.randn(10)).dtype, torch.float32)
         self.assertEqual(cnt.frame_count, 1)
@@ -1572,7 +1572,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(isinstance(a, torch.nn.Parameter))
             return a
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_test_fn = torch.compile(test_fn, backend=cnt)
         out = opt_test_fn()
         self.assertTrue(isinstance(out, torch.nn.Parameter))
@@ -1588,7 +1588,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertIsInstance(x, torch.Size)
             return a
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_test_fn = torch.compile(test_fn, backend=cnt)
         opt_test_fn()
 
@@ -1633,7 +1633,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
             return torch.randn(4)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_test_fn = torch.compile(test_fn, backend=cnt)
         opt_test_fn()
 
@@ -1663,7 +1663,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return t[0]
 
         cfg = DummyConfig()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertEqual(opt_fn(cfg), 64)
         # With unspec int, maximum computation is preserved
@@ -1681,7 +1681,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         correct = _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(x)
         fn = _get_sorted_bucket_idx_and_undo_sorted_bucket_idx
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(x), correct))
         if torch._dynamo.config.assume_static_by_default:
@@ -1707,7 +1707,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 _recursive_map(v)
             return x * b
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_toy_example = torch.compile(toy_example, backend=cnt)
         opt_toy_example(
             torch.randn(10),
@@ -1751,7 +1751,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         d_model = 64
         model = TransformerEncoderLayer(d_model, n_heads)
         inp = torch.randn(1, d_model)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_model = torch.compile(model, backend=cnt, fullgraph=True)
         opt_model(inp)
         opt_model(inp)
@@ -2334,7 +2334,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         m = Mod()
         listy = [torch.randn(10)] * 10
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_m = torch.compile(m, backend=cnt, fullgraph=True)
         opt_m.forward(listy)
 
@@ -2437,7 +2437,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         fn(x)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
@@ -2460,7 +2460,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         fn(x)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
@@ -2483,7 +2483,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         fn(x)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
@@ -2727,7 +2727,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         mod = Foo()
         args = (torch.ones(3, 4),)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_mod = torch.compile(mod, backend=cnt, fullgraph=True)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
         self.assertEqual(cnt.op_count, 5)
@@ -2782,7 +2782,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def f():
             return torch.tensor(data=[[1.0, -1.0]])
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(f, backend=cnt, fullgraph=True)
         self.assertTrue(same(f(), opt_fn()))
         self.assertEqual(cnt.frame_count, 1)
@@ -2797,7 +2797,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.graph_break()
             return x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.randn(4)
         opt_fn(x)
@@ -2815,7 +2815,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 inner(x)
             return x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.randn(4)
         opt_fn(x)
@@ -2869,7 +2869,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod(*args)
 
     def test_pointless_graph_removal(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def fn(x):
@@ -2915,7 +2915,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.graph_break()
             return x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.randn(4)
         opt_fn(x)
@@ -2943,7 +2943,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.graph_break()
             return x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.randn(4)
         opt_fn(x)
@@ -2965,7 +2965,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x += 3
             return x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.randn(4)
         opt_fn(x)
@@ -3003,7 +3003,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # generator
         generator_box = [(x for x in [1, 2, 3])]
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
 
         def g(x):
             return x + 2
@@ -3144,7 +3144,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.cos() + b
 
         args = (torch.Tensor([3, 4, 5]),)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         opt_f = torch.compile(f, backend=cnt, fullgraph=True)
         self.assertTrue(same(f(*args), opt_f(*args)))
@@ -3237,7 +3237,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnt, fullgraph=True)
         self.assertTrue(same(f(*args), opt_f(*args)))
         # torch._assert shouldn't be in the graph
@@ -3258,7 +3258,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x1 = torch.Size((3,))
         x2 = (3,)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnt, fullgraph=True)
         self.assertTrue(same(f(x1, y), opt_f(x1, y)))
         self.assertTrue(same(f(x2, y), opt_f(x2, y)))
@@ -3426,7 +3426,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(verbose=True)
     def test_graph_break_unsupported_fake(self):
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
 
         @torch.compile(backend=counter)
         def f(x):
@@ -3523,7 +3523,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch.sum(y, [y.shape[0]])
             return y
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(f, backend=cnt, fullgraph=True)
         opt_fn(torch.randn(3, 1, 1, 1, 1))
         self.assertEqual(cnt.frame_count, 1)
@@ -3562,7 +3562,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return torch.nn.functional.dropout(x, x.shape[0] / 6)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(f, backend=cnt, fullgraph=True)
         opt_fn(torch.randn(3))
         self.assertEqual(cnt.frame_count, 1)
@@ -3691,7 +3691,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def fn(input, mask):
             return XSoftmax.apply(input, mask, 1)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         fn_opt = torch.compile(fn, backend=cnt, fullgraph=False)
 
         torch.manual_seed(1234)
@@ -3924,7 +3924,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         try:
             torch.set_default_device("cuda")
 
-            counter = torch._dynamo.testing.CompileCounter()
+            counter = torch.testing.CompileCounter()
 
             @torch.compile(backend=counter)
             def f():
@@ -3976,7 +3976,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         inp4 = torch.rand(1, 448, 64)
         c = torch.rand(1, 64, 1, 64)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         opt_fn(inp1, inp2, inp3, inp4, c)
         self.assertEqual(cnt.frame_count, 3)
@@ -4154,7 +4154,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return x.cos()
             return x.sin()
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=counter, dynamic=True)
 
         x = torch.ones(5, 1, 3, 4)
@@ -4308,7 +4308,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x += 1
             return z
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         opt_arg, arg = np.array([1, 2]), np.array([1, 2])
         self.assertEqual(opt_fn(opt_arg), fn(arg))
@@ -4326,7 +4326,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 x = np.ones(9)
             return x**2
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
 
         x = np.zeros((2, 2))
@@ -4374,7 +4374,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return
 
         torch._dynamo.reset()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        cnt = torch.testing.CompileCounterWithBackend(backend)
 
         compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
         requires_grad = func is not func1
@@ -4418,7 +4418,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             ucm = UserCtxManager()  # noqa: F841
             return x * x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         x = torch.rand([2, 2])
         opt_fn(x, x)
@@ -4443,7 +4443,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         model = PaddingNet()
         lengths = torch.tensor([5, 4, 4, 4], dtype=torch.int32)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(model, backend=cnt, fullgraph=True)
         opt_fn(lengths)
         self.assertEqual(cnt.frame_count, 1)
@@ -4487,7 +4487,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             ucm = UserCtxManager(y)  # noqa: F841
             return x * y[0]
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, [5]), fn(x, [5]))
@@ -4511,7 +4511,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             ucm = UserCtxManager(counter)  # noqa: F841
             return x * x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.rand([2, 2])
         self.assertEqual(opt_fn(x, counter), fn(x, counter))
@@ -4897,7 +4897,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         ref = fn(x_weak, weight, y)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
@@ -5744,7 +5744,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(x, x_test)
 
     def test_changing_stride(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def fn(x, y):
@@ -6297,7 +6297,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         def fn(x):
             return mod(x)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         x = torch.randn(4)
 
@@ -6774,7 +6774,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         try:
             torch.set_default_device(device)
 
-            counter = torch._dynamo.testing.CompileCounter()
+            counter = torch.testing.CompileCounter()
 
             @torch._dynamo.optimize(counter)
             def f():
@@ -6948,7 +6948,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             else:
                 return x + 2
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         f_compiled = torch.compile(f, backend=cnt, dynamic=True)
 
         x1 = torch.randn(4)

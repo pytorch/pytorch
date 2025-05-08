@@ -16,7 +16,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             return a - b * 10
 
         torch._dynamo.reset()
-        cnt_static = torch._dynamo.testing.CompileCounter()
+        cnt_static = torch.testing.CompileCounter()
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=False, assume_static_by_default=True
         ):
@@ -31,7 +31,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             return a - b * 10
 
         torch._dynamo.reset()
-        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        cnt_dynamic = torch.testing.CompileCounter()
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=True, assume_static_by_default=True
         ):
@@ -48,7 +48,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             return a - b * 10
 
         torch._dynamo.reset()
-        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        cnt_dynamic = torch.testing.CompileCounter()
         with torch._dynamo.config.patch(
             automatic_dynamic_shapes=True, assume_static_by_default=False
         ):

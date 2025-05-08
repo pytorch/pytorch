@@ -44,7 +44,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(lambda grad: grad * 2)
             return x
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v)
@@ -57,7 +57,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(lambda grad: grad * 2)
             return x, y * y, z * z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))[0]
@@ -73,7 +73,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(lambda grad: grad * 3)
             return x, y * y, z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))[0]
@@ -88,7 +88,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             z = z * z
             return x, y * y, z, handle, h2
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v, y, z, h, h2 = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))
@@ -106,7 +106,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             z = z * z
             return x, y * y, z, handle, handle
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v, y, z, h, h2 = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))
@@ -117,7 +117,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertIs(h2, h)
 
     def test_removed_handle_return(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x, y, z):
@@ -141,7 +141,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             z = z * z
             return x, y * y, z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts, fullgraph=True)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
 
@@ -164,7 +164,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(local_hook)
             return x
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v)
@@ -182,7 +182,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             z.register_hook(local_hook)
             return x, z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v)
@@ -198,7 +198,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(local_hook)
             return x, y * y, z * z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))[0]
@@ -220,7 +220,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(local_hook2)
             return x, y * y, z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))[0]
@@ -233,7 +233,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(global_hook_0)
             return x, x * x
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v)[0]
@@ -248,7 +248,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             x.register_hook(global_hook_2)  # * 3
             return x, x * x
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v = fn(v)[0]
@@ -263,7 +263,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             h2 = x.register_hook(global_hook_2)  # * 3
             return x, x * x, h0, h1, h2
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v, r, handle_0, handle_1, handle_2 = fn(v)
@@ -285,7 +285,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             h0 = x.register_hook(global_hook_0)  # * 4
             return x, x * x
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(fn, backend=cnts)
         v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
         v, r = fn(v)
@@ -314,7 +314,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             return z
 
         out = torch.randn(1, requires_grad=True)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = torch.compile(f, backend=cnts, fullgraph=False)
         res = fn(out)
         res.backward()
@@ -537,7 +537,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         obj1 = ClassWithVal(torch.tensor(88))
         obj2 = ClassWithVal(torch.tensor(99))
         obj3 = ClassWithVal(11)
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         x0 = torch.ones(4, requires_grad=True)
         x1 = torch.ones(4, requires_grad=True)
@@ -556,8 +556,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             z = y.sin()
             return z
 
-        cnt_fw = torch._dynamo.testing.CompileCounter()
-        cnt_bw = torch._dynamo.testing.CompileCounter()
+        cnt_fw = torch.testing.CompileCounter()
+        cnt_bw = torch.testing.CompileCounter()
         opt = torch.compile(fn, backend=cnt_fw, fullgraph=True)
 
         obj1 = ClassWithVal(torch.tensor(88))
@@ -590,8 +590,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
             return run()
 
-        cnt_fw = torch._dynamo.testing.CompileCounter()
-        cnt_bw = torch._dynamo.testing.CompileCounter()
+        cnt_fw = torch.testing.CompileCounter()
+        cnt_bw = torch.testing.CompileCounter()
         opt = torch.compile(fn, backend=cnt_fw, fullgraph=True)
 
         x0 = torch.ones(4, requires_grad=True)
@@ -613,8 +613,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             z = y.sin()
             return z
 
-        cnt_fw = torch._dynamo.testing.CompileCounter()
-        cnt_bw = torch._dynamo.testing.CompileCounter()
+        cnt_fw = torch.testing.CompileCounter()
+        cnt_bw = torch.testing.CompileCounter()
         opt = torch.compile(fn, backend=cnt_fw, fullgraph=True)
 
         obj1 = ClassWithVal(torch.tensor(88))
@@ -644,7 +644,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             z = y.sin()
             return z
 
-        cnt_bw = torch._dynamo.testing.CompileCounter()
+        cnt_bw = torch.testing.CompileCounter()
         opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
 
         obj1 = ClassWithVal(torch.tensor(88))
@@ -688,7 +688,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         x1 = torch.ones(4, requires_grad=True)
         with compiled_autograd._enable(compiler_fn):
-            cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            cnts = torch.testing.CompileCounterWithBackend("aot_eager")
             comp_mod = torch.compile(mod, backend=cnts, fullgraph=True)
             comp_out = comp_mod(x1)
             comp_out[0].backward(torch.ones(4))
@@ -763,7 +763,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
                 y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
 
-                cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
+                cnts = torch.testing.CompileCounterWithBackend(backend)
                 compiled_fn = torch.compile(reg_and_mul, backend=cnts, fullgraph=True)
 
                 compiled_bwd_ctx = (
@@ -798,7 +798,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_no_recompile_on_same_hook(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def fw_hook(inp):
             return (inp[0] + 1,)
@@ -836,7 +836,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         mod = Mod()
 
@@ -873,7 +873,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         mod.register_forward_pre_hook(lambda mod, input: input[0] + 1)
 
         # Case 1: torch.compile(mod)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         compiled_mod = torch.compile(mod, backend=cnts)
 
         x = torch.rand(18, 18)
@@ -883,7 +883,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
 
         # Case 2: mod.compile()
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         mod.compile(backend=cnts)
         res = mod(x)
         self.assertEqual(ref, res)

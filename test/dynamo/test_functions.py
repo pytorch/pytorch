@@ -181,7 +181,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, s):
             return torch._foreach_lerp_(x, y, s)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
         expected = fn(
@@ -203,7 +203,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch._foreach_pow(x, y)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
         inps = (torch.tensor(0.80), [torch.tensor(3.4), torch.tensor(7.8)])
@@ -221,7 +221,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z, s):
             return x.addcmul_(y, z, value=s)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         fn_opt = torch.compile(backend=cnt, fullgraph=True)(fn)
         inps = (
             torch.ones(2, 2),
@@ -1013,7 +1013,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         with torch.inference_mode():
             x_inference = torch.randn(2, 2)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
         x = torch.randn(2, 2)
 
@@ -1030,7 +1030,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             else:
                 return x - 1
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
 
         x = torch.randn(2, 2)
@@ -2209,7 +2209,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + 3
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         cfunc = torch._dynamo.optimize_assert(cnt, dynamic=dynamic)(func)
 
         assert cnt.frame_count == 0
@@ -2286,7 +2286,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def func(x, a):
             return x + math.radians(a)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         cfunc = torch._dynamo.optimize_assert(cnt)(func)
 
         assert cnt.frame_count == 0
@@ -2546,7 +2546,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 return torch.zeros_like(t)
 
         t = torch.randn(3, 4)
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
         self.assertEqual(opt_fn(t), fn(t))
         self.assertGreater(counter.frame_count, 0)
@@ -2563,7 +2563,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 return torch.zeros_like(t)
 
         t = torch.randn(3, 4)
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
         self.assertEqual(opt_fn(t), fn(t))
 
@@ -2679,7 +2679,7 @@ class GraphModule(torch.nn.Module):
             a += next(m)  # will graph break
             return a
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnts)
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
@@ -2810,7 +2810,7 @@ class GraphModule(torch.nn.Module):
         lambda0 = functools.partial(multiply, y=3)
         lambda1 = functools.partial(multiply, y=2)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         torch.compile(fn, backend=cnts, fullgraph=True)(
             lambda0, lambda1, torch.randn(2, 2)
         )
@@ -2823,7 +2823,7 @@ class GraphModule(torch.nn.Module):
         lambda0 = functools.partial(SmallNN(), y=torch.randn(2, 2))
         lambda1 = functools.partial(SmallNN(), y=torch.randn(2, 2))
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         x = torch.randn(2, 2)
         dynamo_result = torch.compile(fn, backend=cnts, fullgraph=True)(
             lambda0, lambda1, x
@@ -2840,7 +2840,7 @@ class GraphModule(torch.nn.Module):
         lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
         lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         x = torch.randn(2, 2)
         dynamo_result = torch.compile(fn, backend=cnts, fullgraph=True)(
             lambda0, lambda1, x
@@ -3048,7 +3048,7 @@ class GraphModule(torch.nn.Module):
         lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
         lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         x = torch.randn(2, 2)
         fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -3075,7 +3075,7 @@ class GraphModule(torch.nn.Module):
         def fn2(f0, f1, args):
             return f0(*args) * f1(*args)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         x = torch.randn(2, 2)
         fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
@@ -3135,7 +3135,7 @@ class GraphModule(torch.nn.Module):
             print("graph break")
             return g(torch.rand([1]))
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(forward, backend=cnts)
 
         input = torch.rand([2])
@@ -3151,7 +3151,7 @@ class GraphModule(torch.nn.Module):
             print("graph break")
             return g(torch.rand([1]))
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(forward, backend=cnts)
 
         input = torch.rand([2])
@@ -3242,7 +3242,7 @@ class GraphModule(torch.nn.Module):
             np.dtype(np.dtype(typ).name),
             np.dtype(typ.__name__),
         ]
-        cnts_1 = torch._dynamo.testing.CompileCounter()
+        cnts_1 = torch.testing.CompileCounter()
         opt_fn_dtype = torch.compile(func_dtype, backend=cnts_1)
         a = torch.zeros(3, dtype=typ)
         for arg in dt_args:
@@ -3250,7 +3250,7 @@ class GraphModule(torch.nn.Module):
         # each should produce an identical arg
         self.assertEqual(cnts_1.frame_count, 1)
 
-        cnts_2 = torch._dynamo.testing.CompileCounter()
+        cnts_2 = torch.testing.CompileCounter()
         opt_fn_info = torch.compile(func_info, backend=cnts_2)
         info_args = [info_func(dt) for dt in dt_args]
         for arg in info_args:
@@ -3755,7 +3755,7 @@ class GraphModule(torch.nn.Module):
             a += next(m)  # will graph break
             return a
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnts)
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
@@ -3960,7 +3960,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         def func():
             return global_func_with_default_tensor_args()
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         compiled_func = torch.compile(func, backend=cnts)
         for i in range(4):
             if i % 2 == 0:
@@ -4000,7 +4000,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         compiled function
         """
         mod = WrapperModule()
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         compiled_mod = torch.compile(mod, backend=cnts)
         for i in range(4):
             if i % 2 == 0:
@@ -4046,7 +4046,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         def func():
             return func_with_default_torch_args()
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         compiled_func = torch.compile(func, backend=cnts)
         out = func()
         compiled_out = compiled_func()
@@ -4089,7 +4089,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             # Return dataclaass as well to check reconstruction
             return c, torch.cos(x) * scaled_value + b.named_tensors["x"] + c.scalar
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         compiled_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.randn(4)
         eager_dataclass, out = fn(x)
@@ -4381,7 +4381,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             tensor_list = set([param2])
             return param in tensor_list
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(opt_fn(param, param2), fn(param, param2))
         self.assertEqual(cnts.frame_count, 1)
@@ -4403,7 +4403,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             tensor_list = set([param2])
             return y in tensor_list and z in tensor_list
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(opt_fn(param, param2), fn(param, param2))
         self.assertEqual(cnts.frame_count, 1)
@@ -4473,7 +4473,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             y.copy_(x)
             return torch.sin(y + y.device.index)
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
 
         with torch.cuda.device(0):
@@ -4492,7 +4492,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 return torch.abs(x + 3)
 
         t = torch.ones(3)
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         fn.pred = True
         opt_fn_0 = torch.compile(fullgraph=True, backend=counter)(fn)
         self.assertEqual(opt_fn_0(t), fn(t))

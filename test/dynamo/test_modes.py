@@ -47,7 +47,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x + x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         x = torch.tensor([3.0])
         with RewriteAddToMul():
@@ -84,7 +84,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         class TestMode2(BaseTorchFunctionMode):
             pass
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt.__call__)
         def fn(x):
@@ -275,7 +275,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         fn(torch.ones(2, 2))
 
     def test_torch_function_mode_enabled_guard(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         inp = torch.ones(2, 2)
 
         @torch.compile(backend=cnt.__call__)

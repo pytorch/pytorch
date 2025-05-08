@@ -377,7 +377,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         x = torch.ones(1, requires_grad=True)
         ref = fn(x)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         res = opt_fn(x)
         # backward should work as well
@@ -416,7 +416,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         inp = torch.randn(4, 6, requires_grad=True)
         ref = fn(inp)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         res = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)(inp)
         res.sum().backward()
 
@@ -433,7 +433,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         inp = torch.randn(4, requires_grad=True)
         torch._dynamo.mark_dynamic(inp, 0)
         ref = fn(inp)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
         res.sum().backward()
 
@@ -456,7 +456,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         torch._dynamo.mark_dynamic(inp, 0)
         torch._dynamo.mark_dynamic(inp, 1)
         ref = fn(inp)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
         res.sum().backward()
 
@@ -474,7 +474,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         x2 = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(0)], run_check=False)
         x3 = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(1)], run_check=False)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=False)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
@@ -632,7 +632,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         x = torch.ones(1)
         ref = fn(x)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
@@ -668,13 +668,13 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         x = torch.ones(1)
         ref = fn(x)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
     def test_dtensor_dont_recompile_on_same_placement_devicemesh(self):
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        cnt = torch.testing.CompileCounterWithBackend("inductor")
 
         @torch.compile(backend=cnt)
         def fn(x):
@@ -862,7 +862,7 @@ def forward(self, primals_1):
             parallelize_plan=parallel_plan,
         )
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        cnt = torch.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(model, backend=cnt, fullgraph=True)
         inp = torch.rand(20, 16).to(self.device_type)
         out = compiled_model(inp)
@@ -938,7 +938,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         torch.manual_seed(rng_seed)
         inp = torch.rand(20, 10, device=self.device_type)
         out = model(inp)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         compiled_mod = torch.compile(model, backend=cnt, fullgraph=True)
         compiled_out = compiled_mod(inp)
         compiled_out.sum().backward()
@@ -987,7 +987,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
 
         # TODO: once aot autograd support is ready we can just use default backend
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         compiled_2d = torch.compile(fsdp_2d, backend=cnt)
         compiled_output = compiled_2d(inp)
 

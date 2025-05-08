@@ -306,7 +306,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         y = torch.randn(3, 3, requires_grad=True)
         z = torch.randn(3, 3, requires_grad=False)
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         failure_reason = None
 
@@ -328,7 +328,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
 
         torch._dynamo.reset()  # for new backend
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         fxz = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare_equal_outs_and_grads(self, F(), fxz, (x, z))
@@ -407,7 +407,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         y = torch.randn(3, 3, requires_grad=True)
         y1, y2, y4 = y.clone(), y.clone(), y.clone()
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         failure_reason = None
 
@@ -430,7 +430,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertEqual(cc.frame_count, 1)
 
         torch._dynamo.reset()  # for new backend
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         fxx(x3, x3)
@@ -463,7 +463,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         self.assertTrue(failure_reason is None)
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(a1, a1, 2, 2)
@@ -476,7 +476,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
@@ -517,7 +517,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         self.assertTrue(failure_reason is None)
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(a1, a1, 2, 2)
@@ -553,7 +553,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         self.assertTrue(failure_reason is None)
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f([3, 2, 1], [4, 5, 6], a1, a1)
@@ -566,7 +566,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
@@ -603,7 +603,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         self.assertTrue(failure_reason is None)
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(a1, a1)
@@ -616,7 +616,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
@@ -652,7 +652,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         self.assertTrue(failure_reason is None)
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(a1, a1, a1, a1)
@@ -665,7 +665,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cc = torch.testing.CompileCounterWithBackend("aot_eager")
 
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)

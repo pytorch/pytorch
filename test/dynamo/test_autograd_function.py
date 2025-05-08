@@ -242,7 +242,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(10, requires_grad=grad)
             for model in [Module5(), Module6()]:
                 torch._dynamo.reset()
-                cnts = torch._dynamo.testing.CompileCounter()
+                cnts = torch.testing.CompileCounter()
                 opt_model = torch.compile(model, backend=cnts)
                 for _ in range(3):
                     ref = model(x)
@@ -279,7 +279,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_stride_in_bwd(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         model = CustomFuncStrideModule()
         opt_model = torch.compile(backend=cnt, fullgraph=True)(model)
         x1 = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -332,7 +332,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_allow_in_graph(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch._dynamo.allow_in_graph
         class AllowInGraphFunc(torch.autograd.Function):
@@ -360,7 +360,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         from torch.autograd.function import once_differentiable
 
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         class ScaleGradient(torch.autograd.Function):
             @staticmethod
@@ -421,7 +421,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_multi_output(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         class Foo(torch.autograd.Function):
             @staticmethod
@@ -500,7 +500,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_amp_custom_fwd_bwd(self):
         torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -549,7 +549,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x.grad, 3.0)
 
     def test_user_defined_object_as_input(self):
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
 
         @dataclass
         class Weird:
@@ -1060,7 +1060,7 @@ class GraphModule(torch.nn.Module):
         y1 = fn(x1, W1)
         y1.sum().backward()
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         y2 = opt_fn(x2, W2)
         y2.sum().backward()
@@ -1098,7 +1098,7 @@ class GraphModule(torch.nn.Module):
         y1 = fn(x1, W1)
         y1.backward(y1.clone().detach().requires_grad_(True))
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         opt_fn = torch.compile(fn, backend=cnt)
         y2 = opt_fn(x2, W2)
         y2.backward(y2.clone().detach().requires_grad_(True))
@@ -1163,7 +1163,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_out):
                 return grad_out * ctx.x0
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
         def foo(x):
@@ -1173,7 +1173,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts.frame_count, 1)
 
     def test_needs_input_grad(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         class NeedsInputGradFunc(torch.autograd.Function):
             @staticmethod
@@ -1211,7 +1211,7 @@ class GraphModule(torch.nn.Module):
                 x, y = ctx.saved_tensors
                 return grad_out * x, grad_out * y
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def foo(x, y):
             return Foo.apply(x, y)
@@ -1249,7 +1249,7 @@ class GraphModule(torch.nn.Module):
                     x0mul = (x0mul * i) + x0mul
                 return x0mul
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
         def foo(x):
@@ -1259,7 +1259,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts.frame_count, 1)
 
     def test_mark_non_differentiable(self):
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         from torch.autograd import Function
 
         class MyFunction(Function):
@@ -1447,7 +1447,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(inp.grad, torch.tensor([2.25, 2.25]))
 
     def test_tuple_arg(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         class TupleArgFunc(torch.autograd.Function):
             @staticmethod

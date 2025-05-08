@@ -221,7 +221,7 @@ class CondTests(TestCase):
         dynamic=False,
         num_predicates=1,
     ):
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        cnt = torch.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
 
         inputs = [inp.to(device=device) for inp in inputs]
@@ -988,7 +988,7 @@ class WhileLoopTests(TestCase):
     ):
         import torch.utils._pytree as pytree
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        cnt = torch.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
 
         inputs = pytree.tree_map(lambda t: t.to(device=device), inputs)
@@ -1652,7 +1652,7 @@ class ScanTests(TestCase):
         dynamic,
         requires_grad=False,
     ):
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        cnt = torch.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True, dynamic=dynamic)(
             model
         )

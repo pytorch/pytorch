@@ -140,7 +140,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         a = torch.randn([3, 4])
         b = torch.randn([3, 4])
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             opt_fn(a, b)
@@ -161,7 +161,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x
 
         a = torch.randn([3, 4])
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
 
         for _ in range(10):
@@ -182,7 +182,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), requires_grad=True)
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
@@ -202,7 +202,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), requires_grad=True)
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
@@ -225,7 +225,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
@@ -256,7 +256,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(ref, res)
@@ -293,7 +293,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         s = torch.cuda.Stream()
         ref = fn(x, s)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x, s)
         self.assertEqual(ref, res)
@@ -330,7 +330,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
@@ -359,7 +359,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
         res = opt_fn(x)
@@ -378,7 +378,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         s0 = torch.cuda.Stream()
         s1 = torch.cuda.Stream()
         x = torch.randn(2, 2)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         ref0 = fn(x, s0, s1)
@@ -393,7 +393,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref1, res1)
 
         torch._dynamo.reset()
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         ref1 = fn(x, s1, s1)
@@ -417,7 +417,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
@@ -441,7 +441,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
@@ -459,7 +459,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return foo + 1, event
 
         x = torch.randn((1024, 1024), device="cuda")
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def run_iters(fn, compile=False):
             if compile:
@@ -512,7 +512,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cur_stream = torch.cuda.current_stream()
         new_stream = torch.cuda.Stream()
         ref = fn(x, cur_stream, new_stream)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x, cur_stream, new_stream)
         self.assertEqual(ref, res)
@@ -552,7 +552,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
@@ -580,7 +580,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 return x - 1
 
         x = torch.randn((2, 2), requires_grad=True)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
 
         if torch.autograd._profiler_enabled():
@@ -1064,7 +1064,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
         x = torch.rand(2, 3)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
 
         with torch.no_grad():
@@ -1101,7 +1101,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
         x = torch.rand(2, 3)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
 
         with torch.no_grad():
@@ -1135,7 +1135,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
         x = torch.rand(2, 3)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
 
         with torch.no_grad():
@@ -1175,7 +1175,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
         x = torch.rand(2, 3)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
 
         with torch.no_grad():
@@ -1187,7 +1187,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnts.op_count, 4)
 
         torch._dynamo.reset()
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
 
         with torch.enable_grad():
@@ -1210,7 +1210,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return a
 
         torch._dynamo.reset()
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -1537,7 +1537,7 @@ class GraphModule(torch.nn.Module):
             return x
 
         x = torch.zeros(10, requires_grad=False)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
@@ -1556,7 +1556,7 @@ class GraphModule(torch.nn.Module):
             return x
 
         x = torch.zeros(10, requires_grad=False)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
@@ -1580,7 +1580,7 @@ class GraphModule(torch.nn.Module):
             return x
 
         x = torch.zeros(10, requires_grad=False)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
@@ -1600,7 +1600,7 @@ class GraphModule(torch.nn.Module):
             return x
 
         x = torch.zeros(10, requires_grad=False)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
@@ -1616,7 +1616,7 @@ class GraphModule(torch.nn.Module):
             return x
 
         x = torch.zeros(10, requires_grad=False)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
@@ -1694,7 +1694,7 @@ class GraphModule(torch.nn.Module):
 
             return output1 + output2 + output3
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnts)
         opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
         self.assertEqual(cnts.frame_count, 3)
