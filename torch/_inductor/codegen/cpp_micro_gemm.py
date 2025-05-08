@@ -1915,9 +1915,10 @@ def create_micro_gemm(
 
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
-    dynamic_M = isinstance(m, sympy.Expr)
+    from ..utils import has_free_symbols
+    dynamic_M = has_free_symbols((m,))
     m = V.graph.sizevars.size_hint(m, fallback=1) if dynamic_M else m
-    assert isinstance(m, int), m
+    assert isinstance(m, int) or m.is_number, m
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
