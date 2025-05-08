@@ -755,8 +755,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
                 rocblas_dir = os.path.join(rocm_bin_path, 'rocblas')
                 target_rocblas_dir = os.path.join(target_dir, 'rocblas')
-                if not os.path.exists(target_rocblas_dir):
-                    os.makedirs(target_rocblas_dir)
+                os.makedirs(target_rocblas_dir, exist_ok=True)
                 self.copy_tree(rocblas_dir, target_rocblas_dir)
 
                 hipblaslt_dir = os.path.join(rocm_bin_path, 'hipblaslt')
