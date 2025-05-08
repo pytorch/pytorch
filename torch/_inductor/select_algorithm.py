@@ -1993,7 +1993,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
     def make_precompile_fn(
         self,
-        choices: list[ChoiceCaller],
+        choices,
         name: str,
         inputs_key: str,
         precompilation_timeout_seconds: Optional[int] = 60 * 60,
@@ -2089,7 +2089,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Some choices only differ in runtime arguments, so we
         # skip a choice if it has the same hash as a previously seen choice
-        seen_choices: OrderedSet[ChoiceCaller] = OrderedSet()
+        seen_choices: OrderedSet[str] = OrderedSet()
         for c in choices:
             # Skip choices which we have already issued a precompile
             if c.hash_key() in seen_choices:
