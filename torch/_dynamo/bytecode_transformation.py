@@ -1472,7 +1472,6 @@ def populate_kw_names_argval(instructions, consts):
 
 # If safe=True, we do not make any bytecode modifications.
 # Mainly used for debugging bytecode_transformation (see debug_checks)
-@functools.lru_cache
 def cleaned_instructions(code, safe=False) -> list[Instruction]:
     instructions = _cached_cleaned_instructions(code, safe)
     # We have a lot of code that implicitly mutates the instruction array. We
@@ -1520,6 +1519,7 @@ def _clone_instructions(instructions):
     return copied
 
 
+@functools.lru_cache
 def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
