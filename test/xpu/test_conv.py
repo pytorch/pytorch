@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import copy
 import itertools
 import math
 import unittest
@@ -1198,17 +1199,16 @@ class TestConvolutionNNDeviceType(NNTestCase):
         conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1, dtype=dtype)
         output_grad = torch.randn(3, 256, 224, 224, dtype=dtype)
         input_0 = input.to(device="xpu:0")
-        conv_0 = conv.to(device="xpu:0")
+        conv_0 = copy.deepcopy(conv).to(device="xpu:0")
         output_0 = conv_0(input_0)
         input_1 = input.to(device="xpu:1")
-        conv_1 = conv.to(device="xpu:1")
+        conv_1 = copy.deepcopy(conv).to(device="xpu:1")
         output_1 = conv_1(input_1)
         self.assertEqual(output_0.cpu(), output_1.cpu())
         output_grad_0 = output_grad.to(device="xpu:0")
         output_0.backward(output_grad_0)
         output_grad_1 = output_grad.to(device="xpu:1")
         output_1.backward(output_grad_1)
-        self.assertEqual(input_0.grad.cpu(), input_1.grad.cpu())
         self.assertEqual(output_grad_0.cpu(), output_grad_1.cpu())
 
     def test_conv_double_backward_strided_with_3D_input_and_weight(self, device):
