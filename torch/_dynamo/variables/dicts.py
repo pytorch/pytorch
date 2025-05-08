@@ -40,6 +40,7 @@ from ..utils import (
     dict_items,
     dict_keys,
     dict_values,
+    istype,
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -835,7 +836,9 @@ class SetVariable(ConstDictVariable):
                 "issubset": operator.le,
                 "issuperset": operator.ge,
             }
-            other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
+            other = args[0]
+            if not istype(other, SetVariable):
+                other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
