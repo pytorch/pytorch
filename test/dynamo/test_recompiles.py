@@ -13,7 +13,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return x * y
 
         def run_foo_6_times_and_count_recompiles(dynamic=None):
-            cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch.testing.CompileCounter()
 
             x = torch.randn([2])
             y = torch.randn([2])
@@ -76,7 +76,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
                 return y * y
 
         def run_foo_6_times_and_count_recompiles():
-            cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch.testing.CompileCounter()
 
             opt = torch.compile(foo, backend=cnt, fullgraph=True)
 
@@ -122,7 +122,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return x * y
 
         def run_foo_6_times_and_count_recompiles_swap_types():
-            cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch.testing.CompileCounter()
 
             x = torch.randn([2])
             y = torch.randn([2])
@@ -168,7 +168,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             a.add_(b)
             return c + 1
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         compiled_foo = torch.compile(foo, backend=cnt, fullgraph=True)
 
         x = torch.randn([3])
@@ -205,7 +205,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             a.add_(g1)
             return g2 + 1
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         compiled_foo = torch.compile(foo, backend=cnt, fullgraph=True)
 
         z = torch.randn([3])
@@ -233,7 +233,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return x @ w
 
         def run_foo_6_times_and_count_recompiles():
-            cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch.testing.CompileCounter()
 
             opt = torch.compile(foo, backend=cnt, fullgraph=True)
 
@@ -306,7 +306,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         model = SimpleDropout()
         x = torch.randn(10)
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         model = torch.compile(model, backend=counter, fullgraph=True)
         for _ in range(20):
             model.eval()
@@ -328,7 +328,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         def h(x, n):
             return x + n
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=counter, dynamic=False)
         for i in range(10):
             opt_f(torch.ones(3), i)
@@ -341,7 +341,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             return g
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
 
         @torch.compile(backend=counter)
         def h(x, g):
@@ -365,7 +365,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
                 x = x + 2
             return x
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
         opt_f = torch.compile(f, backend=counter, dynamic=False)
         # compiles
         self.assertEqual(opt_f(torch.ones(3), 0), torch.ones(3) + 3)
@@ -380,7 +380,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="unbacked")
     def test_automatic_dynamic_shapes_mark_as_unbacked(self):
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
 
         @torch.compile(backend=counter)
         def f(x):
@@ -395,7 +395,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious(self):
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
 
         def f(x):
             if x.size(0) < 10:
@@ -412,7 +412,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
 
         def f(x):
             if x.size(0) < 2:
@@ -428,7 +428,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)
-        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        counter = torch.testing.CompileCounterWithBackend("aot_eager")
 
         @torch.compile(backend=counter, fullgraph=True)
         def fn(x):
@@ -453,7 +453,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         # state is guarded.
 
         weights = torch.randn(10, 10)
-        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        counter = torch.testing.CompileCounterWithBackend("eager")
 
         def fn(x):
             if torch.get_autocast_dtype("cpu") == torch.float16:
@@ -479,7 +479,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             def __call__(self, x):
                 return x + 1
 
-        counter = torch._dynamo.testing.CompileCounter()
+        counter = torch.testing.CompileCounter()
 
         @torch.compile(backend=counter)
         def f(x, foo):

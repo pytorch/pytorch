@@ -38,7 +38,7 @@ class TestBaseOutput(torch._dynamo.test_case.TestCase):
         args = [torch.randn(10)]
         obj1 = fn(*args)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
         self.assertTrue(same(obj1.sample, obj2.sample))
@@ -52,7 +52,7 @@ class TestBaseOutput(torch._dynamo.test_case.TestCase):
             )
         ]
         obj1 = fn(*args)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
         self.assertTrue(same(obj1, obj2))

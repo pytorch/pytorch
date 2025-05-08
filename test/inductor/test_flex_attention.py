@@ -976,7 +976,7 @@ class TestFlexAttention(InductorTestCase):
         torch._dynamo.reset()
 
         # First compilation with original dimensions
-        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        backend = torch.testing.CompileCounterWithBackend("inductor")
         compiled_sdpa1 = torch.compile(sdpa_partial1, backend=backend, dynamic=True)
         compiled_out1 = compiled_sdpa1(q1, k1, v1)
 
@@ -1163,7 +1163,7 @@ class TestFlexAttention(InductorTestCase):
             fudge_factor = 1.1
 
         # The first batch.
-        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        backend = torch.testing.CompileCounterWithBackend("inductor")
         compiled_out1 = torch.compile(sdpa_partial1, backend=backend, fullgraph=True)(
             q1, k1, v1
         )

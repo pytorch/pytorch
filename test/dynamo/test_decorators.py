@@ -18,7 +18,7 @@ def my_custom_function(x):
 
 class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_disallow_in_graph(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts)
         def fn(a):
@@ -62,7 +62,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         x = torch.randint(2, (100,))
         ref = fn(x)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
@@ -114,7 +114,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Disable my monkeypatching
         model.layer0 = torch._dynamo.disable(model.layer0)
 
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        cnts = torch.testing.CompileCounterWithBackend("eager")
         opt_model = torch.compile(model, backend=cnts)
         opt_model(torch.randn(4))
 
@@ -136,7 +136,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_disable_nn_module_with_class_decorator(self):
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        cnts = torch.testing.CompileCounterWithBackend("eager")
 
         @torch._dynamo.disable
         class SimpleLinear(torch.nn.Module):
@@ -185,7 +185,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_allow_in_graph(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts)
         def fn(a):
@@ -205,7 +205,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 5)
 
     def test_allow_in_graph_no_id_reuse(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def do_allow_in_graph(x):
             return x + 1
@@ -495,7 +495,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         def trace_me(x, s):
             return x * s.get_num()
 
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnts = torch.testing.CompileCounterWithBackend("aot_eager")
 
         @torch.compile(fullgraph=True, backend=cnts)
         def fn(x, s):
@@ -621,7 +621,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             return res + 1
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnts = torch.testing.CompileCounterWithBackend("aot_eager")
         opt_fn = torch.compile(fn, backend=cnts)
 
         ref = fn(x)
@@ -827,7 +827,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
             self.assertIn(msg, str(e))
 
     def test_graph_break(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts)
         def fn(x):
@@ -859,7 +859,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         def fn(x):
             return fn1(x.tan())
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
@@ -942,7 +942,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         # NB: Choose another C function for test when we support operator.indexOf
         #     out of the box
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = operator.indexOf
         opt_fn = torch.compile(fn, backend=cnts)
         out = fn([1, 2, 3, 4, 5], 3)
@@ -970,7 +970,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
                     return i
             raise ValueError("sequence.index(x): x not in sequence")
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = operator.indexOf
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn([1, 2, 3, 4, 5], 3)
@@ -982,7 +982,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         torch._dynamo.reset()
         counters.clear()
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         fn = polyfill
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn([1, 2, 3, 4, 5], 3)
@@ -993,7 +993,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
     @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch._dynamo.disable()
         def fn1(x):
@@ -1023,7 +1023,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
             self.assertIn("Skip calling `torch.compiler.disable()`d function", str(e))
 
     def test_disable_optimize(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt, disable=True)
         def f1(x):
@@ -1105,7 +1105,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         e = encoder(y)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
         torch.compile(e, backend=cnt)(x)
 
         # first frame is before disable, second frame is after disable
@@ -1189,7 +1189,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
             def my_class_method(cls, arg1):
                 return super().my_class_method(arg1)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def fn(a, b, c):
@@ -1263,7 +1263,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
 
     def test_set_stance_aot_eager_then_compile(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts)
         def fn(x, y, z):
@@ -1288,7 +1288,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
             def forward(self, x):
                 return x * self.c
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         mod1 = Mock(10)
         mod2 = Mock(20)
         mod3 = Mock(30)
@@ -1305,7 +1305,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 3)
 
     def test_set_stance_eager_then_compile(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts)
         def fn(x, y, z):
@@ -1319,7 +1319,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 1)
 
     def test_set_stance_eager_then_compile_with_graph_break(self):
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnts)
         def fn(x, y, z):
@@ -1491,7 +1491,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
         def a(x):
             return x + 1
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         @torch.compiler.set_stance("default", force_backend=cnts)
         def b(x):
@@ -1536,7 +1536,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
     def test_dont_skip_tracing(self):
         from torch._dynamo.test_dont_skip_tracing_functions import f1, f3, f4, f5, f6
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         # make sure test_dont_skip_tracing_functions is actually skipped by trace rules
         torch.compile(f1, backend=cnts)(torch.randn(3))

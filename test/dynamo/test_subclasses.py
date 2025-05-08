@@ -571,7 +571,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         fn(input)
 
     def test_torch_function_state_guards(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
@@ -1213,7 +1213,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         def test_dynamic_dim(f, x, dim_dynamic, exp_frame_count, exp_op_count):
             torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch.testing.CompileCounter()
 
             opt_f = torch.compile(f, backend=cnt, fullgraph=True)
 
@@ -1252,7 +1252,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         def test_automatic_dynamic(f, inps, dim_dynamic, exp_frame_count, exp_op_count):
             torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch.testing.CompileCounter()
             opt_f = torch.compile(f, backend=cnt, fullgraph=True)
 
             shape_env = ShapeEnv()
@@ -1296,7 +1296,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         x_clone = x.clone()
         x_clone2 = x.clone()
         backend = EagerRecordGraphAndInputs()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        cnt = torch.testing.CompileCounterWithBackend(backend)
 
         @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
@@ -1402,7 +1402,7 @@ class GraphModule(torch.nn.Module):
 
     def test_compile_higher_order_with_functionalization(self):
         backend = EagerRecordGraphAndInputs()
-        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        cnt = torch.testing.CompileCounterWithBackend(backend)
 
         @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
@@ -1951,7 +1951,7 @@ s50 > 3""",
             torch._dynamo.reset()
             shape_env = ShapeEnv()
             backend = torch._dynamo.testing.EagerAndRecordGraphs()
-            cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+            cnt = torch.testing.CompileCounterWithBackend(backend)
             f_cond = torch.compile(f, backend=cnt, fullgraph=True)
             with torch._subclasses.fake_tensor.FakeTensorMode(
                 shape_env=shape_env

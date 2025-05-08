@@ -23,7 +23,7 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
     def test_print_single(self):
         global FILE
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         def comptime_print(e):
             @comptime
@@ -74,7 +74,7 @@ s77""",
     def test_print_graph(self):
         global FILE
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):
@@ -103,7 +103,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_print_disas(self):
         global FILE
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):
@@ -140,7 +140,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_print_value_stack(self):
         global FILE
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         def g(x):
             @comptime
@@ -167,7 +167,7 @@ def forward(self, L_x_ : torch.Tensor):
     def test_print_locals(self):
         global FILE
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):
@@ -193,7 +193,7 @@ y = FakeTensor(..., size=(2,))
 
     # Just make sure it doesn't crash
     def test_print_direct(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x, z):
@@ -206,7 +206,7 @@ y = FakeTensor(..., size=(2,))
 
     def test_sleep(self):
         sleep_time = 5
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x, z, should_sleep):
@@ -231,7 +231,7 @@ y = FakeTensor(..., size=(2,))
     def test_get_local_closure_variable(self):
         global SELF
         SELF = self
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):
@@ -254,7 +254,7 @@ y = FakeTensor(..., size=(2,))
     def test_print_bt(self):
         global FILE
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         def g(x):
             @comptime
@@ -282,7 +282,7 @@ y = FakeTensor(..., size=(2,))
     def test_print_guards(self):
         global FILE
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):
@@ -347,7 +347,7 @@ y = FakeTensor(..., size=(2,))
         )
 
     def test_graph_break(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):
@@ -384,7 +384,7 @@ y = FakeTensor(..., size=(2,))
         global SELF, FILE
         SELF = self
         FILE = StringIO()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
         def f(x):

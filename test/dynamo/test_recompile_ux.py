@@ -59,7 +59,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 out += input
             return out
 
-        compile_counter = torch._dynamo.testing.CompileCounter()
+        compile_counter = torch.testing.CompileCounter()
         for _ in range(10):
             x = torch.randn(3)
             iters = torch.randint(low=0, high=1000, size=())
@@ -83,7 +83,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             return input + input
 
         expected_recompiles = 2
-        compile_counter = torch._dynamo.testing.CompileCounter()
+        compile_counter = torch.testing.CompileCounter()
         with torch._dynamo.config.patch("recompile_limit", expected_recompiles):
             with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
                 for _ in range(10):
@@ -114,7 +114,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         b_v = torch.rand(3, 5, 4, device="cuda").view(3, 4, 5)
         b_p = torch.rand(3, 5, 4, device="cuda").permute(0, 2, 1)
         c = torch.rand(3, 4, 5, device="cuda")
-        compile_counter = torch._dynamo.testing.CompileCounter()
+        compile_counter = torch.testing.CompileCounter()
 
         with torch._dynamo.config.patch("recompile_limit", 2):
             opt_func = torch.compile(func, backend=compile_counter)

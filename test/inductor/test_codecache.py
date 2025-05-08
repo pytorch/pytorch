@@ -484,7 +484,7 @@ class TestFxGraphCache(TestCase):
         Verify that we can populate and hot load functions from the cache with pgo.
         """
 
-        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        backend = torch.testing.CompileCounterWithBackend("inductor")
 
         @torch.compile(backend=backend, fullgraph=True)
         def f(x):
@@ -543,7 +543,7 @@ class TestFxGraphCache(TestCase):
         with file name swapping
         """
 
-        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        backend = torch.testing.CompileCounterWithBackend("inductor")
 
         @torch.compile(backend=backend, fullgraph=True)
         def f(x):

@@ -3050,6 +3050,106 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_non_contigious_reshape1(self):
+        cnt = torch.testing.CompileCounter()
+
+        # reshape u1 -> (u0*u0)
+        # this result in the tensor "i64[u0, u0][s7*u0, s7].
+        # reshape happens in place reshape (no-clone)
+        def func(x, y):
+            f = y.item()
+            t = x.view((f, f))
+            # TODO avoid _check_is_size here.
+            torch._check_is_size(f)
+            return t * 10
+
+        compiled_func = torch.compile(
+            fullgraph=True,
+            backend="inductor",
+            dynamic=True,
+        )(func)
+
+        # create a non-contigious with data being even numbers in [0:cnt-1]
+        def make_non_contiguous_tensor(cnt):
+            # create a non-contiguous tensor x that is skipping odd indices.
+            x = torch.arange(cnt * 2)
+            x = x.as_strided((x.size()[0] // 2,), (2,))
+            return x
+
+        x = make_non_contiguous_tensor(4)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        compiled_result = compiled_func(x, torch.tensor([2]))
+        eager_result = func(x, torch.tensor([2]))
+        self.assertEqual(compiled_result, eager_result)
+
+        x = make_non_contiguous_tensor(49)
+        compiled_result = compiled_func(x, torch.tensor([7]))
+        eager_result = func(x, torch.tensor([7]))
+        self.assertEqual(compiled_result, eager_result)
+    
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_non_contigious_reshape2(self):
+        # reshape (u2, u3) -> (u0, u1)
+        def func(x, y):
+            u0, u1 = y.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+
+            result = torch.reshape(x, (u0, u1))
+            return result
+
+        x = torch.randn(10, 10)
+        # make x not contiguous.
+        x = x.t_()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        compiled_func = torch.compile(fullgraph=True)(func)
+
+        result_eager = func(x, torch.tensor([5, 20]))
+        result_compiled = compiled_func(x, torch.tensor([5, 20]))
+
+        result_eager = func(x, torch.tensor([2, 50]))
+        result_compiled = compiled_func(x, torch.tensor([2, 50]))
+
+    @unittest.skip("this test fails due to ")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_non_contigious_reshape_failing(self):
+        # reshape u1 -> (u0*u0)
+        # this result in the tensor "i64[u0, u0][s7*u0, s7].
+        # reshape happens in place reshape (no-clone)
+        def func(x, y):
+            f = y.item()
+            t1 = x.view((f, f))
+            t2 = x.reshape((f, f))
+            return t1, t2
+
+        # create a non-contigious with data being even numbers in [0:cnt-1]
+        def make_non_contiguous_tensor(cnt):
+            # create a non-contiguous tensor x that is skipping odd indices.
+            x = torch.arange(cnt * 2, device="cuda")
+            x = x.as_strided((x.size()[0] // 2,), (2,))
+            return x
+
+        x = make_non_contiguous_tensor(4)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        compiled_func = torch.compile(
+            fullgraph=True,
+            backend="inductor",
+        )(func)
+
+        compiled_result = compiled_func(x, torch.tensor([2]))
+        eager_result = func(x, torch.tensor([2]))
+        self.assertEqual(compiled_result, eager_result)
+
+        x = make_non_contiguous_tensor(49)
+        compiled_result = compiled_func(x, torch.tensor([7]))
+        eager_result = func(x, torch.tensor([7]))
+        self.assertEqual(compiled_result, eager_result)
+
 
 if __name__ == "__main__":
     run_tests()

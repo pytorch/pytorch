@@ -751,7 +751,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_inner)
             model = apply_fsdp_with_checkpointing(model, wrap_policy, is_inner)
             correct_outputs = model(inputs)
-            cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+            cnt = torch.testing.CompileCounterWithBackend("inductor")
             opt_model = torch.compile(model, backend=cnt)
             outputs = opt_model(inputs)
             self.assertTrue(same(correct_outputs, outputs))
@@ -1130,7 +1130,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             pg = dist.distributed_c10d._get_default_group()
 
-            cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch.testing.CompileCounter()
             sleep_time = 5
 
             @torch.compile(backend=cnt)
@@ -1716,7 +1716,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         args = (x,)
 
         backend = "aot_eager"
-        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        cnt = torch.testing.CompileCounterWithBackend(backend)
 
         torch.compile(mod, backend=cnt)(*args)
 
@@ -1915,7 +1915,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 return z
 
         fsdp_model = FSDP(Model(), use_orig_params=True)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        cnt = torch.testing.CompileCounterWithBackend("aot_eager")
         fsdp_model = torch.compile(fsdp_model, backend=cnt)
         inp = torch.randn((2, 3), device="cuda")
         for _ in range(15):
@@ -1958,7 +1958,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         for use_self in (False, True):
             model = ModuleWithStaticMethod(use_self)
             fsdp_model = FSDP(model, use_orig_params=True)
-            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            cnt = torch.testing.CompileCounterWithBackend("aot_eager")
             fsdp_model = torch.compile(fsdp_model, backend=cnt)
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
@@ -1970,7 +1970,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             self.assertEqual(test_out, ref_out)
 
     def test_async_subclass_no_specialize(self):
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        cnt = torch.testing.CompileCounterWithBackend("eager")
 
         @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
         def f(x):

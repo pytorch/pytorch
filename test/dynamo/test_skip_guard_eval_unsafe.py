@@ -62,7 +62,7 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x + foo.a + foo.b
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
 
         x = torch.randn(4)

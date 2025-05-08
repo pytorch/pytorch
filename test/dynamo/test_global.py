@@ -55,7 +55,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
@@ -70,7 +70,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         """Wrap the second call with torch._dynamo as well"""
@@ -86,7 +86,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return x + g_counter_new
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         self.assertTrue(same(res1, x + x + 1))
@@ -103,7 +103,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
@@ -117,7 +117,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
@@ -135,7 +135,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
@@ -149,7 +149,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
@@ -163,7 +163,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
@@ -176,7 +176,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
             return val
 
         x = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
@@ -196,7 +196,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         a = torch.randn(10)
         b = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
@@ -220,7 +220,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         a = torch.randn(10)
         b = torch.randn(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")

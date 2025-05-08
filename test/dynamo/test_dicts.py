@@ -250,7 +250,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             3: 5,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def fn(x, d):
             for key, value in d.items():
@@ -278,7 +278,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             3: 5,
         }
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def fn(x, d):
             for key in d:
@@ -307,7 +307,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         d[3] = 5
         d.move_to_end(2)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def fn(x, d):
             y = 0
@@ -332,7 +332,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         d[3] = 5
         d.move_to_end(2)
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
 
         def fn(x, d):
             y = 0
@@ -404,7 +404,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         args1 = {"a": torch.randn(10), "b": torch.randn(10)}
         args2 = dict(args1)
         assert fn(args1) is args1
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertIs(opt_fn(args2), args2)
         self.assertTrue(same(args1, args2))
@@ -453,7 +453,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         args1 = {}
         args1["a"] = torch.rand(10)
         args1["b"] = torch.rand(10)
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
@@ -476,7 +476,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 return d[3] * 3
 
         args1 = {namedtuple: None, 3: torch.randn(3)}
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
@@ -496,7 +496,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         args1[x] = y
         args1[3] = z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1, x), opt_fn(args1, x))
         self.assertEqual(cnts.frame_count, 1)
@@ -523,7 +523,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         args1[x] = y
         args1[3] = z
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertEqual(fn(args1, x), opt_fn(args1, x))
         self.assertEqual(cnts.frame_count, 1)
@@ -628,7 +628,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             module_dict.update(next_modules)
             return modules, module_dict
 
-        cnts = torch._dynamo.testing.CompileCounter()
+        cnts = torch.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         modules, module_dict = opt_fn()
 

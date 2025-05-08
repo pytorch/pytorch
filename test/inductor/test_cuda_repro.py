@@ -431,7 +431,7 @@ class CudaReproTests(TestCase):
         def f(x):
             return x.cos().view(x.shape).sin()
 
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        cnts = torch.testing.CompileCounterWithBackend("inductor")
 
         f2 = torch.compile(f, backend=cnts)
 
@@ -1327,7 +1327,7 @@ class CudaReproTests(TestCase):
 
                 return attn
 
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        cnts = torch.testing.CompileCounterWithBackend("inductor")
 
         model = Model().cuda().half()
         model = torch.compile(model, backend=cnts, dynamic=True)
