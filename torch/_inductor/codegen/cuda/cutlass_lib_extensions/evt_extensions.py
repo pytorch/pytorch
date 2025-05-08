@@ -69,11 +69,10 @@ if try_import_cutlass():
         def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
-
-            assert all(x.is_integer for x in shape), (
+            assert all(isinstance(x, int) or x.is_integer for x in shape), (
                 f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
             )
-            assert all(x.is_integer for x in stride), (
+            assert all(isinstance(x, int) or x.is_integer for x in stride), (
                 f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
             )
             shape = tuple(int(x) for x in shape)
@@ -142,16 +141,17 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
         fn_src: str, example_tensors: dict[str, CutlassTensor], **kwargs: Any
     ) -> EpilogueFunctor:
         class EpilogueFunctor(PythonASTFrontend):
-            def __init__(self, **kwargs: dict[str, Any]):
+            def __init__(self, cc: int, **kwargs: Any):
                 self.source = textwrap.dedent(fn_src)
-                super().__init__(**kwargs)
+                super().__init__(cc, **kwargs)
 
             def parse(self, example_inputs: dict[str, CutlassTensor]) -> None:
                 self.example_inputs = example_inputs
                 self.ast = ast.parse(self.source)
                 self.visit(self.ast)
 
-        epilogue_functor = EpilogueFunctor(**kwargs)
+        cc = int(cuda_env.get_cuda_arch())
+        epilogue_functor = EpilogueFunctor(cc=cc, **kwargs)
         epilogue_functor.trace(example_tensors)
         return epilogue_functor
 
