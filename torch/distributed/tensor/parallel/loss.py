@@ -281,7 +281,6 @@ def _nll_loss_forward_handler(
 
     channel_dim = 1 if x.dim() >= 2 else 0
     spec = x._spec
-    dim = normalize_dim(dim, x.dim())
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 
     # Check user input: if target and weight are not DTensors, convert them to DTensors;
@@ -428,7 +427,6 @@ def _nll_loss_backward_handler(
 
     channel_dim = 1 if x.dim() >= 2 else 0
     spec = x._spec
-    dim = normalize_dim(dim, x.dim())
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 
     # if target and weight are not DTensors, convert them to DTensors
