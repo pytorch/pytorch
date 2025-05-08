@@ -448,7 +448,7 @@ def get_runner_prefix(
             if experiment_name in opt_out_experiments:
                 opt_out_exp_list = ", ".join(opt_out_experiments)
                 log.info(
-                    f"Skipping experiment '{experiment_name}', as this workflow has opted-out: {opt_out_exp_list}"
+                    f"Skipping experiment '{experiment_name}', as this workflow has opted-out (opted out experiments are: {opt_out_exp_list})"
                 )
                 continue
 
