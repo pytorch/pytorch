@@ -915,7 +915,7 @@
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
 
-- name: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
+- name: kthvalue(Tensor self, SymInt k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
@@ -2865,6 +2865,8 @@
   offsets: non_differentiable
   lengths: non_differentiable
   dummy: non_differentiable
+  min_seqlen: non_differentiable
+  max_seqlen: non_differentiable
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
   self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
+from torch.fx.node import Target
 
 
 # Below is an implementation of generating FunctionSchema from example values.
@@ -18,6 +19,7 @@ class HopArgumentInfo:
     # Whether this arugment gets mutated in the hop subgraph.
     # For output, this should always be False
     is_mutated: bool
+    kw_only: bool
 
 
 class HopArgumentInfoGen:
@@ -28,6 +30,7 @@ class HopArgumentInfoGen:
         name: str = "",
         default_value: Optional[Any],
         is_mutated: bool = False,
+        kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
             assert type(example_value) == type(default_value)
@@ -36,6 +39,7 @@ class HopArgumentInfoGen:
             example_value=example_value,
             default_value=default_value,
             is_mutated=is_mutated,
+            kw_only=kw_only,
         )
 
 
@@ -69,7 +73,12 @@ class CArgumentGen:
         alias_set = set({f"alias::a{arg_idx}"}) if arg_info.is_mutated else set()
         alias_info = torch._C._AliasInfo(arg_info.is_mutated, alias_set, alias_set)  # type: ignore[attr-defined]
         return torch._C.Argument(
-            arg_info.name, typ, None, arg_info.default_value, False, alias_info
+            arg_info.name,
+            typ,
+            None,
+            arg_info.default_value,
+            arg_info.kw_only,
+            alias_info,
         )
 
 
@@ -152,3 +161,28 @@ class CFunctionSchemaGen:
             False,
             False,
         )
+
+
+def find_hop_schema(
+    gm: torch.fx.GraphModule, target: Target
+) -> list[torch._C.FunctionSchema]:
+    import torch.utils._pytree as pytree
+
+    schemas = []
+    for node in gm.graph.find_nodes(op="call_function", target=target):
+
+        def _get_example_value(node: torch.fx.Node) -> Any:
+            if node.op == "get_attr":
+                assert isinstance(node.target, str)
+                return getattr(gm, node.target)
+            else:
+                return node.meta["example_value"]
+
+        fake_args, fake_kwargs = pytree.tree_map_only(
+            torch.fx.Node,
+            _get_example_value,
+            (node.args, node.kwargs),
+        )
+        schema = node.target.gen_schema(*fake_args, **fake_kwargs)
+        schemas.append(schema)
+    return schemas

@@ -140,6 +140,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("guard_or_false")(file, line).cast<bool>();
   }
 
+  bool statically_known_true(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("statically_known_true")(file, line).cast<bool>();
+  }
+
   bool guard_or_true(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_or_true")(file, line).cast<bool>();
