@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import time
+import unittest
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
@@ -1121,7 +1122,14 @@ def check_sharded_parity(
         assert isinstance(sharded_param.grad, DTensor)  # mypy
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
+def skip_if_not_support_multithread():
+    def decorator(cls):
+        if TEST_XPU:
+            return unittest.skip(TEST_SKIPS["not-support-multithread"].message)(cls)
+        return cls
+    return decorator
 
+@skip_if_not_support_multithread()
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):

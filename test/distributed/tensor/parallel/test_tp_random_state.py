@@ -65,7 +65,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             # in the following way:
             #   - within a tensor parallel group, the RNG is set with the same seed
             #   - across data parallel groups, the RNG is set with different seeds
-            torch.cuda.manual_seed(dp_rank)
+            torch.manual_seed(dp_rank)
 
             # disable/enable parallel RNG feature
             if random._rng_tracker:

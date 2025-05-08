@@ -9,7 +9,7 @@ from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_HPU
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -493,7 +493,7 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(out_dt.to_local(), expected_dt.to_local())
-                if TEST_HPU or TEST_CUDA:
+                if torch.accelerator.is_available():
                     self.assertEqual(
                         comm_mode.get_comm_counts()[
                             torch.ops._dtensor.shard_dim_alltoall
@@ -576,7 +576,7 @@ class RedistributeTest(DTensorTestBase):
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return 8
+        return min(8, torch.accelerator.device_count())
 
     @with_comms
     def test_multi_dim_mesh(self):

@@ -31,6 +31,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+device_type = torch.accelerator.current_accelerator().type
 
 class C(nn.Module):
     def __init__(self, dim: int) -> None:
@@ -72,14 +73,14 @@ class A(nn.Module):
 class Y(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        p = torch.randn(10, device="cuda")
+        p = torch.randn(10, device=device_type)
         self.p = nn.Parameter(p)
 
 
 class X(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        q = torch.randn(10, device="cuda")
+        q = torch.randn(10, device=device_type)
         self.q = nn.Parameter(q)
         self.y = Y()
 
@@ -95,15 +96,15 @@ def _generate_model_and_input() -> nn.Module:
     dim = 8
 
     torch.manual_seed(42)
-    addend = torch.randn((dim, dim), device="cuda")
+    addend = torch.randn((dim, dim), device=device_type)
 
     torch.manual_seed(70)
-    subend = torch.randn((dim, dim), device="cuda")
+    subend = torch.randn((dim, dim), device=device_type)
 
-    model = A(dim, addend, subend).cuda()
+    model = A(dim, addend, subend).to(device=device_type)
 
     torch.manual_seed(84)
-    inp = torch.randn((dim, dim), device="cuda")
+    inp = torch.randn((dim, dim), device=device_type)
 
     return model, inp
 
@@ -229,7 +230,7 @@ class TestFullyShardIgnoreParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_ddp_A_fsdp_B_ddp_C(self):
         default_pg = dist.distributed_c10d._get_default_group()
-        mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
+        mesh = init_device_mesh(device_type, mesh_shape=(default_pg.size(),))
 
         ref_model, ref_inp = _generate_model_and_input()
 

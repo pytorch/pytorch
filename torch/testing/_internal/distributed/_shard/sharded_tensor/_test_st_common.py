@@ -9,11 +9,16 @@ from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
 )
 
+
+_dev = torch.accelerator.current_accelerator()
+DEVICE_TYPE = _dev.type if _dev is not None else "cuda"
+
+
 PLACEMENTS = [
-    "rank:0/cuda:0",
-    "rank:1/cuda:1",
-    "rank:2/cuda:2",
-    "rank:3/cuda:3",
+    f"rank:0/{DEVICE_TYPE}:0",
+    f"rank:1/{DEVICE_TYPE}:1",
+    f"rank:2/{DEVICE_TYPE}:2",
+    f"rank:3/{DEVICE_TYPE}:3",
 ]
 
 DEFAULT_GPU_NUM = 4
