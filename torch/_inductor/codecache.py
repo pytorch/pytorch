@@ -1024,7 +1024,7 @@ class GuardedCache(Generic[T]):
 
         info = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
-            info["cache_sample_guards_expr"] = sample_guards_expr
+            info["cache_status_guard_expr"] = sample_guards_expr
         return graph, pickled_content, info
 
     @classmethod
