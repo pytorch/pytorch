@@ -4052,7 +4052,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = m.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y)
 
-
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("80GB", "cpu")
@@ -4062,6 +4061,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y)
+
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestConvolutionNN)
