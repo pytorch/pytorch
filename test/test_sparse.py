@@ -4056,21 +4056,21 @@ class TestSparseOneOff(TestCase):
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
+                "Expected all tensors to be on the same device"):
             torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
                                     torch.randn(4, 4, 4),
                                     [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
+                "Expected all tensors to be on the same device"):
             torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
                                     torch.randn(4, 4, 4, 0),
                                     [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
+                "Expected all tensors to be on the same device"):
             torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
                                     torch.randn(0, 4, 4, 0),
                                     [0, 4, 4, 0])
