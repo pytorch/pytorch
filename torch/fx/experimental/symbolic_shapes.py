@@ -6171,8 +6171,13 @@ class ShapeEnv:
             )
         else:
             desc = "Could not guard on data-dependent expression"
+        if len(expr.free_symbols) == 0:
+            expr = unhinted_expr
+            maybe_unhinted_expr_str = ""
+        else:
+            maybe_unhinted_expr_str = f" (unhinted: {unhinted_expr})"
         msg = (
-            f"{desc} {expr} (unhinted: {unhinted_expr}).  "
+            f"{desc} {expr}{maybe_unhinted_expr_str}.  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
             f"Caused by: {sloc}\n"
