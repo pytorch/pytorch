@@ -141,9 +141,9 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
         fn_src: str, example_tensors: dict[str, CutlassTensor], **kwargs: Any
     ) -> EpilogueFunctor:
         class EpilogueFunctor(PythonASTFrontend):
-            def __init__(self, **kwargs):
+            def __init__(self, cc: int, **kwargs: Any):
                 self.source = textwrap.dedent(fn_src)
-                super().__init__(**kwargs)
+                super().__init__(cc, **kwargs)
 
             def parse(self, example_inputs: dict[str, CutlassTensor]) -> None:
                 self.example_inputs = example_inputs
