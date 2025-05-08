@@ -207,7 +207,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         def entry(self, index: int) -> Any:
             return self._entries[index]
 
-        def flatten_up_to(self, full_tree: PyTree) -> list[PyTree]:
+        def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
             def helper(
                 treespec: PyTreeSpec,
                 node: PyTree,
@@ -293,7 +293,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
                     helper(subspec, subtree, subtrees)
 
             subtrees: list[PyTree] = []
-            helper(self, full_tree, subtrees)
+            helper(self, tree, subtrees)
             return subtrees
 
         def unflatten(self, leaves: Iterable[Any]) -> PyTree:
