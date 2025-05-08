@@ -19,8 +19,8 @@ from torch.fx.passes.infra.pass_manager import PassManager
 from torch.types import FileLike
 from torch.utils._pytree import (
     FlattenFunc,
-    FromDumpableContextFn,
-    ToDumpableContextFn,
+    FromDumpableContextFunc,
+    ToDumpableContextFunc,
     UnflattenFunc,
 )
 

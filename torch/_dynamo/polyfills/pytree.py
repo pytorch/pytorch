@@ -1,3 +1,5 @@
+# Owner(s): ["module: pytree"]
+
 """
 Python polyfills for torch.utils.pytree
 """
@@ -7,7 +9,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, TYPE_CHECKING
-from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
@@ -18,7 +19,7 @@ from ..decorators import substitute_in_graph
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Iterable
-    from typing_extensions import Self
+    from typing_extensions import Self, TypeIs
 
 
 __all__: list[str] = []
