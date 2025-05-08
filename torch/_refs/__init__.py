@@ -49,6 +49,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 
+
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
 
@@ -3816,7 +3817,11 @@ def _unbacked_fallback_reshape_view_helper(
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true, GuardOnDataDependentSymNode
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        GuardOnDataDependentSymNode,
+    )
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)

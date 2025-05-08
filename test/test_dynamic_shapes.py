@@ -15,6 +15,7 @@ import torch.fx
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
+from torch._dynamo.testing import CompileCounter
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
@@ -3053,43 +3054,51 @@ class TestGuardsExpressions(TestCase):
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_non_contigious_reshape1(self):
-        cnt = torch.testing.CompileCounter()
+        cnt = CompileCounter()
 
+        # since this happen in place, either reshape or view would work.
         # reshape u1 -> (u0*u0)
         # this result in the tensor "i64[u0, u0][s7*u0, s7].
         # reshape happens in place reshape (no-clone)
         def func(x, y):
             f = y.item()
-            t = x.view((f, f))
+            t1 = x.view((f, f))
+            t2 = x.reshape((f, f))
             # TODO avoid _check_is_size here.
             torch._check_is_size(f)
-            return t * 10
+            return t1 * 10, t2 * 10
 
         compiled_func = torch.compile(
             fullgraph=True,
-            backend="inductor",
+            backend=cnt,
             dynamic=True,
         )(func)
 
         # create a non-contigious with data being even numbers in [0:cnt-1]
-        def make_non_contiguous_tensor(cnt):
+        # and reshape it into sqrt(cnt)*sqrt(cnt)
+        def make_non_contiguous_tensor_and_test(cnt):
             # create a non-contiguous tensor x that is skipping odd indices.
             x = torch.arange(cnt * 2)
             x = x.as_strided((x.size()[0] // 2,), (2,))
-            return x
 
-        x = make_non_contiguous_tensor(4)
-        torch._dynamo.decorators.mark_unbacked(x, 0)
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            sz = torch.tensor([int(math.sqrt(cnt))])
+            compiled_result = compiled_func(x, sz)
+            eager_result = func(x, sz)
+            self.assertEqual(compiled_result, eager_result)
 
-        compiled_result = compiled_func(x, torch.tensor([2]))
-        eager_result = func(x, torch.tensor([2]))
+        make_non_contiguous_tensor_and_test(4)
+        make_non_contiguous_tensor_and_test(49)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Pass in a contiguous tensor, it will recompile due to stride being 1 unfortunately.
+        # marking strides unabcked would have fixed it probably. 
+        x = torch.arange(100)
+        compiled_result = compiled_func(x, torch.tensor([10]))
+        eager_result = func(x, torch.tensor([10]))
         self.assertEqual(compiled_result, eager_result)
+        self.assertEqual(cnt.frame_count, 2)
 
-        x = make_non_contiguous_tensor(49)
-        compiled_result = compiled_func(x, torch.tensor([7]))
-        eager_result = func(x, torch.tensor([7]))
-        self.assertEqual(compiled_result, eager_result)
-    
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_non_contigious_reshape2(self):
