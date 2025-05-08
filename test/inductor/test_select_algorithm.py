@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import pickle
 from unittest.mock import patch
 
 import torch
@@ -10,6 +11,7 @@ import torch.nn.functional as F
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import TritonBenchmarkRequest
+from torch._inductor.autotune_remote import RemoteBenchmarkRequest
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
@@ -367,6 +369,40 @@ class TestSelectAlgorithm(TestCase):
         )
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
+
+
+def make_benchmark_fn(
+    cls,
+    _,
+    input_nodes,
+    layout,
+    input_gen_fns,
+):
+    def benchmark(choices):
+        request = RemoteBenchmarkRequest.from_choices(choices, input_nodes, layout)
+        request = pickle.loads(pickle.dumps(request))
+        timings = request.benchmark()
+        return dict(zip(choices, timings))
+
+    return benchmark
+
+
+class TestSelectAlgorithmRemote(TestSelectAlgorithm):
+    """
+    Duplicate all the TestSelectAlgorithm tests, but replace the make_benchmark_fn
+    with one that exercises the autotune_remote utilities, i.e., serialize a remote
+    request object, deserialize, and benchmark its choices.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        patcher = patch(
+            "torch._inductor.select_algorithm.AlgorithmSelectorCache.make_benchmark_fn",
+            make_benchmark_fn,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
 
 if __name__ == "__main__":

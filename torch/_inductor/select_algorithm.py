@@ -106,6 +106,12 @@ class KernelNamespace:
 extern_kernels = KernelNamespace()
 
 
+# Maintain a map from extern kernel names to ExternKernelChoice objects.
+# Support autotuning in an external process where we send the kernel name
+# over the wire instead of serializing a callable.
+extern_kernel_choices: dict[str, "ExternKernelChoice"] = {}
+
+
 @dataclasses.dataclass
 class BenchmarkTensors:
     """Represents a set of inputs and outputs for autotuning with a template"""
@@ -1426,6 +1432,7 @@ class ExternKernelChoice:
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
+        extern_kernel_choices[name] = self
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -2217,8 +2224,8 @@ class AlgorithmSelectorCache(PersistentCache):
         cls,
         choices: Sequence[ChoiceCaller],
         autotune_args: AutotuneArgs,
-    ) -> dict[ChoiceCaller, float]:
-        timings = {}
+    ) -> list[float]:
+        timings = []
         for choice in choices:
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
@@ -2259,7 +2266,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 except ImportError:
                     raise e from None
 
-            timings[choice] = timing
+            timings.append(timing)
 
         return timings
 
@@ -2272,7 +2279,8 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
     ) -> dict[ChoiceCaller, float]:
         inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns)
-        return cls.benchmark_choices(choices, inputs)
+        timings = cls.benchmark_choices(choices, inputs)
+        return dict(zip(choices, timings))
 
     @classmethod
     def benchmark_in_sub_process(
