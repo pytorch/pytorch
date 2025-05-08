@@ -9,15 +9,9 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHDYNAMO,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests
 
-if TEST_WITH_TORCHDYNAMO:
-    __TestCase = CPythonTestCase
-else:
-    __TestCase = unittest.TestCase
+__TestCase = CPythonTestCase
 
 # redirect import statements
 import sys
@@ -2650,12 +2644,15 @@ __test__ = {"tut":      tutorial_tests,
             }
 
 def load_tests(loader, tests, pattern):
-    tests.addTest(doctest.DocTestSuite())
+    # ======= BEGIN Dynamo patch =======
+    suite = doctest.DocTestSuite()
+    for test in suite:
+        # Dynamically change base class
+        test.__class__ = type(test.__class__.__name__, (__TestCase, test.__class__), {})
+    tests.addTests(suite)
+    # ======= END DYNAMO PATCH =======
     return tests
 
 
 if __name__ == "__main__":
-    if TEST_WITH_TORCHDYNAMO:
-        run_tests()
-    else:
-        unittest.main()
+    run_tests()
