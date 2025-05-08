@@ -272,6 +272,9 @@ def count_flops_fx(node: torch.fx.Node) -> Optional[int]:
 
 
 def countable_fx(node: torch.fx.Node) -> bool:
+    """
+    Whether or not we can count the flops of an FX node.
+    """
     assert isinstance(node, torch.fx.Node)
     if not hasattr(node, "target"):
         return False

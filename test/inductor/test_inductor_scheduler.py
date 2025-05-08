@@ -2,10 +2,9 @@
 
 import torch
 import torch.utils.flop_counter
-from torch._inductor.debug import DebugContext
-from torch._inductor.graph import GraphLowering
-from torch._inductor.virtualized import V
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch._dynamo.utils import counters
+from torch._inductor.ir import FixedLayout
+from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -42,11 +41,36 @@ def cT(device, dtype):
 
 
 class TestScheduler(TestCase):
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @parametrize("options", [{"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}, {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}])
+    @parametrize(
+        "options",
+        [
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "force_disable_caches": True,
+            },
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON,ATEN",
+                "force_disable_caches": True,
+            },
+        ],
+    )
     def test_flop_counter_op(self, device, dtype, options):
+        if device == "cpu":
+            return
+        if (
+            options["max_autotune_gemm_backends"] == "TRITON"
+            and torch.cuda.is_available()
+            and not torch._inductor.utils.use_triton_template(
+                FixedLayout(torch.device("cuda"), torch.float16, [400, 800])
+            )
+        ):
+            return
         T = cT(device, dtype)
+
         def composite(x, y, z):
             tmp = torch.mm(x + 10, y / 12)
             return torch.mm(tmp, z)
@@ -63,22 +87,23 @@ class TestScheduler(TestCase):
         ]
         for op, example_inputs, kwargs in test_cases:
             comp = torch.compile(op, options=options)
-            with FlopCounterMode() as mode:
+            # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                # actually run to set the counters
                 comp(*example_inputs, **kwargs)
-            gm = make_fx(op)(*example_inputs, **kwargs)
+                with FlopCounterMode() as mode:
+                    comp(*example_inputs, **kwargs)
             reference_flops = get_total_flops(mode)
 
-            graph = GraphLowering(gm)
-
-            with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
-                graph.run(*example_inputs, **kwargs)
-                graph.init_wrapper_code()
-                graph._update_scheduler()
-                scheduler_flops = 0
-                for node in graph.scheduler.nodes:
-                    flops = node.estimate_flops()
-                    scheduler_flops += flops if flops is not None else 0
-            self.assertEqual(reference_flops, scheduler_flops, msg=f"op = {op}")
+            self.assertEqual(
+                reference_flops,
+                counters["inductor"]["flop_count"],
+                msg=f"op = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
+            )
+            if op != torch.add:
+                self.assertNotEqual(reference_flops, 0, msg=f"op = {op} is 0 flops")
+            counters["inductor"]["flop_count"] = 0
 
 
 instantiate_device_type_tests(TestScheduler, globals())
