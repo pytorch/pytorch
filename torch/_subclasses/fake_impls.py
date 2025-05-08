@@ -844,7 +844,8 @@ def bincount(fake_mode, func, inputs, weights=None, minlength=0):
 
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-    _constrain_range_for_size(new_size, min=minlength)
+    _constrain_range_for_size(new_size)
+    torch._check(new_size >= minlength)
     return inputs.new_empty(new_size)
 
 

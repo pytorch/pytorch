@@ -420,16 +420,9 @@ inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
-//Added sleef Implementation for Maximum
+template <>
 Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b)  {
-  if(!a.has_inf_nan() && !b.has_inf_nan()){
-    return USE_SLEEF(
-      Vectorized<float>(Sleef_fmaxf4(a, b)),
-      Vectorized<float>(vmaxq_f32(a,b)));
-  }
-  else{
-    return Vectorized<float>(vmaxq_f32(a, b));
-  }
+  return Vectorized<float>(vmaxq_f32(a, b));
 }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
@@ -540,7 +533,7 @@ Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<floa
 
 template <>
 Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
-  return Vectorized<float>(vfmsq_f32(c, a, b));
+  return Vectorized<float>(vnegq_f32(vfmsq_f32(c, a, b)));
 }
 
 inline Vectorized<float> Vectorized<float>::erf() const{

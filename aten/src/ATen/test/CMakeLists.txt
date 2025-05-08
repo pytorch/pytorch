@@ -64,6 +64,7 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_distributions_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_dlconvertor_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_exchange_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_half_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu

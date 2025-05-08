@@ -108,15 +108,12 @@ static std::string getIndexFunctionName(ScalarType scalar_type,
       : (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_"
                                                : (serial ? "index_put_serial_" : "index_put_");
 
-  indexFunction += getBitSizeString(scalar_type);
+  indexFunction.append(getBitSizeString(scalar_type));
   if (accumulate) {
-    TORCH_CHECK(scalar_type == ScalarType::Float || scalar_type == ScalarType::Int,
-                "Unsupported data type for accumulate case: ",
-                getMPSTypeString(scalar_type));
-    string dtypeString = (scalar_type == ScalarType::Float) ? "_float" : "_int";
-    indexFunction += dtypeString;
+    indexFunction.append(1, '_');
+    indexFunction.append(scalarToMetalTypeString(scalar_type));
   }
-  indexFunction += use_64bit_indexing ? "_idx64" : "_idx32";
+  indexFunction.append(use_64bit_indexing ? "_idx64" : "_idx32");
   return indexFunction;
 }
 
@@ -206,8 +203,7 @@ static void validateInputData(const TensorIteratorBase& iter,
 
   if (accumulate) {
     // No atomic support for the rest of dtypes
-    TORCH_CHECK(scalar_type == ScalarType::Float || inputTensor.scalar_type() == ScalarType::Int ||
-                scalar_type == ScalarType::Bool);
+    TORCH_CHECK(supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool);
   } else {
     TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type) ||
                     scalar_type == ScalarType::ComplexFloat || scalar_type == ScalarType::ComplexHalf,
@@ -283,7 +279,7 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
   }
 
   @autoreleasepool {
-    string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
+    std::string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
@@ -375,7 +371,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
   }
 
   @autoreleasepool {
-    string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
+    std::string key = "nonzero_out_native_mps" + getTensorsStringKey(self);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
@@ -456,7 +452,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
     NSString* ns_dims_key = [[ns_dims valueForKey:@"description"] componentsJoinedByString:@","];
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types
     // etc match the earlier created MPSGraph
-    string key = "flip_mps:" + getTensorsStringKey({self}) + ":" + string([ns_dims_key UTF8String]);
+    std::string key = "flip_mps:" + getTensorsStringKey({self}) + ":" + std::string([ns_dims_key UTF8String]);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(self));
       MPSGraphTensor* outputTensor = [mpsGraph reverseTensor:inputTensor axes:ns_dims name:nil];
@@ -504,7 +500,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)
   };
 
   @autoreleasepool {
-    string key = "index_add_mps_out" + getTensorsStringKey({self, index, source}) + ":" + std::to_string(dim);
+    std::string key = "index_add_mps_out" + getTensorsStringKey({self, index, source}) + ":" + std::to_string(dim);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
@@ -653,7 +649,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
 
   @autoreleasepool {
-    string key = "index_select_out_mps" + getTensorsStringKey({self, index}) + ":" + std::to_string(dim);
+    std::string key = "index_select_out_mps" + getTensorsStringKey({self, index}) + ":" + std::to_string(dim);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self));
       MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
@@ -790,8 +786,9 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "edb_mps:" + getTensorsStringKey({grad_, indices}) + ":num_weights" + std::to_string(num_weights) +
-        ":padding_idx" + std::to_string(padding_idx) + ":scaled" + std::to_string(scale_grad_by_freq);
+    std::string key = "edb_mps:" + getTensorsStringKey({grad_, indices}) + ":num_weights" +
+        std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" +
+        std::to_string(scale_grad_by_freq);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* incomingGradTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_));
 
@@ -930,7 +927,8 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
   auto expanded_source = source.expand(source_shape);
 
   @autoreleasepool {
-    string key = "index_fill_mps_" + getTensorsStringKey({self, index, expanded_source}) + ":" + std::to_string(dim);
+    std::string key =
+        "index_fill_mps_" + getTensorsStringKey({self, index, expanded_source}) + ":" + std::to_string(dim);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self));
       MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);

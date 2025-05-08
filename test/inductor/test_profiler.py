@@ -179,6 +179,9 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @config.patch(
+        "compile_threads", 1
+    )  # This test monkey patches global variables, which workers don't see
     def test_inductor_profiling_triton_hooks(self):
         from triton.compiler import CompiledKernel  # @manual
 

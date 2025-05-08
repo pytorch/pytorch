@@ -3,6 +3,8 @@ import functools
 import logging
 from typing import Any, Optional
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -14,13 +16,14 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, ir
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import FlexibleLayout, is_triton
+from ..codegen.subgraph import SubgraphTemplate
+from ..ir import FlexibleLayout, ir_node_to_tensor, is_triton
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -34,11 +37,13 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    get_k_splits,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_gemm_template,
     use_cutlass_template,
+    use_decompose_k_choice,
     use_max_autotune,
     use_triton_template,
     use_triton_tma_template,
@@ -69,6 +74,7 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 mm_template = TritonTemplate(
     name="mm",
@@ -585,8 +591,25 @@ def check_supported_striding(mat_a, mat_b) -> None:
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
+def decomposeK(a, b, k_splits):
+    m = a.shape[0]
+    n = b.shape[1]
+    k = a.shape[1]
+
+    k_parts = k // k_splits
+    B = k_splits
+    a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
+    b_reshaped = b.reshape(B, k_parts, n)
+    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+    reduced_buf = torch.sum(result, 0)
+    return reduced_buf.to(a.dtype)
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
+    """
+    Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
+    """
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     device_type = ir.get_device_type(mat1)
     name = "mm"
@@ -621,7 +644,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(
-            m, n, k, *mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -629,9 +655,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
+
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                m,
+                n,
+                k,
+                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -643,6 +673,40 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     ),
                     **mm_options(config, m, n, k, layout),
                     **persistent_mm_options(mat1, mat2),
+                )
+        # Only do split-k optimization if K is much larger than m, n and m, n are small
+        if use_decompose_k_choice(m, n, k):
+            from torch._dispatch.python import enable_python_dispatcher
+
+            from ..decomposition import select_decomp_table
+
+            k_splits = get_k_splits(m, n, k)
+            for k_split in k_splits:
+                if not V.graph.sizevars.is_expr_static_and_true(
+                    sympy.Eq(sympy.Mod(k, k_split), 0)
+                ):
+                    continue
+
+                with enable_python_dispatcher():
+                    decompositions = select_decomp_table()
+
+                    decompose_k_subgraph_template = SubgraphTemplate(
+                        name=f"decompose_k_mm_{k_split}_split",
+                        make_fx_graph=make_fx(
+                            functools.partial(decomposeK, k_splits=k_split),
+                            decompositions,
+                        ),
+                    )
+
+                with V.fake_mode:
+                    mat1_tensor = ir_node_to_tensor(mat1)
+                    mat2_tensor = ir_node_to_tensor(mat2)
+
+                decompose_k_subgraph_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    example_inputs=[mat1_tensor, mat2_tensor],
                 )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
@@ -707,7 +771,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
-
     if should_fallback_to_aten(choices):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
@@ -868,24 +931,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
 
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        # Filter out a known cause of CUDA illegal memory access errors
-        # broadcasting on the last dim of the bias term seems not to be working
-        # in the linear GEMM epilogue used by addmm.
-        if (
-            PythonWrapperCodegen.statically_known_int_or_none(
-                inp_expanded.layout.stride[-1]
-            )
-            != 0
-        ):
-            CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
-                choices,
-                layout,
-                [mat1, mat2, inp_expanded],
-                alpha=alpha,
-                beta=beta,
-                input_reorder=[2, 0, 1],
-            )
+    if is_nonzero and use_cutlass_template(layout, m, n, k):
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            layout,
+            [mat1, mat2, inp_expanded],
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
+        )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
@@ -1032,6 +1086,10 @@ def tuned_scaled_mm(
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
+    # We dont have triton lowerings for the MX variants yet
+    if scale_a.dtype != torch.float32:
+        return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+
     _, is_nonzero = _is_static_problem(layout)
 
     scaled_mm_configs = V.choices.get_scaled_mm_configs(device_type)
@@ -1171,7 +1229,6 @@ def mm_autoheuristic(
             "mat2_iscontig", mat2.layout.is_contiguous(), is_categorical=True
         )
         if name == "mm":
-            # for mixed_mm, we only consider fp16
             context_add_using_tf32(context, mat1.layout.dtype)
         return context
 

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import unittest
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
@@ -13,6 +14,7 @@ from torch._inductor.select_algorithm import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -26,6 +28,8 @@ class TestSubgraphChoice(TestCase):
             layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
         )
 
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
@@ -46,7 +50,7 @@ class TestSubgraphChoice(TestCase):
             B = k // kPartitions
             a_reshaped = torch.permute(a.reshape(m, B, kPartitions), (1, 0, 2))
             b_reshaped = b.reshape(B, kPartitions, n)
-            result = torch.bmm(a_reshaped, b_reshaped)
+            result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
             result_fp32 = result.to(torch.float32)
             reduced_buf = torch.sum(result_fp32, 0)
             return reduced_buf.to(a.dtype)

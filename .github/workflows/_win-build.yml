@@ -173,7 +173,7 @@ jobs:
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
         if: steps.build.outcome != 'skipped'
-        uses: seemethere/upload-artifact-s3@v5
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
           retention-days: 14
           if-no-files-found: error

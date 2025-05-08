@@ -12,7 +12,6 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <string>
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 class Context;
 }
@@ -46,7 +45,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
-  virtual void deviceSynchronize(c10::DeviceIndex device_index) const {
+  virtual void deviceSynchronize(c10::DeviceIndex /*device_index*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
@@ -54,11 +53,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     return false;
   }
 
-  void setCurrentDevice(DeviceIndex device) const override {
+  void setCurrentDevice(DeviceIndex /*device*/) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
@@ -67,36 +66,36 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
-  DeviceIndex exchangeDevice(DeviceIndex device) const override {
+  DeviceIndex exchangeDevice(DeviceIndex /*device*/) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
+  DeviceIndex maybeExchangeDevice(DeviceIndex /*device*/) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  virtual c10::Stream getCurrentStream(DeviceIndex device) const {
+  virtual c10::Stream getCurrentStream(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
   }
 
-  virtual int64_t getCurrentRawStream(DeviceIndex device) const {
+  virtual int64_t getCurrentRawStream(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  virtual c10::Stream getDefaultStream(DeviceIndex device) const {
+  virtual c10::Stream getDefaultStream(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
   }
 
-  virtual void setCurrentStream(const c10::Stream& stream) const {
+  virtual void setCurrentStream(const c10::Stream& /*stream*/ ) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/) const override {
     return false;
   }
 
@@ -105,12 +104,12 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return nullptr;
   }
 
-  virtual PyObject* memoryStats(DeviceIndex device) const {
+  virtual PyObject* memoryStats(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
 
-  virtual PyObject* getDeviceCapability(DeviceIndex device) const {
+  virtual PyObject* getDeviceCapability(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
@@ -121,9 +120,9 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 
 
   virtual void recordMemoryHistory(
-    const std::optional<std::string>& enabled,
-    const std::string& stacks,
-    size_t max_entries) const {
+    const std::optional<std::string>& /*enabled*/,
+    const std::string& /*stacks*/,
+    size_t /*max_entries*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
@@ -137,10 +136,14 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
-  virtual void resetPeakMemoryStats(DeviceIndex device) const {
+  virtual void resetPeakMemoryStats(DeviceIndex /*device*/) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
+  virtual void attachOutOfMemoryObserver(PyObject* observer) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return;
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};
@@ -154,4 +157,3 @@ TORCH_API const MTIAHooksInterface& getMTIAHooks();
 TORCH_API bool isMTIAHooksBuilt();
 } // namespace detail
 } // namespace at
-C10_DIAGNOSTIC_POP()

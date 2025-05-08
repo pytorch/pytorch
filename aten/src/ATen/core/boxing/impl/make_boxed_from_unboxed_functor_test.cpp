@@ -463,7 +463,7 @@ TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithDictInput_withou
 }
 
 struct KernelWithDictInputWithOutput final : OperatorKernel {
-  string operator()(Dict<string, string> input1) {
+std::string operator()(Dict<string, std::string> input1) {
     return input1.at("key2");
   }
 };
@@ -475,7 +475,7 @@ TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithDictInput_withOu
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  Dict<string, std::string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -484,7 +484,7 @@ TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithDictInput_withOu
 }
 
 struct KernelWithDictOutput final : OperatorKernel {
-  Dict<string, string> operator()(Dict<string, string> input) {
+  Dict<string, std::string> operator()(Dict<string, std::string> input) {
     return input;
   }
 };
@@ -496,12 +496,12 @@ TEST(OperatorRegistrationTestFunctorBasedKernel, givenKernelWithDictOutput_whenR
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  Dict<string, std::string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, string>(outputs[0].toGenericDict());
+  auto output = c10::impl::toTypedDict<string, std::string>(outputs[0].toGenericDict());
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ("value1", output.at("key1"));
@@ -520,7 +520,7 @@ private:
 };
 
 struct KernelWithTupleInput final : OperatorKernel {
-  string operator()(std::tuple<string, int64_t, double> input1) {
+  std::string operator()(std::tuple<string, int64_t, double> input1) {
     return std::get<0>(input1);
   }
 };

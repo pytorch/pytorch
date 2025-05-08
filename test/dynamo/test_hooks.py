@@ -889,6 +889,32 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_global_module_forward_pre_hook(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x - 1
+
+        counter = 0
+
+        def hook(mod, args):
+            nonlocal counter
+            counter += 1
+            return (args[0] + 100,)
+
+        mod = Mod()
+        torch.nn.modules.module.register_module_forward_pre_hook(hook)
+
+        # Case 1: torch.compile(mod)
+        compiled_mod = torch.compile(mod, backend="eager")
+
+        x = torch.rand(18, 18)
+
+        ref = mod(x)
+        self.assertEqual(counter, 1)
+        res = compiled_mod(x)
+        self.assertEqual(counter, 2)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

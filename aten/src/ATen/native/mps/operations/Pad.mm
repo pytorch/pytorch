@@ -31,7 +31,7 @@ static Tensor& pad_out_template(Tensor& output,
                                 const std::optional<Tensor>& grad_output_opt,
                                 MPSGraphPaddingMode mode,
                                 double constantValue,
-                                const string op_name) {
+                                const std::string& op_name) {
   using CachedGraph = MPSUnaryGradCachedGraph;
   const int padding_size = (int)padding.size();
   int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
@@ -244,7 +244,7 @@ static Tensor& pad_out_template(Tensor& output,
   }
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({input, grad_output, output}) + ":[" + getArrayRefString(padding) +
+    std::string key = op_name + getTensorsStringKey({input, grad_output, output}) + ":[" + getArrayRefString(padding) +
         "]:" + std::to_string(constantValue);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {

@@ -200,10 +200,15 @@ def cond(
 def materialize_as_graph(
     fn: Callable,
     args: tuple[Any],
-    include_key_set: torch._C.DispatchKeySet,
-    exclude_key_set: torch._C.DispatchKeySet,
+    include_key_set: Optional[torch._C.DispatchKeySet] = None,
+    exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
     force_enable_grad=False,
 ) -> torch.fx.GraphModule:
+    if include_key_set is None:
+        include_key_set = torch._C._dispatch_tls_local_include_set()
+    if exclude_key_set is None:
+        exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+
     @torch._dynamo.disable(recursive=True, reason=None)
     def _materialize_as_graph_inner():
         with suspend_functionalization(), disable_functional_mode():

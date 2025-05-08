@@ -13,6 +13,7 @@ It is lazily initialized, so you can always import it, and use
 
 import importlib
 import os
+import sys
 import threading
 import traceback
 import warnings
@@ -217,9 +218,12 @@ def _check_bf16_tensor_supported(device: _device_t):
 
 def is_tf32_supported() -> bool:
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
-    # Check for ROCm.  If true, return false, since PyTorch does not currently support
-    # tf32 on ROCm.
     if torch.version.hip:
+        prop_name = torch.cuda.get_device_properties().gcnArchName
+        archs = ("gfx94", "gfx95")
+        for arch in archs:
+            if arch in prop_name:
+                return True
         return False
 
     # Otherwise, tf32 is supported on CUDA platforms that natively (i.e. no emulation)
@@ -1038,7 +1042,7 @@ def current_device() -> int:
     return torch._C._cuda_getDevice()
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: Optional[_device_t] = None) -> None:
     r"""Wait for all kernels in all streams on a CUDA device to complete.
 
     Args:
@@ -1253,16 +1257,24 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     if socket_power != "N/A":
         return socket_power
     else:
-        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+        socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+        if socket_power != "N/A":
+            return socket_power
+        else:
+            return 0
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
     clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
     if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
-        return clock_info["cur_clk"]
+        clock_rate = clock_info["cur_clk"]
     else:
-        return clock_info["clk"]
+        clock_rate = clock_info["clk"]
+    if clock_rate != "N/A":
+        return clock_rate
+    else:
+        return 0
 
 
 def device_memory_used(device: Optional[Union[Device, int]] = None) -> int:
@@ -1691,6 +1703,75 @@ def _register_triton_kernels():
 
 
 _lazy_call(_register_triton_kernels)
+
+
+def _compile_kernel(
+    kernel_source: str,
+    kernel_name: str,
+    compute_capability: Optional[str] = None,
+    header_code: str = "",
+    cuda_include_dirs: Optional[list] = None,
+    nvcc_options: Optional[list] = None,
+):
+    """
+    Compiles a CUDA kernel using NVRTC and returns a callable function.
+
+    This function is a wrapper for NVRTC that enables runtime compilation of CUDA kernels.
+    Note that this returns a raw CUDA kernel that operates on raw memory pointers.
+    To use this kernel as a proper PyTorch operator, you should wrap it following the guide at:
+    pytorch.org/tutorials/advanced/python_custom_ops.html
+
+    Args:
+        kernel_source (str): The CUDA kernel source code as a string
+        kernel_name (str): The name of the kernel function to compile
+        compute_capability (str, optional): The compute capability to target (e.g., "86").
+                                           If None, will detect from current device.
+        header_code (str, optional): Additional header code to prepend to the kernel source
+        cuda_include_dirs (list, optional): List of directories containing CUDA headers
+        nvcc_options (list, optional): Additional options to pass to NVRTC
+
+    Returns:
+        callable: A Python function that can be called with PyTorch tensor arguments to execute the kernel
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> kernel_code = '''
+        extern "C"
+        __global__ void add_tensors(const float* a, const float* b, float* c, int n) {
+            int i = threadIdx.x + blockIdx.x * blockDim.x;
+            if (i < n)
+                c[i] = a[i] + b[i];
+        }
+        '''
+        >>> add_kernel = torch.cuda.compile_kernel(kernel_code, "add_tensors")
+        >>> a = torch.randn(1024, device="cuda")
+        >>> b = torch.randn(1024, device="cuda")
+        >>> c = torch.empty_like(a)
+        >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
+    """
+    import ctypes
+
+    from torch.cuda._utils import _cuda_load_module, _nvrtc_compile
+
+    # Compile the kernel to PTX
+    ptx = _nvrtc_compile(
+        kernel_source,
+        kernel_name,
+        compute_capability,
+        header_code,
+        cuda_include_dirs,
+        nvcc_options,
+    )
+
+    # Load the module and get the kernel
+    result = _cuda_load_module(ptx, [kernel_name])
+
+    if isinstance(result, dict):
+        return result[kernel_name]
+    else:
+        # This branch shouldn't be executed if kernel_names is provided,
+        # but MyPy needs this to understand type narrowing
+        return getattr(result, kernel_name)
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable

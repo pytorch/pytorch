@@ -36,7 +36,7 @@ class TestNumbaIntegration(common.TestCase):
             version: (int) Version 0
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
 
         types = [
@@ -250,7 +250,7 @@ class TestNumbaIntegration(common.TestCase):
         will use the exposed device memory.
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
 
         dtypes = [

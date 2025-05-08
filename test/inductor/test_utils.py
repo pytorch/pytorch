@@ -1,10 +1,10 @@
 # Owner(s): ["module: inductor"]
 
-from sympy import Symbol
+from sympy import Symbol, sympify
 
 import torch
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import sympy_subs
+from torch._inductor.utils import sympy_str, sympy_subs
 
 
 class TestUtils(TestCase):
@@ -71,6 +71,15 @@ class TestUtils(TestCase):
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
         self.assertEqual(result.is_nonnegative, None)
+
+    def test_sympy_str(self):
+        self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")
+        self.assertEqual(sympy_str(sympify("a*b+c")), "c + a * b")
+        self.assertEqual(sympy_str(sympify("a+b*(c+d)")), "a + b * (c + d)")
+        self.assertEqual(sympy_str(sympify("(a+b)*(c+d)")), "(a + b) * (c + d)")
+        self.assertEqual(sympy_str(sympify("-a")), "-a")
+        self.assertEqual(sympy_str(sympify("a-b")), "a - b")
+        self.assertEqual(sympy_str(sympify("a+-b")), "a - b")
 
 
 if __name__ == "__main__":

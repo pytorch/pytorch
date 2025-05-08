@@ -42,20 +42,19 @@ size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
 }
 
 void CUDAAllocatorConfig::lexArgs(
-    const char* env,
+    const std::string& env,
     std::vector<std::string>& config) {
   std::vector<char> buf;
 
-  size_t env_length = strlen(env);
-  for (size_t i = 0; i < env_length; i++) {
-    if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
+  for (char ch : env) {
+    if (ch == ',' || ch == ':' || ch == '[' || ch == ']') {
       if (!buf.empty()) {
         config.emplace_back(buf.begin(), buf.end());
         buf.clear();
       }
-      config.emplace_back(1, env[i]);
-    } else if (env[i] != ' ') {
-      buf.emplace_back(static_cast<char>(env[i]));
+      config.emplace_back(1, ch);
+    } else if (ch != ' ') {
+      buf.emplace_back(ch);
     }
   }
   if (!buf.empty()) {
@@ -289,7 +288,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
 #endif // USE_ROCM
 }
 
-void CUDAAllocatorConfig::parseArgs(const char* env) {
+void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   // If empty, set the default values
   m_max_split_size = std::numeric_limits<size_t>::max();
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -297,16 +296,16 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 
-  if (env == nullptr) {
+  if (!env.has_value()) {
     return;
   }
   {
     std::lock_guard<std::mutex> lock(m_last_allocator_settings_mutex);
-    m_last_allocator_settings = env;
+    m_last_allocator_settings = env.value();
   }
 
   std::vector<std::string> config;
-  lexArgs(env, config);
+  lexArgs(env.value(), config);
 
   for (size_t i = 0; i < config.size(); i++) {
     std::string_view config_item_view(config[i]);

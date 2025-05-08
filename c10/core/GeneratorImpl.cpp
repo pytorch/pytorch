@@ -32,7 +32,7 @@ c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
 }
 
 void GeneratorImpl::graphsafe_set_state(
-    const c10::intrusive_ptr<c10::GeneratorImpl>& state) {
+    const c10::intrusive_ptr<c10::GeneratorImpl>& /*state*/) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "graphsafe_set_state is not supported in this Generator");
 }

@@ -2185,8 +2185,7 @@ def _register_qlinear_weight_prepack():
     # Step 2: register patterns from bmm
     # Linear might be decomposed into bmm when input dim exceeds 2 and not contiguous
     # refer to:
-    # https://github.com/pytorch/pytorch/blob/
-    # 80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
+    # https://github.com/pytorch/pytorch/blob/80c07df659362a95da7cd4f3ec367abfdace38c4/torch/_decomp/decompositions.py#L3965-L3968
     # in this case, we can convert it back to qlinear
     for dtype, with_bias, is_tensor_overload in itertools.product(
         [torch.float32, torch.bfloat16], [True, False], [True, False]

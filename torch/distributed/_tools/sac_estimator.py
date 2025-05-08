@@ -50,7 +50,7 @@ def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> N
 
 
 # Based on:
-# https://github.com/fairinternal/xformers/blob/0ded5697a2ea15711ce45131002d04e72053cc6d/xformers/checkpoint.py#L62
+# https://github.com/facebookresearch/xformers/blob/main/xformers/checkpoint.py#L71
 @dataclass
 class _SACMetadata:
     """

@@ -65,7 +65,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   };
 
   @autoreleasepool {
-    string key = "mps_linear" + getTensorsStringKey({input, weight, bias});
+    std::string key = "mps_linear" + getTensorsStringKey({input, weight, bias});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight);
@@ -154,7 +154,7 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output, weight_reshaped});
+    std::string key = "mps_linear_backward_input" + getTensorsStringKey({grad_output, weight_reshaped});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
       newCachedGraph->weightTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, weight_reshaped);
       newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
@@ -236,7 +236,7 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "mps_linear_backward_weights:" + std::to_string(bias_defined) + ":" +
+    std::string key = "mps_linear_backward_weights:" + std::to_string(bias_defined) + ":" +
         getTensorsStringKey({input_reshaped, weight, grad_output_reshaped});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_reshaped);

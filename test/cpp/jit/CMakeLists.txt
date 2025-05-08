@@ -39,6 +39,7 @@ endif()
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
+  ${JIT_TEST_ROOT}/source_range_test.cpp
   ${JIT_TEST_ROOT}/test_add_if_then_else.cpp
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
@@ -70,6 +71,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_ir.cpp
   ${JIT_TEST_ROOT}/test_irparser.cpp
   ${JIT_TEST_ROOT}/test_jit_type.cpp
+  ${JIT_TEST_ROOT}/test_lexer.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter_direct.cpp
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
@@ -115,6 +117,8 @@ target_compile_definitions(test_jit PRIVATE USE_GTEST)
 
 if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
+else()
+  target_link_libraries(test_jit PRIVATE onnx_library)
 endif()
 
 if(USE_MKLDNN)

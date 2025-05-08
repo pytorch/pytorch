@@ -408,11 +408,16 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
             f"/tmp/{func.__name__}_{str(trace_id).replace('/', '_')}.profile"
         )
         prof = cProfile.Profile()
-        prof.enable()
-        start_ts = time.time()
-        retval = prof.runcall(func, *args, **kwargs)
-        profile_latency = time.time() - start_ts
-        prof.disable()
+        try:
+            prof.enable()
+            start_ts = time.time()
+            retval = prof.runcall(func, *args, **kwargs)
+            profile_latency = time.time() - start_ts
+            prof.disable()
+        except ValueError:
+            log.exception("failed to enable cProfile")
+            profile_latency = 0
+            retval = func(*args, **kwargs)
         log.warning(
             "### Cprofile for %s trace id [%s] took %.3f seconds ###",
             func.__name__,
@@ -732,7 +737,6 @@ def _compile(
         )
 
         try:
-            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
@@ -806,10 +810,7 @@ def _compile(
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
-                with dynamo_timed(
-                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
-                ):
-                    out_code = transform_code_object(code, transform)
+                out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
                 if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
@@ -1230,6 +1231,7 @@ class ConvertFrame:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> ConvertFrameReturn:
+        input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1388,6 +1390,8 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
+
+        input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
         if sys.version_info >= (3, 13):

@@ -771,7 +771,23 @@ void initDispatchBindings(PyObject* module) {
             return self.add(k);
           })
       .def("has", &c10::DispatchKeySet::has)
-      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
+      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); })
+      .def(
+          "__eq__",
+          [](c10::DispatchKeySet self, c10::DispatchKeySet other) {
+            return self.raw_repr() == other.raw_repr();
+          })
+      .def(py::pickle(
+          [](const c10::DispatchKeySet&
+                 obj) { // __getstate__ : creates tuple of state
+            return py::make_tuple(obj.raw_repr());
+          },
+          [](const py::tuple& t) { // __setstate__ : restores state from tuple
+            TORCH_CHECK(
+                t.size() == 1, "__setstate__ expected tuple with one element");
+            return c10::DispatchKeySet::from_raw_repr(t[0].cast<uint64_t>());
+          }))
+      .def_static("from_raw_repr", &c10::DispatchKeySet::from_raw_repr);
 
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);

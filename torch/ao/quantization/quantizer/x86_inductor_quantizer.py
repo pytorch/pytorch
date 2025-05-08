@@ -703,8 +703,8 @@ class X86InductorQuantizer(Quantizer):
         # Once we've annotated the model with quantization configurations, we also need to annotate
         # the output of quantizable operations. For example, if we annotated `maxpool2d` to quantize its inputs,
         # we will quantize its output accordingly. This enables us to fuse the dq-operator-q into a quantized op.
-        # Refer to https://github.com/intel/intel-extension-for-pytorch/blob/
-        # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487
+        # Refer to
+        # https://github.com/intel/intel-extension-for-pytorch/blob/90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L487  # noqa: B950
 
         self._annotate_output_for_int8_in_int8_out_pattern_entry(model)
 
@@ -732,8 +732,8 @@ class X86InductorQuantizer(Quantizer):
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
         # Go through all the nodes from start to end.
-        # Recipe refer to https://github.com/intel/intel-extension-for-pytorch/blob/
-        # 90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L538
+        # Recipe refer to
+        # https://github.com/intel/intel-extension-for-pytorch/blob/90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_recipe.py#L538  # noqa: B950
 
         self._annotate_propagation_quantizable_pattern_entry(
             model, quantization_config, filter_fn
@@ -1381,9 +1381,9 @@ class X86InductorQuantizer(Quantizer):
     ) -> None:
         r"""
         Check and insert observer at output of node in int8_in_int8_out_ops if needed.
-        Recipe refers to https://github.com/intel/intel-extension-for-pytorch/blob/
-        90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_utils.py#L495
-        """
+        Recipe refers to
+        https://github.com/intel/intel-extension-for-pytorch/blob/90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_utils.py#L495
+        """  # noqa: B950
         edge_or_node: tuple[Node, Node]
         if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
             if node.target == torch.ops.aten.max_pool2d.default:

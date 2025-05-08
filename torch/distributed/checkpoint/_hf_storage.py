@@ -66,11 +66,17 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         if HfFileSystem.protocol not in fsspec.available_protocols():
             fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
 
-        super().__init__(
-            path=path,
-            token=token,
-            serialization_format=SerializationFormat.SAFETENSORS,
-        )
+        if token is not None:
+            super().__init__(
+                path=path,
+                token=token,
+                serialization_format=SerializationFormat.SAFETENSORS,
+            )
+        else:
+            super().__init__(
+                path=path,
+                serialization_format=SerializationFormat.SAFETENSORS,
+            )
         self._fqn_to_index_mapping: dict[str, int] = fqn_to_index_mapping
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -169,7 +175,12 @@ class _HuggingFaceStorageReader(FsspecReader):
 
         if HfFileSystem.protocol not in fsspec.available_protocols():
             fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)
-        super().__init__(path=path, token=token)
+
+        if token is not None:
+            super().__init__(path=path, token=token)
+        else:
+            super().__init__(path=path)
+
         self.storage_data: dict[str, str] = {}
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:

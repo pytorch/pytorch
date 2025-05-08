@@ -980,6 +980,7 @@ class AttributePropagator {
   std::unordered_map<ClassTypePtr, IValue::HashAliasedIValues>
       SharedTypeSubModules_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   Module& module_;
 
   // Allow to freeze modules containing interfaces.

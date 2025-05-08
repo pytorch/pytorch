@@ -12,13 +12,12 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	-e PACKAGE_NAME=${PACKAGE_NAME}${DESIRED_CUDA_SHORT} \
 	-e DESIRED_CUDA=${DESIRED_CUDA} \
 	-e CUDA_ARCH_LIST="${CUDA_ARCH_LIST}" \
-	"pytorch/manylinux2_28-builder:cuda${DESIRED_CUDA}-main" \
+	"pytorch/almalinux-builder:cuda${DESIRED_CUDA}-main" \
 	magma/build_magma.sh
 
 .PHONY: all
 all: magma-cuda128
 all: magma-cuda126
-all: magma-cuda124
 all: magma-cuda118
 
 .PHONY:
@@ -35,11 +34,6 @@ magma-cuda128:
 .PHONY: magma-cuda126
 magma-cuda126: DESIRED_CUDA := 12.6
 magma-cuda126:
-	$(DOCKER_RUN)
-
-.PHONY: magma-cuda124
-magma-cuda124: DESIRED_CUDA := 12.4
-magma-cuda124:
 	$(DOCKER_RUN)
 
 .PHONY: magma-cuda118

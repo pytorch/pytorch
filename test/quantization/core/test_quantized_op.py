@@ -3139,6 +3139,34 @@ class TestQuantizedOps(TestCase):
                     # Verify the result is scriptable
                     mha_quantized_scripted = torch.jit.script(mha_quantized)
 
+    @skipIfNoONEDNN
+    def test_int8_mul_onednn(self):
+        output_dtype_list = [torch.uint8, torch.float, torch.bfloat16, torch.half]
+        shape_list = [(16, 64), (15, 63)]
+        cases = itertools.product(shape_list, output_dtype_list)
+        for shape, output_dtype in cases:
+            a = torch.randn(shape)
+            b = torch.randn(shape)
+            s_a, z_a = 0.1, 1
+            s_b, z_b = 0.2, 2
+            if output_dtype == torch.uint8:
+                s_c, z_c = 0.3, 3
+            else:
+                s_c, z_c = 1, 0
+            qa = torch.quantize_per_tensor(a, s_a, z_a, torch.quint8)
+            qb = torch.quantize_per_tensor(b, s_b, z_b, torch.quint8)
+            dqa = qa.dequantize()
+            dqb = qb.dequantize()
+            c_ref = dqa * dqb
+            if output_dtype == torch.uint8:
+                c_ref = torch.ops.quantized_decomposed.quantize_per_tensor.default(c_ref, s_c, z_c, 0, 255, torch.uint8)
+            c_ref = c_ref.to(output_dtype)
+
+            a_int8 = qa.int_repr()
+            b_int8 = qb.int_repr()
+            c = torch.ops.onednn.qmul.tensor(a_int8, s_a, z_a, b_int8, s_b, z_b, s_c, z_c, output_dtype)
+            self.assertEqual(c, c_ref)
+
 
 class TestDynamicQuantizedOps(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
@@ -5172,7 +5200,7 @@ class TestQuantizedConv(TestCase):
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
-        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # (https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_almost_equal.html)
         # We use decimal = 0 to ignore off-by-1 differences between
         # reference and test. Off-by-1 differences arise due to the order of
         # round and zero_point addition operation, i.e., if addition
@@ -6907,7 +6935,7 @@ class TestQuantizedConv(TestCase):
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
-        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # (https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_almost_equal.html)
         # We use decimal = 0 to ignore off-by-1 differences between
         # reference and test. Off-by-1 differences arise due to the order of
         # round and zero_point addition operation, i.e., if addition

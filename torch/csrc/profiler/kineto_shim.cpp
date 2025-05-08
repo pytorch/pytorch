@@ -7,6 +7,7 @@
 #endif
 
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 namespace torch {
 
@@ -221,11 +222,9 @@ bool collectivesProfilerExists() {
 #if defined(KINETO_HAS_HCCL_PROFILER)
   return true;
 #endif
-  const char* val = std::getenv("TORCH_PROFILER_ENABLE_COLLECTIVE_PROFILING");
-  if (val == nullptr) {
-    return false;
-  }
-  return std::strcmp(val, "1") == 0;
+  const auto val =
+      c10::utils::get_env("TORCH_PROFILER_ENABLE_COLLECTIVE_PROFILING");
+  return val == "1";
 }
 
 #ifdef USE_KINETO

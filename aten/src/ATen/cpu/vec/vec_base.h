@@ -1323,7 +1323,7 @@ inline Vectorized<IntType> convert_to_int_of_same_size(
   static_assert(sizeof(T) == sizeof(IntType));
   static constexpr int size = Vectorized<T>::size();
 
-  std::array<T, size> src_arr;
+  std::array<T, size> src_arr = {};
   src.store(static_cast<void*>(src_arr.data()));
   std::array<IntType, size> buffer;
   std::transform(

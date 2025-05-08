@@ -3,6 +3,7 @@ import datetime
 import functools
 import unittest
 from collections import defaultdict
+from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -15,7 +16,12 @@ import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
+from torch._inductor.comms import (
+    _reorder_communication_preserving_peak_memory_internal,
+    ReorderInfo,
+)
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -706,7 +712,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             trs = self.get_world_trs()
 
-            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            compiled_fn = torch.compile(
+                example,
+                fullgraph=True,
+                dynamic=True,
+                backend="aot_eager_decomp_partition",
+            )
 
             if override_with_ac:
 
@@ -1399,6 +1410,86 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_reorder_peak_memory(self):
+        """
+        TODO(whc)
+        - check each of the `limiting_factor` cases
+        - confirm peak memory is respected in some adversarial case
+        - check whether it is expected / correct that the "buf7 = buf0; del buf0  # reuse" statement materially changes
+        """
+
+        def func(inp, *, tag, ranks, group_size):
+            x = inp + 1
+            tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(
+                [x, inp], "sum", tag, ranks, group_size
+            )
+            y = x + 2
+            ar0 = torch.ops.c10d_functional.wait_tensor(tensor_list[0])
+            ar1 = torch.ops.c10d_functional.wait_tensor(tensor_list[1])
+            # ensure other is not incorrectly aliasing ar's buffer
+            other = torch.ones_like(inp) + 22
+            return ar0, y, other, ar1
+
+        inputs = torch.ones(4, 4, device="cuda")
+
+        # get stats directly from the internal helper without affecting the real pass's signature
+        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+
+        def _reorder_communication_preserving_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            nonlocal node_stats
+            (
+                reordered_snodes,
+                node_stats,
+            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
+            return reordered_snodes
+
+        with torch._inductor.config.patch(
+            {
+                "reorder_for_compute_comm_overlap": True,
+                "reorder_for_compute_comm_overlap_passes": [
+                    "sink_waits",
+                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
+                    _reorder_communication_preserving_peak_memory,
+                ],
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (
+            FileCheck()
+            .check("buf0 = empty_strided")
+            .check("buf6 = empty_strided")
+            .check(".run(arg0_1, buf0, buf6, 16")
+            .check(
+                "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+            )
+            # .check("buf2 = buf1[0]")
+            # .check("buf3 = buf1[1]")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+            # .check("buf7 = buf0; del buf0  # reuse")
+            # .check(".run(buf7, 16")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("return (buf2, buf6, buf7, buf3")
+            .run(code)
+        )
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+        # TODO make the test case more interesting and validate the actual desired behavior
+        assert node_stats is not None
+        self.assertTrue(isinstance(node_stats, dict))
+        self.assertEqual(len(node_stats), 1)
+        for stats in node_stats.values():
+            self.assertEqual(stats.initial_exposed, 0)
+            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.moves, 0)
 
 
 if __name__ == "__main__":

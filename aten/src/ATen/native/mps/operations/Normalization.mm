@@ -22,6 +22,13 @@
 
 namespace at::native {
 namespace mps {
+
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/LayerNorm_metallib.h>
+#endif
+
 static void get_shapes(MPSShape* input_shape_readonly,
                        NSMutableArray<NSNumber*>*& input_shape,
                        NSMutableArray<NSNumber*>*& new_mean_shape,
@@ -109,7 +116,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   }
 
   @autoreleasepool {
-    string mem_format_key;
+    std::string mem_format_key;
     switch (memory_format) {
       case at::MemoryFormat::Contiguous:
         mem_format_key = "Contiguous";
@@ -136,7 +143,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "batch_norm_mps_out:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
+    std::string key = "batch_norm_mps_out:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
         std::to_string(momentum) + ":" + std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" +
         std::to_string(has_weight) + ":" + std::to_string(has_bias) + ":" + [ns_shape_key UTF8String] + ":" +
         getTensorsStringKey({self,
@@ -482,8 +489,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out(const T
       self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_var);
 }
 
-static string get_mem_string(c10::MemoryFormat memory_format) {
-  string mem_format_key;
+static std::string get_mem_string(c10::MemoryFormat memory_format) {
+  std::string mem_format_key;
   switch (memory_format) {
     case at::MemoryFormat::Contiguous:
       mem_format_key = "Contiguous";
@@ -592,7 +599,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   }
 
   @autoreleasepool {
-    string mem_format_key;
+    std::string mem_format_key;
     switch (memory_format) {
       case at::MemoryFormat::Contiguous:
         mem_format_key = "Contiguous";
@@ -616,7 +623,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
+    std::string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
         std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" + std::to_string(has_weight) + ":" +
         [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" + getMPSTypeString(input);
     auto input_mps_dtype = getMPSDataType(input);
@@ -878,6 +885,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
                                                   const std::optional<Tensor>& weight_opt,
                                                   const std::optional<Tensor>& bias_opt,
                                                   double eps) {
+  auto N = c10::multiply_integers(normalized_shape);
+  auto out = at::empty_like(input, MemoryFormat::Contiguous);
+  auto batch_dim = input.dim() - normalized_shape.size();
+  IntArrayRef batch_shape = input.sizes().slice(0, batch_dim);
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -887,37 +898,48 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   auto M = M_N.first;
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
+  auto mean = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
+  auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
 
   auto input_shape = input.sizes();
+  int axis_size = static_cast<int>(N);
+  float epsilon_buf = static_cast<float>(eps);
+  int use_weight_buf = weight.defined() ? 1 : 0;
+  int use_bias_buf = bias.defined() ? 1 : 0;
+  int use_weight_and_bias_buf = use_weight_buf & use_bias_buf;
   const auto input_ndim = input.dim();
   const int normalized_ndim = normalized_shape.size();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
-  at::Tensor input_reshaped = input.numel() == 0 ? input.reshape({1, M, 0}) : input.reshape({1, M, -1});
-  // Unlike Batch Normalization, which applies scalar scale and bias for each
-  // entire channel/plane with the affine option, Layer Normalization applies
-  // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
-  // batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
-  auto outputs = at::native_batch_norm(input_reshaped,
-                                       /*weight=*/{},
-                                       /*bias=*/{},
-                                       /*running_mean=*/{},
-                                       /*running_var=*/{},
-                                       /*training=*/true,
-                                       /*momentum=*/0,
-                                       eps);
-  at::Tensor out = std::get<0>(outputs);
-  out = out.view(input_shape);
-  if (weight.defined() && bias.defined()) {
-    out = bias.addcmul(out, weight, 1);
-  } else if (weight.defined()) {
-    out = out.mul(weight);
-  } else if (bias.defined()) {
-    out = out.add(bias);
-  }
-  at::Tensor mean = std::get<1>(outputs);
-  at::Tensor variance = std::get<2>(outputs);
+  MPSStream* stream = getCurrentMPSStream();
+  @autoreleasepool {
+    mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
+      // which kernel variant to use based on the normalized axis N size
+      const int N_READS = 4;
+      auto metalType = mps::scalarToMetalTypeString(input);
+      id<MTLComputePipelineState> layerNormKernel = nil;
+      if (axis_size <= 1024 * N_READS) {
+        layerNormKernel = mps::lib.getPipelineStateForFunc("layer_norm_single_row_" + metalType);
+      } else {
+        layerNormKernel = mps::lib.getPipelineStateForFunc("layer_norm_looped_" + metalType);
+      }
+      id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:layerNormKernel];
 
+      mps::mtl_setArgs(computeEncoder, *X, out, mean, rstd, axis_size, epsilon_buf, use_weight_buf, use_bias_buf);
+      if (use_weight_and_bias_buf) {
+        mps::mtl_setArgs<8>(computeEncoder, *gamma, bias);
+      } else if (use_weight_buf) {
+        mps::mtl_setArgs<8>(computeEncoder, *gamma);
+      } else if (use_bias_buf) {
+        mps::mtl_setArgs<9>(computeEncoder, bias);
+      }
+      MTLSize numThreads = MTLSizeMake(std::min((axis_size + N_READS - 1) / N_READS, 1024), 1, 1);
+      MTLSize numThreadgroups = MTLSizeMake(M, 1, 1);
+      [computeEncoder dispatchThreadgroups:numThreadgroups threadsPerThreadgroup:numThreads];
+    });
+  }
+  out = out.view(input_shape);
   std::vector<int64_t> stat_shape;
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
@@ -926,8 +948,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);
-  variance = variance.view(stat_shape);
-  return std::make_tuple(out, mean, variance);
+  rstd = rstd.view(stat_shape);
+  return std::make_tuple(out, mean, rstd);
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_out,
@@ -1060,8 +1082,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
       for (const auto i : c10::irange(num_normalized_dims))
         bn_gamma_shape[i + 2] = input_shape[i + num_channel_dims];
 
-      string key = "layer_norm_backward_mps:" + std::to_string(has_weight) + ":" + getArrayRefString(normalized_shape) +
-          ":" + getArrayRefString((*X).sizes()) + ":" + c10::Join(",", grad_input_mask) + ":" + getMPSTypeString(*X);
+      std::string key = "layer_norm_backward_mps:" + std::to_string(has_weight) + ":" +
+          getArrayRefString(normalized_shape) + ":" + getArrayRefString((*X).sizes()) + ":" +
+          c10::Join(",", grad_input_mask) + ":" + getMPSTypeString(*X);
       auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *X);
         MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *dOut);

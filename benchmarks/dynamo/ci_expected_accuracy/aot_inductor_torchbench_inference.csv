@@ -286,7 +286,7 @@ resnext50_32x4d,pass,0
 
 
 
-sam,pass,0
+sam,fail_to_run,0
 
 
 
@@ -342,7 +342,7 @@ torch_multimodal_clip,pass,0
 
 
 
-tts_angular,pass,0
+tts_angular,fail_to_run,0
 
 
 

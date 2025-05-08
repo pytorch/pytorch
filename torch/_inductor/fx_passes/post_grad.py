@@ -46,12 +46,19 @@ from ..pattern_matcher import (
     register_replacement,
     stable_topological_sort,
 )
-from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use
+from ..utils import (
+    decode_device,
+    get_gpu_type,
+    is_gpu,
+    is_pointwise_use,
+    OPTIMUS_EXCLUDE_POST_GRAD,
+)
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
+from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
@@ -117,7 +124,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "before apply group_batch_fusion_post_grad",
+                "name": "before_recompile_post_grad",
                 "encoding": "string",
             },
             payload_fn=lambda: gm.print_readable(
@@ -126,16 +133,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "after apply group_batch_fusion_post_grad",
-                "encoding": "string",
-            },
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
         )
         GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
@@ -146,33 +143,27 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 patterns.apply
             )
         for pass_name in config.post_grad_fusion_options:
-            # skip all patterns for group batch fusions
-            if pass_name in POST_GRAD_FUSIONS:
+            # skip all patterns for group batch fusions or quantization patterns
+            if pass_name in POST_GRAD_FUSIONS or pass_name in OPTIMUS_EXCLUDE_POST_GRAD:
                 continue
             pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": f"before apply {pattern_matcher_pass.pass_name}_post_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
+            inductor_before_change = save_inductor_dict(
+                [pattern_matcher_pass.pass_name]
             )
             GraphTransformObserver(gm, pass_name).apply_graph_pass(
                 pattern_matcher_pass.apply
             )
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": f"after apply {pattern_matcher_pass.pass_name}_post_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
+            if not is_same_dict(counters["inductor"], inductor_before_change):
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": f"{pattern_matcher_pass.pass_name}_post_grad",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -1217,6 +1208,14 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
+    subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in gm.graph.find_nodes(op="get_attr")
+    )
+
+    for child_name, child_mod in gm.named_children():
+        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
+            view_to_reshape(child_mod)
+
     for nd in gm.graph.find_nodes(
         op="call_function", target=torch.ops.aten.view.default
     ):

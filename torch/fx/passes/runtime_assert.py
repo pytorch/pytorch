@@ -328,7 +328,7 @@ def insert_deferred_runtime_asserts(
             if node == first_non_placeholder:
                 add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
 
-            # deduplicate asserts already present in graph
+            # deduplicate asserts already present in graph, and remove trivial asserts
             if node.target in (
                 torch._check,
                 torch.ops.aten._assert_scalar.default,
@@ -336,10 +336,7 @@ def insert_deferred_runtime_asserts(
                 if (
                     node.args[0] == True  # noqa: E712
                     or (assert_expr := _get_sym_val(node.args[0])) in expr_to_proxy
-                    or (
-                        assert_expr is not None
-                        and _is_bound_expr_for_symbol(assert_expr)
-                    )
+                    and assert_expr in added_asserts
                 ):
                     arg = node.args[0]
                     gm.graph.erase_node(node)

@@ -28,6 +28,7 @@ class Weibull(TransformedDistribution):
     Args:
         scale (float or Tensor): Scale parameter of distribution (lambda).
         concentration (float or Tensor): Concentration parameter of distribution (k/shape).
+        validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
 
     arg_constraints = {

@@ -83,11 +83,6 @@ static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, v
 
 #endif
 
-std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
-  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
-  return instance;
-}
-
 void createCublasHandle(cublasHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(cublasCreate(handle));
 }
@@ -109,19 +104,24 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 
 } // namespace
 
+std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
+  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
+  return instance;
+}
+
 void clearCublasWorkspaces() {
   cublas_handle_stream_to_workspace().clear();
 }
 
 size_t parseChosenWorkspaceSize() {
-  const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
+  auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM
   if (!val) {
-    val = getenv("HIPBLAS_WORKSPACE_CONFIG");
+    val = c10::utils::get_env("HIPBLAS_WORKSPACE_CONFIG");
   }
   if (!val) {
     // for extra convenience
-    val = getenv("ROCBLAS_WORKSPACE_CONFIG");
+    val = c10::utils::get_env("ROCBLAS_WORKSPACE_CONFIG");
   }
   /* 32MiB default, 128MiB for gfx94x/gfx95x */
   const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
@@ -135,7 +135,7 @@ size_t parseChosenWorkspaceSize() {
 
   if (val) {
     size_t total_size = 0;
-    const std::string config(val);
+    const std::string& config(val.value());
     std::regex exp(":([0-9]+):([0-9]+)");
     std::sregex_iterator next(config.begin(), config.end(), exp);
     std::sregex_iterator end;

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import platform
 import struct
-import sys
 from itertools import chain
 from typing import cast, TYPE_CHECKING
 
@@ -15,13 +14,6 @@ if TYPE_CHECKING:
 IS_WINDOWS = platform.system() == "Windows"
 IS_DARWIN = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
-
-IS_CONDA = (
-    "conda" in sys.version
-    or "Continuum" in sys.version
-    or any(x.startswith("CONDA") for x in os.environ)
-)
-CONDA_DIR = os.path.join(os.path.dirname(sys.executable), "..")
 
 IS_64BIT = struct.calcsize("P") == 8
 

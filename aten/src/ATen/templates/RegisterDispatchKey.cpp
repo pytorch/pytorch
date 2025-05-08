@@ -1,10 +1,3 @@
-// required for old g++ to compile PRId64 macros, see
-// https://github.com/pytorch/pytorch/issues/3571
-// for context
-#ifndef __STDC_FORMAT_MACROS
-#define __STDC_FORMAT_MACROS
-#endif
-
 // an external backend might generate file within its code tree
 // and check all the source files within the tree with clang-format.
 // so, disable it since the backend might have a different config.

@@ -547,7 +547,7 @@ class TestUnaryUfuncs(TestCase):
         # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
         x = torch.tensor(0.0 - 1.0e20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
-        # acos test reference: https://github.com/pytorch/pytorch/issue/42952
+        # acos test reference: https://github.com/pytorch/pytorch/issues/42952
         if not (dtype == torch.cdouble and "cuda" in device):
             self.compare_with_numpy(torch.acos, np.arccos, x)
 

@@ -26,13 +26,6 @@ TORCH_API std::optional<c10::DeviceType> getAccelerator(bool checked = false);
 // Check if the given device type is an accelerator.
 TORCH_API bool isAccelerator(c10::DeviceType device_type);
 
-// Check if the given device type is an accelerator, not an excluded one.
-TORCH_API inline bool isAcceleratorExcluded(
-    c10::DeviceType device_type,
-    c10::DeviceType excluded) {
-  return device_type != excluded && isAccelerator(device_type);
-}
-
 // Check if the given device type is an accelerator, not the excluded ones.
 template <
     typename... T,
@@ -41,8 +34,12 @@ TORCH_API inline bool isAcceleratorExcluded(
     c10::DeviceType device_type,
     c10::DeviceType first_excluded,
     T... rest_excluded) {
-  return device_type != first_excluded &&
-      isAcceleratorExcluded(device_type, rest_excluded...);
+  if constexpr (sizeof...(rest_excluded) > 0) {
+    return device_type != first_excluded &&
+        isAcceleratorExcluded(device_type, rest_excluded...);
+  } else {
+    return device_type != first_excluded && isAccelerator(device_type);
+  }
 }
 
 // Return the number of the device available. Note that this is *REQUIRED* to
@@ -65,6 +62,15 @@ TORCH_API c10::Stream getCurrentStream(c10::DeviceIndex device_index);
 // Wait (by blocking the calling thread) until all the work previously enqueued
 // on the given device index has been completed.
 TORCH_API void synchronizeDevice(c10::DeviceIndex device_index);
+
+// Set the current device index to the given device_index and return the
+// original device index that was active before the change.
+TORCH_API c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index);
+
+// Set the current device index to the given device_index. Avoid creating a new
+// context if the context for device_index is not initialized. Return the
+// original device index that was active before the change.
+TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
 
 } // namespace at::accelerator
 

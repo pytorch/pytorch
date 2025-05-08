@@ -76,7 +76,7 @@ Tensor adaptive_avg_pool2d_quantized_cuda(
 // any 3D tensors to 4D prior to using cudnn
 // This implementation currently uses the v7 cudnn APIs as v8 cudnn APIs are not yet available for
 // pooling operations.
-// Consult https://docs.nvidia.com/deeplearning/cudnn/api/index.html#cudnnPoolingForward for
+// Consult https://docs.nvidia.com/deeplearning/cudnn/backend/latest/api/cudnn-ops-library.html#cudnnpoolingforward for
 // documentation on the APIs
 // Currently, it appears there is no cudnn support for dilated pooling -- we will
 // submit a feature request for this with cudnn

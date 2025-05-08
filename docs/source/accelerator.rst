@@ -17,3 +17,4 @@ torch.accelerator
     set_stream
     current_stream
     synchronize
+    device_index

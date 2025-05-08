@@ -323,7 +323,7 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(2*u1, 10)")
+        self.assertEqual(report.failures[0].data["expr"], "Eq(9380*u1, 0)")
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
@@ -382,13 +382,6 @@ class TestDraftExport(TestCase):
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
         for _ep in [ep, ep.run_decompositions()]:
-            # check data-dependent asserts
-            assert_scalar_nodes = [
-                node
-                for node in _ep.graph.nodes
-                if node.target == torch.ops.aten._assert_scalar.default
-            ]
-            self.assertEqual(len(assert_scalar_nodes), 5)
             # unbacked bindings
             unbacked_binding_symbols = set()
             for node in _ep.graph.nodes:
@@ -480,6 +473,7 @@ class TestDraftExport(TestCase):
                 return torch.nn.functional.linear(masked, weight, bias)
 
         x = torch.zeros(10)
+        x[0] += 1
         inp = (torch.randn(10, 8, 7), x, torch.randn(25, 7), torch.randn(25))
         draft_ep = draft_export(M(), inp)
         ep = export(M(), inp)

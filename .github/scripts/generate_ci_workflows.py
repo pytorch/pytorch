@@ -233,7 +233,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.WINDOWS_ARM64,
             arches=["cpu"],
-            python_versions=["3.12"],
+            python_versions=["3.11", "3.12", "3.13"],
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},

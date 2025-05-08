@@ -224,6 +224,11 @@ class C10_API SymInt {
 
   operator SymFloat() const;
 
+  void unsafe_set_data(size_t nbytes) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_heap_allocated());
+    data_ = static_cast<int64_t>(nbytes);
+  }
+
   // Don't use this.  Prefer maybe_as_int instead
   int64_t as_int_unchecked() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_heap_allocated());
@@ -412,13 +417,6 @@ inline bool sym_ge(int64_t a, int64_t b) {
 
 inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
   return a.sym_ge(b);
-}
-
-inline bool definitely_true(
-    const c10::SymBool& b,
-    const char* file,
-    int64_t line) {
-  return b.has_hint() && b.guard_bool(file, line);
 }
 
 } // namespace c10

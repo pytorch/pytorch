@@ -114,12 +114,14 @@ struct Vectorized<c10::qint32> {
     vfloat32 float_vals1 = vec_float(_vec1);
     vfloat32 scale_vec0 = scale.vec0();
     vfloat32 scale_vec1 = scale.vec1();
-    vfloat32 scale_zp_premul0 = scale_zp_premul.vec0();
-    vfloat32 scale_zp_premul1 = scale_zp_premul.vec1();
-    return {Vectorized<float>{
-        vec_madd(scale_vec0, float_vals0, scale_zp_premul0),
-        vec_madd(scale_vec1, float_vals1, scale_zp_premul1)}};
-  }
+    vfloat32 zero_point_vec0 = zero_point.vec0();
+    vfloat32 zero_point_vec1 = zero_point.vec1();
+
+    vfloat32 vec_sub_zero_point_0 = vec_sub(float_vals0, zero_point_vec0);
+    vfloat32 vec_sub_zero_point_1 = vec_sub(float_vals1, zero_point_vec1);
+    Vectorized<float> vf0 = {vec_mul(scale_vec0, vec_sub_zero_point_0), vec_mul(scale_vec1, vec_sub_zero_point_1)};
+   return {vf0};
+}
 
   float_vec_return_type dequantize(
       Vectorized<float> scale,

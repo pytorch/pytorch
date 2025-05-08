@@ -354,16 +354,16 @@ class Vectorized<ComplexFlt> {
   }
 
   static Vectorized<ComplexFlt> el_mergee(
-      Vectorized<ComplexFlt>& first,
-      Vectorized<ComplexFlt>& second) {
+      const Vectorized<ComplexFlt>& first,
+      const Vectorized<ComplexFlt>& second) {
     return {
         vec_mergee(first._vecb0, second._vecb0),
         vec_mergee(first._vecb1, second._vecb1)};
   }
 
   static Vectorized<ComplexFlt> el_mergeo(
-      Vectorized<ComplexFlt>& first,
-      Vectorized<ComplexFlt>& second) {
+      const Vectorized<ComplexFlt>& first,
+      const Vectorized<ComplexFlt>& second) {
     return {
         vec_mergeo(first._vecb0, second._vecb0),
         vec_mergeo(first._vecb1, second._vecb1)};
@@ -480,7 +480,7 @@ class Vectorized<ComplexFlt> {
     vi = vi ^ rsign_mask;
     auto ret = elwise_mult(vr);
     auto vx_swapped = el_swapped();
-    ret = vx_swapped.el_madd(vi, ret);
+    ret = vx_swapped.elwise_mult(vi) + ret;
     return ret;
 
 #else
@@ -495,17 +495,26 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> inline operator/(const Vectorized<ComplexFlt>& b) const {
-    // re + im*i = (a + bi)  / (c + di)
-    // re = (ac + bd)/abs_2()
-    // im = (bc - ad)/abs_2()
+#if 1
+    __at_align__ c10::complex<float> tmp1[Vectorized<c10::complex<float>>::size()];
+    __at_align__ c10::complex<float> tmp2[Vectorized<c10::complex<float>>::size()];
+    __at_align__ c10::complex<float> out[Vectorized<c10::complex<float>>::size()];
+    this->store(tmp1);
+    b.store(tmp2);
+
+    for(const auto i : c10::irange(Vectorized<c10::complex<float>>::size())){
+        out[i] = tmp1[i] / tmp2[i];
+    }
+    return loadu(out);
+#else
     auto fabs_cd =  Vectorized{
-      vec_andc(b._vec0, sign_mask),
-      vec_andc(b._vec1, sign_mask)};          // |c|            |d|
+        vec_andc(b._vec0, sign_mask),
+        vec_andc(b._vec1, sign_mask)};          // |c|            |d|
     auto fabs_dc =  fabs_cd.el_swapped();     // |d|            |c|
     auto scale = fabs_cd.elwise_max(fabs_dc); // sc = max(|c|, |d|)
     auto a2 = elwise_div(scale);              // a/sc           b/sc
     auto b2 = b.elwise_div(scale);            // c/sc           d/sc
-    auto acbd2 = a2.elwise_mult(b2);          // ac/sc^2        bd/sc^2
+    auto acbd2 = a2.elwise_mult(b2);          // ac/sc^2        bd/s
     auto dc2 = b2.el_swapped();               // d/sc           c/sc
     dc2 = dc2 ^ rsign_mask;                   // -d/sc          c/sc
     auto adbc2 = a2.elwise_mult(dc2);         // -ad/sc^2       bc/sc^2
@@ -513,6 +522,7 @@ class Vectorized<ComplexFlt> {
     auto denom2 = b2.abs_2_();                // (c^2+d^2)/sc^2 (c^2+d^2)/sc^2
     ret = ret.elwise_div(denom2);
     return ret;
+#endif
   }
 
   Vectorized<ComplexFlt> asin() const {
@@ -654,6 +664,61 @@ template <>
 Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator^(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
   return Vectorized<ComplexFlt>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
 }
+
+template <>
+Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator*(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
+    // (a + ib) * (c + id) = (ac - bd) + i(ad + bc)
+    // Split into real and imaginary parts
+    auto a_real = a.el_mergee();  // real part of a
+    auto a_imag = a.el_mergeo();  // imag part of a
+    auto b_real = b.el_mergee();  // real part of b
+    auto b_imag = b.el_mergeo();  // imag part of b
+
+    auto b_imag_neg = b_imag ^ rsign_mask;
+    // Compute components
+    auto ac = a_real.elwise_mult(b_real); // real * real
+    auto bd = a_imag.elwise_mult(b_imag_neg); // imag * imag
+    auto ad = a_real.elwise_mult(b_imag); // real * imag
+    auto bc = a_imag.elwise_mult(b_real); // imag * real
+
+    // Real = ac - bd (fix the negative bd part)
+    auto real = ac + bd;  // Real part calculation
+    auto imag = ad + bc;  // Imaginary part calculation
+
+    // Step 1: Extract from real and imag
+    __vector float r0 = real.vec0(); // {r0, r1, r2, r3}
+    __vector float i0 = imag.vec0(); // {i0, i1, i2, i3}
+
+    __vector float r1 = real.vec1(); // imag[0..3]
+    __vector float i1 = imag.vec1(); // imag[4..7]
+
+    __vector unsigned char perm_lo = {
+        0,  1,  2,  3,   // r0
+    16, 17, 18, 19,      //
+    8, 9, 10, 11,    // r1
+    24, 25, 26, 27
+    };
+    __vector float v0 = vec_perm(r0, i0, perm_lo); // Interleave r0 and i0, r1 and i1
+    __vector float v1 = vec_perm(r1, i1, perm_lo);
+    Vectorized<ComplexFlt> result(v0, v1);
+    return result;
+}
+
+template <>
+Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator/(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
+
+    // Take absolute values of real and imaginary parts of b
+    __at_align__ c10::complex<float> tmp1[Vectorized<c10::complex<float>>::size()];
+    __at_align__ c10::complex<float> tmp2[Vectorized<c10::complex<float>>::size()];
+    __at_align__ c10::complex<float> out[Vectorized<c10::complex<float>>::size()];
+    a.store(tmp1);
+    b.store(tmp2);
+    for (const auto i : c10::irange(Vectorized<c10::complex<float>>::size())){ //{Vectorized<c10::complex<float>>::size())) {
+    out[i] = tmp1[i] / tmp2[i];
+    }
+    return Vectorized<ComplexFlt>::loadu(out);
+}
+
 
 } // namespace
 } // namespace vec

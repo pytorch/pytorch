@@ -25,9 +25,10 @@ bool Dimname::isValidName(const std::string& name) {
   }
   for (auto it = name.begin(); it != name.end(); ++it) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (std::isalpha(*it) || *it == '_') {
+    const unsigned char ch = static_cast<unsigned char>(*it);
+    if (std::isalpha(ch) || ch == '_') {
       continue;
-    } else if (it != name.begin() && std::isdigit(*it)) {
+    } else if (it != name.begin() && std::isdigit(ch)) {
       continue;
     }
     return false;
