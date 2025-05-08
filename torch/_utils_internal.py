@@ -159,6 +159,10 @@ def export_training_ir_rollout_check() -> bool:
     return True
 
 
+def full_aoti_runtime_assert() -> bool:
+    return True
+
+
 def log_torch_jit_trace_exportability(
     api: str,
     type_of_export: str,
