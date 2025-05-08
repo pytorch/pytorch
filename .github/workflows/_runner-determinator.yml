@@ -276,7 +276,10 @@ jobs:
                   type=_str_comma_separated_to_set,
                   required=False,
                   default="",
-                  help="comma separated list of experiments to opt-out of. If unset, no opt-outs will occur.",
+                  help=(
+                      "comma separated list of experiments to opt-out of. If unset, no opt-outs will occur. "
+                      "If the same experiment is listed both here and in '--eligible-experiments' opt-out will take priority."
+                  ),
               )
               parser.add_argument(
                   "--pr-number",
@@ -521,7 +524,7 @@ jobs:
                       if experiment_name in opt_out_experiments:
                           opt_out_exp_list = ", ".join(opt_out_experiments)
                           log.info(
-                              f"Skipping experiment '{experiment_name}', as this workflow has opted-out: {opt_out_exp_list}"
+                              f"Skipping experiment '{experiment_name}', as this workflow has opted-out (opted out experiments are: {opt_out_exp_list})"
                           )
                           continue
 

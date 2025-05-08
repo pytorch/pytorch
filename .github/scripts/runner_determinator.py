@@ -203,7 +203,10 @@ def parse_args() -> Any:
         type=_str_comma_separated_to_set,
         required=False,
         default="",
-        help="comma separated list of experiments to opt-out of. If unset, no opt-outs will occur.",
+        help=(
+            "comma separated list of experiments to opt-out of. If unset, no opt-outs will occur. "
+            "If the same experiment is listed both here and in '--eligible-experiments' opt-out will take priority."
+        ),
     )
     parser.add_argument(
         "--pr-number",
