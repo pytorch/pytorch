@@ -1649,7 +1649,11 @@ class InstructionTranslatorBase(
 
     def load_builtin_from_argval(self, argval):
         if argval not in self.f_builtins:
-            raise Unsupported(f"name '{argval}' is not defined")
+            exc.raise_observed_exception(
+                NameError,
+                self,
+                args=[ConstantVariable(f"name '{argval}' is not defined")],
+            )
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -1748,6 +1752,13 @@ class InstructionTranslatorBase(
 
         # 1) when user raises exception type
         val = self._create_exception_type(val)
+
+        if not self._isinstance_exception(val):
+            exc.raise_observed_exception(
+                TypeError,
+                self,
+                args=[ConstantVariable("exceptions must derive from BaseException")],
+            )
 
         # Handle https://peps.python.org/pep-0479/
         # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this

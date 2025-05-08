@@ -398,7 +398,7 @@ class ExceptionVariable(VariableTracker):
             if isinstance(val, ConstantVariable) and val.value is None:
                 self.__traceback__ = val
             else:
-                unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
+                raise_error("__traceback__ must be a traceback or None")
         else:
             unimplemented(f"setattr(ExceptionVariable, {name_var}, {val})")
         return variables.ConstantVariable(None)
