@@ -2848,6 +2848,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
+        with discard_graph_changes(tx):
+            # A little hacky, but we need a dummy ctx proxy for speculate_subgraph.
+            # We should clean this up at some point.
+            proxy = tx.output.create_proxy(
+                "call_function", torch.autograd.function.FunctionCtx, (), {}
+            )
+            set_example_value(proxy.node, ctx.value)
+            ctx.proxy = proxy
+
         if isinstance(self.fwd_graph, types.FunctionType):
             fwd_fn = UserFunctionVariable(self.fwd_graph)
             fwd_args = [ctx, *args]
