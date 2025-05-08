@@ -224,8 +224,11 @@ differs from {node_name}'s size: {ir_node_to_fuse.get_size()}"
         elif node_to_fuse.is_reduction():
             why(f"{node_name} is a reduction which is not yet supported by EVT")
             return False
-        elif not config.epilogue_fusion:
-            why("epilogue fusion is not enabled")
+        elif (
+            not config.cuda.cutlass_epilogue_fusion_enabled
+            or not config.epilogue_fusion
+        ):
+            why("cutlass epilogue fusion is not enabled")
             return False
 
         try:
