@@ -1744,9 +1744,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             y = a - b
         return x, y
 
-    @parametrize(
-        "fn_name", ["add"]
-    )
+    @parametrize("fn_name", ["add"])
     def test_set_raise_TypeError(self, fn_name):
         @make_test
         def fn(a, b):
