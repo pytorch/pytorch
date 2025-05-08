@@ -26,13 +26,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
-#if !defined(_MSC_VER)
-#include <sys/types.h>
-#include <unistd.h>
-#elif defined(_MSC_VER)
-#include <c10/util/win32-headers.h>
-#endif
-
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -1398,30 +1391,17 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def(
       "_cuda_beginAllocateCurrentThreadToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-#ifdef _MSC_VER
-        auto pid = GetCurrentProcessId();
-#else
-        auto pid = getpid();
-#endif
+        auto tid = std::this_thread::get_id();
+
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
             device, mempool_id, [=](cudaStream_t) {
-#ifdef _MSC_VER
-              auto current_pid = GetCurrentProcessId();
-#else
-              auto current_pid = getpid();
-#endif
-              return current_pid == pid;
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
             });
       });
 
   m.def(
       "_cuda_endAllocateToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
-        c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
-      });
-
-  m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
       });
@@ -1542,10 +1522,10 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
-    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(
+    auto cast_gen = THPGenerator_initDefaultGenerator(
         at::cuda::detail::getDefaultCUDAGenerator(i));
     // This reference is meant to be given away, so no need to incref here.
-    PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
+    PyTuple_SetItem(default_cuda_generators, i, cast_gen);
   }
   set_module_attr("default_generators", default_cuda_generators);
   bindGetDeviceProperties(m);

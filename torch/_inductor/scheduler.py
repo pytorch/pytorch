@@ -901,13 +901,13 @@ class BaseSchedulerNode:
 class WhyNoFuse:
     # TODO when we drop support for Python < 3.10, we can use
     # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["node1", "node2", "reason", "args"]
+    __slots__ = ["name1", "name2", "reason", "args"]
     reason: str
     args: tuple[Any, ...]
 
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
-        self.node1 = node1
-        self.node2 = node2
+        self.name1 = node1.get_name()
+        self.name2 = node2.get_name()
 
     def __call__(self, reason: str, *args: Any) -> None:
         self.reason = reason
@@ -915,7 +915,7 @@ class WhyNoFuse:
         fusion_log.debug(self)
 
     def __str__(self) -> str:
-        return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
+        return f"cannot fuse {self.name1} with {self.name2}: " + (
             self.reason % self.args
         )
 
@@ -4183,7 +4183,6 @@ class Scheduler:
                         SymT.FLOAT,
                         SymT.UNBACKED_INT,
                         SymT.UNBACKED_FLOAT,
-                        SymT.PRECOMPUTED_SIZE,
                     ),
                 )
             )
