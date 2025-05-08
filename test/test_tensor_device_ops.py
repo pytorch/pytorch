@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import TestCase
 
 # TODO: these empty classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
-class TestViewOps(TestCase):
+class TestTensorDeviceOps(TestCase):
     pass
 
 if __name__ == '__main__':
