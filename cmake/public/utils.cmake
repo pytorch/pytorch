@@ -324,14 +324,6 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
-  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-    message(WARNING
-        "In the future we will require one to explicitly pass "
-        "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
-        "env variable. This will become a FATAL_ERROR in future version of "
-        "pytorch.")
-    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-  endif()
   if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
