@@ -38,7 +38,7 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-DEVICE_BIAS = "cuda"
+DEVICE_BIAS = ["cuda", "xpu", "mps"]
 
 
 class DeviceBiasVisitor(ast.NodeVisitor):
@@ -46,65 +46,81 @@ class DeviceBiasVisitor(ast.NodeVisitor):
         self.filename = filename
         self.lint_messages: list[LintMessage] = []
 
+    def _has_requires_gpu_decorator(self, node: ast.FunctionDef) -> bool:
+        for d in node.decorator_list:
+            if isinstance(d, ast.Name) and d.id == "requires_gpu":
+                return True
+            if (
+                isinstance(d, ast.Call)
+                and isinstance(d.func, ast.Name)
+                and d.func.id == "requires_gpu"
+            ):
+                return True
+        return False
+
+    # check device = "cuda" or torch.device("cuda")
+    def _check_keyword_device(self, subnode: ast.keyword, msg_prefix: str) -> None:
+        if subnode.arg != "device":
+            return
+
+        val = subnode.value
+        if isinstance(val, ast.Constant) and any(
+            bias in val.value for bias in DEVICE_BIAS
+        ):
+            self.record(
+                subnode,
+                f"{msg_prefix} device='{val.value}', suggest to use device=GPU_TYPE",
+            )
+        elif isinstance(val, ast.Call):
+            if (
+                isinstance(val.func, ast.Attribute)
+                and val.func.attr == "device"
+                and len(val.args) > 0
+                and isinstance(val.args[0], ast.Constant)
+                and any(bias in val.args[0].value for bias in DEVICE_BIAS)
+            ):
+                self.record(
+                    val,
+                    f"{msg_prefix} torch.device('{val.args[0].value}'), suggest to use torch.device(GPU_TYPE)",
+                )
+
+    # check .cuda() or .to("cuda")
+    def _check_device_methods(self, subnode: ast.Call, msg_prefix: str) -> None:
+        func = subnode.func
+        if not isinstance(func, ast.Attribute):
+            return
+        method_name = func.attr
+        if method_name in DEVICE_BIAS:
+            self.record(
+                subnode,
+                f"{msg_prefix} .{method_name}(), suggest to use .to(GPU_TYPE)",
+            )
+        elif method_name == "to" and subnode.args:
+            arg = subnode.args[0]
+            if isinstance(arg, ast.Constant) and any(
+                bias in arg.value for bias in DEVICE_BIAS
+            ):
+                self.record(
+                    subnode,
+                    f"{msg_prefix} .to('{arg.value}'), suggest to use .to(GPU_TYPE)",
+                )
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         # Check if the function is decorated with @requires_gpu, which indicates
         # that the function is intended to run on GPU devices (e.g., CUDA or XPU),
         # but ensure it does not hardcode the device to CUDA.
-        has_requires_gpu = any(
-            (isinstance(d, ast.Name) and d.id == "requires_gpu")
-            or (
-                isinstance(d, ast.Call)
-                and (isinstance(d.func, ast.Name) and d.func.id == "requires_gpu")
-            )
-            for d in node.decorator_list
-        )
-        if has_requires_gpu:
-            msg_prefix = "`@requires_gpu` function should not hardcode"
-            for subnode in ast.walk(node):
-                if isinstance(subnode, ast.keyword):
-                    if subnode.arg == "device":
-                        val = subnode.value
-                        if isinstance(val, ast.Constant) and DEVICE_BIAS in val.value:
-                            # detect: device="cuda"
-                            self.record(
-                                subnode,
-                                f"{msg_prefix} device='{val.value}', suggest to use device=GPU_TYPE",
-                            )
-                        elif isinstance(val, ast.Call):
-                            # detect: device=torch.device("cuda")
-                            if (
-                                isinstance(val.func, ast.Attribute)
-                                and val.func.attr == "device"
-                                and len(val.args) > 0
-                                and isinstance(val.args[0], ast.Constant)
-                                and DEVICE_BIAS in val.args[0].value
-                            ):
-                                self.record(
-                                    val,
-                                    f"{msg_prefix} torch.device('{val.args[0].value}'), suggest to use torch.device(GPU_TYPE)",
-                                )
-                if isinstance(subnode, ast.Call) and isinstance(
-                    subnode.func, ast.Attribute
-                ):
-                    method_name = subnode.func.attr
-                    if method_name == DEVICE_BIAS:
-                        # detect: .cuda()
-                        self.record(
-                            subnode,
-                            f"{msg_prefix} .{DEVICE_BIAS}(), suggest to use to(GPU_TYPE)",
-                        )
-                    elif method_name == "to":
-                        # detect: to("cuda")
-                        if subnode.args:
-                            arg = subnode.args[0]
-                            if (
-                                isinstance(arg, ast.Constant)
-                                and DEVICE_BIAS in arg.value
-                            ):
-                                self.record(
-                                    subnode,
-                                    f"{msg_prefix} .to('{arg.value}'), suggest to use to(GPU_TYPE)",
-                                )
+        if not self._has_requires_gpu_decorator(node):
+            self.generic_visit(node)
+            return
+
+        msg_prefix = "`@requires_gpu` function should not hardcode"
+        for subnode in ast.walk(node):
+            if isinstance(subnode, ast.keyword):
+                self._check_keyword_device(subnode, msg_prefix)
+            elif isinstance(subnode, ast.Call) and isinstance(
+                subnode.func, ast.Attribute
+            ):
+                self._check_device_methods(subnode, msg_prefix)
 
         self.generic_visit(node)
 
