@@ -95,13 +95,6 @@ def torch_vital_set(value):
         else:
             del os.environ['TORCH_VITAL']
 
-# FIXME: document or deprecate whatever this is
-class TestVitalSignsCuda(TestCase):
-    @onlyCUDA
-    def test_cuda_vitals_gpu_only(self, device):
-        with torch_vital_set('ON'):
-            self.assertIn('CUDA.used\t\t true', torch.read_vitals())
-
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
 
@@ -10939,14 +10932,6 @@ def add_neg_dim_tests():
 
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
-
-# TODO: these empy classes are temporarily instantiated for XLA compatibility
-#   once XLA updates their test suite it should be removed
-class TestViewOps(TestCase):
-    pass
-
-class TestTensorDeviceOps(TestCase):
-    pass
 
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
