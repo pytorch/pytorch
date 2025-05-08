@@ -930,6 +930,15 @@ def check_cpu_supported():
     return supported
 
 
+def contiguous_last_dim(x):
+    """Ensure that realized IR node has a contigous stride in the last dimension."""
+    strides = x.maybe_get_stride()
+    if strides and strides[-1] != 1:
+        contiguous_stride_order = list(reversed(range(len(x.get_size()))))
+        return ExternKernel.require_stride_order(x, contiguous_stride_order)
+    return x
+
+
 def lower_cpu(
     query,
     key,
@@ -1091,6 +1100,9 @@ def lower_cpu(
     for item in buffer_list:
         if isinstance(item, TensorBox):
             fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
+
+    # CPU kernel requires last dim to be contiguous
+    query, key, value = map(contiguous_last_dim, [query, key, value])
 
     (
         query,
@@ -1258,7 +1270,6 @@ def set_head_dim_values(
     )
 
 
-# TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(
     query,
@@ -1413,11 +1424,9 @@ def flex_attention(
     else:
         kernel_options.setdefault("IS_DIVISIBLE", True)
 
-    # Reuse query strides for output layout despite different last dimension.
-    # This works because only the last dim differs and we check it is contiguous.
+    # NB it is okay that the v_head_dim is different
+    # We are using these to match fill order of the output.
     q_strides = query.get_stride()
-    assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
-
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
     out_strides = infer_dense_strides(out_size, q_strides)
