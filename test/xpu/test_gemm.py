@@ -30,9 +30,10 @@ from torch.testing._internal.common_utils import (
 def tf32_off():
     enabled = torch.backends.mkldnn.enabled
     deterministic = torch.backends.mkldnn.deterministic
-    with torch.backends.mkldnn.flags(enabled=enabled, deterministic=deterministic, allow_tf32=False):
+    with torch.backends.mkldnn.flags(
+        enabled=enabled, deterministic=deterministic, allow_tf32=False
+    ):
         yield
-        
 
 
 @contextlib.contextmanager
@@ -43,7 +44,9 @@ def tf32_on(self, tf32_precision=1e-5):
     old_precision = self.precision
     try:
         self.precision = tf32_precision
-        with torch.backends.mkldnn.flags(enabled=enabled, deterministic=deterministic, allow_tf32=True):
+        with torch.backends.mkldnn.flags(
+            enabled=enabled, deterministic=deterministic, allow_tf32=True
+        ):
             yield
     finally:
         self.precision = old_precision
