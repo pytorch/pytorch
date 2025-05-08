@@ -30,6 +30,7 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.aoti_eager
 import torch.nn as nn
+from torch._C._dynamo.guards import assert_alignment, assert_size_stride
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
@@ -1410,9 +1411,10 @@ class CommonTemplate:
             )
             _, code = run_and_get_code(fn, x, y)
             code = " ".join(code)
-            self.assertEqual(
-                code.count("view_dtype" if config.cpp_wrapper else "aten.view"), 3
-            )
+            if config.cpp_wrapper:
+                self.assertEqual(code.count("view_dtype"), 3)
+            else:
+                self.assertEqual(code.count("aten.view"), 9)
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -8824,6 +8826,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue((d < 1).all())
 
     @config.patch(implicit_fallbacks=True)
+    def test_needs_contiguous_strides(self):
+        # Construct a custom op whose output strides are not contiguous
+        @torch.library.custom_op("mylib::myop", mutates_args={})
+        def myop(x: torch.Tensor) -> torch.Tensor:
+            return torch.zeros(2, 2).t()
+
+        @myop.register_fake
+        def _(x):
+            return torch.zeros(2, 2).t()
+
+        # custom op that needs contiguous inputs
+        @torch.library.custom_op(
+            "mylib::second_op",
+            mutates_args={},
+            tags=[torch._C.Tag.needs_contiguous_strides],
+        )
+        def second_op(x: torch.Tensor) -> torch.Tensor:
+            assert x.is_contiguous()
+            return torch.ones(2, 2)
+
+        @second_op.register_fake
+        def _(x):
+            return torch.ones(2, 2)
+
+        def f(x):
+            y = myop(x)
+            return second_op(y)
+
+        # Check that the x.is_contiguous() assertion never gets triggered
+        x = torch.randn(2, 2)
+        _ = torch.compile(f, backend="inductor", fullgraph=True)(x)
+
+    @config.patch(implicit_fallbacks=True)
     def test_fallback_mutable_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
@@ -11577,7 +11612,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (sorted_sequence, values), check_lowp=False)
         cfn = torch.compile(fn)
-        _, code = run_and_get_code(cfn, sorted_sequence.cuda(), values.cuda())
+        _, code = run_and_get_code(
+            cfn, sorted_sequence.to(GPU_TYPE), values.to(GPU_TYPE)
+        )
 
         # make sure that we did not fuse the broadcast and the bucketize,
         # because bucketize is computationally expensive.
@@ -11673,7 +11710,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (inp, boundaries), check_lowp=False)
         cfn = torch.compile(fn)
-        _, code = run_and_get_code(cfn, inp.cuda(), boundaries.cuda())
+        _, code = run_and_get_code(cfn, inp.to(GPU_TYPE), boundaries.to(GPU_TYPE))
 
         # make sure that we did not fuse the broadcast and the bucketize,
         # because bucketize is computationally expensive.
@@ -11846,6 +11883,80 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ([torch.randn((16, 32)), torch.randn((16, 32)), torch.randn((16, 32))],),
             check_lowp=False,
         )
+
+    @requires_gpu()
+    @skip_if_not_triton
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_size_stride_assert(self):
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32), device=self.device)
+
+        _, code = run_and_get_code(
+            torch.compile(fn),
+            a,
+        )
+        if not is_dynamic_shape_enabled():
+            FileCheck().check(
+                "assert_size_stride(buf2, (16, 32), (32, 1), 'torch.ops.test.foo.default')"
+            ).run(code[0])
+
+    @requires_gpu()
+    @skip_if_not_triton
+    @config.patch(implicit_fallbacks=True)
+    def test_generated_code_has_alignment_assert(self):
+        def foo(x):
+            return 3 * x
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo", foo, foo_meta)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.test.foo(a)
+            return b
+
+        a = torch.randn((16, 32), device=self.device)
+
+        _, code = run_and_get_code(
+            torch.compile(fn),
+            a,
+        )
+        if not is_dynamic_shape_enabled():
+            FileCheck().check(
+                "assert_alignment(buf2, 16, 'torch.ops.test.foo.default')"
+            ).run(code[0])
+
+    def test_assert_size_stride_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_size_stride(tensor, (16, 32), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_size_stride_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_size_stride(tensor, (32, 64), (32, 1), "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_pass(self):
+        tensor = torch.empty((16, 32))
+        assert_alignment(tensor, 16, "torch.ops.dummy.op_name")
+
+    def test_assert_alignment_op_name_fail(self):
+        tensor = torch.empty((16, 32))
+        with self.assertRaisesRegex(AssertionError, "torch.ops.dummy.op_name"):
+            assert_alignment(tensor, 0, "torch.ops.dummy.op_name")
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
@@ -12978,12 +13089,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
-            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1))").check(
-                "assert_size_stride(buf2, (s77, s27), (s27, 1))"
+            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1)").check(
+                "assert_size_stride(buf2, (s77, s27), (s27, 1)"
             ).run(code)
         else:
-            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1))").check(
-                "assert_size_stride(buf2, (16, 32), (32, 1))"
+            FileCheck().check("assert_size_stride(buf1, (16, 32), (32, 1)").check(
+                "assert_size_stride(buf2, (16, 32), (32, 1)"
             ).run(code)
 
     @requires_cuda
@@ -13254,6 +13365,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     fn_compiled(inps)
 
                 assert len(inps) == 0
+
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_graph_partition_pad_dynamic(self):
+        def get_same_padding(x: int, k: int, s: int, d: int):
+            return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
+
+        def pad_same(x, k, s, d=(1, 1), value=0):
+            ih, iw = x.size()[-2:]
+            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
+                iw, k[1], s[1], d[1]
+            )
+            if pad_h > 0 or pad_w > 0:
+                x = torch.nn.functional.pad(
+                    x,
+                    [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2],
+                    value=value,
+                )
+            return x
+
+        x = torch.randn(2, 24, 110, 110, device=self.device)
+        opt = torch.compile(pad_same, dynamic=True)
+        res = opt(x, (5, 5), (2, 2))
+        ref = pad_same(x, (5, 5), (2, 2))
+        self.assertEqual(res, ref, atol=0, rtol=0)
 
     def test_remove_noop_view_default(self):
         def f(x):
