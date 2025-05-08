@@ -563,7 +563,17 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     if (!copy_requires_temporaries(iter, p2p_enabled)) {
       if (non_blocking) {
         AT_CUDA_CHECK(cudaMemcpyAsync(dst_ptr, src_ptr, nbytes, kind, stream));
-        // record host event
+        // we use both the storage context and the tensor data pointer as the key
+        // for the caching host allocator. This allows us to better attribute the
+        // events to the original tensor allocation correctly. The cases we seek to
+        // handle are:
+
+        // 1: a user can pass a pinned memory tensor with an alternative
+        // context, for example if allocating memory directly from the pinned memory
+        // allocator and constructing a tensor with torch::from_blob.
+
+        // 2: a user can pass a tensor with a different base pointer to the original
+        // allocation (via slicing).
         const auto& dst_tensor = iter.tensor(0);
         const auto& src_tensor = iter.tensor(1);
         const auto& host_tensor = (dst.is_cpu() ? dst_tensor : src_tensor);
