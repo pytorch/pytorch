@@ -22,7 +22,6 @@ from torch._inductor import config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
-from torch._utils_internal import full_aoti_runtime_assert
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export, export_for_training
@@ -3626,36 +3625,6 @@ class AOTInductorTestsTemplate:
 
             self.assertTrue(same(optimized(*example_inputs), m(*example_inputs)))
 
-            with self.assertRaisesRegex(Exception, "run_func_(.*) API call failed "):
-                optimized(torch.randn(100), torch.tensor(2))
-
-    @patch.dict(os.environ, {"TORCHINDUCTOR_SCALAR_ASSERTS_FULL": "1"})
-    def test_aoti_runtime_asserts_backed_symint(self):
-        if not full_aoti_runtime_assert():
-            raise unittest.SkipTest("full runtime assert not turned on")
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                y = x.reshape(100, -1).clone()
-                y = y + 1
-                return y
-
-        model = Model().to(self.device)
-        input1 = (torch.rand(100, device=self.device),)
-        input2 = (torch.rand(2099, device=self.device),)
-        dynamic_shapes = {
-            "x": {0: torch.export.Dim.DYNAMIC},
-        }
-        package_path = AOTIRunnerUtil.compile(
-            model,
-            input1,
-            dynamic_shapes=dynamic_shapes,
-        )
-        optimized = torch._inductor.aoti_load_package(package_path)
-        self.assertEqual(model(*input1), optimized(*input1))
-        with self.assertRaisesRegex(Exception, "run_func_(.*) API call failed "):
-            optimized(*input2)
-
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -4498,13 +4467,6 @@ class AOTInductorTestsTemplate:
             "buf4, u0",
             "buf4, buf5, buf3, u0",
         ]
-        if full_aoti_runtime_assert():
-            # we'll have one more assertion
-            expected_scalar_args = [
-                "buf4, u0",
-                "buf5, u0",
-                "buf5, buf6, buf4, u0",
-            ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
             AOTIRunnerUtil.compile, Model(), example_inputs
