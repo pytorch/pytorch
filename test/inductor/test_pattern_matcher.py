@@ -1675,11 +1675,11 @@ class TestPatternMatcher(TestCase):
         def mutable_ops_pattern(x, out):
             foo_inplace(x)
             bar_out(x, out)
-            return out
+            return x, out
 
         def mutable_ops_replacement(x, out):
             foobar_out(x, out)
-            return out
+            return x, out
 
         inp = torch.randn(3)
 
@@ -1747,8 +1747,9 @@ class TestPatternMatcher(TestCase):
         f2_replaced_inp = inp.clone().detach()
         f2_out = f2(f2_inp)
         f2_replaced_out = f2_replaced(f2_replaced_inp)
-        with self.assertRaisesRegex(AssertionError, "Pattern matcher does not yet support mutable ops that mutate graph input"):
-            self.assertEqual(f2_out, f2_replaced_out)
+        self.assertEqual(f1_inp, f1_replaced_inp)
+        self.assertEqual(f2_out, f2_replaced_out)
+        self.assertEqual(count, 1)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
