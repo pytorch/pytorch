@@ -151,6 +151,8 @@ class TORCH_API OperatorEntry final {
   // Precondition: Dispatcher::mutex_ is held
   void updateFallback(const Dispatcher& dispatcher, DispatchKey dispatch_key);
 
+  void unsafeSetTags(const std::vector<at::Tag>& tags);
+
   // Precondition: Dispatcher::mutex_ is held
   void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
     TORCH_INTERNAL_ASSERT(schema_.has_value());

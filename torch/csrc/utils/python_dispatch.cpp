@@ -532,6 +532,19 @@ void initDispatchBindings(PyObject* module) {
       py::arg("linenum") = 0);
 
   m.def(
+      "_unsafe_set_tags",
+      [](const std::vector<at::Tag>& tags,
+         const char* name,
+         const char* overload_name) {
+        return c10::Dispatcher::singleton().unsafeSetTags(
+            tags, name, overload_name);
+      });
+
+  m.def("_get_tags", [](const char* name, const char* overload_name) {
+    return c10::Dispatcher::singleton().getTags(name, overload_name);
+  });
+
+  m.def(
       "_dispatch_find_schema_or_throw",
       [](const char* name, const char* overload_name) -> c10::OperatorHandle {
         return c10::Dispatcher::singleton().findSchemaOrThrow(
