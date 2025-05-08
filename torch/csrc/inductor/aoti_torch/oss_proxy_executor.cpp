@@ -18,6 +18,19 @@ bool has_key(
   return map.find(key) != map.end();
 }
 
+c10::Device normalize_device(const c10::Device& device) {
+  // cpu device doesn't have an index
+  // cuda device must have an index
+  if (device.is_cpu()) {
+    return c10::Device(c10::DeviceType::CPU);
+  } else if (device.is_cuda()) {
+    return c10::Device(
+        c10::DeviceType::CUDA, device.has_index() ? device.index() : 0);
+  } else {
+    TORCH_CHECK(false, "Unsupported device type", device);
+  }
+}
+
 #ifdef _WIN32
 const std::string k_separator = "\\";
 #else
@@ -211,12 +224,11 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           serialized_arg_val["index"].is_number()) {
         auto index = serialized_arg_val["index"].get<int>();
         device_string += ":" + std::to_string(index);
-        device_->set_index(static_cast<int8_t>(index));
       }
 
       c10::Device device(device_string);
 
-      if (device.type() != device_->type()) {
+      if (device != *device_) {
         VLOG(1) << "ProxyExecutor is using " << *device_ << " for "
                 << op_kernel->target_ << " argument #" << index
                 << ", which is different from the one serialized in thrift: "
@@ -579,15 +591,12 @@ std::unique_ptr<OSSCallTorchBindKernel> OSSProxyExecutor::
 
 OSSProxyExecutor::OSSProxyExecutor(
     const std::string& json_path,
-    bool is_cpu,
+    const std::string& device_str,
     std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
-  if (is_cpu) {
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
-  } else {
-    int device_idx = -1;
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
-  }
-
+  // CUDA device must have an index as a kernel may require
+  // an explicit device index. e.g., merge_pooled_embeddings
+  c10::Device normalized_device = normalize_device(c10::Device(device_str));
+  device_ = std::make_unique<c10::Device>(normalized_device);
   // If custom_objs is provided, use it instead of loading from
   // custom_objs_config.json If custom_objs is not provided, try to load from
   // custom_objs_config.json
@@ -617,7 +626,7 @@ OSSProxyExecutor::OSSProxyExecutor(
       for (auto& [customObjName, file_name] : custom_objs_json.items()) {
         std::string customObjPath =
             folder_path + k_separator + file_name.get<std::string>();
-        LOG(INFO) << "Loading custom object to FbProxyExecutor from: "
+        LOG(INFO) << "Loading custom object to OSSProxyExecutor from: "
                   << customObjPath;
 
         std::ifstream custom_obj_file(customObjPath, std::ios::binary);
