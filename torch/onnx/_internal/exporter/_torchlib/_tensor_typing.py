@@ -43,7 +43,7 @@ _TensorType = Union[
     INT64,
     UINT8,
 ]
-_FloatType = Union[FLOAT16, FLOAT, DOUBLE, BFLOAT16]
+FloatType = Union[FLOAT16, FLOAT, DOUBLE, BFLOAT16]
 IntType = Union[INT8, INT16, INT32, INT64]
 RealType = Union[
     BFLOAT16,
@@ -61,7 +61,7 @@ TTensor = TypeVar("TTensor", bound=_TensorType)
 # but do not constrain the type to be the same as the other inputs/outputs
 TTensor2 = TypeVar("TTensor2", bound=_TensorType)
 TTensorOrString = TypeVar("TTensorOrString", bound=Union[_TensorType, STRING])
-TFloat = TypeVar("TFloat", bound=_FloatType)
+TFloat = TypeVar("TFloat", bound=FloatType)
 TFloatOrUInt8 = TypeVar(
     "TFloatOrUInt8", bound=Union[FLOAT, FLOAT16, DOUBLE, INT8, UINT8]
 )
