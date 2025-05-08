@@ -117,6 +117,7 @@ from .source import (
     NumpyTensorSource,
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
+    SetItemKeySource,
     ShapeEnvSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
@@ -1275,6 +1276,15 @@ class GuardBuilder(GuardBuilderBase):
                 )
             out = base_guard_manager.get_key_manager(
                 index=source.index,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif isinstance(source, SetItemKeySource):
+            assert base_guard_manager
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: list(dict.fromkeys(x))[source.index],
+                # index=source.index,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
