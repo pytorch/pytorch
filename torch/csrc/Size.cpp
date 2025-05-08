@@ -149,26 +149,6 @@ static PyObject* THPSize_repr(THPSize* self) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPSize_add(PyObject* self, PyObject* other) {
-  HANDLE_TH_ERRORS
-  if (!PyTuple_Check(self) || !PyTuple_Check(other)) {
-    Py_RETURN_NOTIMPLEMENTED;
-  }
-
-  THPObjectPtr result(PySequence_Concat(self, other));
-  if (!result) {
-    throw python_error();
-  }
-
-  PyObject* size_obj = PyObject_CallFunctionObjArgs(
-      (PyObject*)&THPSizeType, result.get(), nullptr);
-  if (!size_obj) {
-    throw python_error();
-  }
-  return size_obj;
-  END_HANDLE_TH_ERRORS
-}
-
 template <typename FnType, FnType fn, typename... Args>
 static PyObject* wrap_tuple_fn(Args... args) {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));
@@ -181,17 +161,42 @@ static PyObject* wrap_tuple_fn(Args... args) {
   return result.release();
 }
 
+static PyObject* THPSize_concat(PyObject* left, PyObject* right) {
+  HANDLE_TH_ERRORS
+  if (!PyTuple_Check(right)) {
+    TORCH_CHECK_TYPE(
+        false,
+        "can only concatenate tuple (not ",
+        Py_TYPE(right)->tp_name,
+        ") to torch.Size");
+  }
+  static binaryfunc tuple_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+  static binaryfunc size_concat =
+      wrap_tuple_fn<decltype(&tuple_concat), &tuple_concat>;
+  return size_concat(left, right);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPSize_add(PyObject* left, PyObject* right) {
+  HANDLE_TH_ERRORS
+  if (!PyTuple_Check(left) || !PyTuple_Check(right)) {
+    Py_RETURN_NOTIMPLEMENTED;
+  }
+  return THPSize_concat(left, right);
+  END_HANDLE_TH_ERRORS
+}
+
 // We use an anonymous namespace instead of static to work around
 // (what @peterjc123 think is) a bug in Visual Studio
 namespace {
-auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
 auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
 binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 } // namespace
 
 static PySequenceMethods THPSize_as_sequence = {
     nullptr, /* sq_length */
-    wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
+    // wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
+    THPSize_concat, /* sq_concat */
     wrap_tuple_fn<decltype(&sq_repeat), &sq_repeat>,
     nullptr, /* sq_item */
     nullptr, /* sq_slice */
