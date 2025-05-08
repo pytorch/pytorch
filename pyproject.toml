@@ -15,6 +15,13 @@ dynamic = [
   "version",
 ]
 
+[project.urls]
+Homepage = "https://pytorch.org/"
+Documentation = "https://pytorch.org/docs/"
+Source = "https://github.com/pytorch/pytorch"
+Forum = "https://discuss.pytorch.org/"
+
+
 [build-system]
 requires = [
     # After 75.8.2 dropped dep disttools API. Please fix
