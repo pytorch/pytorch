@@ -152,7 +152,8 @@ def check_file(filename: str) -> list[LintMessage]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="test device bias code",
+        description="Detect Device bias in python functions decorated with [require_gpu]"
+        " that may potentially break support for other GPU devices.",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
