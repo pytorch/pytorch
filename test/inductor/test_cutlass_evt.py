@@ -208,7 +208,8 @@ return D, tmp_1, tmp_2""",
 
             self.assertExpectedInline(
                 str(result),
-                """Unsupported indexing for buf0 with index 200*i0 + 60000*i1 + i2 and strides [200, 60000, 1]""",
+                """Unsupported indexing for buf0 with index 200*i0 + 60000*i1 + i2, \
+index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -359,10 +360,7 @@ return D, tmp_2""",
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
-        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
-
-        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
-        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, cuda_arch)
+        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS)
 
         self.assertExpectedInline(
             _render_argument_type(
