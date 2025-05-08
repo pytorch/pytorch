@@ -10,15 +10,12 @@ import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHDYNAMO,
     run_tests,
     xfailIfTorchDynamo,
 )
 
-if TEST_WITH_TORCHDYNAMO:
-    __TestCase = CPythonTestCase
-else:
-    __TestCase = unittest.TestCase
+__TestCase = CPythonTestCase
+
 
 # redirect import statements
 import sys
@@ -900,7 +897,4 @@ class ComplexTest(__TestCase):
 
 
 if __name__ == "__main__":
-    if TEST_WITH_TORCHDYNAMO:
-        run_tests()
-    else:
-        unittest.main()
+    run_tests()
