@@ -2314,6 +2314,7 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
+    @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
     def test_unbacked_output(self):
         # The point of this test is to have an op which has no symbols as input
         # but a symbol as an output and make sure that we skip caching it.
