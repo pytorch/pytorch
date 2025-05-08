@@ -144,6 +144,8 @@ class MetalExprPrinter(ExprPrinter_):
         x = self.doprint(expr.args[0])
         return f"static_cast<int>(metal::floor({x}))"
 
+    _print_floor = _print_FloorToInt
+
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
