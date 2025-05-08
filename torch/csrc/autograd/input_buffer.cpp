@@ -137,25 +137,28 @@ void _record_stream_any_impl(Variable& var, const c10::Stream& stream) {
 //
 // An operator can deal with multiple devices, e.g. if it does a device
 // transfer, etc. However, for the purpose of stream synchronization, the engine
-// is only aware of single canonical device/stream for each op/node.
+// is only aware of single canonical device/stream for each autograd Node.
 //
-// For the proper synchronization, the op author should make sure of the
+// For the proper synchronization, the Node author should make sure of the
 // following:
 //
-// 1) A node producing a gradient should have it ready on the current
-//   stream during node execution.
-// 2) A node consuming a gradient should wait on the current stream before using
-//    it.
+// 1) A node consuming a gradient should wait on the canonical stream before
+//    using it.
+// 2) A node producing a gradient should have it ready on the canonical
+//    stream during node execution.
 //
+
 // Note: [Autograd Producer-Consumer Stream Syncs]
 //
-// The actual wait and record stream happens prior to the consumer's
-// execution. The logic here is mainly responsible for handling the
-// synchronization needed for accumulation and recording the event that the
-// consumer should wait on later.
+// The producer-consumer stream syncs are partially handled in this method
+// and partially handled in the engine prior to the consumer's execution.
+// The logic here is mainly responsible for handling the synchronization needed
+// for accumulation and recording the event that the consumer should wait on
+// later. The corresponding wait and record_stream happens in the engine.
 //
 // First producer
 // ==============
+// There are several things we need to do upon seeing the first producer:
 // 1) Determine the accumulation stream (which may or may not be used):
 //    case A) var's device matches consumer node's canonical device
 //            (The producer node's canonical device may or may not match)
@@ -180,7 +183,7 @@ void _record_stream_any_impl(Variable& var, const c10::Stream& stream) {
 //   incoming gradient and the existing gradient in the buffer.
 //   (i) wait stream and (ii) record stream to make sure both are ready to be
 //   used on the accumulation stream.
-// 2) Accumulation on the accumulation straem
+// 2) Accumulate on the accumulation stream
 // 3) Update the ready event and stream for the current position.
 //
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -200,7 +203,7 @@ void InputBuffer::add(
   bool is_accelerator =
       device.is_cuda() || device.is_mtia() || device.is_privateuseone();
   //
-  // [ Non-accelerator case ]
+  // Non-accelerator case
   //
   if (!is_accelerator) {
     if (!buffer[pos].defined()) {
@@ -223,8 +226,8 @@ void InputBuffer::add(
 
   // See Note: [Autograd Producer-Consumer Stream Syncs]
   if (!opt_accum_streams[pos].has_value()) {
-    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
     // [ First producer ]
+    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
     // 1)
     if (opt_consumer_stream->device() == device) {
       // Case A

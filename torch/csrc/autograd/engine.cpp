@@ -1063,7 +1063,7 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // Guard onto the present func's stream
+  // Locally set the current stream to func's associated stream
   auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
@@ -1086,7 +1086,9 @@ void Engine::evaluate_function(
     if (opt_parent_stream.value() != inputs.ready_streams[pos].value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       opt_parent_stream->wait(inputs.ready_events[pos].value());
-      _record_stream_any_impl(inputs.buffer[pos], opt_parent_stream.value());
+      if (opt_parent_stream->device() == device) {
+        _record_stream_any_impl(inputs.buffer[pos], opt_parent_stream.value());
+      }
     }
   }
 
