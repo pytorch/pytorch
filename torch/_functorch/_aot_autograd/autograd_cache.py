@@ -1010,7 +1010,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 key, local, remote_cache, AOTAutogradCache.evaluate_guards, hints
             )
 
-            if entry is None and guard_info["result_status"] == "guard_miss":
+            if entry is None and guard_info["cache_status_detailed"] == "guard_miss":
                 counters["aot_autograd"]["autograd_cache_guard_miss"] += 1
             cache_info.update(guard_info)
             if pickled_content is not None:
