@@ -53,9 +53,12 @@ from torch.utils._triton import has_triton
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
-    (torch.cuda.is_available() and has_triton())
-    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
-    "Requires Triton + A100 or Triton + ROCm",
+    (
+        (torch.cuda.is_available() and has_triton())
+        and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip)
+    )
+    or (torch.xpu.is_available() and has_triton()),
+    "Requires Triton + A100 or Triton + ROCm or Triton + XPU",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -4975,9 +4978,12 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 
 supports_learnable_bias = unittest.skipUnless(
-    (torch.cuda.is_available() and has_triton())
-    and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip),
-    "Requires Triton + A100 or Triton + ROCm",
+    (
+        (torch.cuda.is_available() and has_triton())
+        and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
+    )
+    or (torch.xpu.is_available() and has_triton()),
+    "Requires Triton + A100 or Triton + ROCm or Triton + XPU",
 )
 
 
