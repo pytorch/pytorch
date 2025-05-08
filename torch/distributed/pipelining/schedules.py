@@ -23,9 +23,6 @@ from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunk
 from .stage import _PipelineStageBase
 
 
-if TYPE_CHECKING:
-    from torch.distributed import Work
-
 __all__ = [
     "get_schedule_class",
     "PipelineScheduleSingle",
@@ -397,7 +394,9 @@ class _PipelineSchedule(ABC):
         )
 
 
-def _batch_p2p(p2p_ops: list[dist.P2POp], desc: Optional[str] = None) -> list[dist.Work]:
+def _batch_p2p(
+        p2p_ops: list[dist.P2POp], desc: Optional[str] = None
+) -> list[dist.Work]:
     """
     Simple wrapper over batch_isend_irecv from torch.distributed, which just adds a descriptive logger on top.
     """
@@ -705,7 +704,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         bwd_mb_index = 0
 
         # Warmup phase
-        send_work = []
+        send_work: list[dist.Work] = []
         fwd_sends = []
         for _ in range(warmup_chunks):
             # Receive activations
