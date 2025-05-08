@@ -524,7 +524,7 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
         return result
 
-    def call_id(self, tx: "InstructionTranslator"):
+    def call_id(self, tx):
         if not self.source:
             unimplemented_v2(
                 gb_type="Unsupported call_id() without source",
