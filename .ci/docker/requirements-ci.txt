@@ -379,3 +379,6 @@ dataclasses_json==0.6.7
 #Description: required for data pipeline and scripts under tools/stats
 #Pinned versions: 0.6.7
 #test that import:
+
+cmake==4.0.0
+#Description: required for building
