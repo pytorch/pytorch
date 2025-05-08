@@ -434,6 +434,12 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
+        elif name == "count":
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.count),
+                [self] + list(args),
+                kwargs,
+            )
         elif (
             name == "__setitem__"
             and self.is_mutable()

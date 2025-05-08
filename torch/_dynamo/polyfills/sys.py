@@ -12,6 +12,7 @@ from ..decorators import substitute_in_graph
 __all__ = [
     "intern",
     "getrecursionlimit",
+    "get_int_max_str_digits",
 ]
 
 
@@ -23,3 +24,8 @@ def intern(string: str, /) -> str:
 @substitute_in_graph(sys.getrecursionlimit, can_constant_fold_through=True)
 def getrecursionlimit() -> int:
     return sys.getrecursionlimit()
+
+
+@substitute_in_graph(sys.get_int_max_str_digits, can_constant_fold_through=True)
+def get_int_max_str_digits() -> int:
+    return sys.get_int_max_str_digits()

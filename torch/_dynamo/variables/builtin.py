@@ -1255,6 +1255,11 @@ class BuiltinVariable(VariableTracker):
     call_int = _call_int_float
     call_float = _call_int_float
 
+    def call_complex(self, tx: "InstructionTranslator", *args, **kwargs):
+        if self.constant_args(*args, **kwargs):
+            args, kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+            return ConstantVariable(complex(*args, **kwargs))
+
     def call_str(self, tx: "InstructionTranslator", arg):
         # Handle `str` on a user defined function or object
         if isinstance(arg, (variables.UserFunctionVariable)):
