@@ -225,6 +225,8 @@ std::string TensorCheck::check_verbose(
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
       fail_reason << "size mismatch at index " << i << ". expected "
                   << known_size.value() << ", actual " << sizes[i];
+      std::cout << "size mismatch for " << tensor_name << std::endl;
+      std::cout << fail_reason.str() << std::endl;
       return fail_reason.str();
     }
   }
@@ -1398,50 +1400,61 @@ class StorageOverlapChecker {
  * failure. The data structure is also accessible in Python.
  */
 
-class GuardDebugInfo {
- public:
-  GuardDebugInfo(
-      bool result,
-      py::list verbose_code_parts,
-      int num_guards_executed)
-      : result(result),
-        verbose_code_parts(std::move(verbose_code_parts)),
-        num_guards_executed(num_guards_executed) {}
+ class GuardDebugInfo {
+  public:
+   GuardDebugInfo(
+       bool result,
+       py::list verbose_code_parts,
+       py::list failure_reasons,
+       int num_guards_executed)
+       : result(result),
+         verbose_code_parts(std::move(verbose_code_parts)),
+         failure_reasons(std::move(failure_reasons)),
+         num_guards_executed(num_guards_executed) {}
+ 
+   // This constructor is used when guard succeeds.
+   GuardDebugInfo(bool result, int num_guards_executed)
+       : result(result), num_guards_executed(num_guards_executed) {}
+ 
+   // This constructor is used for evaluable code parts only
+   GuardDebugInfo(bool result, py::list code_parts, int num_guards_executed)
+       : result(result), verbose_code_parts(std::move(code_parts)), num_guards_executed(num_guards_executed) {}
 
-  // This constructor is used when guard succeeds.
-  GuardDebugInfo(bool result, int num_guards_executed)
-      : result(result), num_guards_executed(num_guards_executed) {}
-
-  GuardDebugInfo(
-      bool result,
-      const std::string& failed_reason,
-      int num_guards_executed)
-      : GuardDebugInfo(result, num_guards_executed) {
-    verbose_code_parts.append(failed_reason);
-  }
-
-  std::string to_string() {
-    std::stringstream ss;
-    ss << "GuardDebugInfo(\n"
-       << "result=" << result << ",\n"
-       << "verbose_code_parts=" << verbose_code_parts << ",\n"
-       << "num_guards_executed=" << num_guards_executed << ")\n";
-    return ss.str();
-  }
-
-  // Whether the guard passed or failed.
-  bool result;
-
-  // This is a list of verbose_code_parts for the failed guard. When there are
-  // more than one verbose_code_parts, then recompilation reasoning infra on the
-  // Python side can iterate over this list and eval each string to pinpoint the
-  // exact code part that failed.
-  py::list verbose_code_parts;
-
-  // Total number of executed guards so far. This is helpful in debugging if
-  // shuffling is working.
-  int num_guards_executed;
-};
+   GuardDebugInfo(
+       bool result,
+       const std::string& failed_reason,
+       int num_guards_executed)
+       : GuardDebugInfo(result, num_guards_executed) {
+     failure_reasons.append(failed_reason);
+   }
+ 
+   std::string to_string() const {
+     std::stringstream ss;
+     ss << "GuardDebugInfo(\n"
+        << "result=" << result << ",\n"
+        << "verbose_code_parts=" << verbose_code_parts << ",\n"
+        << "failure_reasons=" << failure_reasons << ",\n"
+        << "num_guards_executed=" << num_guards_executed << ")\n";
+     return ss.str();
+   }
+ 
+   // Whether the guard passed or failed.
+   bool result;
+ 
+   // This is a list of verbose_code_parts for the failed guard. When there are
+   // more than one verbose_code_parts, then recompilation reasoning infra on the
+   // Python side can iterate over this list and eval each string to pinpoint the
+   // exact code part that failed.
+   py::list verbose_code_parts;
+ 
+   // List of reasons for guard failures. In string format, not meant to be eval-ed
+   // in Python.
+   py::list failure_reasons;
+ 
+   // Total number of executed guards so far. This is helpful in debugging if
+   // shuffling is working.
+   int num_guards_executed;
+ };
 
 class GuardManager;
 class RootGuardManager;
@@ -2619,19 +2632,29 @@ class GuardManager {
       int& num_guards_executed) {
     bool guards_failed = false;
     py::list verbose_code_parts;
+    py::list guard_fail_reasons;
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
           accessor->check_verbose_nopybind(value);
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
+        std::cout << "guards_failed on accessor: " << accessor->get_source() << std::endl;
+        std::cout << debug_info.to_string() << std::endl;
         guards_failed = true;
-        verbose_code_parts += debug_info.verbose_code_parts;
+        if (debug_info.verbose_code_parts.size() > 0) {
+          std::cout << "VCP: " << debug_info.verbose_code_parts[0].cast<std::string>() << std::endl;
+          verbose_code_parts = debug_info.verbose_code_parts;
+        }
+        if (debug_info.failure_reasons.size() > 0) {
+          std::cout << "fail reason: " << debug_info.failure_reasons[0].cast<std::string>() << std::endl;
+        }
+        guard_fail_reasons += debug_info.failure_reasons;
       }
     }
     if (guards_failed) {
       return GuardDebugInfo(
-        false, verbose_code_parts, num_guards_executed);
+        false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
     }
 
     return GuardDebugInfo(true, num_guards_executed);
@@ -3524,6 +3547,7 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
+      std::cout << "fail_reason non empty" << fail_reason << std::endl;
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);
@@ -5391,6 +5415,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__str__", &GuardDebugInfo::to_string)
       .def_readonly("result", &GuardDebugInfo::result)
       .def_readonly("verbose_code_parts", &GuardDebugInfo::verbose_code_parts)
+      .def_readonly("failure_reasons", &GuardDebugInfo::failure_reasons)
       .def_readonly(
           "num_guards_executed", &GuardDebugInfo::num_guards_executed);
 

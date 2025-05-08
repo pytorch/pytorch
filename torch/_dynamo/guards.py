@@ -3218,6 +3218,7 @@ def strip_local_scope(s: str) -> str:
 
 
 def _format_reasons_for_shape_guards(compile_id: CompileId, reasons: list[str], scope: dict[str, object]) -> str:
+    breakpoint()
     has_parameter = False
     shape_sources = OrderedSet()
     pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
@@ -3270,6 +3271,7 @@ def get_guard_fail_reason_helper(
     # C++ guard manager. We need to fix the issue to remove the comment.
     # assert not guard_debug_info.result
     if not guard_debug_info.result:
+        breakpoint()
         verbose_code_parts = guard_debug_info.verbose_code_parts
         # verbose_code_parts is either the actual reason (e.g. in case of
         # TENSOR_MATCH) or it could be a list of verbose_code_part that we
@@ -3278,11 +3280,12 @@ def get_guard_fail_reason_helper(
         # very important for symbolic shape guards which are currently
         # installed as a lambda guard and can encompass a long list of code_parts.
 
-        if any("Duplicate tensor found" in part for part in verbose_code_parts):
-            no_tensor_aliasing_check_failed = True
-        else:
-            reasons = verbose_code_parts
-            verbose_code_parts = []
+        if len(verbose_code_parts) == 1:
+            if any("Duplicate tensor found" in part for part in verbose_code_parts):
+                no_tensor_aliasing_check_failed = True
+            else:
+                reasons = verbose_code_parts
+                verbose_code_parts = []
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(

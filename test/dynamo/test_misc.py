@@ -6679,6 +6679,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(guard_failure is not None)
         first_guard_failure = guard_failure[0].partition("\n")[0]
+        breakpoint()
         if torch._dynamo.config.assume_static_by_default:
             self.assertIn(
                 """tensor 'x' size mismatch at index 0. expected 2, actual 5""",
