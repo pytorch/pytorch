@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import importlib.resources
 import io
 import itertools
 import json
@@ -3126,8 +3127,7 @@ def cutlass_key() -> bytes:
     if config.is_fbcode():
         with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
             with open(resource_path) as resource_file:
-                ret = resource_file.read()
-                return ret
+                return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
     build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
