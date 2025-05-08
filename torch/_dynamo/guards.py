@@ -90,7 +90,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
-from . import config, convert_frame, exc, mutation_guard
+from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
@@ -1740,6 +1740,9 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        # don't support this in serialization because it uses unsupported ID_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("NN_MODULE guard cannot be serialized.")
         self.ID_MATCH(guard)
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -1758,10 +1761,16 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
+        # don't support this in serialization because it uses unsupported ID_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("FUNCTION_MATCH guard cannot be serialized.")
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
+        # don't support this in serialization because it uses unsupported FUNCTION_MATCH
+        if self.serialization_mode == "save":
+            raise RuntimeError("CLOSURE_MATCH guard cannot be serialized.")
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):
@@ -1771,9 +1780,6 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
-
-    def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
@@ -1916,9 +1922,6 @@ class GuardBuilder(GuardBuilderBase):
             # This is unsafe if you add/remove a hook on nn module variable
             return
         self.SEQUENCE_LENGTH(guard)
-
-    def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
         pass  # we always guard on this via GlobalStateGuard()
@@ -2228,7 +2231,7 @@ class GuardBuilder(GuardBuilderBase):
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
-                # For numpy tensors, since those are ephemeral, we dont have to
+                # For numpy tensors, since those are ephemeral, we don't have to
                 # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
@@ -2523,6 +2526,23 @@ class GuardsStatePickler(pickle.Pickler):
         )
 
     @classmethod
+    def _unpickle_traceable_wrapper_subclass(
+        cls, meta_tensor, device, pytype, dispatch_keys_raw, ctx, inner_data
+    ):
+        # Unpickle the inner tensor components. These could also be subclass instances.
+        inner_tensors = {}
+        for attr, unpickle_func, unpickle_func_args in inner_data:
+            inner_tensors[attr] = unpickle_func(*unpickle_func_args)
+
+        outer_size, outer_stride = meta_tensor.shape, meta_tensor.stride()
+        out = type(meta_tensor).__tensor_unflatten__(
+            inner_tensors, ctx, outer_size, outer_stride
+        )
+        out.pytype = pytype
+        out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
+        return out
+
+    @classmethod
     def _unpickle_python_module(cls, alias: str):
         return importlib.import_module(alias)
 
@@ -2542,6 +2562,29 @@ class GuardsStatePickler(pickle.Pickler):
         import sympy
 
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
+            from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+            if is_traceable_wrapper_subclass(obj):
+                # inner_data is a list of tuples of:
+                #   (inner attr name, unpickle func, tuple of func inputs)
+                # This supports traceable wrapper subclass inner tensors.
+                inner_data = []
+                attrs, ctx = obj.__tensor_flatten__()
+                # recursively call for inner tensor components
+                for attr in attrs:
+                    inner = getattr(obj, attr)
+                    func, args_tuple = self.reducer_override(inner)
+                    inner_data.append((attr, func, args_tuple))
+
+                return type(self)._unpickle_traceable_wrapper_subclass, (
+                    torch.empty_like(obj, device="meta"),
+                    obj.device,
+                    type(obj),
+                    torch._C._dispatch_keys(obj).raw_repr(),
+                    ctx,
+                    inner_data,
+                )
+
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta"),
                 obj.device,
@@ -3129,8 +3172,8 @@ def is_recompiles_verbose_enabled():
 
 
 # this will only be used if cpp guards are disabled
-def make_torch_function_mode_stack_guard(intial_stack):
-    types = [type(x) for x in intial_stack]
+def make_torch_function_mode_stack_guard(initial_stack):
+    types = [type(x) for x in initial_stack]
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()

@@ -436,6 +436,23 @@ def convert_shape_to_inductor(
     return [sympy.sympify(i) for i in lst]
 
 
+def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
+    """
+    Like convert_shape_to_symint, but operates on a single expression.
+    """
+    from .virtualized import V
+
+    return (
+        i
+        if isinstance(i, int)
+        else (
+            int(i)
+            if isinstance(i, sympy.Integer)
+            else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        )
+    )
+
+
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]],
 ) -> list[Union[int, torch.SymInt]]:
@@ -443,20 +460,7 @@ def convert_shape_to_symint(
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
-    from .virtualized import V
-
-    return [
-        (
-            i
-            if isinstance(i, int)
-            else (
-                int(i)
-                if isinstance(i, sympy.Integer)
-                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
-            )
-        )
-        for i in lst
-    ]
+    return [convert_to_symint(i) for i in lst]
 
 
 def is_view(op: torch._ops.OpOverload) -> bool:
@@ -1496,7 +1500,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma_device
+    from torch.utils._triton import has_triton_tma
 
     from .virtualized import V
 
@@ -1527,7 +1531,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
     return (
         config.triton.enable_persistent_tma_matmul
-        and has_triton_tma_device()
+        and has_triton_tma()
         and all(_is_tma_compatible(m) for m in matrices)
     )
 
