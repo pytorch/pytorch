@@ -224,10 +224,6 @@ class FakeTensorTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unhandled FakeTensor Device Propagation for.*") as exc:
             torch.nextafter(fake_x, fake_y)
 
-
-
-
-
     def test_nan_to_num(self):
         with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:
