@@ -184,7 +184,6 @@ static void accumulate(
 // 2) Accumulate on the accumulation stream
 // 3) Update the ready event and stream for the current position.
 //
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 void InputBuffer::add(
     size_t pos,
     Variable&& var,
@@ -247,12 +246,16 @@ void InputBuffer::add(
     // 2)
     buffer[pos] = std::move(var);
     // 3)
-    ready_events[pos] = c10::Event{device_type};
-    ready_events[pos]->record(*opt_producer_stream);
+    auto event = c10::Event{device_type};
+    event.record(*opt_producer_stream);
+    ready_events[pos] = std::move(event);
     ready_streams[pos] = opt_producer_stream;
   } else {
     // [ Nth producer ]
     auto accum_stream = opt_accum_streams[pos];
+    auto& ready_event = ready_events[pos];
+    auto& ready_stream = ready_streams[pos];
+    TORCH_INTERNAL_ASSERT(accum_stream && ready_event && ready_stream);
     // 1)
     if (*accum_stream != *opt_producer_stream) {
       auto event = c10::Event{device_type};
@@ -260,21 +263,21 @@ void InputBuffer::add(
       accum_stream->wait(event);
       record_stream_any_impl(var, *accum_stream);
     }
-    if (*accum_stream != *ready_streams[pos]) {
-      accum_stream->wait(*ready_events[pos]);
+    if (*accum_stream != *ready_stream) {
+      accum_stream->wait(*ready_event);
       // This is redundant for case A, but needed for case C
-      record_stream_any_impl(buffer[pos], *opt_accum_streams[pos]);
+      record_stream_any_impl(buffer[pos], *accum_stream);
     }
     // 2)
     c10::OptionalStreamGuard stream_guard{accum_stream};
     accumulate(buffer, pos, std::move(var));
     // 3)
-    ready_events[pos] = c10::Event{device_type};
-    ready_events[pos]->record(*accum_stream);
+    auto event = c10::Event{device_type};
+    event.record(*accum_stream);
+    ready_events[pos] = std::move(event);
     ready_streams[pos] = accum_stream;
   }
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   std::vector<Variable> result = std::move(g.buffer);
