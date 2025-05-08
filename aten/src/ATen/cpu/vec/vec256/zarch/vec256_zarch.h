@@ -363,6 +363,11 @@ constexpr auto GetSwapMaskFloat() {
 }
 
 template <typename T>
+    struct is_vec_specialized_for < T,
+    std::enable_if_t < is_zarch_implemented<T>() >>>
+    : std::bool_constant<true> {};
+
+template <typename T>
 struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
  public:
   using value_type = T;
@@ -1742,6 +1747,11 @@ C10_DIAGNOSTIC_POP()
 
 //////////////////////////////////QUANT///////////////////////////////////////////
 template <typename T>
+    struct is_vec_specialized_for < T,
+    std::enable_if_t < is_zarch_implemented_quant<T>() >>>
+    : std::bool_constant<true> {};
+
+template <typename T>
 struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
  public:
   using value_type = typename T::underlying;
@@ -2211,6 +2221,11 @@ template <typename U>
 constexpr U log10e_inv() {
   return static_cast<U>(0.43429448190325176);
 }
+
+template <typename T>
+    struct is_vec_specialized_for < T,
+    std::enable_if_t < is_zarch_implemented_complex<T>() >>>
+    : std::bool_constant<true> {};
 
 template <typename T>
 struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {

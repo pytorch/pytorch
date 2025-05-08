@@ -19,6 +19,9 @@ inline namespace CPU_CAPABILITY {
 
 #define VEC_INT_SVE_TEMPLATE(vl, bit)                                         \
   template <>                                                                 \
+  struct is_vec_specialized_for<int##bit##_t> : std::bool_constant<true> {};  \
+                                                                              \
+  template <>                                                                 \
   class Vectorized<int##bit##_t> {                                            \
    private:                                                                   \
     vls_int##bit##_t values;                                                  \
