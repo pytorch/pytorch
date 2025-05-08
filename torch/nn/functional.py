@@ -15,6 +15,7 @@ from torch._jit_internal import (
     BroadcastingList2,
     BroadcastingList3,
 )
+from torch._prims_common import DimsType
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
 from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
@@ -5551,7 +5552,7 @@ def triplet_margin_with_distance_loss(
 def normalize(
     input: Tensor,
     p: float = 2.0,
-    dim: int = 1,
+    dim: DimsType = 1,
     eps: float = 1e-12,
     out: Optional[Tensor] = None,
 ) -> Tensor:
@@ -5568,8 +5569,8 @@ def normalize(
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
-        dim (int or tuple of ints): the dimension to reduce. Default: 1
-        eps (float): small value to avoid division by zero. Default: 1e-12
+        dim (int or Sequence of ints, optional): the dimension to reduce. Default: 1
+        eps (float, optional): small value to avoid division by zero. Default: 1e-12
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
