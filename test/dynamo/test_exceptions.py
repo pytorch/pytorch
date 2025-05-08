@@ -22,6 +22,15 @@ class CustomException(Exception):
     ...
 
 
+class CustomExceptionMeta(type):
+    def __instancecheck__(cls, instance):
+        return True
+
+
+class CustomExceptionWithInstanceCheck(Exception, metaclass=CustomExceptionMeta):
+    ...
+
+
 class CustomExceptionWithArgs(Exception):
     def __init__(self, a, b=None):
         self.a = a
@@ -150,8 +159,12 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(out, inp + 1))
 
     @make_dynamo_test
-    def test_isinstance_CustomException_type(self):
+    def test_isinstance_CustomException(self):
         assert isinstance(CustomException, type)
+        assert not isinstance(CustomException(), type)
+        C = CustomExceptionWithInstanceCheck
+        assert isinstance(C, C)
+        assert isinstance(C(), C)
 
     @make_dynamo_test
     def test_propagate_exception_inside_ctx_manager(self):
