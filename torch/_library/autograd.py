@@ -70,6 +70,25 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
             return result
 
     def backward(ctx, *grads):
+        """
+        Computes the gradients of the forward operation with respect to its inputs.
+
+        This function is automatically called during the backward pass in PyTorch's 
+        autograd system. If a registered backward function exists, it is used to 
+        compute the gradients. Otherwise, an error is raised indicating that no 
+        autograd formula is available.
+
+        Args:
+            ctx: The autograd context, which stores information from the forward pass.
+            *grads: The gradients of the outputs with respect to some loss function.
+
+        Returns:
+            A tuple containing the computed gradients for each input of the forward function. 
+            If an autograd function was not registered, an exception is raised.
+
+        Raises:
+            RuntimeError: If no autograd formula is registered for the given operation.
+        """
         if info._backward_fn:
             try:
                 prev_needs_input_grad = ctx.needs_input_grad
