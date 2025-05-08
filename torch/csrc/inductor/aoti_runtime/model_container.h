@@ -257,17 +257,15 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    std::shared_lock model_lk(model_exec_mutex_);
-    auto* model = get_available_model();
-
+    AOTInductorModel* model;
     ConstantState& const_folded = inactive_buffer == use_secondary_
         ? constant_folded_
         : constant_folded_secondary_;
     if (!inactive_buffer) {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
-      model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      model = get_available_model();
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
@@ -280,9 +278,10 @@ class AOTInductorModelContainer {
         available_models_.push_back(model);
         throw;
       }
-      constants_folding_lk.unlock();
-      model_lk.lock();
     } else {
+      std::shared_lock model_lk(model_exec_mutex_);
+      model = get_available_model();
+
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
       auto constants_map = get_constants_map(/* get_inactive= */ true);
