@@ -523,53 +523,6 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
 
-  if (copy_requires_temporaries(iter, p2p_enabled)) {
-    // NB: this involves recursive calls to copy. Be careful that those copies
-    // don't require temporaries or you will cause an infinite recursion!
-    auto& dst = iter.tensor(0);
-    Tensor dst_contig;
-    Tensor src_contig;
-
-    // If non_blocking is true - type conversions are performed on the GPU
-    // For blocking transfers conversions are performed on CPU to avoid allocating
-    // extra GPU memory
-    // for GPU-GPU transfers conversions are performed on the source device
-    auto conversion_device = non_blocking ? kCUDA : kCPU;
-    if (iter.device_type(1) == conversion_device) {
-      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
-    } else {
-      bool same_type = iter.dtype(0) == iter.dtype(1);
-      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).expand_as(dst).contiguous();
-    }
-
-    // propagate the correct conjugate bit
-    dst_contig._set_conj(dst.is_conj());
-    src_contig._set_conj(iter.tensor(1).is_conj());
-
-    dst_contig._set_neg(dst.is_neg());
-    src_contig._set_neg(iter.tensor(1).is_neg());
-
-    // perform a same-dtype copy on contiguous tensors
-    TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
-    TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
-    dst_contig.copy_(src_contig, non_blocking);
-
-    // if necessary, copy back into dst
-    if (!dst_contig.is_same(dst)) {
-      TORCH_INTERNAL_ASSERT(dst_contig.device() == dst.device());
-      dst.copy_(dst_contig, non_blocking);
-    }
-    return;
-  }
-
-  // Copy on GPU (or between GPUs)
-  if (dst_device.is_cuda() && src_device.is_cuda()) {
-    copy_device_to_device(iter, non_blocking, p2p_enabled);
-    return;
-  }
-
   // Copy between CPU and GPU
   cuda::OptionalCUDAGuard device_guard;
   cudaMemcpyKind kind;
@@ -631,6 +584,54 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
      iter.tensor(0).neg_();
   }
+
+  if (copy_requires_temporaries(iter, p2p_enabled)) {
+    // NB: this involves recursive calls to copy. Be careful that those copies
+    // don't require temporaries or you will cause an infinite recursion!
+    auto& dst = iter.tensor(0);
+    Tensor dst_contig;
+    Tensor src_contig;
+
+    // If non_blocking is true - type conversions are performed on the GPU
+    // For blocking transfers conversions are performed on CPU to avoid allocating
+    // extra GPU memory
+    // for GPU-GPU transfers conversions are performed on the source device
+    auto conversion_device = non_blocking ? kCUDA : kCPU;
+    if (iter.device_type(1) == conversion_device) {
+      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
+    } else {
+      bool same_type = iter.dtype(0) == iter.dtype(1);
+      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      src_contig = iter.tensor(1).expand_as(dst).contiguous();
+    }
+
+    // propagate the correct conjugate bit
+    dst_contig._set_conj(dst.is_conj());
+    src_contig._set_conj(iter.tensor(1).is_conj());
+
+    dst_contig._set_neg(dst.is_neg());
+    src_contig._set_neg(iter.tensor(1).is_neg());
+
+    // perform a same-dtype copy on contiguous tensors
+    TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
+    TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
+    dst_contig.copy_(src_contig, non_blocking);
+
+    // if necessary, copy back into dst
+    if (!dst_contig.is_same(dst)) {
+      TORCH_INTERNAL_ASSERT(dst_contig.device() == dst.device());
+      dst.copy_(dst_contig, non_blocking);
+    }
+    return;
+  }
+
+  // Copy on GPU (or between GPUs)
+  if (dst_device.is_cuda() && src_device.is_cuda()) {
+    copy_device_to_device(iter, non_blocking, p2p_enabled);
+    return;
+  }
+
 }
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel_cuda)
