@@ -619,7 +619,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
-  C10_DEPRECATED ProcessGroupNCCL(
+  [[deprecated]] ProcessGroupNCCL(
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
