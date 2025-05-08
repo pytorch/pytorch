@@ -22,22 +22,31 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.9.2b")
+  set(__AOTRITON_RELEASE_PAGE "0.9.2b")
+  set(__AOTRITON_VER_LIST
+      "0.9.2b"  # rocm6.2
+      "0.9.2b"  # rocm6.3
+      "0.9.2b"  # rocm6.4
+      "0.9.2b_612896439f"  # rocm6.5 with gfx950
+      )
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
+      "manylinux_2_28"  # rocm6.5
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.2"
       "rocm6.3"
       "rocm6.4"
+      "rocm6.5"
       )
-  set(__AOTRITON_CI_COMMIT "b388d223d8c7213545603e00f6f3148c54d1f525")
+  set(__AOTRITON_CI_COMMIT "612896439fb4f78509b1a566b5ef0a333e9585bb")    # source of rocm6.5 with gfx950
   set(__AOTRITON_SHA256_LIST
       "08d84f96f4c984179f80f517c0431c7511ee26bb0ce9bd05a827573ddd78cc79"  # rocm6.2
       "9094d59717e7e6eace9126ca100dd0e86510f07fc6c3a349569fc4e2d9056604"  # rocm6.3
       "41190202c2736d5ff75b13a3abc0fb52ebfbb67226cf85dc3de7699c7000db44"  # rocm6.4
+      "c85da64d21510190277794455ef8bd3f2d543a6f2462140d3da27e1df0ab8f82"  # rocm6.5 with gfx950
       )
   set(__AOTRITON_Z "gz")
 
@@ -67,13 +76,14 @@ if(NOT __AOTRITON_INCLUDED)
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_ROCM}" __AOTRITON_ROCM_INDEX)
     list(GET __AOTRITON_SHA256_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_SHA256)
     list(GET __AOTRITON_MANYLINUX_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_MANYLINUX)
+    list(GET __AOTRITON_VER_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_VER)
     set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     string(CONCAT __AOTRITON_FILE "aotriton-"
                                   "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
-                                 "${__AOTRITON_VER}/${__AOTRITON_FILE}")
+                                 "${__AOTRITON_RELEASE_PAGE}/${__AOTRITON_FILE}")
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"
       URL_HASH SHA256=${__AOTRITON_SHA256}
