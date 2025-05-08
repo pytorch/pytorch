@@ -9,12 +9,10 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHDYNAMO,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
+
 
 # redirect import statements
 import sys
