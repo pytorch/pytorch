@@ -1372,6 +1372,7 @@ def clear_instruction_args(instructions):
             inst.arg = None
 
 
+@functools.lru_cache
 def get_code_keys() -> list[str]:
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
@@ -1417,7 +1418,6 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
     instructions = cleaned_instructions(code, safe)
-    propagate_line_nums(instructions)
 
     transformations(instructions, code_options)
     return clean_and_assemble_instructions(instructions, keys, code_options)[1]
@@ -1472,11 +1472,14 @@ def populate_kw_names_argval(instructions, consts):
 
 # If safe=True, we do not make any bytecode modifications.
 # Mainly used for debugging bytecode_transformation (see debug_checks)
+@functools.lru_cache
 def cleaned_instructions(code, safe=False) -> list[Instruction]:
     instructions = _cached_cleaned_instructions(code, safe)
     # We have a lot of code that implicitly mutates the instruction array. We
     # could do better here by making the copies explicit when necessary.
-    return _clone_instructions(instructions)
+    cloned_instructions = _clone_instructions(instructions)
+    propagate_line_nums(cloned_instructions)
+    return cloned_instructions
 
 
 # Copy an instructions array, making sure to remap the individual instruction targets.
@@ -1517,7 +1520,6 @@ def _clone_instructions(instructions):
     return copied
 
 
-@functools.lru_cache
 def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
