@@ -493,7 +493,8 @@ auto build_graph(
                                             dropoutoffset.dtype() == kInt
                                                 ? fe::DataType_t::INT32
                                                 : fe::DataType_t::INT64));
-    scaled_dot_product_flash_attention_options.set_dropout(dropout_probability, seed, offset);
+    scaled_dot_product_flash_attention_options.set_dropout(
+        dropout_probability, seed, offset);
   }
   auto Q_ = mha_graph->tensor(
       fe::graph::Tensor_attributes()
@@ -541,7 +542,7 @@ auto build_graph(
   AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
 
-  return std::move(mha_graph);
+  return mha_graph;
 }
 
 auto build_graph_nestedtensor(
@@ -630,8 +631,8 @@ auto build_graph_nestedtensor(
                                             dropoutoffset.dtype() == kInt
                                                 ? fe::DataType_t::INT32
                                                 : fe::DataType_t::INT64));
-    scaled_dot_product_flash_attention_options
-          .set_dropout(dropout_probability, seed, offset);
+    scaled_dot_product_flash_attention_options.set_dropout(
+        dropout_probability, seed, offset);
   }
   // We hardcode BSHD to cuDNN even though the underlying layout is THD
   auto q_strides = q.strides();
@@ -745,7 +746,7 @@ auto build_graph_nestedtensor(
       mha_graph->create_execution_plans({fe::HeurMode_t::A}));
   AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
-  return std::move(mha_graph);
+  return mha_graph;
 }
 
 auto build_graph_backward(
@@ -871,7 +872,7 @@ auto build_graph_backward(
       mha_graph->create_execution_plans({fe::HeurMode_t::A}));
   AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
-  return std::move(mha_graph);
+  return mha_graph;
 }
 
 auto build_graph_backward_nestedtensor(
@@ -935,14 +936,13 @@ auto build_graph_backward_nestedtensor(
                             .set_dim({b, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_data_type(fe::DataType_t::INT32));
-  auto sdpa_backward_options =
-      fe::graph::SDPA_backward_attributes()
-          .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
-          .set_causal_mask(is_causal)
-          .set_attn_scale(attn_scale)
-          .set_seq_len_q(SEQ_LEN_Q_)
-          .set_seq_len_kv(SEQ_LEN_KV_)
-          .set_padding_mask(true);
+  auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
+                                   .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
+                                   .set_causal_mask(is_causal)
+                                   .set_attn_scale(attn_scale)
+                                   .set_seq_len_q(SEQ_LEN_Q_)
+                                   .set_seq_len_kv(SEQ_LEN_KV_)
+                                   .set_padding_mask(true);
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_uid(SEED)
@@ -1069,44 +1069,44 @@ auto build_graph_backward_nestedtensor(
   STATS->set_ragged_offset(RAG_STATS_OFF_);
   auto do_strides = dO.strides();
   auto DO_ = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                 .set_ragged_offset(RAG_O_OFF_)
-                                 .set_uid(DO)
-                                 .set_name("DO")
-                                 .set_dim({b, h_q, s_q, d_v})
-                                 .set_stride(
-                                     {INT_MAX,
-                                      do_strides[strideidx0],
-                                      do_strides[strideidx1],
-                                      do_strides[strideidx2]}));
+                                   .set_ragged_offset(RAG_O_OFF_)
+                                   .set_uid(DO)
+                                   .set_name("DO")
+                                   .set_dim({b, h_q, s_q, d_v})
+                                   .set_stride(
+                                       {INT_MAX,
+                                        do_strides[strideidx0],
+                                        do_strides[strideidx1],
+                                        do_strides[strideidx2]}));
   auto [Dq, Dk, Dv] = mha_graph->sdpa_backward(
       Q_, K_, V_, O_, DO_, STATS, sdpa_backward_options);
   Dq->set_output(true)
-    .set_uid(DQ)
-    .set_ragged_offset(RAG_Q_OFF_)
-    .set_dim({b, h_q, s_q, d_qk})
-    .set_stride(
-         {INT_MAX,
-          q_strides[strideidx0],
-          q_strides[strideidx1],
-          q_strides[strideidx2]});
+      .set_uid(DQ)
+      .set_ragged_offset(RAG_Q_OFF_)
+      .set_dim({b, h_q, s_q, d_qk})
+      .set_stride(
+          {INT_MAX,
+           q_strides[strideidx0],
+           q_strides[strideidx1],
+           q_strides[strideidx2]});
   Dk->set_output(true)
-    .set_uid(DK)
-    .set_ragged_offset(RAG_K_OFF_)
-    .set_dim({b, h_k, s_kv, d_qk})
-    .set_stride(
-        {INT_MAX,
-         k_strides[strideidx0],
-         k_strides[strideidx1],
-         k_strides[strideidx2]});
+      .set_uid(DK)
+      .set_ragged_offset(RAG_K_OFF_)
+      .set_dim({b, h_k, s_kv, d_qk})
+      .set_stride(
+          {INT_MAX,
+           k_strides[strideidx0],
+           k_strides[strideidx1],
+           k_strides[strideidx2]});
   Dv->set_output(true)
-    .set_uid(DV)
-    .set_ragged_offset(RAG_V_OFF_)
-    .set_dim({b, h_v, s_kv, d_v})
-    .set_stride(
-        {INT_MAX,
-         v_strides[strideidx0],
-         v_strides[strideidx1],
-         v_strides[strideidx2]});
+      .set_uid(DV)
+      .set_ragged_offset(RAG_V_OFF_)
+      .set_dim({b, h_v, s_kv, d_v})
+      .set_stride(
+          {INT_MAX,
+           v_strides[strideidx0],
+           v_strides[strideidx1],
+           v_strides[strideidx2]});
 
   AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
@@ -1114,7 +1114,7 @@ auto build_graph_backward_nestedtensor(
       mha_graph->create_execution_plans({fe::HeurMode_t::A}));
   AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
-  return std::move(mha_graph);
+  return mha_graph;
 }
 
 void run_cudnn_SDP_fprop(
@@ -1554,8 +1554,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       {RAG_V_OFF, rag_v_off.data_ptr()},
       {RAG_LSE_OFF, rag_stats_off.data_ptr()},
       {SEQ_LEN_Q, seqlen_q.data_ptr()},
-      {SEQ_LEN_KV, seqlen_kv.data_ptr()}
-  };
+      {SEQ_LEN_KV, seqlen_kv.data_ptr()}};
   if (dropout_probability != 0.0f) {
     variant_pack[SEED] = _dropoutseed.data_ptr();
     variant_pack[OFFSET] = _dropoutoffset.data_ptr();
