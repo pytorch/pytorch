@@ -57,15 +57,19 @@ class CMake:
         cmake_command = "cmake"
         if IS_WINDOWS:
             return cmake_command
+        version_lists = []
         cmake3_version = CMake._get_version(which("cmake3"))
+        if cmake3_version is not None:
+            version_lists.append(cmake3_version)
         cmake_version = CMake._get_version(which("cmake"))
+        if cmake_version is not None:
+            version_lists.append(cmake_version)
 
-        _cmake_min_version = LooseVersion("3.18.0")
-        if all(
-            ver is None or ver < _cmake_min_version
-            for ver in [cmake_version, cmake3_version]
-        ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.18.0 found")
+        _cmake_min_version = LooseVersion("3.25.3")
+        if not version_lists or all(ver < _cmake_min_version for ver in version_lists):
+            raise RuntimeError(
+                f"no cmake or cmake3 with version >= 3.25.3 found:{version_lists}"
+            )
 
         if cmake3_version is None:
             cmake_command = "cmake"
