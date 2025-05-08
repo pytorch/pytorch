@@ -1145,3 +1145,4 @@ class TORCH_API StaticRuntime {
 };
 
 } // namespace torch::jit
+C10_DECLARE_bool(static_runtime_disable_debug_memory_overlap_check);
