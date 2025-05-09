@@ -281,20 +281,21 @@ ONNXProgram(
         the weights are saved as external data in a separate file.
 
         Initializer (model weights) serialization behaviors:
+
         * ``include_initializers=True``, ``keep_initializers_as_inputs=False`` (default):
-        The initializers are included in the saved model.
+          The initializers are included in the saved model.
         * ``include_initializers=True``, ``keep_initializers_as_inputs=True``:
-        The initializers are included in the saved model and kept as model inputs.
-        Choose this option if you want the ability to override the model weights
-        during inference.
+          The initializers are included in the saved model and kept as model inputs.
+          Choose this option if you want the ability to override the model weights
+          during inference.
         * ``include_initializers=False``, ``keep_initializers_as_inputs=False``:
-        The initializers are not included in the saved model and are not listed
-        as model inputs. Choose this option if you want to attach the initializers
-        to the ONNX model in a separate, post-processing, step.
+          The initializers are not included in the saved model and are not listed
+          as model inputs. Choose this option if you want to attach the initializers
+          to the ONNX model in a separate, post-processing, step.
         * ``include_initializers=False``, ``keep_initializers_as_inputs=True``:
-        The initializers are not included in the saved model but are listed as model
-        inputs. Choose this option if you want to supply the initializers during
-        inference and want to minimize the size of the saved model.
+          The initializers are not included in the saved model but are listed as model
+          inputs. Choose this option if you want to supply the initializers during
+          inference and want to minimize the size of the saved model.
 
         Args:
             destination: The path to save the ONNX model to.
@@ -316,21 +317,22 @@ ONNXProgram(
         if keep_initializers_as_inputs:
             self.model.graph.inputs.extend(original_initializers.values())  # type: ignore[arg-type]
 
-        # Save the model to disk
-        if (
-            external_data
-            or _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD
-        ):
-            onnxscript_apis.save_model_with_external_data(self.model, destination)
-        else:
-            ir.save(self.model, destination)
-
-        # Revert the changes to the model
-        if not include_initializers:
-            self.model.graph.initializers.update(original_initializers)
-        if keep_initializers_as_inputs:
-            self.model.graph.inputs.clear()
-            self.model.graph.inputs.extend(original_inputs)
+        try:
+            # Save the model to disk
+            if (
+                external_data
+                or _count_initializer_size(self.model.graph) > _LARGE_MODEL_THRESHOLD
+            ):
+                onnxscript_apis.save_model_with_external_data(self.model, destination)
+            else:
+                ir.save(self.model, destination)
+        finally:
+            # Revert the changes to the model
+            if not include_initializers:
+                self.model.graph.initializers.update(original_initializers)
+            if keep_initializers_as_inputs:
+                self.model.graph.inputs.clear()
+                self.model.graph.inputs.extend(original_inputs)
 
     def apply_weights(self, state_dict: dict[str, torch.Tensor]) -> None:
         """Apply the weights from the specified state dict to the ONNX model.

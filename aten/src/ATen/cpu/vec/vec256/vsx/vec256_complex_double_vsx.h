@@ -210,16 +210,16 @@ class Vectorized<ComplexDbl> {
   }
 
   static Vectorized<ComplexDbl> el_mergee(
-      Vectorized<ComplexDbl>& first,
-      Vectorized<ComplexDbl>& second) {
+      const Vectorized<ComplexDbl>& first,
+      const Vectorized<ComplexDbl>& second) {
     return {
         vec_mergeh(first._vec0, second._vec0),
         vec_mergeh(first._vec1, second._vec1)};
   }
 
   static Vectorized<ComplexDbl> el_mergeo(
-      Vectorized<ComplexDbl>& first,
-      Vectorized<ComplexDbl>& second) {
+      const Vectorized<ComplexDbl>& first,
+      const Vectorized<ComplexDbl>& second) {
     return {
         vec_mergel(first._vec0, second._vec0),
         vec_mergel(first._vec1, second._vec1)};
@@ -422,7 +422,7 @@ class Vectorized<ComplexDbl> {
     vi = vi ^ vd_rsign_mask;
     auto ret = elwise_mult(vr);
     auto vx_swapped = el_swapped();
-    ret = vx_swapped.el_madd(vi, ret);
+    ret = vx_swapped.elwise_mult(vi) + ret;
 #else
     auto ac_bd = elwise_mult(b);
     auto d_c = b.el_swapped();
@@ -437,21 +437,32 @@ class Vectorized<ComplexDbl> {
     // re + im*i = (a + bi)  / (c + di)
     // re = (ac + bd)/abs_2()
     // im = (bc - ad)/abs_2()
-    auto fabs_cd =  Vectorized{
-      vec_andc(b._vec0, vd_sign_mask),
-      vec_andc(b._vec1, vd_sign_mask)};       // |c|            |d|
-    auto fabs_dc =  fabs_cd.el_swapped();     // |d|            |c|
-    auto scale = fabs_cd.elwise_max(fabs_dc); // sc = max(|c|, |d|)
-    auto a2 = elwise_div(scale);              // a/sc           b/sc
-    auto b2 = b.elwise_div(scale);            // c/sc           d/sc
-    auto acbd2 = a2.elwise_mult(b2);          // ac/sc^2        bd/sc^2
-    auto dc2 = b2.el_swapped();               // d/sc           c/sc
-    dc2 = dc2 ^ vd_rsign_mask;                // -d/sc          c/sc
-    auto adbc2 = a2.elwise_mult(dc2);         // -ad/sc^2       bc/sc^2
-    auto ret = horizontal_add(acbd2, adbc2);  // (ac+bd)/sc^2   (bc-ad)/sc^2
-    auto denom2 = b2.abs_2_();                // (c^2+d^2)/sc^2 (c^2+d^2)/sc^2
-    ret = ret.elwise_div(denom2);
-    return ret;
+    //auto fabs_cd =  Vectorized{
+    //    vec_andc(b._vec0, vd_sign_mask),
+    //    vec_andc(b._vec1, vd_sign_mask)};       // |c|            |d|
+    //auto fabs_dc =  fabs_cd.el_swapped();     // |d|            |c|
+    //auto scale = fabs_cd.elwise_max(fabs_dc); // sc = max(|c|, |d|)
+    //auto a2 = elwise_div(scale);              // a/sc           b/sc
+    //auto b2 = b.elwise_div(scale);            // c/sc           d/sc
+    //auto acbd2 = a2.elwise_mult(b2);          // ac/sc^2        bd/sc^2
+    //auto dc2 = b2.el_swapped();               // d/sc           c/sc
+    //dc2 = dc2 ^ vd_rsign_mask;                // -d/sc          c/sc
+    //auto adbc2 = a2.elwise_mult(dc2);         // -ad/sc^2       bc/sc^2
+    //auto ret = horizontal_add(acbd2, adbc2);  // (ac+bd)/sc^2   (bc-ad)/sc^2
+    //auto denom2 = b2.abs_2_();                // (c^2+d^2)/sc^2 (c^2+d^2)/sc^2
+    //ret = ret.elwise_div(denom2);
+    //return ret;
+
+    __at_align__ c10::complex<double> tmp1[Vectorized<c10::complex<double>>::size()];
+    __at_align__ c10::complex<double> tmp2[Vectorized<c10::complex<double>>::size()];
+    __at_align__ c10::complex<double> out[Vectorized<c10::complex<double>>::size()];
+    this->store(tmp1);
+    b.store(tmp2);
+
+    for (const auto i : c10::irange(Vectorized<c10::complex<float>>::size())){
+        out[i] = tmp1[i] / tmp2[i];
+    }
+    return loadu(out);
   }
 
   Vectorized<ComplexDbl> exp() const {
@@ -577,6 +588,54 @@ Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator|(const Vectorized<ComplexDbl>&
 template <>
 Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator^(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
   return Vectorized<ComplexDbl>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator*(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+    // (a + ib) * (c + id) = (ac - bd) + i(ad + bc)
+    // Split into real and imaginary parts
+    auto a_real = a.el_mergee();  // real part of a
+    auto a_imag = a.el_mergeo();  // imag part of a
+    auto b_real = b.el_mergee();  // real part of b
+    auto b_imag = b.el_mergeo();  // imag part of b
+
+    // Compute components
+    auto ac = a_real.elwise_mult(b_real); // real*real
+    auto bd = a_imag.elwise_mult(b_imag); // imag*imag
+
+    // Real part: ac - bd
+    auto real = ac - bd;
+
+    auto ad = a_real.elwise_mult(b_imag); // real*imag
+    auto bc = a_imag.elwise_mult(b_real); // imag*real
+
+    // Imag = ad + bc
+    auto imag = ad + bc;
+
+    // Merge real and imaginary parts into vectors
+    __vector double v0 = vec_mergeh(real.vec0(), imag.vec0()); // [r0, i0]
+    __vector double v1 = vec_mergeh(real.vec1(), imag.vec1()); // [r1, i1]
+
+    // Create the final result
+    auto result = Vectorized<ComplexDbl>{v0, v1};
+    return result;
+}
+
+template <>
+Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator/(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+    // re + im*i = (a + bi)  / (c + di)
+    // re = (ac + bd)/abs_2()
+    // im = (bc - ad)/abs_2()
+    // Take absolute values of real and imaginary parts of b
+    __at_align__ c10::complex<double> tmp1[Vectorized<c10::complex<double>>::size()];
+    __at_align__ c10::complex<double> tmp2[Vectorized<c10::complex<double>>::size()];
+    __at_align__ c10::complex<double> out[Vectorized<c10::complex<double>>::size()];
+    a.store(tmp1);
+    b.store(tmp2);
+    for (const auto i : c10::irange(Vectorized<c10::complex<double>>::size())){
+        out[i] = tmp1[i] / tmp2[i];
+    }
+    return Vectorized<ComplexDbl>::loadu(out);
 }
 
 } // namespace
