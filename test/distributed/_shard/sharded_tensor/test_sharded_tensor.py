@@ -6,6 +6,7 @@ import itertools
 import math
 import pickle
 import sys
+import os
 
 import torch
 import torch.distributed as dist
@@ -1335,12 +1336,12 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @requires_nccl()
     def test_load_state_dict_errors(self):
         self.init_rpc()
-
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29600"
         dist.init_process_group(
             backend="nccl",
             world_size=self.world_size,
-            rank=self.rank,
-            init_method=f"file://{self.file_name}",
+            rank=self.rank
         )
 
         spec = ChunkShardingSpec(
