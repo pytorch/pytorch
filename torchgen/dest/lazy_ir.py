@@ -61,7 +61,7 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
             if arg.is_symint_or_list:
                 # TODO: I don't understand when you should put lazy_ in the name
                 # or not
-                return f"{arg.name} ? std::make_optional(GetSymIntValue(*{arg.name})) : ::std::nullopt"
+                return f"{arg.name} ? ::std::make_optional(GetSymIntValue(*{arg.name})) : ::std::nullopt"
             elif arg.is_wrapped_scalar:
                 return f"node_{arg.name}"
             return (
@@ -249,14 +249,14 @@ class GenLazyIR(ABC):
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
         reuse_ctor_args = ", ".join(ctor_args)
         if self.use_lazy_shape and schema.properties.ShapePrecompute:
-            ctor_args.append("std::vector<torch::lazy::Shape>&& shapes")
+            ctor_args.append("::std::vector<torch::lazy::Shape>&& shapes")
         node_ctor_args = ", ".join(ctor_args)
 
         scalar_initializers = ",\n        ".join(
             [
                 # This code is just special casing the mapping from string_view -> strings
-                f"{a.name}({a.name}.has_value() ? ::std::make_optional(std::string(*{a.name})) : ::std::nullopt)"
-                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
+                f"{a.name}({a.name}.has_value() ? ::std::make_optional(::std::string(*{a.name})) : ::std::nullopt)"
+                if a.lazy_type.cpp_type() == "::std::optional<::std::string_view>"
                 else f"{a.name}({a.name})"
                 for a in scalar_args
             ]
@@ -265,10 +265,10 @@ class GenLazyIR(ABC):
             scalar_initializers = f",\n        {scalar_initializers}"
         scalar_decls = "\n  ".join(
             [
-                f"std::string {a.name};"
-                if a.lazy_type.cpp_type() == "c10::string_view"
-                else f"::std::optional<std::string> {a.name};"
-                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
+                f"::std::string {a.name};"
+                if a.lazy_type.cpp_type() == "::std::string_view"
+                else f"::std::optional<::std::string> {a.name};"
+                if a.lazy_type.cpp_type() == "::std::optional<::std::string_view>"
                 else f"{a.lazy_type.cpp_type()} {a.name};"
                 for a in scalar_args
             ]
@@ -315,8 +315,8 @@ class {schema.node_name} : public {self.node_base} {{
     {has_optional_defs}
   }}
 
-  std::string ToString() const override {{
-    std::stringstream ss;
+  ::std::string ToString() const override {{
+    ::std::stringstream ss;
     ss << {self.node_base}::ToString();
     {members_to_string_str}
     return ss.str();
@@ -342,7 +342,7 @@ class GenTSLazyIR(GenLazyIR):
     def lowering_function(self, schema: LazyIrSchema) -> str:
         signature = """
   torch::lazy::TSOpVector Lower(
-      std::shared_ptr<torch::jit::GraphFunction> function,
+      ::std::shared_ptr<torch::jit::GraphFunction> function,
       torch::lazy::TSLoweringContext* loctx) const override"""
 
         if schema.properties.LowerDeclOnly:
@@ -421,7 +421,7 @@ class GenLazyNativeFuncDefinition:
                 if isinstance(arg.lazy_type, OptionalCType):
                     lazy_tensor_decls.append(
                         f"""auto node_{arg.name} = {arg.name} ?
-                std::make_optional(torch::lazy::LazyGraphExecutor::Get()->
+                ::std::make_optional(torch::lazy::LazyGraphExecutor::Get()->
                     GetIrValueForScalarFromCodegen(*{arg.name}, *common_device)):
                 ::std::nullopt;"""
                     )
@@ -510,14 +510,16 @@ class GenLazyNativeFuncDefinition:
         is_structured = func.structured or func.structured_delegate is not None
         if is_structured or is_view_copy_op:
             meta_out = """
-std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
+::std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
 
                 def this_shape(i: int) -> str:
-                    return f"torch::lazy::Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
+                    return f"torch::lazy::Shape(::std::get<{i}>(out_meta).scalar_type(), ::std::get<{i}>(out_meta).sizes().vec())"
 
                 shapes_str = ",".join([this_shape(i) for i in range(returns_length)])
-                meta_out = "std::vector<torch::lazy::Shape> shapes{" + shapes_str + "};"
+                meta_out = (
+                    "::std::vector<torch::lazy::Shape> shapes{" + shapes_str + "};"
+                )
 
             # Convert tensor args to the meta device and call it.
             # (We can't pass in the input tensors directly, because they are "functional wrappers".
@@ -559,7 +561,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         func_schema_str = "aten::" + str(func.func)
         shape_str += f"""
             if(torch::lazy::symbolicShapeEnabled()){{
-                std::vector<torch::jit::IValue> inputs = {{ {", ".join(str(a.name) for a in all_args)} }};
+                ::std::vector<torch::jit::IValue> inputs = {{ {", ".join(str(a.name) for a in all_args)} }};
                 const char* schema_str = "{func_schema_str}";
                 applySymbolicShapesOnLT(schema_str, inputs, shapes);
             }}
@@ -571,7 +573,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         return f"""torch::lazy::NodePtr node = torch::lazy::ReuseNode<{schema.node_name}>({node_ctor_input_str});
         if (!node) {{
             {self.shape_inference(func, schema)}
-            node = torch::lazy::MakeNode<{schema.node_name}>({node_ctor_input_str}, std::move(shapes));
+            node = torch::lazy::MakeNode<{schema.node_name}>({node_ctor_input_str}, ::std::move(shapes));
             CacheNode(node);
         }}
         """
@@ -592,7 +594,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
         first_tensor_name = value_types_names[0] if len(value_types_names) > 0 else None
         bridge_str = f"""auto result = {self.create_aten_from_ltc_tensor}(
-                {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
+                {self.create_lazy_tensor(first_tensor_name)}(::std::move(node), *common_device));"""
 
         if returns_length > 1:
             assert len(value_types_names) > 0, (
@@ -659,7 +661,7 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"TORCH_API std::vector<torch::lazy::Shape> compute_shape_{self.__decl_suffix()}"
+        return f"TORCH_API ::std::vector<torch::lazy::Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:

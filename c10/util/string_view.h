@@ -592,7 +592,9 @@ constexpr inline void swap(
     basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
-using string_view = std::string_view;
+#if !defined(C10_NODEPRECATED)
+using string_view = ::std::string_view;
+#endif
 using c10_string_view = basic_string_view<char>;
 
 // NOTE: In C++20, this function should be replaced by string_view.starts_with
