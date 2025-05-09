@@ -74,7 +74,7 @@ def radians(x):
     return math.pi / 180.0 * x
 
 
-def accumulate_grad(x, new_grad, grad_mode):
+def accumulate_grad(x, new_grad):
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
         return
@@ -82,7 +82,7 @@ def accumulate_grad(x, new_grad, grad_mode):
     new_grad_strided.copy_(new_grad)
     if x.grad is None:
         x.grad = new_grad_strided
-    elif grad_mode:
+    elif torch.is_grad_enabled():
         x.grad = x.grad + new_grad_strided
     else:
         x.grad.add_(new_grad_strided)

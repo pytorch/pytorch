@@ -69,10 +69,7 @@ Tensor _reinterpret_tensor(
   return self_;
 }
 
-static void accumulate_grad_(
-    const Tensor& variable,
-    const Tensor& new_grad,
-    bool /* grad_mode */) {
+static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   at::Tensor& grad = variable.mutable_grad();
   if (new_grad.device() != kMeta) {
     // Do not call into this codepath from C++ frontend, instead call directly
@@ -108,7 +105,7 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
           c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor),
       {at::Tag::pt2_compliant_tag});
   m.def(
-      "accumulate_grad_(Tensor variable, Tensor new_grad, bool grad_mode) -> ()",
+      "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
       {at::Tag::pt2_compliant_tag});
 }

@@ -94,7 +94,7 @@ variable_list AccumulateGrad::apply_with_saved(
   // proxy a call to torch.ops.inductor.accumulate_grad_.default
   const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
   pyinterface->call_accumulate_grad(
-      saved.get_py_compiler(), variable_copy, grads[0], GradMode::is_enabled());
+      saved.get_py_compiler(), variable_copy, grads[0]);
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
