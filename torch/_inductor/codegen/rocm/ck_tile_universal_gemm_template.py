@@ -471,14 +471,9 @@ class CKTileGemmTemplate(CKTileTemplate):
         """
         M, N, K = self.get_gemm_problem_size()
 
-        ck_dtype_to_size = {
-            "FP16": 2,
-            "BF16": 2,
-        }
-
         def max_alignment(contiguous_elements_per_tile, elements_per_thread, ck_dtype):
             for vector_load_bytes in (16, 8, 4, 2, 1):
-                alignment = vector_load_bytes // ck_dtype_to_size[ck_dtype]
+                alignment = vector_load_bytes // self.ck_dtype_to_size[ck_dtype]
                 if (
                     alignment > 0
                     and contiguous_elements_per_tile % alignment == 0
@@ -486,8 +481,9 @@ class CKTileGemmTemplate(CKTileTemplate):
                 ):
                     return alignment
 
-        gfx9_threads_per_warp = 64
-        threads_per_block = op.warp_m * op.warp_n * op.warp_k * gfx9_threads_per_warp
+        threads_per_block = (
+            op.warp_m * op.warp_n * op.warp_k * self.gfx9_threads_per_warp
+        )
         a_elements_per_thread = op.tile_m * op.tile_k / threads_per_block
         b_elements_per_thread = op.tile_n * op.tile_k / threads_per_block
 
@@ -533,10 +529,34 @@ class CKTileGemmTemplate(CKTileTemplate):
             if (
                 op.layout_c == "Row"
                 and is_static_int(N)
-                and N % (16 / ck_dtype_to_size[op.datatype_c]) != 0
+                and N % (16 / self.ck_dtype_to_size[op.datatype_c]) != 0
             ):
                 return False
 
+        return True
+
+    def check_warp_tiles(self, op: "CKTileGemmOperation"):
+        if op.tile_m % (op.warp_m * op.warp_tile_m) != 0:
+            return False
+        if op.tile_n % (op.warp_n * op.warp_tile_n) != 0:
+            return False
+        if op.tile_k % (op.warp_k * op.warp_tile_k) != 0:
+            return False
+        return True
+
+    def check_block_tile_size(self, op: "CKTileGemmOperation"):
+        # assuming LDS size is 64KB
+        if op.pipeline == "CompV4":
+            max_block_tile_size = 2**15
+        else:
+            max_block_tile_size = 2**16
+
+        block_tile_size = (
+            self.ck_dtype_to_size[op.datatype_a] * op.tile_m * op.tile_k
+            + self.ck_dtype_to_size[op.datatype_b] * op.tile_n * op.tile_k
+        )
+        if block_tile_size > max_block_tile_size:
+            return False
         return True
 
     def filter_op(self, op: "CKTileGemmOperation"):

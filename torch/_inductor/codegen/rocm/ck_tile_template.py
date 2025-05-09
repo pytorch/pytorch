@@ -20,6 +20,11 @@ class CKTileTemplate(ROCmTemplate):
         torch.float8_e5m2fnuz: "BF8",
     }
 
+    ck_dtype_to_size = {
+        "FP16": 2,
+        "BF16": 2,
+    }
+
     def header(self) -> IndentedBuffer:
         res = super().header()
         res.splice(
