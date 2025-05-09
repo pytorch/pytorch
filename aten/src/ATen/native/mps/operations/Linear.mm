@@ -1,6 +1,8 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
@@ -8,6 +10,61 @@
 namespace at::native {
 
 using namespace mps;
+
+static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const Tensor& bias, Tensor& output) {
+  bool is_bias_defined = bias.defined();
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  const string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      MPSDataType mpsDataType = getMPSDataType(weight.scalar_type());
+
+      auto inputNDArray = getMPSNDArray(input, input.sizes(), input.strides());
+      auto outNDArray = getMPSNDArray(output, output.sizes(), output.strides());
+
+      id<MTLBuffer> weightBuf = getMTLBufferStorage(weight);
+      MPSNDArrayDescriptor* weightDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType
+                                                                                shape:getMPSShape(weight.sizes())];
+      weightDesc.preferPackedRows = YES;
+      [weightDesc transposeDimension:0 withDimension:1];
+      MPSNDArray* weightNDArray = [[MPSNDArray alloc] initWithBuffer:weightBuf
+                                                              offset:weight.storage_offset() * weight.element_size()
+                                                          descriptor:weightDesc];
+
+      if (is_bias_defined) {
+        auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
+            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3]; });
+        auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
+
+        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+        [kernel encodeToCommandEncoder:computeEncoder
+                         commandBuffer:commandBuffer
+                          sourceArrays:@[ inputNDArray, weightNDArray, biasNDArray ]
+                      destinationArray:outNDArray];
+        getMPSProfiler().endProfileKernel(kernel);
+      } else {
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
+            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2]; });
+        auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
+        getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
+        [kernel encodeToCommandEncoder:computeEncoder
+                         commandBuffer:commandBuffer
+                          sourceArrays:@[ inputNDArray, weightNDArray ]
+                      destinationArray:outNDArray];
+        getMPSProfiler().endProfileKernel(kernel);
+      }
+    }
+  });
+}
 
 Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
@@ -17,6 +74,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
   TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
   TORCH_CHECK(weight_arg.is_mps(), "Tensor for argument weight is on ", weight_arg.device(), " but expected on mps");
+  TORCH_CHECK((input.scalar_type() != kComplexFloat && input.scalar_type() != kComplexHalf),
+              "mps linear does not support complex types");
 
   const Tensor& bias = *(at::borrow_from_optional_tensor(bias_opt));
   const bool is_bias_defined = bias.defined();
@@ -54,8 +113,12 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+    _mps_linear_nograph(input, weight, bias, output);
+    // Squeeze last dim of 1D linear
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
+  }
   MPSStream* stream = getCurrentMPSStream();
-
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
