@@ -358,10 +358,6 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def libdevice_abs(x: DTypeArg) -> torch.dtype:
-        return promote_types([x])
-
-    @staticmethod
     def check_bounds(
         expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ) -> None:

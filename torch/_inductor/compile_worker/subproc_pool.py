@@ -1,3 +1,4 @@
+import base64
 import functools
 import itertools
 import logging
@@ -20,8 +21,9 @@ from typing_extensions import Never, ParamSpec
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
 # functionality to destroy singletons before forking and re-enable them after.
 import torch._thread_safe_fork  # noqa: F401
-from torch._inductor import config
+from torch._inductor.codecache import torch_key
 from torch._inductor.compile_worker.utils import _async_compile_initializer
+from torch._inductor.utils import get_ld_library_path
 
 
 log = logging.getLogger(__name__)
@@ -55,19 +57,6 @@ def _recv_msg(read_pipe: IO[bytes]) -> tuple[int, bytes]:
     job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
     return job_id, data
-
-
-def _get_ld_library_path() -> str:
-    path = os.environ.get("LD_LIBRARY_PATH", "")
-    if config.is_fbcode():
-        from libfb.py.parutil import get_runtime_path
-
-        runtime_path = get_runtime_path()
-        if runtime_path:
-            lib_path = os.path.join(runtime_path, "runtime", "lib")
-            path = os.pathsep.join([lib_path, path]) if path else lib_path
-
-    return path
 
 
 class _SubprocExceptionInfo:
@@ -128,6 +117,7 @@ class SubprocPool:
         read_fd, subproc_write_fd = os.pipe()
         self.write_pipe = os.fdopen(write_fd, "wb")
         self.read_pipe = os.fdopen(read_fd, "rb")
+        torch_key_str = base64.b64encode(torch_key()).decode("utf-8")
 
         cmd = [
             sys.executable,
@@ -138,6 +128,7 @@ class SubprocPool:
             f"--parent={os.getpid()}",
             f"--read-fd={str(subproc_read_fd)}",
             f"--write-fd={str(subproc_write_fd)}",
+            f"--torch-key={torch_key_str}",
         ]
         self.process = subprocess.Popen(
             cmd,
@@ -150,7 +141,7 @@ class SubprocPool:
                 # creates the SubprocPool in the first place.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
-                "LD_LIBRARY_PATH": _get_ld_library_path(),
+                "LD_LIBRARY_PATH": get_ld_library_path(),
             },
             pass_fds=(subproc_read_fd, subproc_write_fd),
         )

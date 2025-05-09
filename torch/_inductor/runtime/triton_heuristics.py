@@ -71,7 +71,9 @@ from .triton_compat import (
     CompiledKernel,
     Config,
     GPUTarget,
+    HAS_WARP_SPEC,
     KernelInterface,
+    knobs,
     OutOfResources,
     PTXASError,
     triton,
@@ -83,7 +85,7 @@ class NoTritonConfigsError(RuntimeError):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Hashable, Sequence
+    from collections.abc import Container, Hashable
 
     from torch._guards import CompileId
 
@@ -169,6 +171,13 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
         call_kwargs.update(launcher.config.kwargs)
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
+    if HAS_WARP_SPEC:
+        call_kwargs["num_consumer_groups"] = getattr(
+            launcher.config, "num_consumer_groups", 0
+        )
+        call_kwargs["num_buffers_warp_spec"] = getattr(
+            launcher.config, "num_buffers_warp_spec", 0
+        )
     args_str = [*call_args]
     args_str.extend(f"{k}={v}" for k, v in call_kwargs.items())
     args_str = ", ".join(args_str)
@@ -199,6 +208,7 @@ class CachingAutotuner(KernelInterface):
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
         filename: Optional[str] = None,
         reset_to_zero_arg_names: Optional[list[str]] = None,
+        autotune_cache_info: Optional[dict[str, Any]] = None,
     ):
         super().__init__()
 
@@ -225,6 +235,7 @@ class CachingAutotuner(KernelInterface):
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False
+        self.autotune_cache_info = autotune_cache_info
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
                 "CachingAutotuner gets %d configs for %s",
@@ -275,6 +286,17 @@ class CachingAutotuner(KernelInterface):
         self.compile_id: Optional[CompileId] = None
         self.is_backward = False
 
+    def is_statically_launchable(self):
+        """
+        Checks if every compiled kernel is statically launchable, which
+        allows us to efficiently cache it in FXGraphCache
+        """
+        if not self.compile_results:
+            return False
+        return all(
+            isinstance(x, StaticTritonCompileResult) for x in self.compile_results
+        )
+
     def set_compile_info(
         self, compile_id: Optional[CompileId], is_backward: bool
     ) -> None:
@@ -285,6 +307,7 @@ class CachingAutotuner(KernelInterface):
         self,
         warm_cache_only=False,
         reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
+        static_triton_bundle_key: Optional[str] = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
@@ -297,6 +320,8 @@ class CachingAutotuner(KernelInterface):
             if reload_kernel is not None:
                 self._reload_kernel = reload_kernel
             self._precompile_worker()
+            if static_triton_bundle_key is not None and self.is_statically_launchable():
+                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
             self._make_launchers()
             self._dynamic_scale_rblock()
 
@@ -456,21 +481,30 @@ class CachingAutotuner(KernelInterface):
                 try:
                     launchers.append(result.make_launcher())
 
-                except (OutOfResources, PTXASError) as e:
+                except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
                     exc = e
         if len(launchers) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
         self.launchers = launchers
 
-    def prepare_for_pickle(self):
+    def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any]:
         """Drop stuff from triton.JITFunction that does not pickle.
         This must be called after precompile so that these things are no longer needed.
+        Returns a tuple of old values
         """
+        old_values = (
+            self.fn.fn,
+            self.fn.__globals__,
+            self.fn.used_global_vals,
+            self.fn.repr,
+            self.launchers,
+        )
         self.fn.fn = None
         self.fn.__globals__ = None
         self.fn.used_global_vals = None
         self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
         self.launchers = []
+        return old_values
 
     def __getstate__(self) -> dict[str, Any]:
         assert not self.launchers, (
@@ -509,6 +543,11 @@ class CachingAutotuner(KernelInterface):
                 compile_meta["constants"][arg_name] = getattr(cfg, arg_name)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
+        if HAS_WARP_SPEC:
+            compile_meta["num_consumer_groups"] = getattr(cfg, "num_consumer_groups", 0)
+            compile_meta["num_buffers_warp_spec"] = getattr(
+                cfg, "num_buffers_warp_spec", 0
+            )
         compile_meta["debug"] = self.inductor_meta.get(
             "assert_indirect_indexing", True
         ) and not self.inductor_meta.get("is_hip", False)
@@ -555,6 +594,15 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        if HAS_WARP_SPEC:
+            options.update(
+                {
+                    "num_consumer_groups": compile_meta.get("num_consumer_groups", 0),
+                    "num_buffers_warp_spec": compile_meta.get(
+                        "num_buffers_warp_spec", 0
+                    ),
+                }
+            )
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -774,9 +822,11 @@ class CachingAutotuner(KernelInterface):
             "CachingAutotuner.benchmark_all_configs",
             log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-            dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
             compile_id=self.compile_id,
             is_backward=self.is_backward,
+            log_waitcounter=True,
+            waitcounter_name_override="triton_autotuner",
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -927,7 +977,15 @@ class CachingAutotuner(KernelInterface):
                 self.autotune_time_taken_ns + coordesc_time_taken_ns,
                 found_by_coordesc=True,
             )
-        return config2launcher.get(best_config)
+
+        if best_config not in config2launcher:
+            # On a Coordesc cache hit, we might not have loaded the launcher
+            # This can happen because PyCodeCache saves CachingAutotuners in memory,
+            # even for separate compile IDs (which can have different inputs without changing output code)
+            config2launcher[best_config] = self._precompile_config(
+                best_config
+            ).make_launcher()
+        return config2launcher[best_config]
 
     def run(
         self,
@@ -1056,7 +1114,8 @@ class CompileResult(Generic[_T]):
             f"    grid_2 = {grid.z_grid}",
             f"    runner({', '.join(runner_args)})",
         ]
-        exec("\n".join(lines), scope)
+        launcher_code = "\n".join(lines)
+        exec(launcher_code, scope)
         return scope["launcher"]
 
     def _get_arg_lists(
@@ -1198,9 +1257,30 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 raise e
             return None
 
+    def reload_cubin_path(self):
+        """
+        When loading from cache on disk, we want to reload cubin
+        files from their appropriate location on disc.
+        """
+        cubin_location = os.path.join(
+            triton_cache_dir(self.compile_meta.get("device", 0)),
+            triton_hash_to_path_key(self.kernel.hash),
+            f"{self.kernel.name}.cubin",
+        )
+        if not os.path.exists(cubin_location):
+            raise RuntimeError(
+                "Cubin file saved by TritonBundler not found at %s", cubin_location
+            )
+        self.kernel.cubin_path = cubin_location
+
     def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
-        self.kernel.load_kernel()
+        if not self.kernel.cubin_path:
+            self.reload_cubin_path()
+        device = self.compile_meta.get("device", 0)
+        if device is None:
+            device = 0
+        self.kernel.load_kernel(device)
         scope = {
             "runner": self.kernel.run,
         }
@@ -1346,11 +1426,18 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
 
+        if knobs is None:
+            launch_enter = binary.__class__.launch_enter_hook
+            launch_exit = binary.__class__.launch_exit_hook
+        else:
+            launch_enter = knobs.runtime.launch_enter_hook
+            launch_exit = knobs.runtime.launch_exit_hook
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
-            "launch_enter_hook": binary.__class__.launch_enter_hook,
-            "launch_exit_hook": binary.__class__.launch_exit_hook,
+            "launch_enter_hook": launch_enter,
+            "launch_exit_hook": launch_exit,
             "metadata": (
                 binary.packed_metadata
                 if hasattr(binary, "packed_metadata")
@@ -1395,13 +1482,13 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 "metadata",
                 *call_args,
             ]
-        else:  # args after CompiledKernel.launch_metadata: https://github.com/openai/triton/pull/3492
+        else:  # args after CompiledKernel.launch_metadata: https://github.com/triton-lang/triton/pull/3492
             # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
             # `bin.launch_metadata` is relatively expensive, and returns None unless a
             # `launch_enter_hook` is installed.  So if we don't have that hook installed,
             # we want to burn None in to the launch args with zero overhead.
             # See https://github.com/pytorch/pytorch/issues/123597
-            if binary.__class__.launch_enter_hook:
+            if launch_enter:
                 launch_metadata = f"bin.launch_metadata((grid_0, grid_1, grid_2), stream, {', '.join(call_args)})"
             else:
                 launch_metadata = "None"
@@ -1612,6 +1699,7 @@ def cached_autotune(
 
     # on disk caching logic and/or remote caching
     autotune_cache = None
+    autotune_cache_info = {}
     if (
         not disabled
         and filename is not None
@@ -1624,9 +1712,28 @@ def cached_autotune(
         if autotune_cache:
             if best_config := autotune_cache.read_best(inductor_meta, configs):
                 configs = [best_config]
-
+                autotune_cache_info["best_config"] = triton_config_to_hashable(
+                    best_config
+                )
+                autotune_cache_info["autotune_cache_state"] = "hit"
+            else:
+                autotune_cache_info["autotune_cache_state"] = "miss"
+                autotune_cache_info["num_configs"] = len(configs)
+                if inductor_meta.get("coordinate_descent_tuning"):
+                    autotune_cache_info["coordesc_tuning"] = True
+                    if len(configs) == 1:
+                        # This is the config that coordinate descent tuning started at, which
+                        # is not the same as the final config chosen (i.e. only_config, best_config)
+                        autotune_cache_info["coordesc_tuning_start_config"] = (
+                            triton_config_to_hashable(configs[0])
+                        )
     else:
+        if len(configs) == 1:
+            autotune_cache_info["autotune_cache_state"] = "only 1 config"
+            autotune_cache_info["only_config"] = triton_config_to_hashable(configs[0])
+
         if disabled:
+            autotune_cache_info["autotune_cache_state"] = "force_disabled"
             log.debug("autotune caching is disabled by config.force_disable_caches")
 
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
@@ -1685,6 +1792,7 @@ def cached_autotune(
             size_hints=size_hints,
             custom_kernel=custom_kernel,
             filename=filename,
+            autotune_cache_info=autotune_cache_info,
         )
 
     return decorator
@@ -2326,13 +2434,35 @@ def split_scan(
     )
 
 
-def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=None):
+def template(
+    num_stages,
+    num_warps,
+    triton_meta,
+    num_consumer_groups=0,
+    num_buffers_warp_spec=0,
+    filename=None,
+    inductor_meta=None,
+):
     """
     Compile a triton template
     """
+    # Prepare the base configuration
+    config_args = {
+        "num_stages": num_stages,
+        "num_warps": num_warps,
+    }
+
+    # Conditionally add arguments based on HAS_WARP_SPEC
+    if HAS_WARP_SPEC:
+        config_args.update(
+            {
+                "num_consumer_groups": num_consumer_groups,
+                "num_buffers_warp_spec": num_buffers_warp_spec,
+            }
+        )
     return cached_autotune(
         None,
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
+        [triton.Config({}, **config_args)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -2343,7 +2473,14 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
 def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     """Extract triton.Config options that should become kwargs"""
     popped = {}
-    for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):
+    for key in (
+        "num_warps",
+        "num_stages",
+        "num_ctas",
+        "maxnreg",
+        "num_consumer_groups",
+        "num_buffers_warp_spec",
+    ):
         val = config.pop(key, None)
         if val is not None:
             popped[key] = val
@@ -2351,11 +2488,19 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def config_to_dict(config: Config) -> dict[str, Any]:
-    return {
+    config_dict = {
         **config.kwargs,
         "num_warps": config.num_warps,
         "num_stages": config.num_stages,
     }
+    if HAS_WARP_SPEC:
+        config_dict.update(
+            {
+                "num_consumer_groups": getattr(config, "num_consumer_groups", 0),
+                "num_buffers_warp_spec": getattr(config, "num_buffers_warp_spec", 0),
+            }
+        )
+    return config_dict
 
 
 def config_from_dict(config: dict[str, Any]) -> Config:
@@ -2419,13 +2564,15 @@ class GridExpr:
 
     inductor_meta: dict[str, Any]
     mode: Literal["python", "cpp"] = "python"
-    prefix: Sequence[str] = ()
+    prefix: list[str] = dataclasses.field(default_factory=list)
     x_grid: Union[str, int] = 1
     y_grid: Union[str, int] = 1
     z_grid: Union[str, int] = 1
 
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
+        if self.mode == "python":
+            self.prefix.append("from torch.utils._sympy.functions import FloorDiv")
 
     def generate(self, meta: dict[str, int]) -> None:
         raise NotImplementedError
@@ -2438,7 +2585,9 @@ class GridExpr:
         if isinstance(numel, int) and isinstance(block, int):
             return ceildiv(numel, block)  # constant fold
         if self.mode == "python":
-            return f"-(({numel}) // -({block}))"
+            # Use FloorDiv instead of // so we can get better sympy expressions for
+            # dynamic shapes.
+            return f"-FloorDiv(({numel}), -({block}))"
         # trick above doesn't work in C++ due to rounding differences
         return f"(({numel} + ({block} - 1)) / ({block}))"
 
@@ -2521,12 +2670,16 @@ class Grid3D(GridExpr):
 class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.prefix = [
-            self.assign_tmp("y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))),
-            self.assign_tmp(
-                "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
-            ),
-        ]
+        self.prefix.extend(
+            [
+                self.assign_tmp(
+                    "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
+                ),
+                self.assign_tmp(
+                    "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
+                ),
+            ]
+        )
         self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
         self.z_grid = "y_grid_div_"
 

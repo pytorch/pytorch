@@ -605,13 +605,18 @@ class TORCH_API Library final {
   /// }
   /// ```
 
-  template <typename Schema>
   Library& def(
-      Schema&& raw_schema,
+      c10::FunctionSchema&& s,
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s), nullptr, tags, rv);
+  }
+
+  Library& def(
+      const char* raw_schema,
+      const std::vector<at::Tag>& tags = {},
+      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    return _def(schema(raw_schema), nullptr, tags, rv);
   }
 
   /// Declares that for all operators that are subsequently def'ed, their
@@ -884,8 +889,48 @@ class TORCH_API Library final {
   at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+void initialize_torch_libraries();
+#endif
+
 namespace detail {
 
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+// This is an experimental feature to defer TorchLibraryInit cost to run either
+// at model load time, or when a client application explicitly calls
+// torch::initialize_torch_libraries().
+//
+// This is not thread safe, the client is required to ensure that libraries
+// containing TORCH_LIBRARY initializers are loaded in a thread safe manner.
+extern std::vector<TorchLibraryInit*> torch_library_initializers;
+class TorchLibraryInit final {
+    private:
+      using InitFn = void(Library&);
+      Library::Kind kind;
+      InitFn* init_function;
+      const char* ns;
+      std::optional<c10::DispatchKey> key;
+      const char* file;
+      uint32_t line;
+      std::unique_ptr<Library> lib = nullptr;
+
+    public:
+      TorchLibraryInit(
+            Library::Kind kind,
+            InitFn* fn,
+            const char* ns,
+            std::optional<c10::DispatchKey> k,
+            const char* file,
+            uint32_t line) : kind(kind), init_function(fn), ns(ns), key(k), file(file), line(line) {
+              torch_library_initializers.push_back(this);
+            }
+
+      void initialize() {
+        lib = std::unique_ptr<Library>(new Library(kind, ns, key, file, line));
+        init_function(*lib);
+      }
+};
+#else
 class TorchLibraryInit final {
  private:
   using InitFn = void(Library&);
@@ -903,6 +948,7 @@ class TorchLibraryInit final {
     fn(lib_);
   }
 };
+#endif
 
 } // namespace detail
 

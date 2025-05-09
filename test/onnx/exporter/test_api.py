@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 
 import numpy as np
@@ -124,17 +125,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             )
             self.assertTrue(os.path.exists(path))
 
-    def test_export_supports_script_module(self):
-        class ScriptModule(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        self.assert_export(
-            torch.jit.script(ScriptModule()),
-            (torch.randn(1, 1, 2),),
-            strategy="JitTraceConvertStrategy",
-        )
-
     def test_dynamic_shapes_with_fully_specified_axes(self):
         ep = torch.export.export(
             SampleModelForDynamicShapes(),
@@ -245,6 +235,31 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 ][:-1]
             )
         )
+
+    def test_upgraded_torchlib_impl(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, input):
+                # Use GELU activation function
+                return torch.nn.functional.gelu(input, approximate="tanh")
+
+        input = torch.randn(1, 3, 4, 4)
+        onnx_program_op18 = torch.onnx.export(
+            GeluModel(),
+            input,
+            dynamo=True,
+        )
+        all_nodes_op18 = [n.op_type for n in onnx_program_op18.model.graph]
+        self.assertIn("Tanh", all_nodes_op18)
+        self.assertNotIn("Gelu", all_nodes_op18)
+
+        onnx_program_op20 = torch.onnx.export(
+            GeluModel(),
+            input,
+            opset_version=20,
+            dynamo=True,
+        )
+        all_nodes_op20 = [n.op_type for n in onnx_program_op20.model.graph]
+        self.assertIn("Gelu", all_nodes_op20)
 
     def test_refine_dynamic_shapes_with_onnx_export(self):
         # NOTE: From test/export/test_export.py
@@ -479,6 +494,15 @@ class TestFakeTensorExport(common_utils.TestCase):
 
         node_names = [n.op_type for n in onnx_program.model.graph]
         self.assertIn("Sin", node_names)
+
+    def test_torchscript_exporter_raises_deprecation_warning(self):
+        # Test that the deprecation warning is raised when using torchscript exporter
+        with self.assertWarnsRegex(
+            DeprecationWarning, "You are using the legacy TorchScript-based ONNX export"
+        ):
+            torch.onnx.export(
+                SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
+            )
 
 
 if __name__ == "__main__":

@@ -66,6 +66,14 @@ static_assert(
 #define NCCL_HAS_MEM_ALLOC
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 26, 0)
+#define NCCL_HAS_QOS
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 0)
+#define NCCL_SUPPORTS_FP8
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
@@ -182,6 +190,7 @@ namespace c10d {
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
+TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 int nccl_nonblocking_timeout();
 
@@ -221,6 +230,7 @@ class NCCLComm {
       int numRanks,
       int rank,
       std::vector<ncclUniqueId>& commIds,
+      at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
 #endif // NCCL_HAS_INIT_RANK_SCALABLE
 #endif // NCCL_HAS_CONFIG
@@ -239,6 +249,7 @@ class NCCLComm {
 #endif
 
   ncclUniqueId getNcclId();
+  at::DeviceIndex getDeviceIndex();
 
   // Must not be copyable
   NCCLComm(const NCCLComm&) = delete;

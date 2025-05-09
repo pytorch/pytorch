@@ -60,16 +60,6 @@ else
 fi
 
 ###############################################################################
-# Setup XPU ENV
-###############################################################################
-if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
-  set +u
-  # Refer https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
-  source /opt/intel/oneapi/compiler/latest/env/vars.sh
-  source /opt/intel/oneapi/pti/latest/env/vars.sh
-fi
-
-###############################################################################
 # Check GCC ABI
 ###############################################################################
 
@@ -224,6 +214,14 @@ else
     python -c 'import torch.backends.xnnpack; exit(0 if torch.backends.xnnpack.enabled else 1)'
     popd
   fi
+fi
+
+###############################################################################
+# Check XPU configured correctly
+###############################################################################
+if [[ "$DESIRED_CUDA" == 'xpu' && "$PACKAGE_TYPE" != 'libtorch' ]]; then
+  echo "Checking that xpu is compiled"
+  python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'
 fi
 
 ###############################################################################

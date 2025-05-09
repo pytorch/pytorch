@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
 )
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -86,7 +87,7 @@ def _maybe_run_with_interpreter(fn):
 
 
 def _maybe_compile_and_run_fn(fn, *args):
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_dynamo_compiling():
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )
@@ -147,6 +148,7 @@ def check_meta_consistency(
     rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
     lhs_name: str,
     rhs_name: str,
+    include_contiguity: bool = True,
 ) -> None:
     def diff_meta_pairs(
         lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
@@ -159,13 +161,12 @@ def check_meta_consistency(
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 return ", ".join(
                     diff_tensor_meta(
-                        # We set include contiguity=False because we have vmap x cond tests, where if
-                        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
-                        # "querying is_contiguous inside of vmap for memory_format other than
-                        # torch.contiguous_format is not yet implemented". This is good for because stride
-                        # is still checked.
-                        _extract_tensor_metadata(lhs, include_contiguity=False),
-                        _extract_tensor_metadata(rhs, include_contiguity=False),
+                        _extract_tensor_metadata(
+                            lhs, include_contiguity=include_contiguity
+                        ),
+                        _extract_tensor_metadata(
+                            rhs, include_contiguity=include_contiguity
+                        ),
                         check_grad=False,
                     )
                 )
@@ -293,6 +294,10 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(
+                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+            )
         return gm
 
 
@@ -698,13 +703,33 @@ def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
 ) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
-    with disable_proxy_modes_tracing():
+    (
+        mutated_inputs,
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+
+
+def check_input_alias_and_mutation_return_ouputs(
+    gm: torch.fx.GraphModule,
+    fake_args: list[FakeTensor],
+) -> tuple[
+    list[int],
+    dict[int, int],
+    dict[int, int],
+    dict[int, int],
+    Union[tuple[Any, ...], list[Any]],
+]:
+    # We want to disable active functional, proxy and fake modes if any.
+    # to create a encapsulated environment for fake tensor prop
+    with torch.utils._python_dispatch._disable_current_modes():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
         changed after run gm once to detect mutation and checks tensor storage
         to detect alias.
         """
-        from torch._prims_common import clone_preserve_strides
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
@@ -715,17 +740,56 @@ def check_input_alias_and_mutation(
         def _tensor_storage(t) -> StorageWeakRef:
             return StorageWeakRef(t._typed_storage())
 
+        def _get_shape_env(
+            fake_args,
+        ) -> Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]:
+            # detect_fake_mode requires there could be only one active fake mode. This
+            # restricts the usage of this function because the global TracingContext
+            # has a persistent fake mode but fake tensors can be created
+            # outside of the tracing context (e.g. in testing).
+            # Instead, we just look at fake_args fake tensor mode
+            prev_fake_mode = None
+            for arg in fake_args:
+                if isinstance(arg, torch.Tensor):
+                    assert isinstance(arg, FakeTensor)
+                    prev_fake_mode = arg.fake_mode
+            assert prev_fake_mode is not None
+            return prev_fake_mode.shape_env
+
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
+            # We need to re-use prev_fake_mode's shape env to resolve
+            # the runtime assertions for unbacked symbols.
+            new_fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=_get_shape_env(fake_args),
+                allow_non_fake_inputs=False,
+            )
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
-            ctx_stack.enter_context(torch.inference_mode(False))
+            no_inference_mode_ctx = torch.inference_mode(False)
+            ctx_stack.enter_context(new_fake_mode)
+            ctx_stack.enter_context(no_inference_mode_ctx)
+            if new_fake_mode.shape_env is not None:
+                ctx_stack.enter_context(
+                    new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                )
+
+            # create new fake tensors in new fake mode to avoid mutating original tensors
             cloned = [
-                clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+                torch.empty_strided(
+                    arg.size(),
+                    arg.stride(),
+                    dtype=arg.dtype,
+                    device=arg.device,
+                    requires_grad=arg.requires_grad,
+                    layout=arg.layout,
+                )
+                if isinstance(arg, torch.Tensor)
+                else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-            outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
+            outputs = gm(*cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [
@@ -760,7 +824,13 @@ def check_input_alias_and_mutation(
             for i, inp in enumerate(cloned)
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
-        return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+        return (
+            mutated_inputs,
+            inp_inp_alias_map,
+            inp_out_alias_map,
+            out_out_alias_map,
+            outputs,
+        )
 
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
@@ -816,4 +886,10 @@ class FunctionalizeCtxWrapper:
         return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
+        if isinstance(self.subgraph, torch.fx.GraphModule):
+            # Running graph with interpreter is needed for propagating the stack_trace
+            with fx_traceback.preserve_node_meta():
+                return self.ctx.functionalize(torch.fx.Interpreter(self.subgraph).run)(
+                    *args, **kwargs
+                )
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
