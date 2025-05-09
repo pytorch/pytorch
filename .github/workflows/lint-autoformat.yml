@@ -1,10 +1,8 @@
 name: Apply lint suggestions
 
 on:
-
-  push:
-    tags:
-      - ciflow/autoformat/*
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   lintrunner-autoformat:
@@ -12,7 +10,9 @@ jobs:
       contents: read
       pull-requests: write
     runs-on: lf.linux.2xlarge
-    if: ${{ github.repository_owner == 'pytorch' && github.event.pull_request.user.login != 'ezyang' && github.event.pull_request.user.login != 'malfet' && !startsWith(github.head_ref, 'export-') }}
+    # Not a true ciflow tag because the reusable action used for suggesting
+    # changes requires pull_request trigger
+    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.labels.*.name, 'ciflow/autoformat') }}
     steps:
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
