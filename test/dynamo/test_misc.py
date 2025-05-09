@@ -10775,8 +10775,7 @@ ShapeEnv not equal: field values don't match:
             "Should have logged graph break reason",
         )
         self.assertTrue(
-            metrics[0].dynamo_time_before_restart_s
-            <= metrics[0].entire_frame_compile_time_s
+            metrics[0].dynamo_time_before_restart_s <= metrics[0].duration_us
         )
 
         (restart_reason,) = metrics[1].restart_reasons
@@ -10785,8 +10784,7 @@ ShapeEnv not equal: field values don't match:
             "Should have logged graph break reason",
         )
         self.assertTrue(
-            metrics[1].dynamo_time_before_restart_s
-            <= metrics[1].entire_frame_compile_time_s
+            metrics[1].dynamo_time_before_restart_s <= metrics[1].duration_us
         )
 
         # No restarts
