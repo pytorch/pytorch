@@ -706,9 +706,7 @@ class AutogradCompilerInstance:
                 self.to_proxy(variable),
                 self.to_proxy(grad),
             ),
-            kwargs={
-                "grad_mode": grad_mode
-            },
+            kwargs={"grad_mode": grad_mode},
         )
 
     def proxy_call_hook(self, hook, *args, **kwargs):

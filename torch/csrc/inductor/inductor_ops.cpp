@@ -69,7 +69,10 @@ Tensor _reinterpret_tensor(
   return self_;
 }
 
-static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad, bool /* grad_mode */) {
+static void accumulate_grad_(
+    const Tensor& variable,
+    const Tensor& new_grad,
+    bool /* grad_mode */) {
   at::Tensor& grad = variable.mutable_grad();
   if (new_grad.device() != kMeta) {
     // Do not call into this codepath from C++ frontend, instead call directly
