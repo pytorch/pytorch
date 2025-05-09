@@ -1701,20 +1701,18 @@ namespace {
       }
     }
     TEST(FP8E4M3Test, FP8E4M3ConversionFloat) {
-      float f32s[100];
-      for (const auto i : c10::irange(100)) {
-        f32s[i] = static_cast<float>(i + 0.3);
-      }
-      for (const auto i : c10::irange(100)) {
+      for (uint32_t index = 0; index < 256; ++index) {
+        uint8_t input_u8 = static_cast<uint8_t>(index);
+        float f32 = static_cast<float>(input_u8);
       #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
-        uint8_t u8 = at::vec::fp32_to_fp8e4m3_scalar(f32s[i]);
+        uint8_t u8 = at::vec::fp32_to_fp8e4m3_scalar(f32);
         float x = at::vec::fp8e4m3_to_fp32_scalar(u8);
       #else
-        uint8_t u8 = c10::detail::fp8e4m3fn_from_fp32_value(f32s[i]);
+        uint8_t u8 = c10::detail::fp8e4m3fn_from_fp32_value(f32);
         float x = c10::detail::fp8e4m3fn_to_fp32_value(u8);
       #endif
-        EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32s[i]))
-            << "Test failed for float to u8 " << f32s[i] << "\n";
+        EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32))
+            << "Test failed for float to u8 " << f32 << "\n";
         EXPECT_EQ(x, c10::detail::fp8e4m3fn_to_fp32_value(u8))
             << "Test failed for u8 to float " << u8 << "\n";
       }
