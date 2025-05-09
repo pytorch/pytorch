@@ -68,8 +68,6 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
     constant_fold(gm)
     fake_tensor_prop(gm, aot_example_inputs, True)
-    gm.recompile()
-    gm.graph.lint()
 
     for pattern in pass_patterns:
         pattern.apply(gm.graph)  # type: ignore[arg-type]
