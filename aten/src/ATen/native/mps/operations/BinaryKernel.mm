@@ -34,9 +34,23 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name, bool supports_dense = true) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
 
+  auto convert_double_scalar = [](Tensor& t) {
+    if (t.dim() != 0) {
+      return;
+    }
+    if (t.scalar_type() == kDouble) {
+      t = t.to(kFloat);
+    } else if (t.scalar_type() == kComplexDouble) {
+      t = t.to(kComplexFloat);
+    }
+  };
+
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
   Tensor out = iter.output();
+
+  convert_double_scalar(input);
+  convert_double_scalar(other);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
