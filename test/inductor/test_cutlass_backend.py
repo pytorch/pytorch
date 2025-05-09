@@ -137,6 +137,14 @@ class TestCutlassBackend(TestCase):
         import cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
+    def test_cutlass_key(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+        from torch._inductor.codecache import cutlass_key
+
+        self.assertIsNotNone(cutlass_key())
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_mm(self):
