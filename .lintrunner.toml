@@ -84,8 +84,6 @@ include_patterns = [
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
-    'torch/nativert/**/*.h',
-    'torch/nativert/**/*.cpp',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
 ]
@@ -234,10 +232,6 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
-    'torch/nativert/*.h',
-    'torch/nativert/*.cpp',
-    'torch/nativert/**/*.h',
-    'torch/nativert/**/*.cpp',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -539,7 +533,6 @@ include_patterns = [
     'c10/**',
     'aten/**',
     'torch/csrc/**',
-    'torch/nativert/**',
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
@@ -767,7 +760,6 @@ include_patterns = [
     'aten/**',
     'c10/**',
     'torch/csrc/**',
-    'torch/nativert/**',
 ]
 exclude_patterns = [
     'aten/src/ATen/cuda/CUDAContext.cpp',
@@ -1022,7 +1014,6 @@ include_patterns = [
     'c10/**',
     'aten/**',
     'torch/csrc/**',
-    'torch/nativert/**',
 ]
 exclude_patterns = [
     'c10/util/CallOnce.h',
@@ -1067,7 +1058,6 @@ include_patterns = [
     'c10/**',
     'aten/**',
     'torch/csrc/**',
-    'torch/nativert/**',
 ]
 exclude_patterns = [
     '**/fb/**',
