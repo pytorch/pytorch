@@ -4341,7 +4341,7 @@ xfail_by_backend = {
         "test_return_duplicate",  # gradient batching rule not implemented for aten::sym_size.int
         "test_return_duplicate_inplace",  # gradient batching rule not implemented for aten::sym_size.int
         "test_setitem",  # CopySlices accuracy error
-        # "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
+        "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
         "test_checkpoint_detects_non_determinism",  # different error
         "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
         "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
