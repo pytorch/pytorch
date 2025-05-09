@@ -62,6 +62,7 @@ class SizeVarAllocator:
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
+        self.unbacked_replacements: dict[Expr, Expr] = {}
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
         # The basic idea is if we have some complicated sympy expression
         # f(s0), we may choose to precompute it on the host and then replace
@@ -638,11 +639,43 @@ class SizeVarAllocator:
                 )
         return strides
 
+    def _get_unbacked_replacements(self, expr: Expr) -> dict[Expr, Expr]:
+        """
+        This helps with covering unbacked symint cases where you may have two
+        expressions: s0 + u0 and u1. And s0 + u0 is known to be equal to u1
+        via deferred_runtime_asserts.
+
+        For example in atomically_apply_size_hint, it must return the same size
+        hint for both s0 + u0 and u1, but it first needs to know they are equal.
+        Then it can substitute s0 + u0 for u1.
+        """
+        if expr in self.unbacked_replacements:
+            return self.unbacked_replacements[expr]
+
+        runtime_asserts = itertools.chain.from_iterable(
+            self.shape_env.deferred_runtime_asserts.get(u, [])
+            for u in free_unbacked_symbols(expr)
+        )
+        equalities = (
+            assertion.expr
+            for assertion in runtime_asserts
+            if isinstance(assertion.expr, sympy.Equality)
+        )
+        replacements = {eq.rhs: eq.lhs for eq in equalities}
+
+        self.unbacked_replacements[expr] = replacements
+        return replacements
+
     def atomically_apply_size_hint(
         self, expr: Union[Expr, int], *, fallback: Optional[int] = None
     ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return int(expr)
+
+        # Make sure to substitute with the factored version
+        # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
+        unbacked_replacements = self._get_unbacked_replacements(expr)
+        expr = sympy.factor(expr).subs(unbacked_replacements)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
