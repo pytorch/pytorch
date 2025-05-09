@@ -4342,6 +4342,19 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @parametrize("_type", [set, frozenset], name_fn=lambda t: t.__name__)
+    def test_set_call___init__(self, _type):
+        @make_test
+        def fn(a, b):
+            s = _type({"apple", "banana", "cherry"})
+            s.__init__({"google", "microsoft", "apple"})
+            if "banana" in s:
+                return a + b
+            else:
+                return a - b
+
+        fn(self)
+
     def test_frozenset_construction(self):
         def fn(x):
             s = frozenset({x})
@@ -4991,6 +5004,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(FunctionTests)
+instantiate_parametrized_tests(DefaultsTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
