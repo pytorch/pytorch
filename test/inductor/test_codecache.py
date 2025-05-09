@@ -13,13 +13,9 @@ from unittest import mock
 
 import torch
 from torch._dynamo import reset
-from torch._dynamo.pgo import PGOCacheArtifact
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.autograd_cache import (
-    AOTAutogradCache,
-    AOTAutogradCacheArtifact,
-)
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
     BypassFxGraphCache,
@@ -27,7 +23,6 @@ from torch._inductor.codecache import (
     CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
-    InductorCacheArtifact,
     PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
@@ -35,7 +30,6 @@ from torch._inductor.codecache import (
 from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
-from torch._inductor.runtime.autotune_cache import AutotuneCacheArtifact
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
@@ -392,12 +386,10 @@ class TestFxGraphCache(TestCase):
 
         autotune_expect = 1 if device == GPU_TYPE else 0
 
-        self.assertEqual(len(cache_info.artifacts[InductorCacheArtifact.type()]), 1)
-        self.assertEqual(
-            len(cache_info.artifacts[AutotuneCacheArtifact.type()]), autotune_expect
-        )
-        self.assertEqual(len(cache_info.artifacts[AOTAutogradCacheArtifact.type()]), 0)
-        self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 0)
+        self.assertEqual(len(cache_info.inductor_artifacts), 1)
+        self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
+        self.assertEqual(len(cache_info.aot_autograd_artifacts), 0)
+        self.assertEqual(len(cache_info.pgo_artifacts), 0)
 
         self.reset()
 
@@ -422,14 +414,10 @@ class TestFxGraphCache(TestCase):
         with fresh_inductor_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
-            self.assertEqual(len(cache_info.artifacts[InductorCacheArtifact.type()]), 1)
-            self.assertEqual(
-                len(cache_info.artifacts[AutotuneCacheArtifact.type()]), autotune_expect
-            )
-            self.assertEqual(
-                len(cache_info.artifacts[AOTAutogradCacheArtifact.type()]), 0
-            )
-            self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 0)
+            self.assertEqual(len(cache_info.inductor_artifacts), 1)
+            self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
+            self.assertEqual(len(cache_info.aot_autograd_artifacts), 0)
+            self.assertEqual(len(cache_info.pgo_artifacts), 0)
 
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
@@ -523,10 +511,10 @@ class TestFxGraphCache(TestCase):
 
         artifact_bytes, cache_info = artifacts
 
-        self.assertEqual(len(cache_info.artifacts[InductorCacheArtifact.type()]), 2)
-        self.assertEqual(len(cache_info.artifacts[AutotuneCacheArtifact.type()]), 0)
-        self.assertEqual(len(cache_info.artifacts[AOTAutogradCacheArtifact.type()]), 0)
-        self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 2)
+        self.assertEqual(len(cache_info.inductor_artifacts), 2)
+        self.assertEqual(len(cache_info.autotune_artifacts), 0)
+        self.assertEqual(len(cache_info.aot_autograd_artifacts), 0)
+        self.assertEqual(len(cache_info.pgo_artifacts), 2)
 
         self.reset()
         backend.clear()
@@ -538,12 +526,10 @@ class TestFxGraphCache(TestCase):
         with torch.compiler.config.patch({"job_id": self.id()}), fresh_inductor_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
-            self.assertEqual(len(cache_info.artifacts[InductorCacheArtifact.type()]), 2)
-            self.assertEqual(len(cache_info.artifacts[AutotuneCacheArtifact.type()]), 0)
-            self.assertEqual(
-                len(cache_info.artifacts[AOTAutogradCacheArtifact.type()]), 0
-            )
-            self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 2)
+            self.assertEqual(len(cache_info.inductor_artifacts), 2)
+            self.assertEqual(len(cache_info.autotune_artifacts), 0)
+            self.assertEqual(len(cache_info.aot_autograd_artifacts), 0)
+            self.assertEqual(len(cache_info.pgo_artifacts), 2)
 
             f(torch.randn(2, 5))
             f(torch.randn(2, 6))
@@ -583,7 +569,7 @@ class TestFxGraphCache(TestCase):
 
         artifact_bytes, cache_info = artifacts
 
-        self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 2)
+        self.assertEqual(len(cache_info.pgo_artifacts), 2)
 
         self.reset()
         backend.clear()
@@ -597,7 +583,7 @@ class TestFxGraphCache(TestCase):
         ), fresh_inductor_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
-            self.assertEqual(len(cache_info.artifacts[PGOCacheArtifact.type()]), 2)
+            self.assertEqual(len(cache_info.pgo_artifacts), 2)
 
             f(torch.randn(2, 5))
             f(torch.randn(2, 6))
@@ -640,6 +626,11 @@ class TestFxGraphCache(TestCase):
 
             @override
             @staticmethod
+            def type() -> str:
+                return "test"
+
+            @override
+            @staticmethod
             def encode(content: str) -> bytes:
                 return content.encode()
 
@@ -652,13 +643,13 @@ class TestFxGraphCache(TestCase):
         self.assertIsNotNone(artifacts)
         artifact_bytes, cache_info = artifacts
 
-        self.assertEqual(len(cache_info.artifacts[ArbitraryCacheArtifact.type()]), 3)
+        self.assertEqual(len(cache_info.test_artifacts), 3)
 
         cache_stub.clear()
         CacheArtifactManager.clear()
 
         cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
-        self.assertEqual(len(cache_info.artifacts[ArbitraryCacheArtifact.type()]), 3)
+        self.assertEqual(len(cache_info.test_artifacts), 3)
         self.assertEqual(cache_stub.cache, test_cache)
 
         CacheArtifactManager.clear()
@@ -666,7 +657,7 @@ class TestFxGraphCache(TestCase):
         artifacts = torch.compiler.save_cache_artifacts()
         self.assertIsNotNone(artifacts)
         _, cache_info = artifacts
-        self.assertEqual(len(cache_info.artifacts[ArbitraryCacheArtifact.type()]), 1)
+        self.assertEqual(len(cache_info.test_artifacts), 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})

@@ -74,6 +74,11 @@ class AutotuneCacheArtifact(CacheArtifact):
 
     @override
     @staticmethod
+    def type() -> str:
+        return "autotune"
+
+    @override
+    @staticmethod
     def encode(content: JsonDataTy) -> bytes:
         assert not isinstance(content, bytes)
         serde = RemoteCacheJsonSerde()

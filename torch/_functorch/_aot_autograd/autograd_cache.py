@@ -777,6 +777,11 @@ class AOTAutogradCacheArtifact(CacheArtifact):
     def populate_cache(self):
         AOTAutogradCache._write_to_local_cache(self.key, self.content)
 
+    @override
+    @staticmethod
+    def type():
+        return "aot_autograd"
+
 
 class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
     """

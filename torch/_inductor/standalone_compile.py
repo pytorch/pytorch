@@ -10,11 +10,9 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
 from torch._dynamo.utils import dynamo_timed
-from torch._inductor.codecache import InductorCacheArtifact
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
-from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCacheArtifact
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -72,8 +70,8 @@ class CompiledArtifact:
                     "CompiledArtifact.save failed to save since there's no artifact to save"
                 )
             artifact_bytes, cache_info = self._artifacts
-            assert len(cache_info.artifacts[AOTAutogradCacheArtifact.type()]) == 1, cache_info
-            key = cache_info.artifacts[AOTAutogradCacheArtifact.type()][0]
+            assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
+            key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
                 # cant assert that it is a file since it might not exist yet
@@ -105,7 +103,7 @@ class CompiledArtifact:
                     assert loaded_cache_info is not None
                     # Now write all the output_code artifacts to disk so that
                     # they can be inspected and modified
-                    for key in loaded_cache_info.artifacts[InductorCacheArtifact.type()]:
+                    for key in loaded_cache_info.inductor_artifacts:
                         subdir = FxGraphCache._get_tmp_dir_for_key(key)
                         assert os.path.exists(subdir)
                         for path in sorted(os.listdir(subdir)):

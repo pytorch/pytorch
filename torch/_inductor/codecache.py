@@ -1052,6 +1052,11 @@ class InductorCacheArtifact(CacheArtifact):
     def populate_cache(self) -> None:
         FxGraphCache._write_to_local_cache(self.key, self.content)
 
+    @override
+    @staticmethod
+    def type() -> str:
+        return "inductor"
+
 
 class FxGraphCache(GuardedCache[CompiledFxGraph]):
     """

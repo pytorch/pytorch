@@ -48,16 +48,15 @@ class CacheArtifact(ABC):
     def populate_cache(self) -> None:
         pass
 
-    @classmethod
-    def type(cls) -> str:
+    @staticmethod
+    def type() -> str:
         """
-        Returns the type of the artifact
+        Returns the type of the artifact. Must be unique across all CacheArtifact classes.
+
+        CacheArtifactFactory.register will add property method to CacheInfo based on this (def {type}_artifacts)
+        that returns all artifacts for specific cache.
         """
-        if cls.__name__ == "CacheArtifact":
-            raise RuntimeError(
-                "CacheArtifact is an abstract class, please use a subclass"
-            )
-        return cls.__name__
+        raise RuntimeError("CacheArtifact is an abstract class, please use a subclass")
 
 
 class CacheArtifactFactory:
@@ -74,6 +73,11 @@ class CacheArtifactFactory:
             artifact_cls.type() not in cls._artifact_types
         ), f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
         cls._artifact_types[artifact_type_key] = artifact_cls
+        setattr(
+            CacheInfo,
+            f"{artifact_type_key}_artifacts",
+            property(lambda self: self.artifacts[artifact_type_key]),
+        )
         return artifact_cls
 
     @classmethod
@@ -104,6 +108,16 @@ class CacheInfo:
     artifacts: defaultdict[str, list[str]] = dataclasses.field(
         default_factory=lambda: defaultdict(list)
     )
+
+    # Methods set by CacheArtifactFactory.register based on CacheArtifact.type()
+    @property
+    def inductor_artifacts(self) -> list[str]: ...
+    @property
+    def autotune_artifacts(self) -> list[str]: ...
+    @property
+    def aot_autograd_artifacts(self) -> list[str]: ...
+    @property
+    def pgo_artifacts(self) -> list[str]: ...
 
     def add(self, artifact: CacheArtifact) -> None:
         self.artifacts[artifact.type()].append(artifact.key)

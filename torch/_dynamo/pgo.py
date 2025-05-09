@@ -609,6 +609,11 @@ class PGOCacheArtifact(CacheArtifact):
         )
         assert meta is not None
 
+    @override
+    @staticmethod
+    def type() -> str:
+        return "pgo"
+
     @staticmethod
     def _rewrite_cache_key_for_mega_cache(original_key: str) -> str:
         """
