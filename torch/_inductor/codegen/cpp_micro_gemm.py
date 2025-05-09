@@ -4,8 +4,6 @@ import sys
 from enum import Enum
 from typing import Callable, Optional
 
-import sympy
-
 import torch
 
 from .. import cpp_builder, ir
@@ -320,18 +318,23 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-# extra check for small M dimension for int8 WoQ case
-def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
+def is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k):
     return (
         k % config.register_blocking.block_k == 0
         and n % config.register_blocking.block_n == 0
         and m < 16
-        and not kwargs.get("dynamic_M", False)
+    )
+
+
+# extra check for small M dimension for int8 WoQ case
+def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
+    return is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k) and not kwargs.get(
+        "dynamic_M", False
     )
 
 
 # For int8 WoQ GEMM with small M, we use different blockings that shouldn't be used otherwise
-def do_not_use_with_small_m(config, m, n, k, alpha, num_threads, **kwargs):
+def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **kwargs):
     return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs)
 
 
@@ -360,7 +363,7 @@ def do_not_use_with_small_m(config, m, n, k, alpha, num_threads, **kwargs):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
-        extra_check=do_not_use_with_small_m,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
     ),
     *generate_gemm_config(
         VecAVX512,
@@ -398,7 +401,7 @@ def do_not_use_with_small_m(config, m, n, k, alpha, num_threads, **kwargs):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
-        extra_check=do_not_use_with_small_m,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
     ),
     *generate_gemm_config(
         VecAVX2,
@@ -1902,6 +1905,11 @@ def create_micro_gemm(
     use_ref=True,
     q_group_size=None,
 ) -> Optional[CppMicroGemm]:
+    """
+    Based on the provided info, try to find the config of the micro-kernel that would
+    deliver the best performance in terms of lower latency for this case.
+    """
+
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
             name,
@@ -1916,6 +1924,7 @@ def create_micro_gemm(
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
     from ..utils import has_free_symbols
+
     dynamic_M = has_free_symbols((m,))
     m = V.graph.sizevars.size_hint(m, fallback=1) if dynamic_M else m
     assert isinstance(m, int) or m.is_number, m

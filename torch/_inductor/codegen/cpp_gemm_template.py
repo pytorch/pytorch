@@ -28,6 +28,7 @@ from .cpp_micro_gemm import (
     CppMicroGemmAMX,
     CppMicroGemmFP32Vec,
     create_micro_gemm,
+    is_int8_woq_gemm_small_m_dim_corner_case,
     LayoutType,
 )
 from .cpp_template import CppTemplate
@@ -331,8 +332,6 @@ SMALL_M_GEMM_TEMPLATE = r"""
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
     ) }}
-    const int64_t m_start = 0;
-    constexpr int64_t m_end = M;
     # pragma omp parallel
     {
         #pragma omp for nowait
@@ -362,10 +361,10 @@ SMALL_M_GEMM_TEMPLATE = r"""
                     {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True, prefetch=True)|indent(20, false) }}
                 }
             }
-{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
+{%- set tile_Y = kernel.slice_nd(Y_2d, [("0", "M"), ("n_start", "n_end")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [("0", "M"), ("0", "n_end - n_start")]) %}
             {{ kernel.store_output(
-                tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("0", "n_start"), reindexers=reindexers
             )|indent(20, false) }}
         }
     }
@@ -1550,9 +1549,9 @@ class CppGemmTemplate(CppTemplate):
         """Use SMALL_M_GEMM_TEMPLATE"""
         return (
             isinstance(micro_gemm, CppMicroGemmFP32Vec)
-            and K % micro_gemm.register_blocking.block_k == 0
-            and N % micro_gemm.register_blocking.block_n == 0
-            and X.get_size()[0] < 16
+            and is_int8_woq_gemm_small_m_dim_corner_case(
+                micro_gemm, X.get_size()[0], N, K
+            )
             and X.get_dtype() is torch.bfloat16
             and W.get_dtype() is torch.int8
         )
