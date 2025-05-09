@@ -13,7 +13,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
+    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_gpu
