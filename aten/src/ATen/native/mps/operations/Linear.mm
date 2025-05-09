@@ -113,10 +113,11 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
-  bool is_macos_15_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
-  if (is_macos_15_or_newer) {
+  if (s_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
     _mps_linear_nograph(input, weight, bias, output);
-  } else {
+    // Squeeze last dim of 1D linear
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
+  }
     MPSStream* stream = getCurrentMPSStream();
     struct CachedGraph : public MPSCachedGraph {
       CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -177,7 +178,6 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
       }
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
-  }
 
   // Shave off '1' present at the end of the shape
   if (weight_arg.dim() == 1) {
