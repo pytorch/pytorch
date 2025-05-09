@@ -1631,7 +1631,7 @@ class TestFP8Matmul(TestCase):
             scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
             f = torch._scaled_grouped_mm
-            f = torch.compile(f) if use_torch_compile else f
+            f = torch.compile(f, dynamic=False) if use_torch_compile else f
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                     out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
