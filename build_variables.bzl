@@ -589,6 +589,7 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 
 libtorch_nativert_sources = [
+    "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
 ]
 
