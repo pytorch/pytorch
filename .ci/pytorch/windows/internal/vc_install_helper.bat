@@ -1,6 +1,6 @@
 if "%VC_YEAR%" == "2022" powershell windows/internal/vs2022_install.ps1
 
-set VC_VERSION_LOWER=17
+set VC_VERSION_LOWER=17.10
 set VC_VERSION_UPPER=18
 
 
