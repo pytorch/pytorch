@@ -15,6 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
+from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
@@ -487,26 +488,32 @@ class FxConverter:
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
         call_kwargs.update(config.kwargs)
 
-        def replace_floor_div(arg: sympy.Expr) -> sympy.Expr:
+        def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
             """
             Converts floor(x / c) to x // c.
             """
-            if isinstance(arg, sympy.core.mul.Mul):
-                for arg_idx, frac in enumerate(arg.args):
-                    other_arg = arg.args[1 - arg_idx]
+            if isinstance(expr, sympy.core.mul.Mul):
+                for frac_arg_idx, frac in enumerate(expr.args):
                     if isinstance(frac, sympy.Rational):
-                        numerator = other_arg * frac.numerator
+                        numerator = (
+                            sympy_product(
+                                arg
+                                for other_arg_idx, arg in enumerate(expr.args)
+                                if other_arg_idx != frac_arg_idx
+                            )
+                            * frac.numerator
+                        )
                         denominator = frac.denominator
 
                         # Sanity check the results.
-                        new_arg = numerator / denominator
-                        assert V.graph.sizevars.statically_known_equals(new_arg, arg), (
-                            f"Unsound replacement: '{new_arg}' != '{arg}'"
-                        )
+                        new_expr = numerator / denominator
+                        assert V.graph.sizevars.statically_known_equals(
+                            new_expr, expr
+                        ), f"Unsound replacement: '{new_expr}' != '{expr}'"
 
                         return FloorDiv(numerator, denominator)
             else:
-                return sympy.floor(arg)
+                return sympy.floor(expr)
 
         def expr_to_symint(expr: Union[int, sympy.Expr]) -> Union[int, sympy.Expr]:
             return (
