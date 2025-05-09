@@ -1270,7 +1270,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
-    @config.patch({"triton.autotune_at_compile_time": None})
     def test_size_with_unbacked_add_expr(self):
         # Tests AOTI autotuning to make sure the correct input tensor sizes
         # are generated for sizes that include an expr such as s0 + u0.
@@ -1296,13 +1295,13 @@ class AOTInductorTestsTemplate:
                 )
 
         example_inputs = (
-            torch.ones(64, dtype=torch.int64, device="cuda"),
-            torch.ones(64, dtype=torch.int64, device="cuda") * 12,
-            torch.ones((768,), dtype=torch.int64, device="cuda").bool(),
-            torch.randn((401, 8), dtype=torch.bfloat16, device="cuda"),
-            torch.randn((1, 256), dtype=torch.bfloat16, device="cuda"),
-            torch.ones(758, 127, dtype=torch.int64, device="cuda"),
-            torch.scalar_tensor(10, dtype=torch.int32, device="cuda"),
+            torch.ones(64, dtype=torch.int64, device=self.device),
+            torch.ones(64, dtype=torch.int64, device=self.device) * 12,
+            torch.ones((768,), dtype=torch.int64, device=self.device).bool(),
+            torch.randn((401, 8), dtype=torch.bfloat16, device=self.device),
+            torch.randn((1, 256), dtype=torch.bfloat16, device=self.device),
+            torch.ones(758, 127, dtype=torch.int64, device=self.device),
+            torch.scalar_tensor(10, dtype=torch.int32, device=self.device),
         )
         spec = {
             "values": (Dim.DYNAMIC,),

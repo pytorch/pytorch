@@ -687,7 +687,7 @@ class SizeVarAllocator:
             symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
             for symbol in free_symbols
         }
-        return sympy_subs(expr, size_dict)
+        return expr.subs(size_dict)
 
     def offset_var(self, index: Expr, vars: list[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
