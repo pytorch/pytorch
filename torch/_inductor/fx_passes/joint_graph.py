@@ -10,7 +10,6 @@ from typing import Any, Union
 import torch
 import torch._guards
 import torch.utils._pytree as pytree
-import torch._prims_common as prim_utils
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import (
@@ -23,6 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
+    Ignored,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -344,7 +344,7 @@ def create_zero_mul_replacement_pass():
     @register_graph_pattern(
         CallFunction(
             torch.ops.aten.mul,
-            KeywordArg("tensor"),
+            Ignored(),
             0,  # Constant 0
         ),
         pass_dict=pattern_matcher_pass,
@@ -353,21 +353,23 @@ def create_zero_mul_replacement_pass():
         CallFunction(
             torch.ops.aten.mul,
             0,  # Constant 0
-            KeywordArg("tensor"),
+            Ignored(),
         ),
         pass_dict=pattern_matcher_pass,
     )
-    def replace_mul_zero(match: Match, *, tensor):
+    def replace_mul_zero(match: Match):
         """
         Replace tensor * 0 with a zero tensor
         """
-        # Get tensor metadata from the match
-        tensor_val = tensor.meta.get("val")
+        tensor_val = match.output_node().meta.get("val", None)
+        if not isinstance(tensor_val, torch.Tensor):
+            return
+
         shape = tensor_val.shape
         dtype = tensor_val.dtype
         device = tensor_val.device
 
-        def zero_tensor(tensor: Any):
+        def zero_tensor():
             # Create a full tensor of zeros with the same shape, dtype, and device
             return torch.ops.aten.full(
                 shape,
@@ -378,7 +380,7 @@ def create_zero_mul_replacement_pass():
                 pin_memory=False,
             )
 
-        match.replace_by_example(zero_tensor, [tensor])
+        match.replace_by_example(zero_tensor, [])
 
     return pattern_matcher_pass
 

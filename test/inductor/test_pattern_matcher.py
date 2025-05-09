@@ -1287,9 +1287,8 @@ class TestPatternMatcher(TestCase):
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_replace_mul_zero(self):
-
         def test(x, y):
-            return (x + (y * 0))
+            return x + (y * 0)
 
         x = torch.rand([256], device="cuda")
         y = torch.rand([256], device="cuda")
