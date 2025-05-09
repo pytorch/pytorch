@@ -30,14 +30,16 @@ jobs:
       sync-tag: linux-xpu-2025-0-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-2025.0-py3.9
-      docker-image-name: pytorch-linux-jammy-xpu-2025.0-py3
+      docker-image-name: ci-image:pytorch-linux-jammy-xpu-2025.0-py3
       runner: linux.12xlarge
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.idc.xpu" },
         ]}
     secrets: inherit
 

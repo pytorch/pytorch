@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 
 import numpy as np
@@ -123,17 +124,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 SampleModel(), (torch.randn(1, 1, 2),), path, dynamo=True
             )
             self.assertTrue(os.path.exists(path))
-
-    def test_export_supports_script_module(self):
-        class ScriptModule(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        self.assert_export(
-            torch.jit.script(ScriptModule()),
-            (torch.randn(1, 1, 2),),
-            strategy="JitTraceConvertStrategy",
-        )
 
     def test_dynamic_shapes_with_fully_specified_axes(self):
         ep = torch.export.export(
@@ -504,6 +494,15 @@ class TestFakeTensorExport(common_utils.TestCase):
 
         node_names = [n.op_type for n in onnx_program.model.graph]
         self.assertIn("Sin", node_names)
+
+    def test_torchscript_exporter_raises_deprecation_warning(self):
+        # Test that the deprecation warning is raised when using torchscript exporter
+        with self.assertWarnsRegex(
+            DeprecationWarning, "You are using the legacy TorchScript-based ONNX export"
+        ):
+            torch.onnx.export(
+                SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
+            )
 
 
 if __name__ == "__main__":
