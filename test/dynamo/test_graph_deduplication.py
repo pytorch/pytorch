@@ -1,10 +1,16 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: B950
+import contextlib
+
 import torch
 import torch.fx
 from torch._dynamo.graph_utils import _detect_cycles
 from torch._dynamo.test_case import TestCase
-from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    extract_graph_and_tracker,
+    normalize_gm,
+)
 
 
 def extract_graph(fn, *args, **kwargs):
@@ -18,9 +24,19 @@ def graph_str(gm):
 
 
 class GraphDededuplicationTests(TestCase):
+    def setUp(self):
+        self.exit_stack = contextlib.ExitStack()
+        self.exit_stack.enter_context(
+            torch._dynamo.config.patch("use_graph_deduplication", True)
+        )
+        super().setUp()
+
+    def tearDown(self):
+        self.exit_stack.close()
+        super().tearDown()
+
     def run_and_return_graphs(self, fn, *args, **kwargs):
-        with torch._dynamo.config.patch("use_graph_deduplication", True):
-            return extract_graph(fn, *args, **kwargs)
+        return extract_graph(fn, *args, **kwargs)
 
     def test_single_subgraph(self):
         def inner_fn(x, y):
@@ -691,7 +707,7 @@ class <lambda>(torch.nn.Module):
         sum_2 = get_node("sum_2")
         exit_autocast = mod.graph.call_function(torch.amp._exit_autocast)
         sum_2.append(exit_autocast)
-        additional_deps = _populate_additional_deps(mod.graph)
+        additional_deps = _populate_additional_deps(mod.graph, {})
         invoke_subgraph = get_node("invoke_subgraph")
         invoke_subgraph.append(enter_autocast)
         getitem_1 = get_node("getitem_1")
@@ -904,6 +920,105 @@ class <lambda>(torch.nn.Module):
             add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
             return (add,)
 """,
+        )
+
+    def test_mutation_ordering(self):
+        from torch._dynamo.graph_deduplication import (
+            _populate_additional_deps,
+            _stable_topological_sort,
+        )
+
+        def inner_fn(x, y):
+            x0 = x.view(x.size())
+            return x0.view(x.size())
+
+        def inner_fn2(x, y):
+            x = x * 2
+            y = y * 2
+            return x.sum() + y.sum()
+
+        def fn(x, y):
+            o0 = inner_fn(x, y)
+            o1 = inner_fn(x, y)
+            x.add_(x)
+            o2 = inner_fn2(x, y)
+            y.mul_(y)
+            o3 = inner_fn2(x, y)
+            return o0 + o1 + o2.sum() + o3.sum()
+
+        x = torch.rand(10, 10)
+        y = torch.rand(10, 20)
+        x_clone = x.clone()
+        y_clone = y.clone()
+
+        graph, tracker = extract_graph_and_tracker(fn, x_clone, y_clone)
+
+        def get_node(name):
+            return next(n for n in graph.nodes if n.name == name)
+
+        additional_deps = _populate_additional_deps(
+            graph, tracker.node_to_mutated_arg_positions
+        )
+
+        self.assertExpectedInline(
+            additional_deps,
+            """defaultdict(<class 'torch.utils._ordered_set.OrderedSet'>, {add_: OrderedSet([x0, x0_1]), invoke_subgraph: OrderedSet([add_]), invoke_subgraph_1: OrderedSet([add_, mul_]), mul_: OrderedSet([invoke_subgraph])})""",
+        )
+
+        add_ = get_node("add_")
+        mul_ = get_node("mul_")
+        x0 = get_node("x0")
+        x0.append(mul_)
+        o1 = get_node("o1")
+        o1.append(add_)
+        self.assertExpectedInline(
+            graph,
+            """\
+graph():
+    %subgraph_0 : [num_users=2] = get_attr[target=subgraph_0]
+    %l_x_ : torch.Tensor [num_users=5] = placeholder[target=L_x_]
+    %l_y_ : torch.Tensor [num_users=3] = placeholder[target=L_y_]
+    %x0 : [num_users=1] = call_method[target=view](args = (%l_x_, (10, 10)), kwargs = {})
+    %mul_ : [num_users=0] = call_method[target=mul_](args = (%l_y_, %l_y_), kwargs = {})
+    %o0 : [num_users=1] = call_method[target=view](args = (%x0, (10, 10)), kwargs = {})
+    %x0_1 : [num_users=1] = call_method[target=view](args = (%l_x_, (10, 10)), kwargs = {})
+    %o1 : [num_users=1] = call_method[target=view](args = (%x0_1, (10, 10)), kwargs = {})
+    %add_ : [num_users=0] = call_method[target=add_](args = (%l_x_, %l_x_), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=operator.add](args = (%o0, %o1), kwargs = {})
+    %invoke_subgraph : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%subgraph_0, subgraph_0, (%l_x_, %l_y_)), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph, 0), kwargs = {})
+    %sum_5 : [num_users=1] = call_method[target=sum](args = (%getitem,), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=operator.add](args = (%add_2, %sum_5), kwargs = {})
+    %invoke_subgraph_1 : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%subgraph_0, subgraph_0, (%l_x_, %l_y_)), kwargs = {})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph_1, 0), kwargs = {})
+    %sum_6 : [num_users=1] = call_method[target=sum](args = (%getitem_1,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=operator.add](args = (%add_3, %sum_6), kwargs = {})
+    return (add_4,)""",
+        )
+        _stable_topological_sort(graph, additional_deps)
+        self.assertExpectedInline(
+            graph,
+            """\
+graph():
+    %subgraph_0 : [num_users=2] = get_attr[target=subgraph_0]
+    %l_x_ : torch.Tensor [num_users=5] = placeholder[target=L_x_]
+    %l_y_ : torch.Tensor [num_users=3] = placeholder[target=L_y_]
+    %x0 : [num_users=1] = call_method[target=view](args = (%l_x_, (10, 10)), kwargs = {})
+    %o0 : [num_users=1] = call_method[target=view](args = (%x0, (10, 10)), kwargs = {})
+    %x0_1 : [num_users=1] = call_method[target=view](args = (%l_x_, (10, 10)), kwargs = {})
+    %o1 : [num_users=1] = call_method[target=view](args = (%x0_1, (10, 10)), kwargs = {})
+    %add_ : [num_users=0] = call_method[target=add_](args = (%l_x_, %l_x_), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=operator.add](args = (%o0, %o1), kwargs = {})
+    %invoke_subgraph : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%subgraph_0, subgraph_0, (%l_x_, %l_y_)), kwargs = {})
+    %mul_ : [num_users=0] = call_method[target=mul_](args = (%l_y_, %l_y_), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph, 0), kwargs = {})
+    %sum_5 : [num_users=1] = call_method[target=sum](args = (%getitem,), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=operator.add](args = (%add_2, %sum_5), kwargs = {})
+    %invoke_subgraph_1 : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%subgraph_0, subgraph_0, (%l_x_, %l_y_)), kwargs = {})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph_1, 0), kwargs = {})
+    %sum_6 : [num_users=1] = call_method[target=sum](args = (%getitem_1,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=operator.add](args = (%add_3, %sum_6), kwargs = {})
+    return (add_4,)""",
         )
 
 

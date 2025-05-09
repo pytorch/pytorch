@@ -57,7 +57,9 @@ when they are created in output_graph.
     duplicated_region_groups = output_graph.region_tracker.get_identical_regions(
         output_graph.graph
     )
-    node_to_additional_deps = _populate_additional_deps(output_graph.graph)
+    node_to_additional_deps = _populate_additional_deps(
+        output_graph.graph, output_graph.region_tracker.node_to_mutated_arg_positions
+    )
 
     sub_gms: dict[str, torch.fx.GraphModule] = {}
 
@@ -107,7 +109,7 @@ def _replace_region_with_subgraph(
     inds_with_external_users: list[int],
     sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
-    node_to_additional_deps: dict[torch.fx.Node, list[torch.fx.Node]],
+    node_to_additional_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
 ) -> None:
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
@@ -143,11 +145,12 @@ def _replace_region_with_subgraph(
     # Erase in reverse topological order
     for node in reversed(region):
         graph.erase_node(node)
-        node_to_additional_deps.pop(node)
-        for dep_list in node_to_additional_deps.values():
+        node_to_additional_deps.pop(node, None)
+        for deps in node_to_additional_deps.values():
             try:
-                dep_list.remove(node)
-            except ValueError:
+                deps.remove(node)
+                deps.add(invoke_subgraph_node)
+            except KeyError:
                 pass
 
     if config.graph_deduplication_lint:
@@ -294,23 +297,29 @@ def _stable_topological_sort(
 
 
 def _populate_additional_deps(
-    graph: torch.fx.Graph,
-) -> dict[torch.fx.Node, list[torch.fx.Node]]:
+    graph: torch.fx.Graph, node_to_mutated_arg_positions: dict[Node, OrderedSet[int]]
+) -> dict[Node, OrderedSet[Node]]:
+    node_to_additional_deps: dict[Node, OrderedSet[Node]] = defaultdict(OrderedSet)
+    _add_mutation_dependencies(node_to_mutated_arg_positions, node_to_additional_deps)
+    _add_global_state_dependencies(graph, node_to_additional_deps)
+    return node_to_additional_deps
+
+
+def _add_global_state_dependencies(
+    graph: torch.fx.Graph, node_to_additional_deps: dict[Node, OrderedSet[Node]]
+) -> None:
     import torch.amp
 
-    node_to_additional_deps: dict[torch.fx.Node, list[torch.fx.Node]] = defaultdict(
-        list
-    )
     all_nodes = list(graph.nodes)
 
     # These are targets of the nodes which need to stay in the same relative place in the graph
     global_state_targets = {torch.amp._enter_autocast, torch.amp._exit_autocast}
-    all_nodes_dep_on: list[torch.fx.Node] = []
+    all_nodes_dep_on: list[Node] = []
 
     def prev_cur_nodes(
-        all_nodes: list[torch.fx.Node],
-    ) -> Generator[tuple[list[torch.fx.Node], torch.fx.Node]]:
-        prev_nodes: list[torch.fx.Node] = []
+        all_nodes: list[Node],
+    ) -> Generator[tuple[list[Node], Node], None, None]:
+        prev_nodes: list[Node] = []
         next_nodes = list(reversed(all_nodes))
 
         while next_nodes:
@@ -320,10 +329,36 @@ def _populate_additional_deps(
 
     for prev_nodes, cur_node in prev_cur_nodes(all_nodes):
         args_unique = _get_flat_args_unique(cur_node, {})
-        additional_deps = node_to_additional_deps[cur_node]
-        additional_deps.extend(n for n in all_nodes_dep_on if n not in args_unique)
+        new_deps = [n for n in all_nodes_dep_on if n not in args_unique]
+
+        if new_deps:
+            additional_deps = node_to_additional_deps[cur_node]
+            additional_deps.update(new_deps)
+
         if cur_node.target in global_state_targets:
-            additional_deps.extend(n for n in prev_nodes if n not in args_unique)
+            additional_deps = node_to_additional_deps[cur_node]
+            additional_deps.update(n for n in prev_nodes if n not in args_unique)
             all_nodes_dep_on.append(cur_node)
 
-    return node_to_additional_deps
+
+def _add_mutation_dependencies(
+    node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
+    node_to_additional_deps: dict[Node, OrderedSet[Node]],
+) -> None:
+    for node, indices in node_to_mutated_arg_positions.items():
+        flat_args_kwargs = _get_flat_args(node, {})
+
+        # for all mutated args,
+        # add dependency on usages which occur after node to ensure
+        # node will always be ordered before them
+        # also add node as a dependency on usages which
+        # occur before node to ensure node is ordered after them
+        for index in indices:
+            mutated_arg = flat_args_kwargs[index]
+            for user in mutated_arg.users:
+                if user is node:
+                    continue
+                elif user < node:
+                    node_to_additional_deps[node].add(user)
+                elif user > node:
+                    node_to_additional_deps[user].add(node)
