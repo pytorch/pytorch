@@ -675,7 +675,7 @@ class SizeVarAllocator:
         # Make sure to substitute with the factored version
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
         unbacked_replacements = self._get_unbacked_replacements(expr)
-        expr = sympy_subs(sympy.factor(expr), unbacked_replacements)
+        expr = sympy.factor(expr).subs(unbacked_replacements)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
