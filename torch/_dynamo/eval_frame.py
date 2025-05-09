@@ -1047,7 +1047,6 @@ def _optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
-            rebuild_ctx=rebuild_ctx,
         )
 
     backend = get_compiler_fn(backend)
