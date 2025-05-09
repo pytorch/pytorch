@@ -113,7 +113,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
-  if (s_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
     _mps_linear_nograph(input, weight, bias, output);
     // Squeeze last dim of 1D linear
     return weight_arg.dim() != 1 ? output : output.squeeze(-1);
