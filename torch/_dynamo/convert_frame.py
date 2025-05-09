@@ -709,10 +709,10 @@ def _compile(
         torch.overrides._get_current_function_mode_stack()
     )
 
-    @preserve_global_state
+    # @preserve_global_state
     def transform(
         instructions: list[Instruction], code_options: dict[str, object]
-    ) -> None:
+    ) -> list[Instruction]:
         nonlocal output
         nonlocal tracer
         speculation_log.restart()
@@ -758,11 +758,12 @@ def _compile(
         output = tracer.output
         assert output is not None
         assert output.output_instructions
-        instructions[:] = output.output_instructions
+        new_instructions = output.output_instructions
         code_options.update(output.code_options)
-        propagate_inst_exn_table_entries(instructions)
-        check_inst_exn_tab_entries_valid(instructions)
-        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        propagate_inst_exn_table_entries(new_instructions)
+        check_inst_exn_tab_entries_valid(new_instructions)
+        new_instructions = remove_pointless_jumps(remove_dead_code(new_instructions))
+        return new_instructions
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(

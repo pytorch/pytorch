@@ -1225,7 +1225,7 @@ def debug_bytes(*args) -> str:
 
 def debug_checks(code):
     """Make sure our assembler produces same bytes as we start with"""
-    dode = transform_code_object(code, lambda x, y: None, safe=True)
+    dode = transform_code_object(code, lambda x, y: x, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
     assert code.co_lnotab == dode.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
 
@@ -1411,7 +1411,13 @@ def get_code_keys() -> list[str]:
     return keys
 
 
-def transform_code_object(code, transformations, safe=False) -> types.CodeType:
+def transform_code_object(
+    code,
+    transformations: Callable[
+        [list[Instruction], dict[str, object]], list[Instruction]
+    ],
+    safe: bool = False,
+) -> types.CodeType:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
@@ -1419,8 +1425,9 @@ def transform_code_object(code, transformations, safe=False) -> types.CodeType:
     instructions = cleaned_instructions(code, safe)
     propagate_line_nums(instructions)
 
-    transformations(instructions, code_options)
-    return clean_and_assemble_instructions(instructions, keys, code_options)[1]
+    new_instructions = transformations(instructions, code_options)
+    assert new_instructions is not None
+    return clean_and_assemble_instructions(new_instructions, keys, code_options)[1]
 
 
 def clean_and_assemble_instructions(

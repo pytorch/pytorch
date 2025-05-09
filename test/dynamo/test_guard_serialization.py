@@ -325,6 +325,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     guards_serialization_mode="load",
                 )
                 loaded_gm = check_fn_manager.guard_manager
+                return instructions
 
         try:
             transform_code_object(self._frame_state.f_code, transform)

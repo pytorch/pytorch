@@ -461,7 +461,7 @@ class ContinueExecutionCache:
                         ]
 
             # TODO(jansel): add dead code elimination here
-            instructions[:] = prefix + instructions
+            return prefix + instructions
 
         new_code = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
@@ -505,6 +505,7 @@ class ContinueExecutionCache:
             )
             assert target.opcode == new_target.opcode
             new_offset = new_target.offset
+            return instructions
 
         transform_code_object(code, find_new_offset)
 
@@ -557,6 +558,7 @@ class ContinueExecutionCache:
                     )
                     for new, old in zip(new_targets, targets):
                         block_target_offset_remap[old.offset] = new[1].offset
+                    return instructions
 
                 transform_code_object(code, remap_block_offsets)
 

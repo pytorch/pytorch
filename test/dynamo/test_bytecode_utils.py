@@ -281,8 +281,8 @@ def fn():
                 e()
             f()
 
-        def nothing(*args):
-            pass
+        def nothing(instructions, code_options):
+            return instructions
 
         code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
@@ -297,8 +297,8 @@ def fn():
             except Exception:
                 pass
 
-        def nothing(*args):
-            pass
+        def nothing(instructions, code_options):
+            return instructions
 
         code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
