@@ -524,9 +524,6 @@ if __name__ == "__main__":
             self.assertEqual(z, x)
 
 
-instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
-
-
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
@@ -697,12 +694,11 @@ class TestXpuOps(TestCase):
             [16, 7, 8, 512, 35],
             [117, 7, 9, 513, 35],
         ]
-        input_type = torch.float16
         output_type = torch.float
         for i in range(len(shape)):
             for j in range(len(shape[i])):
                 dim = j - 1
-                x = torch.randn(shape[i]).to(input_type)
+                x = torch.randn(shape[i], dtype=dtype)
                 grad = torch.randn(shape[i]).to(output_type)
                 x_cpu = x.clone().requires_grad_()
                 y_cpu = torch.nn.functional.softmax(x_cpu, dim, dtype=output_type)
