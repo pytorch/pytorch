@@ -1038,7 +1038,6 @@ class AutogradCompilerInstance:
         )
         self.compile_context.__exit__(None, None, None)
         return runtime_wrapper, self.compiler_fn(graph)
-        # return runtime_wrapper, graph
 
     @staticmethod
     def get_all_nodes(args):
