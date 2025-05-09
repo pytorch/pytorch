@@ -18,7 +18,7 @@
 #include <ostream>
 #include <string>
 
-namespace torch::header_only {
+namespace torch::standalone {
 // These contains all device types that also have a BackendComponent
 // and therefore participate in per-backend functionality dispatch keys.
 // This is most backends except PrivateUse2 and PrivateUse3
@@ -111,9 +111,9 @@ static_assert(
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
-inline TORCH_API std::atomic<bool> privateuse1_backend_name_set;
+inline TORCH_API std::atomic<bool> privateuse1_backend_name_set{false};
 inline TORCH_API std::string privateuse1_backend_name;
-inline TORCH_API std::mutex privateuse1_lock;
+inline TORCH_API std::mutex privateuse1_lock{};
 
 inline TORCH_API bool is_privateuse1_backend_registered() {
   return privateuse1_backend_name_set.load(std::memory_order_acquire);
@@ -259,12 +259,12 @@ inline TORCH_API std::ostream& operator<<(
   stream << DeviceTypeName(type, /* lower case */ true);
   return stream;
 }
-} // namespace torch::header_only
+} // namespace torch::standalone
 
 namespace std {
 template <>
-struct hash<torch::header_only::DeviceType> {
-  std::size_t operator()(torch::header_only::DeviceType k) const {
+struct hash<torch::standalone::DeviceType> {
+  std::size_t operator()(torch::standalone::DeviceType k) const {
     return std::hash<int>()(static_cast<int>(k));
   }
 };

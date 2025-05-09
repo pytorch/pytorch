@@ -27,7 +27,6 @@
 #include <ATen/ops/lt_native.h>
 #include <ATen/ops/maximum_native.h>
 #include <ATen/ops/minimum_native.h>
-#include <ATen/ops/mul_native.h>
 #include <ATen/ops/ne_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
@@ -330,29 +329,11 @@ CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
-TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  if (!mps::supportsComplex() && (c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type()))) {
-    return mps::complex_mul_out(self, other, output);
-  }
-  mps::binaryOpTensor(self, other, output, "mul", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    return [mpsGraph multiplicationWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryCastTensor name:nil];
-  });
-}
 TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
   mps::binaryOpTensor(self, other, output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     return [mpsGraph atan2WithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryCastTensor name:nil];
   });
-}
-
-TORCH_IMPL_FUNC(div_out_mode_mps)
-(const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode, const Tensor& output) {
-  mps::div_mode_template(self, other, rounding_mode, output, "div_mode_out");
-}
-
-TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::div_mode_template(self, other, std::nullopt, output, "div_out");
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
@@ -369,10 +350,6 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   } else {
     at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
-}
-
-static void div_floor_kernel_mps(TensorIteratorBase& iter) {
-  mps::div_mode_template(iter.input(0), iter.input(1), "floor", iter.output(0), "floor_divide_out");
 }
 
 TORCH_IMPL_FUNC(remainder_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
@@ -448,5 +425,4 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
   mps::binaryOpTensor(self, other, output, "xlogy_out_mps", xlogy_op_block);
 }
 
-REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel_mps);
 } // namespace at::native

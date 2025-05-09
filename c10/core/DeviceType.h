@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/header_only/core/DeviceType.h>
+#include <torch/standalone/header_only/core/DeviceType.h>
 
 namespace c10 {
-using namespace torch::header_only;
+using namespace torch::standalone;
 } // namespace c10
