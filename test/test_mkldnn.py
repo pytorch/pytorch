@@ -1623,6 +1623,12 @@ class TestMkldnn(TestCase):
         # Above should trigger no warnings regardless of configuration
         self.assertEqual(len(w), 0)
 
+    def test_mkldnn_error_on_zero_stride(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/149274
+        x = torch.rand(1, 2, 3, 3).to_mkldnn()
+        with self.assertRaises(ValueError):
+            torch.mkldnn_max_pool2d(x, kernel_size=3, stride=0)
+
 
 instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
 

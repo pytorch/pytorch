@@ -102,7 +102,7 @@ TensorImpl::TensorImpl(
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
-    ImplType type,
+    ImplType /*type*/,
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
