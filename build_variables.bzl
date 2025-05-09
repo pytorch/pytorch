@@ -590,6 +590,7 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 libtorch_nativert_sources = [
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/common/FileUtil.cpp",
 ]
 
 torch_mobile_tracer_sources = [
