@@ -58,7 +58,7 @@ while IFS=: read -r filepath url; do
     sleep 1
   done
  done < <(
-  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\]+'
+  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\|]+'
   excludes=(
     ':(exclude,glob)**/.*'
     ':(exclude,glob)**/*.lock'
