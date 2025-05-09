@@ -267,7 +267,7 @@ class _IndependentConstraint(Constraint):
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
 
 
-class _MixtureSameFamilyConstraint(Constraint):
+class mixture_same_family(Constraint):
     """
     Constraint for the :class:`torch.distribution.MixtureSameFamily`
     distribution that adds back the rightmost batch dimension before
@@ -310,7 +310,7 @@ class _MixtureSameFamilyConstraint(Constraint):
         return result
 
     def __repr__(self):
-        return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)})"
+        return f"{self.__class__.__name__}({repr(self.base_constraint)})"
 
 
 class _Boolean(Constraint):
@@ -709,7 +709,6 @@ class _Stack(Constraint):
 dependent = _Dependent()
 dependent_property = _DependentProperty
 independent = _IndependentConstraint
-mixture_same_family = _MixtureSameFamilyConstraint
 boolean = _Boolean()
 one_hot = _OneHot()
 nonnegative_integer = _IntegerGreaterThan(0)
