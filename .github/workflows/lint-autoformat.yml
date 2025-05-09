@@ -10,9 +10,7 @@ jobs:
       contents: read
       pull-requests: write
     runs-on: lf.linux.2xlarge
-    # Not a true ciflow tag because the reusable action used for suggesting
-    # changes requires pull_request trigger
-    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.labels.*.name, 'ciflow/autoformat') }}
+    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.labels.*.name, 'autoformat') }}
     steps:
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
