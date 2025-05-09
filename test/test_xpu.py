@@ -763,5 +763,9 @@ class TestXpuOps(TestCase):
 
             self.assertEqual(expect, actual)
 
+
+instantiate_device_type_tests(TestXpuOps, globals(), only_for="xpu", allow_xpu=True)
+
+
 if __name__ == "__main__":
     run_tests()
