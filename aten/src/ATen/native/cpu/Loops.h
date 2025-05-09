@@ -218,6 +218,11 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
     out1.store(data[0] + i * sizeof(scalar_t));
     out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
+  for (; i <= n - Vec::size(); i += Vec::size()) {
+    auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
+    auto out1 = c10::guts::apply(vop, std::move(args1));
+    out1.store(data[0] + i * sizeof(scalar_t));
+  }
   if (i < n) {
     int64_t strides[ntensors];
     for (const auto arg : c10::irange(ntensors)) {
