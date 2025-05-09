@@ -1073,6 +1073,33 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
 
+    @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
+    def test_empty_nn_module_hooks_dict(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+        m = Module()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(2, dtype=torch.float32)
+        ref, loaded = self._test_serialization("EMPTY_NN_MODULE_HOOKS_DICT", fn, x)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, True)
+
+        h = m.register_forward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_forward_pre_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_backward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
