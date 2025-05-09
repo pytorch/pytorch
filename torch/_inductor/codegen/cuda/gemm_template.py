@@ -1022,6 +1022,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             outputs=[Y],
             names_str=names_str,
             input_reorder=input_reorder,
+            epilogue_inputs=[],  # TODO mlazos: will be filled in in https://github.com/pytorch/pytorch/pull/150907
+            epilogue_outputs=[],  # TODO mlazos: will be filled in in https://github.com/pytorch/pytorch/pull/150907
         )
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
