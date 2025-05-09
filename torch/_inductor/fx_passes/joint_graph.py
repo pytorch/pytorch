@@ -22,6 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
+    Ignored,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -333,7 +334,63 @@ class UniformValueConstantFolder(ConstantFolder):
         return self.unknown_value
 
 
+def create_zero_mul_replacement_pass():
+    """
+    Creates a pass that replaces x * 0 with aten.full of zeros
+    """
+    pattern_matcher_pass = PatternMatcherPass("zero_mul_replacement")
+
+    # Match both directions: x * 0 and 0 * x
+    @register_graph_pattern(
+        CallFunction(
+            torch.ops.aten.mul,
+            Ignored(),
+            0,  # Constant 0
+        ),
+        pass_dict=pattern_matcher_pass,
+    )
+    @register_graph_pattern(
+        CallFunction(
+            torch.ops.aten.mul,
+            0,  # Constant 0
+            Ignored(),
+        ),
+        pass_dict=pattern_matcher_pass,
+    )
+    def replace_mul_zero(match: Match):
+        """
+        Replace tensor * 0 with a zero tensor
+        """
+        tensor_val = match.output_node().meta.get("val", None)
+        if not isinstance(tensor_val, torch.Tensor):
+            return
+
+        shape = tensor_val.shape
+        dtype = tensor_val.dtype
+        device = tensor_val.device
+
+        def zero_tensor():
+            # Create a full tensor of zeros with the same shape, dtype, and device
+            return torch.ops.aten.full(
+                shape,
+                0,  # fill value
+                dtype=dtype,
+                layout=torch.strided,
+                device=device,
+                pin_memory=False,
+            )
+
+        match.replace_by_example(zero_tensor, [])
+
+    return pattern_matcher_pass
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
+    # peephole optimize patterns that only require one input to be defined
+    # prior to constant folding
+    zero_mul_pass = create_zero_mul_replacement_pass()
+    zero_mul_pass.apply(gm)
+
     with torch.utils._python_dispatch._disable_current_modes():
         "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
         aten = torch.ops.aten
