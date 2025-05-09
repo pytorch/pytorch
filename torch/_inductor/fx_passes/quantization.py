@@ -1328,34 +1328,20 @@ def _register_woq_mm_int8_pattern4():
 
 
 def _register_woq_concat_linear_pattern():
-    wgt1 = CallFunction(
-        prims.convert_element_type.default,
-        CallFunction(
-            aten.permute.default,
-            KeywordArg("w1"),
+    def _create_wgt_node(wgt_node_name: str):
+        return CallFunction(
+            prims.convert_element_type.default,
+            CallFunction(
+                aten.permute.default,
+                KeywordArg(wgt_node_name),
+                Arg(),
+            ),
             Arg(),
-        ),
-        Arg(),
+        )
+
+    cat_wgt = CallFunction(
+        aten.cat.default, [_create_wgt_node(wgt) for wgt in ["w1", "w2", "w3"]], 1
     )
-    wgt2 = CallFunction(
-        prims.convert_element_type.default,
-        CallFunction(
-            aten.permute.default,
-            KeywordArg("w2"),
-            Arg(),
-        ),
-        Arg(),
-    )
-    wgt3 = CallFunction(
-        prims.convert_element_type.default,
-        CallFunction(
-            aten.permute.default,
-            KeywordArg("w3"),
-            Arg(),
-        ),
-        Arg(),
-    )
-    cat_wgt = CallFunction(aten.cat.default, [wgt1, wgt2, wgt3], 1)
 
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
