@@ -23,10 +23,6 @@ while IFS=: read -r filepath url; do
     fi
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
       sleep 1
-      code=$(curl -k -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -A "$user_agent" "$url") || code=000
-    fi
-    if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
-      sleep 1
       request_id=$(curl -sS -G -H 'Accept: application/json' \
         --data-urlencode "host=$url" \
         --data-urlencode "max_nodes=1" \
@@ -66,7 +62,7 @@ while IFS=: read -r filepath url; do
     sleep 1
   done
  done < <(
-  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\]+'
+  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\|]+'
   excludes=(
     ':(exclude,glob)**/.*'
     ':(exclude,glob)**/*.lock'
