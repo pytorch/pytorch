@@ -192,6 +192,26 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
+    def test_empty_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                return torch.matmul(x, self.w) + self.b
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+            # We should have 1 input, 1 output, 2 constants for the model.
+            check_str = "AOTInductorModelBase(1, 1, 2"
+            FileCheck().check_count(check_str, 1).run(code)
+
     def test_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -299,6 +319,31 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
+
+    def test_autotune_with_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device) -> None:
+                super().__init__()
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device=device)
+
+            def _quantize(self, input):
+                return torch.abs(input)
+
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
+        model = Model(self.device).to(self.device)
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
+        )
 
     @requires_gpu
     def test_multi_device(self):
@@ -527,6 +572,17 @@ class AOTInductorTestsTemplate:
             with config.patch({"freezing": True}):
                 model = LinearModel(device=self.device)
                 self.check_model(model, example_inputs)
+
+    def test_empty_cat_dtype_promotion(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.cat([x, y], dim=1)
+                z = z.to(dtype=torch.bfloat16)
+                return z * 2
+
+        model = Foo()
+        inps = (torch.randn(4, 10, dtype=torch.bfloat16), torch.randn(4, 0))
+        self.check_model(model, inps)
 
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -4457,6 +4513,39 @@ class AOTInductorTestsTemplate:
                 1,
             ).run(code)
         self.check_model(Model(), example_inputs)
+
+    def test_input_codegen_with_sympy_expr(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class MyModel(torch.nn.Module):
+            def forward(self, getitem_54, getitem_52, getitem_19, values_2, offsets):
+                bitwise_or = torch.bitwise_or(getitem_54, getitem_52)
+                combined = torch.cat([getitem_19, values_2], dim=0)
+                add = combined + bitwise_or
+
+                sliced = values_2[:-1] + offsets
+                return add, sliced
+
+        inps = (
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randn((192,), device="cuda"),
+            torch.randn((48,), device="cuda"),
+            torch.randint(0, 100, (47,), device="cuda", dtype=torch.uint8),
+        )
+
+        dim = torch.export.Dim("dimensionality")
+        derived_dim = 2 * dim
+        spec = {
+            "getitem_54": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_52": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_19": (derived_dim,),  # [2*s40]
+            "values_2": (Dim.AUTO,),  # [s33 + 1]
+            "offsets": (Dim.AUTO,),  # [s33]
+        }
+
+        self.check_model(MyModel(), inps, dynamic_shapes=spec)
 
     @common_utils.parametrize("mark_unbacked", (True, False))
     def test_unbacked_equals_input_size_runtime_assertion(self, mark_unbacked: bool):
