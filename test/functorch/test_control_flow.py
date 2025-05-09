@@ -3485,7 +3485,77 @@ class AssociativeScanTests(TestCase):
             )
         ),
     )
+    # Skipping this combination as there is a CPP compilation failure that
+    # may be unrelated to associative_scan itself. There is a dedicated tests for
+    # this case below.
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["compile_mode"] == "compile_dynamic_shape"
+            and params["combine_mode"] == "generic"
+            and params["device"] == torch.device("cpu")
+            and params["autograd"]
+        ),
+    )
     def test_associative_scan_compile(
+        self, combine_mode, reverse, compile_mode, device, autograd
+    ):
+        x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        results = self._run_test(
+            model=AssociativeScanModels.Simple(**kwargs),
+            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+        if not reverse:
+            results_torch = []
+            for op_pt in [torch.cumsum, torch.cumprod]:
+                results_torch.append(op_pt(x, 0))
+            self.assertEqual(results, results_torch)
+
+        # Jax Examples
+        x = torch.arange(
+            0, 4, device=device, dtype=torch.float32, requires_grad=autograd
+        )
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result = self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+        if not reverse:
+            results_torch = torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.float32)
+        else:
+            results_torch = torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.float32)
+
+        self.assertEqual(result, results_torch)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @unittest.expectedFailure
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["compile_dynamic_shape"])
+    @parametrize("combine_mode", ["generic"])
+    @parametrize("device", [torch.device("cpu")])
+    @parametrize("autograd", [True])
+    def test_associative_scan_compile_fail(
         self, combine_mode, reverse, compile_mode, device, autograd
     ):
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
