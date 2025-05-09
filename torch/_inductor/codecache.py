@@ -1225,7 +1225,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         if pickled_content is not None:
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.INDUCTOR, key, pickled_content
+                InductorCacheArtifact.type(), key, pickled_content
             )
 
         # Now re-evaluate with the symints to add any guards to the current env.
