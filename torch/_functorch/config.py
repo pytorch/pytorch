@@ -58,7 +58,7 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
 # We will either make this the default with AOTAutogradCache, or
 # we'll just use it in the precompile flow. So there's no
 # need to add env vars or make it configurable
-bundled_autograd_cache: bool = False
+bundled_autograd_cache: bool = True
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
