@@ -862,7 +862,7 @@ def skip_if_not_triton(fn):
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if ifdynstaticdefault(True, False) or torch._dynamo.config.dynamic_shapes:
+        if ifdynstaticdefault(True, False):
             raise unittest.SkipTest("associtaive_scan doesn's support lifted SymInts.")
         return fn(self, *args, **kwargs)
 
