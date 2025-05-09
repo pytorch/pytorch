@@ -6,6 +6,55 @@ set -ex -o pipefail
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+# mkdir -p /tmp/sccache_nvcc_stuff
+# which nvcc
+# sudo tee /opt/cache/bin/nvcc > /dev/null <<EOF
+# #!/bin/sh
+# echo "\$@" >> /tmp/sccache_nvcc_stuff/nvcc_args.txt
+
+# if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
+#   exec sccache $(which nvcc) "\$@"
+# else
+#   exec $(which nvcc) "\$@"
+# fi
+# EOF
+# sudo chmod +x /opt/cache/bin/nvcc
+# # sudo mv /opt/cache/bin/nvcc /opt/cache/lib/
+
+# sudo rm -rf /opt/cache/bin/gcc
+# which gcc
+
+# sudo tee /opt/cache/bin/gcc > /dev/null <<EOF
+# #!/bin/sh
+# echo "\$@" >> /tmp/sccache_nvcc_stuff/gcc_args.txt
+
+# # sccache does not support -E flag, so we need to call the original compiler directly in order to avoid calling this wrapper recursively
+# for arg in "\$@"; do
+#   if [ "\$arg" = "-E" ]; then
+#     exec $(which gcc) "\$@"
+#   fi
+# done
+# for arg in "\$@"; do
+#   case "\$arg" in
+#     /tmp/sccache_nvcc*)
+#       cp --parents "\$arg" /tmp/sccache_nvcc_stuff
+#       ;;
+#   esac
+# done
+
+# if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
+#   exec sccache $(which gcc) "\$@"
+# else
+#   exec $(which gcc) "\$@"
+# fi
+# EOF
+
+# sudo chmod +x /opt/cache/bin/gcc
+# cat /opt/cache/bin/gcc
+# which gcc
+# gcc --version
+
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
@@ -412,3 +461,5 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi
+
+# tar czf nvcc_stuff.tar.gz /tmp/sccache_nvcc_stuff

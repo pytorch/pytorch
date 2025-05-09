@@ -284,6 +284,25 @@ jobs:
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
+          zip -r sccache_log.zip sccache_error.log
+
+      - name: store
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: ${{ steps.get-job-id.outputs.job-id }}-sccache-log
+          retention-days: 14
+          if-no-files-found: error
+          path: sccache_log.zip
+          s3-bucket: ${{ inputs.s3-bucket }}
+
+      - name: store2
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: ${{ steps.get-job-id.outputs.job-id }}-tempfiles
+          retention-days: 14
+          if-no-files-found: error
+          path: nvcc_stuff.tar.gz
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
