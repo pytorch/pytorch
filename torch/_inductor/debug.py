@@ -12,7 +12,6 @@ import os.path
 import pickle
 import pstats
 import shutil
-import subprocess
 import traceback
 from collections.abc import Iterator
 from typing import Any, Callable, IO, Optional, Union
