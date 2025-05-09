@@ -11,9 +11,6 @@ professionals who collaborate to advance the state of machine learning.
 Check out the resources below to learn how to contribute code to the
 core framework, report and fix bugs, improve documentation, and much more.
 
-For specific guidance on how to contribute to PyTorch, start with
-`The Ultimate Guide to PyTorch Contributions <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>`__.
-
 .. toctree::
    :glob:
    :maxdepth: 1
