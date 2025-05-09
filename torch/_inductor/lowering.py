@@ -1911,7 +1911,11 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
             and parent.target
             in (
                 aten.view.dtype,
+                aten.view.default,
                 aten.cat.default,
+                aten.clone.default,
+                aten.permute.default,
+                aten.reshape.default,
                 aten._scaled_mm.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
