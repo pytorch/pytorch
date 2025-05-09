@@ -1,4 +1,4 @@
-add_loop_eager,compile_time_instruction_count,3174000000,0.015
+add_loop_eager,compile_time_instruction_count,3040000000,0.015
 
 
 
@@ -14,11 +14,11 @@ add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44130000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,25990000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,25840000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,1019000000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,1011000000,0.015
 
 
 
@@ -34,7 +34,7 @@ basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,10370000
 
 
 
-update_hint_regression,compile_time_instruction_count,1677500000,0.02
+update_hint_regression,compile_time_instruction_count,1731000000,0.02
 
 
 
@@ -42,19 +42,19 @@ float_args,compile_time_instruction_count,439200000,0.015
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,1027000000,0.015
+sum_floordiv_regression,compile_time_instruction_count,1005000000,0.015
 
 
 
-symint_sum,compile_time_instruction_count,3270000000,0.015
+symint_sum,compile_time_instruction_count,3234000000,0.015
 
 
 
-symint_sum_loop,compile_time_instruction_count,4296000000,0.015
+symint_sum_loop,compile_time_instruction_count,4239000000,0.015
 
 
 
-aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2095000000,0.015
+aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2080000000,0.015
 
 
 
