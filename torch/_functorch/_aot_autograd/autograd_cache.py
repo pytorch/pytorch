@@ -58,7 +58,6 @@ from torchgen.utils import dataclass_repr
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
-    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
@@ -614,9 +613,6 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
 
     guards_expr: Optional[str]
 
-    # # Used by compiled autograd
-    cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo]
-
     def pre_save(self):
         """
         Perform any preparations to make the cache entry ready for serialization.
@@ -771,7 +767,7 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
                 self.compiled_bw.backward_state_indices,
                 disable_amp,
                 self.indices_of_inps_to_detach,
-                self.cached_lazy_backward_info,
+                None,  # lazy_backward_info
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
@@ -1191,7 +1187,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         backward_time_taken_ns: int,
         sanitized_aot_config: AOTConfig,
         guards_expr: Optional[str],
-        cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo],
         backward_state_indices: Optional[list[int]],
         num_symints_saved_for_bw: Optional[int],
     ) -> GenericAOTAutogradCacheEntry:
@@ -1230,7 +1225,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 backward_time_taken_ns=backward_time_taken_ns,
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
-                cached_lazy_backward_info=cached_lazy_backward_info,
             )
 
         else:
@@ -1275,5 +1269,4 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 backward_time_taken_ns=backward_time_taken_ns,
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
-                cached_lazy_backward_info=cached_lazy_backward_info,
             )

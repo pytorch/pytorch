@@ -49,7 +49,6 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
-    CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
     DebugAssertWrapper,
     EffectTokensWrapper,
@@ -180,7 +179,10 @@ def aot_dispatch_base(
     aot_forward_graph_str = None
     if aot_config.cache_info is not None:
         aot_forward_graph_str = fw_module.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            fast_sympy_print=True,
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
@@ -269,7 +271,6 @@ def aot_dispatch_base(
                 backward_time_taken_ns=0,
                 sanitized_aot_config=sanitize_aot_config(aot_config),
                 guards_expr=guards_expr,
-                cached_lazy_backward_info=None,
                 backward_state_indices=None,
                 num_symints_saved_for_bw=None,
             )
@@ -1275,13 +1276,8 @@ def aot_dispatch_autograd(
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
-            compiled_bw_func, lazy_backward_info, _fw_metadata, aot_config
+            compiled_bw_func, _fw_metadata, aot_config
         ):
-            bw_module = lazy_backward_info.bw_module
-            bw_module.meta = {}
-            for node in bw_module.graph.nodes:
-                node.meta = {}
-
             fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
             bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
             cache_info = aot_config.cache_info
@@ -1315,9 +1311,6 @@ def aot_dispatch_autograd(
                     backward_time_taken_ns,
                     sanitized_aot_config=sanitize_aot_config(aot_config),
                     guards_expr=guards_expr,
-                    cached_lazy_backward_info=CachedAutogradLazyBackwardCompileInfo(
-                        bw_module
-                    ),
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
                 )
@@ -1326,9 +1319,7 @@ def aot_dispatch_autograd(
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(
-                compiled_bw_func, lazy_backward_info, fw_metadata, aot_config
-            )
+            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(
