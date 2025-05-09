@@ -8,13 +8,13 @@ from unittest import skip
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import (
     Partial,
     Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
