@@ -1541,7 +1541,7 @@ class NullVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen"):
         if sys.version_info < (3, 11):
             unimplemented_v2(
-                gb_type="Python version incompatibility",
+                gb_type="Attempted to reconstruct a NULL value",
                 context=f"reconstruct {self}",
                 explanation="Dynamo encountered bytecode (`PUSH_NULL`) specific "
                 "to Python 3.11+ but is running in an older Python version.",
