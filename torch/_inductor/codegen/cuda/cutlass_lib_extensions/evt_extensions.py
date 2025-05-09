@@ -119,7 +119,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
     ) -> tuple[str, str, str]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
         assert cuda_arch >= 90, "Only SM90+ is supported for EVT"
-        epilogue_functor = _trace(fn_src, example_tensors, **kwargs)
+        epilogue_functor = _trace(fn_src, example_tensors, cuda_arch, **kwargs)
         visitor = EpilogueFunctorVisitor(cuda_arch, epilogue_functor)
         fusion_callbacks = FusionCallbacks(visitor.graph, cuda_arch, emit_CD=False)
         collective_epilogue = CollectiveEpilogue(
@@ -138,7 +138,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
     # This is modified to enable directly passing the source code of the epilogue vs getting it from a bona-fide python function
     # The reason for this is that inspect.getsource does not work with functions defined at runtime via exec/eval
     def _trace(
-        fn_src: str, example_tensors: dict[str, CutlassTensor], **kwargs: Any
+        fn_src: str, example_tensors: dict[str, CutlassTensor], cc: int, **kwargs: Any
     ) -> EpilogueFunctor:
         class EpilogueFunctor(PythonASTFrontend):
             def __init__(self, cc: int, **kwargs: Any):

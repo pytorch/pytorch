@@ -360,7 +360,10 @@ return D, tmp_2""",
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
-        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS)
+        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
+
+        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
+        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, cuda_arch)
 
         self.assertExpectedInline(
             _render_argument_type(

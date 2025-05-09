@@ -62,6 +62,34 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
+un_ops_under_test = [torch.relu, torch.sigmoid, torch.tanh]
+bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
+
+evt_all_ops = evt_bin_ops = parametrize(
+    "op", un_ops_under_test + bin_ops_under_test, name_fn=lambda f: f.__name__
+)
+
+
+def gen_args(op, shape):
+    if op in bin_ops_under_test:
+        return (torch.rand(*shape, device="cuda:0").half(),)
+    else:
+        return ()
+
+
+use_evt_config = config.patch(
+    {
+        "max_autotune": True,
+        "max_autotune_gemm_backends": "CUTLASS",
+        "cuda.cutlass_max_profiling_configs": 1,
+        "autotune_fallback_to_aten": False,
+        "benchmark_epilogue_fusion": False,
+        "cuda.cutlass_tma_only": True,  # EVT doesn't support benchmark fusion yet
+        "cuda.cutlass_epilogue_fusion_enabled": True,
+    }
+)
+
+
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
@@ -1317,6 +1345,35 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @config.patch(
+        {"benchmark_epilogue_fusion": False, "cuda.cutlass_tma_only": True}
+    )  # EVT doesn't support benchmark fusion yet
+    def test_evt_flexible_layout(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, B):
+                A = torch.zeros_like(B)
+                return (A @ B).relu()
+
+        M = 1024
+        B = torch.randn(M, M).cuda().half()
+        model = TestModel().cuda()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            _ = torch.compile(model)(B)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_filtered_ops_cache(self):
         class TestModel(torch.nn.Module):
             def forward(self, B):
@@ -1339,6 +1396,60 @@ class TestCutlassBackend(TestCase):
         ):
             _ = torch.compile(model)(B)
         self.assertTrue(time.time() - start_time < 100)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_fusions_basic(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                res = (a @ b).relu()  # add extra activation to not hit addmm path
+                return op(res, *extra_args)
+
+        M = 16
+        N = 16
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_broadcasting(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_mixed_dtypes(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_multi_op(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_multi_output(self):
+        pass
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_all_ops
+    def test_evt_return_accumulator(self):
+        pass
 
 
 if __name__ == "__main__":
