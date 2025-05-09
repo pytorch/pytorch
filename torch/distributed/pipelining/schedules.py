@@ -9,7 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from enum import Enum
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -395,7 +395,7 @@ class _PipelineSchedule(ABC):
 
 
 def _batch_p2p(
-        p2p_ops: list[dist.P2POp], desc: Optional[str] = None
+    p2p_ops: list[dist.P2POp], desc: Optional[str] = None
 ) -> list[dist.Work]:
     """
     Simple wrapper over batch_isend_irecv from torch.distributed, which just adds a descriptive logger on top.
