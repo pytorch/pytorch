@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+trap 'kill 0' SIGINT
+
 status=0
 green='\e[1;32m'; red='\e[1;31m'; cyan='\e[1;36m'; yellow='\e[1;33m'; reset='\e[0m'
 user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
@@ -16,9 +18,15 @@ while IFS=: read -r filepath url; do
   (
     code=$(curl -k -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -I "$url") || code=000
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
+      sleep 1
       code=$(curl -k -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -r 0-0 -A "$user_agent" "$url") || code=000
     fi
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
+      sleep 1
+      code=$(curl -k -gsLm30 --retry 3 --retry-delay 3 --retry-connrefused -o /dev/null -w "%{http_code}" -A "$user_agent" "$url") || code=000
+    fi
+    if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
+      sleep 1
       request_id=$(curl -sS -G -H 'Accept: application/json' \
         --data-urlencode "host=$url" \
         --data-urlencode "max_nodes=1" \
@@ -58,7 +66,7 @@ while IFS=: read -r filepath url; do
     sleep 1
   done
  done < <(
-  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\|]+'
+  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\]+'
   excludes=(
     ':(exclude,glob)**/.*'
     ':(exclude,glob)**/*.lock'
