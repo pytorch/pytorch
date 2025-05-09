@@ -862,6 +862,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             return None
 
+        if inductor_cuda_config.cutlass_tma_only and not self._has_tma_epilogue(op):
+            return None
+
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
@@ -995,7 +998,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             All inputs and their corresponding buffer addresses and names take precedence over previously
             passed inputs to the template at construction time. However, they should be layout compatible.
         """
-
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
@@ -1044,6 +1046,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             # operand
             op.C.element = op.A.element
 
+            assert op.C.element == op.D.element, (
+                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            )
+
         argument_template, epilogue_template = self._get_template_args(op)
         should_swap_xw: bool = False
         if Bias is not None and self._has_tma_epilogue(op):
@@ -1062,32 +1068,43 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             read_names = OrderedSet(evt_read_names) - OrderedSet(evt_write_names)
             write_names = OrderedSet(evt_write_names)
-
+            assert write_names, "There should be at least one write"
+            output_D_name = next(
+                name for name, rename in buffer_renames.items() if rename == "D"
+            )
             name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
-            epilogue_inputs = [name_to_buffer[name] for name in read_names]
-            epilogue_outputs = [name_to_buffer[name] for name in write_names]
-
+            output_D = name_to_buffer[output_D_name]
             evt_name, evt_args, evt_code = self._render_evt(
                 op,
                 evt_py_code,
                 evt_read_names,
                 evt_write_names,
                 buffer_renames,
+                name_to_buffer[output_D_name].get_layout().dtype,
                 Y.get_layout().dtype,
-                W.get_layout().dtype,
             )
+
+            # Don't include implicit accumulator input in epilogue inputs
+            epilogue_inputs = [
+                name_to_buffer[name] for name in read_names if name != Y.get_name()
+            ]
+            epilogue_outputs = [name_to_buffer[name] for name in write_names]
+
+            # In the template above, Y is set to D. However in the EVT case, it's possible that
+            # the original accumulator isn't returned, and a different write is assigned to D
+            assert isinstance(output_D, Buffer)
+            Y = output_D
         else:
             evt_name = None
             epilogue_inputs = []
-            epilogue_outputs = []
+            epilogue_outputs = [Y]
             evt_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
             evt_code = ""
 
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs,  # type: ignore[arg-type]
-            outputs=[Y],
+            outputs=epilogue_outputs,  # type: ignore[arg-type]
             epilogue_inputs=epilogue_inputs,
-            epilogue_outputs=epilogue_outputs,
             names_str=names_str,
             input_reorder=input_reorder,
         )
@@ -1226,6 +1243,10 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             result = epilogue_schedule_str.lower().startswith("tma")
         return result
 
+    @staticmethod
+    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+        return CUTLASS3xGemmTemplate._has_tma_epilogue(op)
+
     def _are_inputs_layout_compatible(self, layouts: list[Layout]) -> bool:
         """
         Evaluates whether input layouts are compatible for General Matrix Multiply (GEMM).
@@ -1316,14 +1337,15 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
+        examples = create_example_tensors(
+            read_names,
+            write_names,
+            buffer_renames,
+            name_to_buffer,  # type: ignore[arg-type]
+        )
         evt_name, evt_args, evt_code = trace(
             evt_py_code,
-            create_example_tensors(
-                read_names,
-                write_names,
-                buffer_renames,
-                name_to_buffer,  # type: ignore[arg-type]
-            ),
+            examples,
             acc_dtype,
             output_dtype,
             op.tile_description,  # type: ignore[attr-defined]
@@ -1361,9 +1383,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             # bias dtype
             op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(
                 Bias.get_layout().dtype
-            )
-            assert op.C.element == op.D.element, (
-                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
             )
 
             # Bias layout

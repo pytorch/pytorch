@@ -11,6 +11,7 @@ from sympy import Expr, symbols
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ from ...ir import (
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import (
+    CSEVariable,
     IndentedBuffer,
     Kernel,
     OpOverrides,
@@ -237,7 +239,6 @@ class CUDATemplateKernel(CUDAKernel):
         inputs: list[IRNode],
         outputs: list[IRNode],
         epilogue_inputs: list[IRNode],
-        epilogue_outputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -283,13 +284,6 @@ class CUDATemplateKernel(CUDAKernel):
             if node is not None:
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
-
-        for epilogue_output in epilogue_outputs:
-            if epilogue_output is not None:
-                self.named_nodes[epilogue_output.get_name()] = epilogue_output
-                self.args.output_buffers[epilogue_output.get_name()] = (
-                    epilogue_output.get_name()
-                )
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
@@ -539,6 +533,12 @@ class CUDATemplateKernel(CUDAKernel):
                 f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
             )
 
+    def load(self, name: str, index: Expr, mode: Any = None) -> CSEVariable:
+        """
+        Mock load function for memory planning to optimize allocations properly.
+        """
+        return self.create_cse_var(name, bounds=ValueRanges.unknown())
+
     def store(self, name: str, index: Expr, value: Any, mode: Any = None) -> None:
         """
         Mock store function for memory planning to optimize allocations properly.
@@ -569,6 +569,7 @@ class CUDATemplateCaller(ChoiceCaller):
             tuple[CUDATemplateKernel, functools.partial[str]],
         ],
         bmreq: CUDABenchmarkRequest,
+        supports_epilogue_fusion: bool,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
             dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
@@ -579,6 +580,7 @@ class CUDATemplateCaller(ChoiceCaller):
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
+        self.supports_epilogue_fusion = supports_epilogue_fusion
         self.template = template
         self.info_kwargs = info_kwargs
 
@@ -635,6 +637,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 workspace_size=self.bmreq.workspace_size,
+                supports_epilogue_fusion=self.supports_epilogue_fusion,
                 template=self.template,
             )
         )

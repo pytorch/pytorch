@@ -1335,6 +1335,9 @@ class cuda:
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = False
 
+    # Whether to only use TMA-compatible kernels in CUTLASS
+    cutlass_tma_only = False
+
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config

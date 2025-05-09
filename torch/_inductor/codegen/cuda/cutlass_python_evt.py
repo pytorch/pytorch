@@ -68,7 +68,7 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def sigmoid(x0: str) -> str:
-        return CutlassEVTOpsMixIn._prefix_un_op("sigmoid", x0)
+        raise NotImplementedError("sigmoid is not supported in CUTLASS python evt")
 
     @staticmethod
     def sub(x0: str, x1: str) -> str:
@@ -76,7 +76,7 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def tanh(x0: str) -> str:
-        return CutlassEVTOpsMixIn._prefix_un_op("tanh", x0)
+        raise NotImplementedError("tanh is not supported in CUTLASS python evt")
 
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
