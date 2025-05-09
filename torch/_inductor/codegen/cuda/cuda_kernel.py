@@ -539,6 +539,12 @@ class CUDATemplateKernel(CUDAKernel):
                 f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
             )
 
+    def store(self, name: str, index: Expr, value: Any, mode: Any = None) -> None:
+        """
+        Mock store function for memory planning to optimize allocations properly.
+        """
+        self.store_buffer_names.add(name)
+
 
 class CUDATemplateCaller(ChoiceCaller):
     """
