@@ -21,7 +21,6 @@ struct CPUGeneratorImplStateLegacy {
   int left;  /* = 1; */
   int seeded; /* = 0; */
   uint64_t next;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint64_t state[at::MERSENNE_STATE_N]; /* the array for the state vector  */
 
   /********************************/
