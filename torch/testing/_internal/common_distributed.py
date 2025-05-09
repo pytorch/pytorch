@@ -227,6 +227,23 @@ def nccl_skip_if_lt_x_gpu(backend, x):
     return decorator
 
 
+def skip_if_lt_world_size():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            self = args[0]
+            if (
+                torch.cuda.is_available()
+                and torch.cuda.device_count() >= self.world_size
+            ):
+                return func(*args, **kwargs)
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        return wrapper
+
+    return decorator
+
+
 def verify_ddp_error_logged(model_DDP, err_substr):
     # Verify error was logged in ddp_logging_data.
     ddp_logging_data = model_DDP._get_ddp_logging_data()
