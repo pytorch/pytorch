@@ -38,11 +38,7 @@ run_doxygen = os.environ.get("RUN_DOXYGEN", "false") == "true"
 # ones.
 extensions = [
     "sphinx.ext.intersphinx",
-    "sphinxext.opengraph",
 ] + (["breathe", "exhale"] if run_doxygen else [])
-
-ogp_site_url = "http://pytorch.org/"
-ogp_image = "https://docs.pytorch.org/assets/images/social-share.jpg"
 
 intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
 
