@@ -3,6 +3,7 @@ set(NATIVERT_TEST_ROOT ${TORCH_ROOT}/test/cpp/nativert)
 # Build the cpp gtest binary containing the cpp-only tests.
 set(NATIVERT_TEST_SRCS
   ${NATIVERT_TEST_ROOT}/test_tensor_meta.cpp
+  ${NATIVERT_TEST_ROOT}/test_mpmc_queue.cpp
   ${TORCH_ROOT}/torch/nativert/graph/TensorMeta.cpp
 )
 

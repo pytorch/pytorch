@@ -32,8 +32,6 @@ if torch.cuda._is_compiled():
 else:
     get_cuda_stream = None
 
-_device_t = Union[torch.device, str, int, None]
-
 # Recording the device properties in the main process but used in worker process.
 caching_worker_device_properties: dict[str, Any] = {}
 caching_worker_current_devices: dict[str, int] = {}
@@ -46,7 +44,7 @@ class DeviceInterface:
     """
 
     class device:
-        def __new__(cls, device: _device_t):
+        def __new__(cls, device: torch.types.Device):
             raise NotImplementedError
 
     class Event:
@@ -78,7 +76,7 @@ class DeviceInterface:
             raise NotImplementedError
 
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             raise NotImplementedError
 
     @staticmethod
@@ -86,7 +84,7 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def set_device(device: _device_t):
+    def set_device(device: torch.types.Device):
         raise NotImplementedError
 
     @staticmethod
@@ -126,15 +124,15 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def synchronize(device: _device_t = None):
+    def synchronize(device: torch.types.Device = None):
         raise NotImplementedError
 
     @classmethod
-    def get_device_properties(cls, device: _device_t = None):
+    def get_device_properties(cls, device: torch.types.Device = None):
         return cls.Worker.get_device_properties(device)
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None):
+    def get_compute_capability(device: torch.types.Device = None):
         raise NotImplementedError
 
     @staticmethod
@@ -148,7 +146,7 @@ class DeviceInterface:
         return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
     @staticmethod
-    def memory_allocated(device: _device_t = None) -> int:
+    def memory_allocated(device: torch.types.Device = None) -> int:
         raise NotImplementedError
 
     @staticmethod
@@ -220,7 +218,7 @@ class CudaInterface(DeviceInterface):
             return torch.cuda.current_device()
 
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
@@ -260,7 +258,7 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available()
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None):
+    def get_compute_capability(device: torch.types.Device = None):
         if torch.version.hip is None:
             major, min = torch.cuda.get_device_capability(device)
             return major * 10 + min
@@ -315,7 +313,7 @@ class XpuInterface(DeviceInterface):
             return torch.xpu.current_device()
 
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
@@ -354,7 +352,7 @@ class XpuInterface(DeviceInterface):
         return torch.xpu.is_available()
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None):
+    def get_compute_capability(device: torch.types.Device = None):
         cc = torch.xpu.get_device_capability(device)
         return cc
 
@@ -407,7 +405,7 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None) -> str:
+    def get_compute_capability(device: torch.types.Device = None) -> str:
         return ""
 
     @staticmethod
@@ -419,7 +417,7 @@ class CpuInterface(DeviceInterface):
         return 0
 
     @staticmethod
-    def synchronize(device: _device_t = None):
+    def synchronize(device: torch.types.Device = None):
         pass
 
     @staticmethod
@@ -456,16 +454,16 @@ class MpsInterface(DeviceInterface):
         return 0
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None) -> str:
+    def get_compute_capability(device: torch.types.Device = None) -> str:
         return ""
 
     @staticmethod
-    def synchronize(device: _device_t = None):
+    def synchronize(device: torch.types.Device = None):
         torch.mps.synchronize()
 
     class Worker:
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             return {}
 
         @staticmethod
