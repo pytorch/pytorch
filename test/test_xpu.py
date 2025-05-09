@@ -737,7 +737,6 @@ class TestXpuOps(TestCase):
             # Don't want the periodic tests to fail frequently
             self.assertEqual(xpu_results, cpu_results, atol=1e-4, rtol=1e-4)
 
-    @onlyXPU
     @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
