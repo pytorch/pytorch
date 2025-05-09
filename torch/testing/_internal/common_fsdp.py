@@ -938,9 +938,11 @@ class MLPStack(nn.Sequential):
             "1.in_proj": ColwiseParallel(use_local_output=False),
             "1.out_proj": RowwiseParallel(use_local_output=False),
             "2.in_proj": ColwiseParallel(use_local_output=False),
-            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
-            if self.with_seq_parallel
-            else RowwiseParallel(),
+            "2.out_proj": (
+                RowwiseParallel(output_layouts=Shard(1))
+                if self.with_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         if self.with_seq_parallel:
             parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
@@ -1200,6 +1202,12 @@ class FSDPTest(MultiProcessTestCase):
                     store=store,
                 )
             else:
+                if (
+                    DISTRIBUTED_BACKEND == "nccl"
+                    and torch.cuda.device_count() < self.world_size
+                ):
+                    sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
                 dist.init_process_group(
                     init_method=self.init_method,
                     backend=DISTRIBUTED_BACKEND,
