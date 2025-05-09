@@ -14,8 +14,13 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils import _get_device_module
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
