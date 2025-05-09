@@ -11345,12 +11345,17 @@ class TestAutogradForwardMode(TestCase):
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
     def test_min_max_median_backprops_to_all_values(self, device):
-        for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
+        amin_ = lambda x: torch.aminmax(x)[0]
+        amax_ = lambda x: torch.aminmax(x)[1]
+
+        for f in [torch.min, torch.max, torch.median, torch.nanmedian, amin_, amax_]:
             x1 = torch.tensor(
                 [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
             )
             x2 = torch.tensor(
-                [float("nan"), float("nan"), float("nan")], requires_grad=True
+                [float("nan"), float("nan"), float("nan")],
+                device=device,
+                requires_grad=True,
             )
             for x in [x1, x2]:
                 y = f(x)
