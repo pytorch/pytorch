@@ -182,6 +182,9 @@ class SchedulerBuffer:
         assert self.node is not None
         return self.node.get_mutation_names()
 
+    def get_device(self) -> Optional[torch.device]:
+        return self.node.get_output_spec().get_device()
+
 
 @dataclasses.dataclass
 class SchedulerDonatedBuffer(SchedulerBuffer):
@@ -482,7 +485,9 @@ class BaseSchedulerNode:
                     continue
 
                 if (
-                    buf_to_be_inplaced.scheduler.get_fused_node(user_node)
+                    user_node.get_first_name()
+                    not in buf_to_be_inplaced.scheduler.name_to_fused_node
+                    or buf_to_be_inplaced.scheduler.get_fused_node(user_node)
                     is not fused_node
                 ):
                     continue
@@ -896,13 +901,13 @@ class BaseSchedulerNode:
 class WhyNoFuse:
     # TODO when we drop support for Python < 3.10, we can use
     # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["node1", "node2", "reason", "args"]
+    __slots__ = ["name1", "name2", "reason", "args"]
     reason: str
     args: tuple[Any, ...]
 
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
-        self.node1 = node1
-        self.node2 = node2
+        self.name1 = node1.get_name()
+        self.name2 = node2.get_name()
 
     def __call__(self, reason: str, *args: Any) -> None:
         self.reason = reason
@@ -910,7 +915,7 @@ class WhyNoFuse:
         fusion_log.debug(self)
 
     def __str__(self) -> str:
-        return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
+        return f"cannot fuse {self.name1} with {self.name2}: " + (
             self.reason % self.args
         )
 
@@ -1732,6 +1737,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_operation_names():
                 self.name_to_node[name] = other_node
 
+            self.outputs_by_name: dict[str, SchedulerBuffer] = {
+                k: v for snode in self.snodes for k, v in snode.outputs_by_name.items()
+            }
+
         self.use_custom_partition_algo = use_custom_partition_algo
         device = snodes[0].get_device()
         assert device
@@ -2093,6 +2102,11 @@ class Scheduler:
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
+
+        if torch._inductor.config.graph_partition:
+            self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
+            self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
+
         self.compute_last_usage()
         log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
@@ -4169,7 +4183,6 @@ class Scheduler:
                         SymT.FLOAT,
                         SymT.UNBACKED_INT,
                         SymT.UNBACKED_FLOAT,
-                        SymT.PRECOMPUTED_SIZE,
                     ),
                 )
             )
@@ -4269,6 +4282,132 @@ class Scheduler:
 
         return signatures[::-1]
 
+    def reorder_for_minimizing_partition(
+        self,
+        nodes: list[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder nodes to minimize the number of partitions via a bfs
+        topological sort. This is the optimal reodering such that the
+        number of partitions cannot be reduced further. This may be
+        sub-optimal for other metrics such as peak memory. This does not
+        change relative orders of two cudagraphable nodes, nor the
+        relative order of two non_cudagraphable nodes.
+        """
+        node_to_indegree: dict[BaseSchedulerNode, int] = dict()
+        cudagraphable_nodes: collections.deque[BaseSchedulerNode] = collections.deque()
+        non_cudagraphable_nodes: collections.deque[BaseSchedulerNode] = (
+            collections.deque()
+        )
+
+        def insert_pending_nodes(node: BaseSchedulerNode) -> None:
+            if self.should_partition(node):
+                non_cudagraphable_nodes.append(node)
+            else:
+                cudagraphable_nodes.append(node)
+
+        def update_indegree(node: BaseSchedulerNode) -> None:
+            for succ_node in node.mpi_node.succ_nodes:
+                assert node_to_indegree[succ_node] > 0
+                node_to_indegree[succ_node] -= 1
+                if node_to_indegree[succ_node] == 0:
+                    insert_pending_nodes(succ_node)
+
+        for node in nodes:
+            node_to_indegree[node] = len(node.mpi_node.pred_nodes)
+            if node_to_indegree[node] == 0:
+                insert_pending_nodes(node)
+
+        schedule: list[BaseSchedulerNode] = []
+        num_iters: int = 0
+        while num_iters < len(nodes) and (
+            non_cudagraphable_nodes or cudagraphable_nodes
+        ):
+            while non_cudagraphable_nodes:
+                node = non_cudagraphable_nodes.popleft()
+                schedule.append(node)
+                update_indegree(node)
+
+            while cudagraphable_nodes:
+                node = cudagraphable_nodes.popleft()
+                schedule.append(node)
+                update_indegree(node)
+
+            num_iters += 1
+
+        if num_iters > len(nodes):
+            raise RuntimeError(
+                """
+                Failed to schedule, while loop ran too long when
+                reordering for minimizing the num of partitions
+                """
+            )
+
+        return schedule
+
+    def maybe_reorder_for_minimizing_partition(
+        self,
+        nodes: list[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder nodes to minimize the number of partitions if this only slightly
+        increase peak memory.
+        """
+        from .memory import estimate_peak_memory, prepare_planning_info
+
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+
+        default_peak_memory, name_to_freeable_input_buf = prepare_planning_info(
+            nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+            OrderedSet(V.graph.graph_inputs.keys()),
+            graph_outputs,
+        )
+
+        reordered_nodes = self.reorder_for_minimizing_partition(nodes)
+        reorder_peak_memory, _ = estimate_peak_memory(
+            reordered_nodes, name_to_freeable_input_buf, graph_outputs
+        )
+
+        # 1.1 here means 10% extra peak memory budget which is quite arbitrary
+        if reorder_peak_memory < default_peak_memory * 1.1:
+            return reordered_nodes
+
+        return nodes
+
+    def reorder_for_partition_with_simple_dependency(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        """
+        Reorder a node if it should be partitioned and has simple dependency:
+        1. move a partitioned node to the front if it has no dependency
+        2. move a partitioned node to the back if it is only used by OutputNode
+        3. otherwise do not reorder
+        """
+
+        front: list[BaseSchedulerNode] = []
+        middle: list[BaseSchedulerNode] = []
+        back: list[BaseSchedulerNode] = []
+
+        def only_output_user(node: BaseSchedulerNode) -> bool:
+            for buf in node.get_outputs():
+                for use in buf.users:
+                    if not isinstance(use.node, OutputNode):
+                        return False
+            return True
+
+        for node in nodes:
+            should_partition = self.should_partition(node)
+            if should_partition and len(node.unmet_dependencies) == 0:
+                front.append(node)
+            elif should_partition and only_output_user(node):
+                back.append(node)
+            else:
+                middle.append(node)
+
+        return front + middle + back
+
     def graph_partition(
         self,
     ) -> tuple[list[PartitionType], list[GraphPartitionSignature]]:
@@ -4277,7 +4416,6 @@ class Scheduler:
         graph partitions and compute partition input/output signatures.
         """
         partitions: list[PartitionType] = []
-
         skip_cudagraph = True
         cur_partition: PartitionType = []
         skip_cudagraphs = []
@@ -4520,7 +4658,7 @@ class Scheduler:
                     )
                     return False
             except CompilationError as e:
-                # workaround triton issue: https://github.com/openai/triton/issues/2151
+                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
                 if "Loop-carried variable" in str(e):
                     fusion_log.debug(
                         "ComboKernel benchmark: return True because of loop-carried variable"
@@ -4534,7 +4672,7 @@ class Scheduler:
         try:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
-            # workaround triton issue: https://github.com/openai/triton/issues/2151
+            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
             if "Loop-carried variable" in str(e):
                 fusion_log.debug(
                     "ComboKernel benchmark: return True because of loop-carried variable"
