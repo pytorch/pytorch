@@ -49,6 +49,7 @@ class TestBasicSoftmax(TestCase):
 
                 x_xpu = x.clone().to(device).requires_grad_()
                 y_xpu = F.softmax(x_xpu, dim, dtype=output_type)
+                self.assertEqual(y_xpu.dtype, torch.float32)
                 y_xpu.backward(grad.clone().to(device))
                 self.assertEqual(y_cpu, y_xpu.cpu())
                 self.assertEqual(x_cpu.grad, x_xpu.grad.cpu())
