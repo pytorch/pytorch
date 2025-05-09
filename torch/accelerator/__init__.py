@@ -2,7 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 from typing_extensions import deprecated
 
 import torch
