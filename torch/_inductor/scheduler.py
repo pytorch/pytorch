@@ -4303,17 +4303,19 @@ class Scheduler:
         change relative orders of two cudagraphable nodes, nor the
         relative order of two non_cudagraphable nodes.
         """
+        import heapq
+
         node_to_indegree: dict[BaseSchedulerNode, int] = dict()
-        cudagraphable_nodes: collections.deque[BaseSchedulerNode] = collections.deque()
-        non_cudagraphable_nodes: collections.deque[BaseSchedulerNode] = (
-            collections.deque()
-        )
+        cudagraphable_nodes: list[tuple[int, BaseSchedulerNode]] = []
+        non_cudagraphable_nodes: list[tuple[int, BaseSchedulerNode]] = []
+        node_to_index = {node: idx for idx, node in enumerate(nodes)}
 
         def insert_pending_nodes(node: BaseSchedulerNode) -> None:
+            node_with_index = (node_to_index[node], node)
             if self.should_partition(node):
-                non_cudagraphable_nodes.append(node)
+                heapq.heappush(non_cudagraphable_nodes, node_with_index)
             else:
-                cudagraphable_nodes.append(node)
+                heapq.heappush(cudagraphable_nodes, node_with_index)
 
         def update_indegree(node: BaseSchedulerNode) -> None:
             for succ_node in node.mpi_node.succ_nodes:
@@ -4333,12 +4335,12 @@ class Scheduler:
             non_cudagraphable_nodes or cudagraphable_nodes
         ):
             while non_cudagraphable_nodes:
-                node = non_cudagraphable_nodes.popleft()
+                _, node = heapq.heappop(non_cudagraphable_nodes)
                 schedule.append(node)
                 update_indegree(node)
 
             while cudagraphable_nodes:
-                node = cudagraphable_nodes.popleft()
+                _, node = heapq.heappop(cudagraphable_nodes)
                 schedule.append(node)
                 update_indegree(node)
 
