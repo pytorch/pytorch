@@ -660,83 +660,72 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    def test_torch_compile_api_inductor(self):
-        def fn():
-            torch.manual_seed(123)
-            model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4),
-                torch.nn.Sigmoid(),
-            )
+    @parametrize("api", ("compile", "optimize"))
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_compile_api(self, api, backend):
+        def wrap(fn, backend):
+            if api == "compile":
+                return torch.compile(fn, backend=backend)
+            elif api == "optimize":
+                return torch._dynamo.optimize(backend)(fn)
 
+        def fn(model, inputs):
             res = []
-            for _ in range(3):
-                x = torch.randn([1, 4])
-
-                result = model(x).sum()
+            for inp in inputs:
+                result = model(inp).sum()
                 result.backward()
                 res.append(model[0].weight.grad)
                 res.append(model[0].bias.grad)
                 model.zero_grad()
             return res
 
-        expected = fn()
+        torch.manual_seed(123)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        inputs = [
+            torch.randn([1, 4]),
+            torch.randn([2, 4]),
+            torch.randn([3, 4]),
+        ]
+
+        expected = fn(model, inputs)
         with config.patch(compiled_autograd=True):
-            compiled_fn = torch.compile(fn)
-        actual = compiled_fn()
+            compiled_fn = wrap(fn, backend)
+        actual = compiled_fn(model, inputs)
         self.assertEqual(expected, actual)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 2)
 
-    def test_torch_compile_api_aot_eager(self):
-        def fn():
-            torch.manual_seed(123)
-            model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4),
-                torch.nn.Sigmoid(),
-            )
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_optimize_assert(self, backend):
+        # can be merged into the test above once we support
+        # no graph break on .backward
 
-            res = []
-            for _ in range(3):
-                x = torch.randn([1, 4])
+        def fn(model, inp):
+            # NOTE: not calling .backward in the compiled fn
+            return model(inp).sum()
 
-                result = model(x).sum()
-                result.backward()
-                res.append(model[0].weight.grad)
-                res.append(model[0].bias.grad)
-                model.zero_grad()
-            return res
+        torch.manual_seed(123)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        inp = torch.randn([1, 4])
 
-        expected = fn()
+        out = fn(model, inp)
+        out.backward()
+        expected = [p.grad for p in model.parameters()]
+        model.zero_grad()
         with config.patch(compiled_autograd=True):
-            compiled_fn = torch.compile(fn, backend="aot_eager")
-        actual = compiled_fn()
+            compiled_fn = torch._dynamo.optimize_assert(backend)(fn)
+
+        # should not error due to undefined `rebuild_ctx`
+        out = compiled_fn(model, inp)
+        out.backward()
+        actual = [p.grad for p in model.parameters()]
         self.assertEqual(expected, actual)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-
-    def test_torch_compile_api_eager(self):
-        def fn():
-            torch.manual_seed(123)
-            model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4),
-                torch.nn.Sigmoid(),
-            )
-
-            res = []
-            for _ in range(3):
-                x = torch.randn([1, 4])
-
-                result = model(x).sum()
-                result.backward()
-                res.append(model[0].weight.grad)
-                res.append(model[0].bias.grad)
-                model.zero_grad()
-            return res
-
-        expected = fn()
-        with config.patch(compiled_autograd=True):
-            compiled_fn = torch.compile(fn, backend="eager")
-        actual = compiled_fn()
-        self.assertEqual(expected, actual)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
 
     def test_multiple_torch_compile(self):
         model = torch.nn.Sequential(
