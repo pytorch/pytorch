@@ -3117,6 +3117,9 @@ def _cutlass_include_paths() -> list[str]:
 
 
 def _cuda_lib_options() -> list[str]:
+    """
+    Util function for CUTLASS backend to find the correct CUDA libraries.
+    """
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
@@ -3125,6 +3128,9 @@ def _cuda_lib_options() -> list[str]:
     if is_linux():
         _transform_cuda_paths(lpaths)
         for path in lpaths:
+            if "torch/lib" in path:
+                # don't want to depend on pytorch
+                continue
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
             extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
