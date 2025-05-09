@@ -164,11 +164,11 @@ static PyObject* wrap_tuple_fn(Args... args) {
 static PyObject* THPSize_concat(PyObject* left, PyObject* right) {
   // wrap tuple's sq_concat with a customized error message
   HANDLE_TH_ERRORS
-    TORCH_CHECK_TYPE(
-        PyTuple_Check(right),
-        "can only concatenate tuple (not ",
-        Py_TYPE(right)->tp_name,
-        ") to torch.Size");
+  TORCH_CHECK_TYPE(
+      PyTuple_Check(right),
+      "can only concatenate tuple (not ",
+      Py_TYPE(right)->tp_name,
+      ") to torch.Size");
   static binaryfunc tuple_concat = PyTuple_Type.tp_as_sequence->sq_concat;
   static binaryfunc size_concat =
       wrap_tuple_fn<decltype(&tuple_concat), &tuple_concat>;
