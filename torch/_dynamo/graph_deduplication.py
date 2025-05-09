@@ -112,7 +112,7 @@ def _replace_region_with_subgraph(
         flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         sub_args.append(flattened_args_kwargs[arg_ind])
 
-    invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
+    invoke_args = (get_subgraph_node, subgraph_name, *sub_args)
     fake_inputs = [node.meta["example_value"] for node in sub_args]
 
     if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
@@ -125,7 +125,10 @@ def _replace_region_with_subgraph(
     from torch._inductor.pattern_matcher import stable_topological_sort
 
     invoke_subgraph_node = graph.create_node(
-        "call_function", torch.ops.higher_order.invoke_subgraph, invoke_args, {}
+        "call_function",
+        torch.ops.higher_order.invoke_subgraph,
+        invoke_args,  # type: ignore[arg-type]
+        {},
     )
     for ind, external_user_ind in enumerate(inds_with_external_users):
         node = region[external_user_ind]
