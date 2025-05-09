@@ -65,6 +65,7 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import (
     BackendFeature,
+    CodegenSymbol,
     get_scheduling_for_device,
     index_prevent_reordering,
 )
@@ -3423,6 +3424,15 @@ class Layout(OutputSpec):
     def get_device(self) -> torch.device:
         return self.device
 
+    def get_example(self) -> torch.Tensor:
+        with V.fake_mode:
+            return torch.empty_strided(
+                convert_shape_to_symint(self.size),
+                convert_shape_to_symint(self.stride),
+                dtype=self.dtype,
+                device=self.device,
+            )
+
     def is_contiguous(self) -> bool:
         return is_contiguous_strides_for_shape(self.stride, self.size)
 
@@ -3926,7 +3936,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
 
 
 @ir_dataclass(frozen=False)
-class Buffer(IRNode):
+class Buffer(IRNode, CodegenSymbol):
     # Name is sometimes None; e.g., ForceInPlace, where there isn't
     # a meaningful name
     name: Optional[str]
@@ -3945,6 +3955,11 @@ class Buffer(IRNode):
     def get_name(self) -> str:
         assert self.name, self
         return self.name
+
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        if isinstance(self.layout, Layout):
+            return self.layout.get_example()
+        raise NotImplementedError(type(self.layout).__name__)
 
     def get_device(self) -> Optional[torch.device]:
         return self.get_output_spec().get_device()
@@ -4579,6 +4594,32 @@ class TritonTemplateBuffer(TemplateBuffer):
             allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
         )
 
+        self.subgraph_inps: Optional[list[Optional[Union[IRNode, sympy.Expr]]]] = None
+        self.subgraph_outs: Optional[list[Optional[IRNode]]] = None
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        res = super().get_free_symbol_uses(unbacked_only)
+        subgraph_outs = self.subgraph_outs if self.subgraph_outs else []
+        subgraph_inps = self.subgraph_inps if self.subgraph_inps else []
+
+        for inp in subgraph_inps:
+            if isinstance(inp, sympy.Expr):
+                res.update(get_free_symbols(inp, unbacked_only))
+            elif isinstance(inp, IRNode):
+                res.update(inp.get_free_symbol_uses(unbacked_only))
+            else:
+                assert inp is None
+
+        for out in subgraph_outs:
+            if isinstance(out, IRNode):
+                res.update(out.get_free_symbol_uses(unbacked_only))
+            else:
+                assert out is None
+
+        return res
+
     def get_outputs(self) -> list[Buffer]:
         return self.outputs
 
@@ -4733,6 +4774,10 @@ class CUDATemplateBuffer(TemplateBuffer):
 
     def get_workspace_size(self):  # type: ignore[no-untyped-def]
         return self.workspace_size if self.workspace_size is not None else 0
+
+    def emulate_store_fn(self) -> None:
+        for output in self.get_outputs():
+            ops.store(output.get_name(), None, None)
 
 
 class CppTemplateBuffer(TemplateBuffer):
@@ -5576,6 +5621,14 @@ class ExternKernel(InputsKernel):
     def require_contiguous(cls, x):  # type: ignore[no-untyped-def]
         return cls.require_stride_order(x, list(reversed(range(len(x.get_size())))))
 
+    @classmethod
+    def require_contiguous_strides(cls, x):  # type: ignore[no-untyped-def]
+        # TODO: combine this with require_contiguous after
+        # https://github.com/pytorch/pytorch/pull/148235 lands.
+        return cls.require_exact_strides(
+            x, FlexibleLayout.contiguous_strides(x.get_size())
+        )
+
     def apply_constraint(self) -> None:
         pass
 
@@ -5720,6 +5773,7 @@ class ExternKernel(InputsKernel):
                 return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
+
             wrapper.writeline(
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
@@ -6015,7 +6069,6 @@ class SubgraphBuffer(ExternKernel):
         self.subgraph = V.graph.make_subgraph(
             self.gm, self.example_inputs, subgraph_name
         )
-
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
@@ -6033,9 +6086,11 @@ class SubgraphBuffer(ExternKernel):
                 self.graph = graph
                 self.name = graph.name
 
-        wrapper.codegen_subgraph(
+        outer_inputs = [t.codegen_reference() for t in self.inputs]
+
+        wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
-            [*[buffer.get_name() for buffer in self.inputs]],
+            outer_inputs,
             [self.name],
         )
 
@@ -7446,9 +7501,9 @@ class InvokeSubgraph(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(cls, subgraph: Subgraph, operands):  # type: ignore[no-untyped-def]
+    def create(cls, subgraph: Subgraph, *operands):  # type: ignore[no-untyped-def]
         # TODO(anijain2305) - Support sym expr as operands in future.
-        fx_operands = V.graph.current_node.args[-1]
+        fx_operands = V.graph.current_node.args[2:]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         # Realize the inputs. Also intermediates can have different strides than
