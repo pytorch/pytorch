@@ -13,8 +13,6 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   // wT = transpose(weight);
   // y=x*wT+b
 
-  auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
-
   TORCH_CHECK(supportedFloatingOrComplexType(input), "MPS device does not support linear for non-float inputs");
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
   TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
@@ -26,6 +24,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     TORCH_CHECK(bias.is_mps(), "Tensor for argument bias is on ", bias.device(), " but expected on mps");
     TORCH_CHECK(supportedFloatingOrComplexType(bias), "MPS device does not support linear for non-float bias");
   }
+
+  auto weight = (weight_arg.dim() == 1) ? weight_arg.unsqueeze(0) : weight_arg;
 
   auto input_size = input.sizes();
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
@@ -116,14 +116,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
-  // Shave off '1' present at the end of the shape
-  if (weight_arg.dim() == 1) {
-    // Number of elements in new output shape
-    auto output_sizes = output.sizes();
-    std::vector<int64_t> out_shape(output_sizes.begin(), output_sizes.end() - 1);
-    return output.view(IntArrayRef(out_shape));
-  }
-  return output;
+  // Squeeze last dim of 1D linear
+  return weight_arg.dim() != 1 ? output : output.squeeze(-1);
 }
 
 static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
