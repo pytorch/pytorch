@@ -696,7 +696,6 @@ class TestXpuOps(TestCase):
             [16, 7, 8, 512, 35],
             [117, 7, 9, 513, 35],
         ]
-        device = "xpu"
         input_type = torch.float16
         output_type = torch.float
         for i in range(len(shape)):
