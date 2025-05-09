@@ -13,7 +13,15 @@ from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
 
 from ..lowering import lowerings as L, require_channels_last
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    filter_nodes,
+    KeywordArg,
+    ListOf,
+    Match,
+    stable_topological_sort,
+)
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -1081,6 +1089,14 @@ def _is_valid_concat_linear_woq_optimization_pattern():
         w2 = match.kwargs["w2"].meta["val"]
         w3 = match.kwargs["w3"].meta["val"]
         scales = match.kwargs["scales"].meta["val"]
+        if len(match.kwargs["scales"].meta["val"].size()) > 1:
+            return False
+        num_scales = match.kwargs["scales"].meta["val"].numel()
+        w1_cols = match.kwargs["w1"].meta["val"].size()[0]
+        w2_cols = match.kwargs["w2"].meta["val"].size()[0]
+        w3_cols = match.kwargs["w3"].meta["val"].size()[0]
+        if w1_cols + w2_cols + w3_cols != num_scales:
+            return False
         return (
             # For now, we only support woq mm kernels
             # with x.type=bfloat16 and w.type=int8
@@ -1131,7 +1147,7 @@ def _register_concat_linear_woq_lowering(pattern, computation_woq, computation_r
     @register_freezing_graph_pattern(
         pattern,
         extra_check=_is_valid_concat_linear_woq_optimization_pattern(),
-        pass_number=2,
+        pass_number=4,
     )
     def woq(match: Match, *args, **kwargs):
         x = kwargs["x"]
@@ -1149,8 +1165,24 @@ def _register_concat_linear_woq_lowering(pattern, computation_woq, computation_r
         origin_x_size = tuple(x.meta["val"].size())
         x_shape = [-1, origin_x_size[-1]]
         out_shape = list(origin_x_size[:-1] + (out_features,))
-        mm_node_of_x = next(iter(x.users.keys()))
-        with match.graph.inserting_before(mm_node_of_x):
+        mm_node_of_x = None
+        for candidate in iter(x.users.keys()):
+            if (
+                candidate.target == aten.mm.default
+                and list(candidate._input_nodes)[1].target == aten.cat.default
+            ):
+                mm_node_of_x = candidate
+                break
+        assert mm_node_of_x is not None, "unable to find mm node"
+        _, cat_wgt_node = mm_node_of_x._input_nodes
+        scaling_node = next(iter(mm_node_of_x.users.keys()))
+        user_of_scaling_node = next(iter(scaling_node.users.keys()))
+        # Some other pass is making some changes that entials
+        # adding a node before it's used, but it can only be found when
+        # lint is run. stable_topological_sort() is being run before lint,
+        # so that error isn't being discovered
+        stable_topological_sort(match.graph)
+        with match.graph.inserting_before(user_of_scaling_node):
             new_cat_node = match.graph.call_function(
                 aten.cat.default,
                 args=([w1, w2, w3], 0),
@@ -1166,8 +1198,6 @@ def _register_concat_linear_woq_lowering(pattern, computation_woq, computation_r
             output_reshape_node = match.graph.call_function(
                 computation_reshape, args=(new_woq_node, out_shape)
             )
-            _, cat_wgt_node = mm_node_of_x._input_nodes
-            scaling_node = next(iter(mm_node_of_x.users.keys()))
             scaling_node.replace_all_uses_with(output_reshape_node)
             match.graph.erase_node(scaling_node)
             match.graph.erase_node(mm_node_of_x)

@@ -123,6 +123,10 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
 
 @functools.lru_cache(None)
 def addmm_patterns_init():
+    """
+    addmm related patterns.
+    To avoid duplication, also includes int8 WoQ GEMM pattern without bias.
+    """
     device = next(
         (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
     )
@@ -139,7 +143,7 @@ def addmm_patterns_init():
             weight_inputs.append("w3")
 
         if not all(
-            match.kwargs[wgt].target == "torch.ops.prims.convert_element_type.default"
+            match.kwargs[wgt].target == torch.ops.prims.convert_element_type.default
             for wgt in weight_inputs
         ):
             return False
@@ -151,7 +155,10 @@ def addmm_patterns_init():
         ):
             return False
 
-        if not all(match.kwargs[wgt].dtype is torch.bfloat16 for wgt in weight_inputs):
+        if not all(
+            match.kwargs[wgt].meta["val"].dtype is torch.bfloat16
+            for wgt in weight_inputs
+        ):
             return False
 
         equal_shape_inputs = [weight_inputs]
