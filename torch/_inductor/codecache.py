@@ -6,6 +6,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import importlib.resources
 import io
 import itertools
 import json
@@ -974,7 +975,7 @@ class GuardedCache(Generic[T]):
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         evaluate_guards: Callable[[str, Union[list[int], list[torch.SymInt]]], bool],
         hints: list[int],
-    ) -> tuple[Optional[T], Optional[bytes], str]:
+    ) -> tuple[Optional[T], Optional[bytes], dict[str, str]]:
         """
         Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
 
@@ -992,6 +993,7 @@ class GuardedCache(Generic[T]):
         graph = None
         pickled_content = None
         result_status = "full_miss"
+        sample_guards_expr = None
 
         # Iterate over any entries in the subdir for this key and evaluate
         # guards to determine whether there's a hit.
@@ -1014,12 +1016,17 @@ class GuardedCache(Generic[T]):
                 graph = candidate
                 pickled_content = content
                 result_status = "hit"
+                sample_guards_expr = candidate.guards_expr
                 break
             else:
-                # At least one guard missed
+                # At least one guard missed, log this
                 result_status = "guard_miss"
+                sample_guards_expr = candidate.guards_expr
 
-        return graph, pickled_content, result_status
+        info = {"cache_status_detailed": result_status}
+        if sample_guards_expr is not None:
+            info["cache_status_guard_expr"] = sample_guards_expr
+        return graph, pickled_content, info
 
     @classmethod
     def _filter_backed_symints(
@@ -1200,11 +1207,11 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         cache_info: dict[str, Any] = dict()
 
         # Use the find_graph_for_key method to find a graph for the given key
-        graph, pickled_content, result_status = FxGraphCache.find_guarded_entry(
+        graph, pickled_content, guard_info = FxGraphCache.find_guarded_entry(
             key, local, remote_cache, evaluate_guards, hints
         )
+        cache_info.update(guard_info)
         if graph is None:
-            cache_info["miss_type"] = result_status
             return None, cache_info
 
         if pickled_content is not None:
@@ -3114,6 +3121,23 @@ def _cutlass_include_paths() -> list[str]:
         os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
         os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
+
+
+@torch_key_cache
+def cutlass_key() -> bytes:
+    """
+    Compute a key representing the state of the CUTLASS library.
+
+    Note: OSS and fbcode will have different keys.
+    """
+    if config.is_fbcode():
+        with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
+            with open(resource_path) as resource_file:
+                return resource_file.read().encode()
+
+    combined_hash = hashlib.sha256()
+    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    return combined_hash.digest()
 
 
 def _cuda_lib_options() -> list[str]:
