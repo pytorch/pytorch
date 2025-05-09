@@ -4259,7 +4259,6 @@ known_graph_breaks_tests = {
     "test_create_graph_and_full_backward_hook_cycle",  # _pack_with_none
     "test_full_backward_hook_double_backward",  # _pack_with_none
     "test_grad_mode_restored_reentrant",  # assertTrue
-    "test_lobpcg",  # skip files
 }
 
 test_contexts = {
@@ -4277,13 +4276,6 @@ skipped_tests = {
     "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
 }
 
-"""
-FAILED [0.2754s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_default_saved_tensors_hooks_double_backward - RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
-FAILED [0.0452s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_nested_anomaly_detect_nan - AssertionError: Source of 's35' is None when lifting it to input of top-level. If it's an unbacked symbol, this could be because it's not tracked with lazy_bind_unbacked_symbols. Otherwise, should provide a source when create_graph_input for `s35` at root tracer.
-FAILED [0.2548s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_saved_variable_packing_unpacking_saved_original_with_hooks - RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
-FAILED [1.4363s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_lobpcg - TypeError: add(): argument 'input' (position 1) must be Tensor, not NoneType
-"""
-
 known_failing_tests = {
     # Category: Compiled autograd
     # "test_grad_mode_restored_reentrant",  # create_graph
@@ -4293,7 +4285,8 @@ known_failing_tests = {
     # "test_backward_with_nonleaf_inputs",  # create_graph
     # "test_create_graph_and_full_backward_hook_cycle",  # create_graph
     # "test_custom_autograd_repeated_grad_grad",  # create_graph
-    # "test_default_saved_tensors_hooks_double_backward",  # create_graph
+    "test_default_saved_tensors_hooks_double_backward",  # wrong when pack hook returns non-leaf
+    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # wrong when pack hook returns non-leaf
     # "test_full_backward_hook_double_backward",  # create_graph
     # "test_function",  # create_graph
     # "test_grad",  # create_graph
@@ -4302,13 +4295,12 @@ known_failing_tests = {
     # "test_grad_nonleaf_many_outputs",  # create_graph
     # "test_hessian_vector",  # create_graph
     # "test_inplace_on_view_backward",  # create_graph
-    # "test_nested_anomaly_detect_nan",  # create_graph
+    "test_nested_anomaly_detect_nan",  # nested anomaly
     # "test_nested_anomaly_printstack_cleanup",  # create_graph
     # "test_once_differentiable",  # create_graph
-    # "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # create_graph
     "test_select_sum",  # batched gradients
     "test_custom_autograd_no_early_free",  # batched gradients
-    # "test_lobpcg",  # create_graph
+    "test_lobpcg",  # NaNs
     "test_reentrant_with_callbacks_both_depths",  # queue_callback
     "test_reentrant_with_callbacks_depth_0",  # queue_callback
     "test_reentrant_with_callbacks_depth_1",  # queue_callback

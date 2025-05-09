@@ -9927,7 +9927,6 @@ for shape in [(1,), ()]:
             y = a**3
             s = torch.sum(y)
         (g,) = torch.autograd.grad(s, (a,), create_graph=True)
-        # todo: why g no grad_fn?
         g.sum().backward()
         # factor 2 because only a is saved once
         self.assertEqual(6 * 2 * a, a.grad)
