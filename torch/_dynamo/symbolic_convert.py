@@ -1342,15 +1342,13 @@ class InstructionTranslatorBase(
                 raise
             except RuntimeError as e:
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
-                    print(
-                        "\n"
-                        + torch.fx.GraphModule(
-                            self.output.nn_modules, self.output.graph
-                        ).print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                        file=sys.stderr,
+                    readable_graph = torch.fx.GraphModule(
+                        self.output.nn_modules, self.output.graph
+                    ).print_readable(
+                        print_output=False, include_stride=True, include_device=True
                     )
+                    e.partial_fx_graph = readable_graph  # type: ignore[attr-defined]
+                    raise
 
                 raise
             except Exception as e:
