@@ -1070,6 +1070,9 @@ class DeviceCachingAllocator {
   std::vector<std::pair<MempoolId_t, std::function<bool(cudaStream_t)>>>
       captures_underway;
 
+  // tracks which pools we can use as a last resort before ooming
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
+
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
@@ -1255,6 +1258,29 @@ class DeviceCachingAllocator {
           || (C10_LIKELY(captures_underway.empty()) &&
               release_cached_blocks(context) &&
               alloc_block(params, true, context, lock));
+    }
+
+    // we are about to oom, try to use existing mempools as a last resort
+    if (!block_found && params.err == cudaErrorMemoryAllocation) {
+      // if already trying to use a mempool, then just oom
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if (!active_pool) {
+        for (MempoolId_t mempool_id : use_on_oom_pools) {
+          auto filter = [](cudaStream_t) { return true; };
+          beginAllocateToPool(mempool_id, filter);
+          auto& mempool = get_pool(size, stream);
+          AllocParams mempool_params(
+              device, size, stream, &mempool, alloc_size, stats);
+          mempool_params.stat_types = get_stat_types_for_pool(mempool);
+          block_found = get_free_block(mempool_params);
+          endAllocateToPool(mempool_id);
+          releasePool(mempool_id);
+          if (block_found) {
+            params = mempool_params;
+            break;
+          }
+        }
+      }
     }
 
     if (!block_found) {
@@ -2085,6 +2111,14 @@ class DeviceCachingAllocator {
     // and increment its use_count
     std::lock_guard<std::recursive_mutex> lock(mutex);
     ensure_exists_and_incref_pool(mempool_id);
+  }
+
+  void setUseOnOOM(bool use_on_oom, MempoolId_t mempool_id) {
+    // Choose if this pool should be used as a last resort before ooming
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (use_on_oom) {
+      use_on_oom_pools.insert(mempool_id);
+    }
   }
 
   // See Note [Interaction with CUDA graph capture]
@@ -3714,6 +3748,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->ensureExistsAndIncrefPool(std::move(mempool_id));
   }
 
+  void setUseOnOOM(
+      c10::DeviceIndex device,
+      bool use_on_oom,
+      MempoolId_t mempool_id) override {
+    assertValidDevice(device);
+    device_allocator[device]->setUseOnOOM(use_on_oom, std::move(mempool_id));
+  }
+
   // CUDAGraph interactions
   void beginAllocateToPool(
       c10::DeviceIndex device,
@@ -4042,7 +4084,8 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
-    bool is_user_created)
+    bool is_user_created,
+    bool use_on_oom)
     : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
@@ -4051,6 +4094,7 @@ MemPool::MemPool(
   }
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::ensureExistsAndIncrefPool(device_, id_);
+  CUDACachingAllocator::setUseOnOOM(device_, use_on_oom, id_);
 }
 
 MemPool::~MemPool() {

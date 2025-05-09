@@ -796,10 +796,17 @@ class Node(_NodeBase):
                 self.kwargs,
                 arg_types,
                 kwarg_types,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs,
             )
         elif self.op == "call_module":
             assert isinstance(self.target, str)
-            return normalize_module(root, self.target, self.args, self.kwargs)  # type: ignore[arg-type]
+            return normalize_module(
+                root,
+                self.target,
+                self.args,  # type: ignore[arg-type]
+                self.kwargs,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs,
+            )
 
         return None
 
