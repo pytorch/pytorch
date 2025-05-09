@@ -1,5 +1,5 @@
 import itertools
-from collections.abc import Generator, Iterator, Sequence
+from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from os import linesep
 from typing import Any, Optional
@@ -9,7 +9,7 @@ import sympy
 import torch
 import torch._inductor.virtualized as virtualized
 from torch._inductor.ir import ComputedBuffer, Pointwise
-from torch._inductor.ops_handler import DefaultHandler
+from torch._inductor.ops_handler import DefaultHandler, WrapperHandler
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import IndentedBuffer, OrderedSet
 from torch._inductor.virtualized import OpsValue
@@ -18,6 +18,69 @@ from ...virtualized import V
 
 
 _ACCUMULATOR_ALIAS = "accum"
+
+
+class CutlassEVTOpsMixIn:
+    @staticmethod
+    def _infix_bin_op(op: str, a: str, b: str) -> str:
+        return f"{a} {op} {b}"
+
+    @staticmethod
+    def _prefix_bin_op(op: str, a: str, b: str) -> str:
+        return f"{op}({a}, {b})"
+
+    @staticmethod
+    def _prefix_un_op(op: str, a: str) -> str:
+        return f"{op}({a})"
+
+    @staticmethod
+    def to_dtype(
+        x: str,
+        dtype: Any,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = False,
+    ) -> str:
+        return x
+
+    @staticmethod
+    def constant(value: Any, dtype: Any) -> str:
+        raise NotImplementedError
+
+    @staticmethod
+    def mul(x0: str, x1: str) -> str:
+        return CutlassEVTOpsMixIn._infix_bin_op("*", x0, x1)
+
+    @staticmethod
+    def truediv(x0: str, x1: str) -> str:
+        return CutlassEVTOpsMixIn._infix_bin_op("/", x0, x1)
+
+    @staticmethod
+    def ge(x0: str, x1: str) -> str:
+        raise NotImplementedError
+
+    @staticmethod
+    def add(x0: str, x1: str) -> str:
+        return CutlassEVTOpsMixIn._infix_bin_op("+", x0, x1)
+
+    @staticmethod
+    def relu(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("relu", x0)
+
+    @staticmethod
+    def sigmoid(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("sigmoid", x0)
+
+    @staticmethod
+    def sub(x0: str, x1: str) -> str:
+        return CutlassEVTOpsMixIn._infix_bin_op("-", x0, x1)
+
+    @staticmethod
+    def tanh(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("tanh", x0)
+
+
+class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
+    """Passthrough handler for cutlass ops, used for running epilogue nodes for memory planning"""
 
 
 class _AssignmentFormatter(DefaultHandler):
@@ -39,7 +102,7 @@ class _AssignmentFormatter(DefaultHandler):
             raise NotImplementedError(name)
 
 
-class CutlassEVTCodegen:
+class CutlassEVTCodegen(CutlassEVTOpsMixIn):
     """
     Notes:
         * Used by CUTLASSGemmTemplate.
@@ -69,6 +132,7 @@ class CutlassEVTCodegen:
         self.reads: OrderedSet[str] = OrderedSet()
         self.last_usages: OrderedSet[str] = OrderedSet()
         self.cur_node: Optional[ComputedBuffer] = None
+        self.name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
 
         if accumulator_node_name not in last_usages:
             self.store(accumulator_node_name, value=OpsValue(_ACCUMULATOR_ALIAS))
@@ -89,7 +153,7 @@ class CutlassEVTCodegen:
                 node = s_node.node
                 assert isinstance(node, ComputedBuffer)
                 with codegen.set_cur_node(node):
-                    index_vars = CutlassEVTCodegen._get_index_vars(node)
+                    index_vars = CutlassEVTCodegen.get_index_vars(node)
                     node.get_store_function()(index_vars)
 
         return (
@@ -156,65 +220,41 @@ class CutlassEVTCodegen:
             self.store_name_to_value[name] = value_to_write
         return None
 
-    def to_dtype(
-        self,
-        x: str,
-        dtype: Any,
-        src_dtype: Optional[torch.dtype] = None,
-        use_compute_types: bool = False,
-    ) -> str:
-        return x
-
-    def constant(self, value: Any, dtype: Any) -> str:
-        raise NotImplementedError
-
-    def mul(self, x0: str, x1: str) -> str:
-        return self._infix_bin_op("*", x0, x1)
-
-    def truediv(self, x0: str, x1: str) -> str:
-        raise NotImplementedError
-
-    def ge(self, x0: str, x1: str) -> str:
-        raise NotImplementedError
-
-    def add(self, x0: str, x1: str) -> str:
-        return self._infix_bin_op("+", x0, x1)
-
-    def relu(self, x0: str) -> str:
-        return self._prefix_un_op("relu", x0)
-
-    def sigmoid(self, x0: str) -> str:
-        return self._prefix_un_op("sigmoid", x0)
-
-    def sub(self, x0: str, x1: str) -> str:
-        raise NotImplementedError
-
     def _get_cur_node(self) -> ComputedBuffer:
         assert self.cur_node
         return self.cur_node
 
     @staticmethod
-    def _get_index_vars(node: ComputedBuffer) -> Sequence[sympy.Expr]:
+    def get_index_vars(node: ComputedBuffer) -> Sequence[sympy.Expr]:
         data = node.data
         # TODO mlazos: relax this, cutlass supports reductions and other ops
         assert isinstance(data, Pointwise)
         return data._index(data.ranges)
 
     def _get_current_index_vars(self) -> Sequence[sympy.Expr]:
-        return self._get_index_vars(self._get_cur_node())
+        return self.get_index_vars(self._get_cur_node())
 
     def _check_indexing(self, name: str, index: sympy.Expr) -> None:
         # We only support indexing that matches the layout today because
         # CUTLASS doesn't support arbitrary indexing
         buffer_name = self.accumulator_node_name if name == _ACCUMULATOR_ALIAS else name
-        buffer = V.graph.name_to_buffer[buffer_name]
+        buffer = self.name_to_buffer[buffer_name]
         index_strides = V.graph.sizevars.stride_vars(
             index, self._get_current_index_vars()
         )
-        if buffer.get_layout().stride != index_strides:
+        stride = buffer.get_layout().stride
+        if not self._stride_compatible(stride, index_strides):
             raise NotImplementedError(
-                f"Unsupported indexing for {name} with index {index} and strides {index_strides}"
+                f"Unsupported indexing for {name} with index {index}, index strides {index_strides}, and layout stride {stride}"
             )
+
+    def _stride_compatible(
+        self, left: Iterable[sympy.Expr], right: Iterable[sympy.Expr]
+    ) -> bool:
+        return all(
+            sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
+            for l, r in (zip(left, right))
+        )
 
     def _render_input_signature(self) -> str:
         arguments = ", ".join(
@@ -232,12 +272,3 @@ class CutlassEVTCodegen:
 
     def _tmp_var(self) -> str:
         return f"tmp_{next(self.var_counter)}"
-
-    def _infix_bin_op(self, op: str, a: str, b: str) -> str:
-        return f"{a} {op} {b}"
-
-    def _prefix_bin_op(self, op: str, a: str, b: str) -> str:
-        return f"{op}({a}, {b})"
-
-    def _prefix_un_op(self, op: str, a: str) -> str:
-        return f"{op}({a})"
