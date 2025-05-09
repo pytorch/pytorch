@@ -40,6 +40,11 @@ while IFS=: read -r filepath url; do
         done
       fi
     fi
+    # Treat Cloudflare JS-challenge and rate-limit as success.
+    if [[ "$code" == "403" || "$code" == "429" || "$code" == "503" ]]; then
+      printf "${yellow}%s${reset} ${cyan}%s${reset} %s\n" "$code" "$url" "$filepath"
+      exit 0
+    fi
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
       printf "${red}%s${reset} ${yellow}%s${reset} %s\n" "$code" "$url" "$filepath" >&2
       exit 1
@@ -53,7 +58,7 @@ while IFS=: read -r filepath url; do
     sleep 1
   done
  done < <(
-  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\]+'
+  pattern='(?!.*@lint-ignore)(?<!git\+)(?<!\$\{)https?://(?![^/]*@)(?![^\s<>\")]*[<>\{\}\$])[^[:space:]<>")\[\]\\]+'
   excludes=(
     ':(exclude,glob)**/.*'
     ':(exclude,glob)**/*.lock'
@@ -72,6 +77,7 @@ while IFS=: read -r filepath url; do
   git --no-pager grep --no-color -I -P -o "$pattern" -- "${paths[@]}" "${excludes[@]}" \
   | sed -E 's/[^/[:alnum:]]+$//' \
   | grep -Ev '://(0\.0\.0\.0|127\.0\.0\.1|localhost)([:/])' \
+  | grep -Ev '://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
   | grep -Ev 'fwdproxy:8080' \
   || true
 )
