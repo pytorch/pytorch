@@ -4278,26 +4278,9 @@ skipped_tests = {
 
 known_failing_tests = {
     # Category: Compiled autograd
-    # "test_grad_mode_restored_reentrant",  # create_graph
-    # "test_accumulate_grad",  # create_graph
-    # "test_anomaly_assign_parent_cleanup",  # create_graph
-    # "test_backward_create_graph_warns",  # create_graph
-    # "test_backward_with_nonleaf_inputs",  # create_graph
-    # "test_create_graph_and_full_backward_hook_cycle",  # create_graph
-    # "test_custom_autograd_repeated_grad_grad",  # create_graph
     "test_default_saved_tensors_hooks_double_backward",  # wrong when pack hook returns non-leaf
     "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # wrong when pack hook returns non-leaf
-    # "test_full_backward_hook_double_backward",  # create_graph
-    # "test_function",  # create_graph
-    # "test_grad",  # create_graph
-    # "test_grad_materialize_grads",  # create_graph
-    # "test_grad_nonleaf",  # create_graph
-    # "test_grad_nonleaf_many_outputs",  # create_graph
-    # "test_hessian_vector",  # create_graph
-    # "test_inplace_on_view_backward",  # create_graph
     "test_nested_anomaly_detect_nan",  # nested anomaly
-    # "test_nested_anomaly_printstack_cleanup",  # create_graph
-    # "test_once_differentiable",  # create_graph
     "test_select_sum",  # batched gradients
     "test_custom_autograd_no_early_free",  # batched gradients
     "test_lobpcg",  # NaNs
