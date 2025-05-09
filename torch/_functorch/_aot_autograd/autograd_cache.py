@@ -410,13 +410,18 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
         return
 
     def load(self, example_inputs) -> CompiledFxGraph:
+        self.example_inputs = example_inputs
+
         return self.result
 
     def post_compile(
         self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
     ) -> CompiledFxGraph:
         constants = CompiledFxGraphConstants()
+        # Cache hit specific post compile
         graph, cache_info = FxGraphCache.cache_hit_post_compile(result, {}, constants)
+        if graph is None:
+            raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -425,8 +430,9 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
-        if graph is None:
-            raise BypassAOTAutogradCache("Failed to reload cache entry from disk")
+        counters["inductor"]["fxgraph_cache_hit"] += 1
+        # Run normal post compile
+        graph.post_compile(self.example_inputs, constants, fx_config)
         return graph
 
 
@@ -1168,3 +1174,106 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             "FbRemoteAOTAutogradCache",
             "RemoteAOTAutogradCache",
         )
+
+    @staticmethod
+    def make_entry(
+        compiled_fw_func: CompiledFxGraph,
+        compiled_bw_func: Optional[CompiledFxGraph],
+        aot_joint_graph_str: Optional[str],
+        aot_forward_graph_str: Optional[str],
+        aot_backward_graph_str: Optional[str],
+        runtime_metadata: ViewAndMutationMeta,
+        dispatch_wrappers: list[CompilerWrapper],
+        maybe_subclass_meta: Optional[SubclassMeta],
+        num_fw_outs_saved_for_bw: Optional[int],
+        indices_of_inps_to_detach: list[int],
+        forward_time_taken_ns: int,
+        backward_time_taken_ns: int,
+        sanitized_aot_config: AOTConfig,
+        guards_expr: Optional[str],
+        cached_lazy_backward_info: Optional[CachedAutogradLazyBackwardCompileInfo],
+        backward_state_indices: Optional[list[int]],
+        num_symints_saved_for_bw: Optional[int],
+    ) -> GenericAOTAutogradCacheEntry:
+        if config.bundled_autograd_cache:
+            # Helper function to unwrap all the wrappers we added during aotdispatch
+            # They get reapplied on cache load
+            def unwrap_compiled_fx_graph(obj):
+                while hasattr(obj, "__wrapped__"):
+                    obj = obj.__wrapped__
+                assert isinstance(obj, CompiledFxGraph)
+                return obj
+
+            compiled_fw_graph = unwrap_compiled_fx_graph(compiled_fw_func)
+            bundled_compiled_forward = BundledCompiledForward(compiled_fw_graph)
+            bundled_compiled_backward = None
+            if compiled_bw_func is not None:
+                assert backward_state_indices is not None
+                assert num_symints_saved_for_bw is not None
+                compiled_bw_graph = unwrap_compiled_fx_graph(compiled_bw_func)
+                bundled_compiled_backward = BundledCompiledBackward(
+                    compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
+                )
+
+            return BundledAOTAutogradCacheEntry(
+                compiled_fw=bundled_compiled_forward,
+                compiled_bw=bundled_compiled_backward,
+                aot_joint_graph_str=aot_joint_graph_str,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=aot_backward_graph_str,
+                runtime_metadata=runtime_metadata,
+                dispatch_wrappers=dispatch_wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                indices_of_inps_to_detach=indices_of_inps_to_detach,
+                forward_time_taken_ns=forward_time_taken_ns,
+                backward_time_taken_ns=backward_time_taken_ns,
+                sanitized_aot_config=sanitized_aot_config,
+                guards_expr=guards_expr,
+                cached_lazy_backward_info=cached_lazy_backward_info,
+            )
+
+        else:
+            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+            fw_debug_lines = getattr(
+                compiled_fw_func, "_fx_graph_cache_debug_lines", []
+            )
+
+            assert fw_key is not None
+            compiled_forward = CompiledForward(
+                fx_graph_cache_info=(fw_key, fw_debug_lines),
+                fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
+            )
+            compiled_backward = None
+            if compiled_bw_func is not None:
+                bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+                bw_debug_lines = getattr(
+                    compiled_bw_func, "_fx_graph_cache_debug_lines", []
+                )
+                assert bw_key is not None
+                assert backward_state_indices is not None
+                assert num_symints_saved_for_bw is not None
+                compiled_backward = CompiledBackward(
+                    fx_graph_cache_info=(bw_key, bw_debug_lines),
+                    fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),
+                    backward_state_indices=backward_state_indices,
+                    num_symints_saved_for_bw_=num_symints_saved_for_bw,
+                )
+
+            return AOTAutogradCacheEntry(
+                compiled_fw=compiled_forward,
+                compiled_bw=compiled_backward,
+                aot_joint_graph_str=aot_joint_graph_str,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=aot_backward_graph_str,
+                runtime_metadata=runtime_metadata,
+                dispatch_wrappers=dispatch_wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                indices_of_inps_to_detach=indices_of_inps_to_detach,
+                forward_time_taken_ns=forward_time_taken_ns,
+                backward_time_taken_ns=backward_time_taken_ns,
+                sanitized_aot_config=sanitized_aot_config,
+                guards_expr=guards_expr,
+                cached_lazy_backward_info=cached_lazy_backward_info,
+            )
