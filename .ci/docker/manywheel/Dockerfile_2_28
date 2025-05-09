@@ -7,8 +7,8 @@ ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
-ARG DEVTOOLSET_VERSION=11
-RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel yum-utils gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
+ARG DEVTOOLSET_VERSION=13
+RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel yum-utils gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
@@ -33,7 +33,7 @@ RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
 RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 
 FROM base as cuda
-ARG BASE_CUDA_VERSION=11.8
+ARG BASE_CUDA_VERSION=12.6
 # Install CUDA
 ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
@@ -47,7 +47,7 @@ ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 
 FROM base as magma
-ARG BASE_CUDA_VERSION=10.2
+ARG BASE_CUDA_VERSION=12.6
 # Install magma
 ADD ./common/install_magma.sh install_magma.sh
 RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
@@ -64,7 +64,7 @@ ADD ./common/install_libpng.sh install_libpng.sh
 RUN bash ./install_libpng.sh && rm install_libpng.sh
 
 FROM ${GPU_IMAGE} as common
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=13
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
@@ -87,13 +87,12 @@ RUN yum install -y \
         wget \
         which \
         xz \
-        gcc-toolset-${DEVTOOLSET_VERSION}-toolchain \
-        glibc-langpack-en
-RUN yum install -y \
-    https://repo.ius.io/ius-release-el7.rpm \
-    https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
+        glibc-langpack-en \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 
-RUN yum swap -y git git236-core
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
 # Override this behaviour by treating every folder as safe
@@ -117,8 +116,8 @@ COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/
 COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
 
 FROM common as cpu_final
-ARG BASE_CUDA_VERSION=11.8
-ARG DEVTOOLSET_VERSION=11
+ARG BASE_CUDA_VERSION=12.6
+ARG DEVTOOLSET_VERSION=13
 # Install Anaconda
 ADD ./common/install_conda_docker.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
