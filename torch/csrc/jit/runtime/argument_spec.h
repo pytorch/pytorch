@@ -28,7 +28,7 @@ struct ArgumentInfo {
     return defined_;
   }
   at::Device device() const {
-    return at::Device(DeviceType(dev_type_), device_);
+    return at::Device(at::DeviceType(dev_type_), device_);
   }
   // XXX: It is guaranteed that this will return false when called on non-tensor
   // arguments
@@ -106,7 +106,7 @@ struct ArgumentSpec {
       at::Device device = t->device();
       arg.dev_type_ =
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          static_cast<std::underlying_type_t<DeviceType>>(device.type());
+          static_cast<std::underlying_type_t<at::DeviceType>>(device.type());
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
@@ -266,8 +266,8 @@ struct CompleteArgumentSpec {
           pod.type = static_cast<int>(t.scalar_type());
           at::Device device = t.device();
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          pod.dev_type =
-              static_cast<std::underlying_type_t<DeviceType>>(device.type());
+          pod.dev_type = static_cast<std::underlying_type_t<at::DeviceType>>(
+              device.type());
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
@@ -352,7 +352,7 @@ struct CompleteArgumentInfo {
   }
   at::Device device() const {
     return at::Device(
-        DeviceType(pod(i).dev_type),
+        at::DeviceType(pod(i).dev_type),
         static_cast<c10::DeviceIndex>(pod(i).device));
   }
   int ndimension() const {

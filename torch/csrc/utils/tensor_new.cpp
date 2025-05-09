@@ -478,7 +478,7 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;
     tensor = at::lift_fresh(tensor);
   }
-  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU) {
+  if (only_lift_cpu_tensors() && device.type() != at::DeviceType::CPU) {
     if (!device.has_index() &&
         !torch::utils::is_device_initialized(device.type())) {
       // Infer device 0 to avoid device init
