@@ -1,0 +1,54 @@
+name: Link Checks
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: true
+
+jobs:
+  lint-urls:
+    name: Lint URLs
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-url-lint') }}
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      timeout: 120
+      runner: ${{ inputs.runner }}linux.2xlarge
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ inputs.ref }}
+      script: |
+        ./scripts/lint_urls.sh $(
+          [ "${{ github.event_name }}" = "pull_request" ] \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} \
+          || [ "${{ github.event_name }}" = "push" ] \
+            && git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+        ) || {
+          echo
+          echo "URL lint failed. If this is a transient outage, you can bypass it by adding the \`skip-url-lint\` label to your PR."
+          exit 1
+        }
+
+  lint-xrefs:
+    name: Lint Xrefs
+    needs: lint-urls
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      timeout: 60
+      runner: ${{ inputs.runner }}linux.2xlarge
+      docker-image: pytorch-linux-focal-linter
+      fetch-depth: 0
+      submodules: false
+      ref: ${{ inputs.ref }}
+      script: |
+        ./scripts/lint_xrefs.sh $(
+          [ "${{ github.event_name }}" = "pull_request" ] \
+            && git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} \
+          || [ "${{ github.event_name }}" = "push" ] \
+            && git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+        )

@@ -148,20 +148,61 @@ template <typename T>
 constexpr constant bool is_scalar_integral_v =
     ::metal::is_integral_v<T> && ::metal::is_scalar_v<T>;
 
-template <typename T, typename U>
-inline ::metal::enable_if_t<::metal::is_same_v<U, T>, T> cast_to(const U from) {
+// cast_to primitives
+//  - No-op if types as the same
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<::metal::is_same_v<U, T>, bool> = true>
+inline T cast_to(const U from) {
   return from;
 }
-
-template <typename T, typename U>
-inline ::metal::enable_if_t<is_complex_v<T>, T> cast_to(const U from) {
-  return T(float(from), 0.0);
+//  - Simple cast between scalar and complex dtypes
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>),
+        bool> = true>
+inline T cast_to(const U from) {
+  return static_cast<T>(from);
 }
 
-template <typename T, typename U>
-inline ::metal::enable_if_t<!::metal::is_same_v<U, T> && !is_complex_v<T>, T>
-cast_to(const U from) {
-  return static_cast<T>(from);
+// - Scalar to complex
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && !is_complex_v<U>, bool> = true>
+inline T cast_to(const U from) {
+  return T(float(from), 0.0);
+}
+// - Complex to scalar (should not really be used, but exists for compliteness)
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline T cast_to(const U from) {
+  return static_cast<T>(from.x);
+}
+
+// Generalizable math operators (used for both scalar and complex)
+template <typename U, typename V>
+using common_dtype = decltype(U(0) + V(0));
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return x * y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return T(x.x * y.x - x.y * y.y, x.x * y.y + x.y * y.x);
 }
 
 } // namespace metal

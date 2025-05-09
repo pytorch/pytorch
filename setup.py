@@ -1181,6 +1181,7 @@ def main():
     extras_require = {
         "optree": ["optree>=0.13.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
+        "pyyaml": ["pyyaml"],
     }
 
     # Read in README.md for our long_description

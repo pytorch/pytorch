@@ -33,12 +33,6 @@ Features described in this documentation are classified by release status:
 :maxdepth: 2
 
 pytorch-api
-```
-
-```{toctree}
-:glob:
-:maxdepth: 2
-
 notes
 ```
 
