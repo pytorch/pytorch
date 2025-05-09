@@ -1483,7 +1483,9 @@ def cleaned_instructions(code, safe=False) -> list[Instruction]:
     instructions = _cached_cleaned_instructions(code, safe)
     # We have a lot of code that implicitly mutates the instruction array. We
     # could do better here by making the copies explicit when necessary.
-    return _clone_instructions(instructions)
+    instructions = _clone_instructions(instructions)
+    propagate_line_nums(instructions)
+    return instructions
 
 
 # Copy an instructions array, making sure to remap the individual instruction targets.
