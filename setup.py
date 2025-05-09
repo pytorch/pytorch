@@ -443,7 +443,7 @@ def check_submodules():
             ],
         )
     check_for_files(
-        os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
+        os.path.join(third_party_path, "fbgemm", "external", "asmjit"),
         ["CMakeLists.txt"],
     )
 
