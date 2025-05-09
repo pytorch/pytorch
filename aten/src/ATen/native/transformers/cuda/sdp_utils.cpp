@@ -57,14 +57,21 @@
 namespace sdp {
 namespace {
 
+// tracks whether we've set the default priority order once, to avoid setting
+// it redundantly or overwriting a user-specified priority order
+// when the priority order context manager is used before the default priority
+// order is initialized the following happens:
+// (1) the current priority order is queried
+// (2) priority_order() is called, which initializes it to the default as init_ is false
+// (3) the user-specified priority order is set
+// (3.1) we are in the priority context...
+// (3.2) we exit the priority context...
+// (4) the previous priority order (default) is restored
 bool priority_order_init_ = false;
 
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-  // TODO(eqy): Re-enable by default after upgrading to a release later than 9.5.0
-  // see context: https://github.com/pytorch/pytorch/issues/138340
-  // return false;
 #if defined(CUDNN_VERSION)
 
 #if CUDNN_VERSION > 90000
@@ -581,9 +588,9 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
 
   const auto dprop = at::cuda::getCurrentDeviceProperties();
   // Check that the input is nested
-  if (dprop->major < 9 && has_for_nested_inputs(params)) {
+  if ((dprop->major == 9 || dprop->major == 10) && has_for_nested_inputs(params)) {
     if (debug) {
-      TORCH_WARN("CuDNN SDPA supports nested tensors on SM 9.0.");
+      TORCH_WARN("cuDNN SDPA supports nested tensors on SM 9.0, SM 10.0.");
     }
     return false;
   }
@@ -607,7 +614,7 @@ bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
   // sdp kernels
   if (!at::globalContext().userEnabledCuDNNSDP()) {
     if (debug) {
-      TORCH_WARN("CuDNN attention has been runtime disabled.");
+      TORCH_WARN("cuDNN attention has been runtime disabled.");
     }
     return false;
   }
@@ -638,7 +645,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #endif
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
   if (debug) {
-    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use CuDNN Attention (< v9.0.0)");
+    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
   }
   return false;
 #endif
@@ -877,7 +884,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   sdp::can_use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_WARN("Flash attention kernel not used because:");
   sdp::can_use_flash_attention(kernel_params, print_debug);
-  TORCH_WARN("CuDNN attention kernel not used because:");
+  TORCH_WARN("cuDNN attention kernel not used because:");
   sdp::can_use_cudnn_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return SDPBackend::error;

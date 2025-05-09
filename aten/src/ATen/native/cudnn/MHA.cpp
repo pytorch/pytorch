@@ -638,6 +638,7 @@ auto build_graph_nestedtensor(
   auto q_strides = q.strides();
   auto k_strides = k.strides();
   auto v_strides = v.strides();
+  // NB: cuDNN API shape is transposed
   constexpr int strideidx0 = 1;
   constexpr int strideidx1 = 0;
   constexpr int strideidx2 = 2;
@@ -967,6 +968,7 @@ auto build_graph_backward_nestedtensor(
   auto q_strides = q.strides();
   auto k_strides = k.strides();
   auto v_strides = v.strides();
+  // NB: cuDNN API shape is transposed
   constexpr int strideidx0 = 1;
   constexpr int strideidx1 = 0;
   constexpr int strideidx2 = 2;
