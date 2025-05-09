@@ -13,6 +13,7 @@ import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.tensor import Partial, Placement, Replicate, Shard
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -23,12 +24,6 @@ from torch.distributed.tensor._utils import (
     compute_global_tensor_info,
     compute_local_shape_and_global_offset,
     normalize_to_torch_size,
-)
-from torch.distributed.tensor.placement_types import (
-    Partial,
-    Placement,
-    Replicate,
-    Shard,
 )
 
 
@@ -996,8 +991,6 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     placements: Optional[Sequence[Placement]] = None,
     **kwargs,
 ) -> DTensor:
-    # from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
-
     # if device_mesh is None, use the one from mesh resources
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     kwargs["device"] = device_mesh.device_type

@@ -6,10 +6,10 @@ import pathlib
 import tempfile
 import unittest
 
+from numpy.testing import assert_array_equal
+
 import torch
 import torch.nn.functional as F
-
-from numpy.testing import assert_array_equal
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
