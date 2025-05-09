@@ -8673,6 +8673,26 @@ for shape in [(1,), ()]:
         ):
             Func.apply(b)
 
+    def test_custom_function_inplace_on_view_of_leaf(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                inp.add_(1)
+                ctx.mark_dirty(inp)
+                return inp
+
+            @staticmethod
+            def backward(ctx, gO):
+                pass
+
+        a = torch.tensor([1.0, 2.0], requires_grad=True)
+        b = a.view_as(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "a view of a leaf Variable that requires grad"
+        ):
+            Func.apply(b)
+
     def test_named_tensor_for_complex_views(self):
         names = ["batch", "height", "width", "complex"]
         z = torch.ones((2, 1, 2, 2), requires_grad=True)
