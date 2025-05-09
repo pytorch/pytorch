@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import logging
+import unittest
 
 import torch
 import torch._inductor
@@ -48,9 +49,10 @@ class MyModule3(torch.nn.Module):
 
 
 @requires_gpu
-@skipIfXpu(
-    msg="Intel GPU has not enabled decompose_mem_bound_mm PASS in "
-    "torch/_inductor/fx_passes/decompose_mem_bound_mm.py"
+@unittest.skipIf(
+    TEST_XPU,
+    "Intel GPU has not enabled decompose_mem_bound_mm PASS in "
+    "torch/_inductor/fx_passes/decompose_mem_bound_mm.py",
 )
 @torch._inductor.config.patch(
     post_grad_fusion_options={
