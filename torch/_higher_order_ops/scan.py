@@ -15,6 +15,7 @@ from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_meta_consistency,
     first_slice_copy,
+    FunctionalizeCtxWrapper,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -865,7 +866,7 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
-        functional_combine_fn = ctx.functionalize(combine_fn)
+        functional_combine_fn = FunctionalizeCtxWrapper(ctx, combine_fn)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
         sample_inputs = list(
