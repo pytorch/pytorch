@@ -1545,10 +1545,7 @@ class NullVariable(VariableTracker):
                 context=f"reconstruct {self}",
                 explanation="Dynamo attempted to generate bytecode (`PUSH_NULL`) specific "
                 "to Python 3.11+ but is running in an older Python version.",
-                hints=[
-                    "Run your code with Python 3.11 or newer if you need to "
-                    "trace functions using this bytecode pattern."
-                ],
+                hints=[*graph_break_hints.DYNAMO_BUG],
             )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
