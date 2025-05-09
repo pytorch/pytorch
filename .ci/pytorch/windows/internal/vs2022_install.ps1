@@ -20,8 +20,13 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+echo "VS download worked"
+
+echo %PATH%
+
 if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
     $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[17.10, 18)" -property installationPath
+    Write-Output "Existing BuildTools installation found at: $existingPath"
     if ($existingPath -ne $null) {
         if (!${env:CIRCLECI}) {
             echo "Found correctly versioned existing BuildTools installation in $existingPath"
