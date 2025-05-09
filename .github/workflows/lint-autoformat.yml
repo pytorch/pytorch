@@ -26,7 +26,7 @@ jobs:
           set -ex
           python3 -m venv /tmp/venv
           source /tmp/venv/bin/activate
-          export ADDITIONAL_LINTRUNNER_ARGS="format"
+          export ADDITIONAL_LINTRUNNER_ARGS="format --all-files"
           bash .github/scripts/lintrunner.sh
       - name: Check for changes
         id: git-check
