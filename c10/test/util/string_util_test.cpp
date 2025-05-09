@@ -77,4 +77,60 @@ TEST(StringUtilTest, testStrMulti) {
 }
 } // namespace test_str_multi
 
+namespace test_try_to {
+TEST(tryToTest, Int64T) {
+  const std::vector<std::pair<const char*, int64_t>> valid_examples = {
+      {"123", 123},
+      {"+456", 456},
+      {"-123", -123},
+      {"0x123", 291},
+      {"00123", 83},
+      {"000", 0},
+  };
+  for (const auto& [str, num] : valid_examples) {
+    EXPECT_EQ(c10::tryToNumber<int64_t>(str), num);
+    EXPECT_EQ(c10::tryToNumber<int64_t>(std::string{str}), num);
+  }
+
+  const std::vector<const char*> invalid_examples = {
+      "123abc",
+      "123.45",
+      "",
+      "12345678901234567890", // overflow
+  };
+  for (const auto str : invalid_examples) {
+    EXPECT_FALSE(c10::tryToNumber<int64_t>(str).has_value());
+    EXPECT_FALSE(c10::tryToNumber<int64_t>(std::string{str}).has_value());
+  }
+  EXPECT_FALSE(c10::tryToNumber<int64_t>(nullptr).has_value());
+}
+
+TEST(tryToTest, Double) {
+  const std::vector<std::pair<const char*, double>> valid_examples = {
+      {"123.45", 123.45},
+      {"-123.45", -123.45},
+      {"123", 123.},
+      {".5", 0.5},
+      {"-.02", -0.02},
+      {"5e-2", 5e-2},
+      {"1e+3", 1e3},
+      {"0x123.45", 291.26953125},
+  };
+  for (const auto& [str, num] : valid_examples) {
+    EXPECT_EQ(c10::tryToNumber<double>(str), num);
+    EXPECT_EQ(c10::tryToNumber<double>(std::string{str}), num);
+  }
+
+  const std::vector<const char*> invalid_examples = {
+      "123abc",
+      "",
+      "1e309", // overflow
+  };
+  for (const auto str : invalid_examples) {
+    EXPECT_FALSE(c10::tryToNumber<double>(str).has_value());
+    EXPECT_FALSE(c10::tryToNumber<double>(std::string{str}).has_value());
+  }
+  EXPECT_FALSE(c10::tryToNumber<double>(nullptr).has_value());
+}
+} // namespace test_try_to
 } // namespace

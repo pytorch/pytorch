@@ -341,6 +341,9 @@ reorder_for_compute_comm_overlap_passes: list[
     "raise_comms",
 ]
 
+# Maximum number of positions to advance a given collective, unlimited by default
+reorder_prefetch_limit: Optional[int] = None
+
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
@@ -1158,7 +1161,7 @@ class triton:
     # of registers being benchmarked.
     #
     # NOTE: triton will always report >0 register spills for kernels using sin/cos.
-    # (check this issue https://github.com/openai/triton/issues/1756 )
+    # (check this issue https://github.com/triton-lang/triton/issues/1756 )
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.

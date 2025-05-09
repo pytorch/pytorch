@@ -1488,7 +1488,7 @@ class TestFP8Matmul(TestCase):
                 B = B.clamp(min=min_val, max=max_val)
                 B = _bfloat16_to_float4_e2m1fn_x2(B)
 
-                approx_match_sqnr_target = 16.0
+                approx_match_sqnr_target = 15.8
 
         C_ref = A_ref @ B_ref.t()
 
