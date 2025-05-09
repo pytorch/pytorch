@@ -2535,7 +2535,7 @@ class ShapeCodeParts:
 @dataclasses.dataclass
 class GuardsState:
     output_graph: OutputGraphGuardsState
-    shape_code_parts: ShapeCodeParts
+    shape_code_parts: Optional[ShapeCodeParts]
 
 
 class GuardsStatePickler(pickle.Pickler):
@@ -2872,7 +2872,6 @@ class CheckFunctionManager:
                     output_graph_guards_state.input_source_to_sizes_strides,
                 ),
             )
-            assert self.shape_code_parts is not None
             guards_state = GuardsState(
                 output_graph=output_graph_guards_state,
                 shape_code_parts=self.shape_code_parts,
