@@ -65,11 +65,7 @@ extensions = [
     "myst_parser",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
-    "sphinxext.opengraph",
 ]
-
-ogp_site_url = "http://pytorch.org/"
-ogp_image = "https://docs.pytorch.org/assets/images/social-share.jpg"
 
 myst_enable_extensions = [
     "colon_fence",
