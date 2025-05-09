@@ -226,14 +226,14 @@ CUDA_NOT_FOUND_MESSAGE = (
     "CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH"
     "environment variable or add NVCC to your system PATH. The extension compilation will fail."
 )
-ROCM_HOME = _find_rocm_home()
+ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hip) else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
 
-CUDA_HOME = _find_cuda_home() if torch.cuda._is_compiled() else None
+CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 SYCL_HOME = _find_sycl_home() if torch.xpu._is_compiled() else None
 
