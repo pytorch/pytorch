@@ -141,6 +141,12 @@ unsafe_skip_cache_dynamic_shape_guards: bool = False
 # Unsafe way to mark function as cacheable
 unsafe_marked_cacheable_functions: list[str] = []
 
+# If set to "DEFAULT", this will use the default path that is "torch/_inductor/fx_passes/serialized_patterns/"
+# If set to another path, torchinductor_serialized_pattern_path will generate patterens to the given path
+serialized_pattern_path = os.environ.get(
+    "TORCHINDUCTOR_SERIALIZED_PATTERN_PATH", "DEFAULT"
+)
+
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
 
