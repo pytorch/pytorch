@@ -16,7 +16,6 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
-    _fused_scaled_matmul_reduce_scatter_fallback,
     _test_mode,
     enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
@@ -41,6 +40,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
+
+test_contexts = [nullcontext, _test_mode]
 
 
 def requires_cuda_p2p_access():
@@ -624,8 +626,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         output_shape = [*A.shape[:-1], B.shape[1]]
 
         outputs = []
-        contexts = [nullcontext, _test_mode]
-        for context in contexts:
+        for context in test_contexts:
             with context():
                 outputs.append(
                     torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
