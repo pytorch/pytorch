@@ -91,7 +91,7 @@ struct CUDACachingHostAllocatorImpl
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
-    auto start = std::chrono::system_clock::now();
+    auto start = std::chrono::steady_clock::now();
     bool use_register = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_use_cuda_host_register();
     if (use_register) {
       allocWithCudaHostRegister(ptr, size);
@@ -102,7 +102,7 @@ struct CUDACachingHostAllocatorImpl
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
     use_host_register[*ptr] = use_register;
 
-    auto end = std::chrono::system_clock::now();
+    auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     // Update the statistics on the time spent on cudaHostAlloc/hostRegister
@@ -113,7 +113,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void free_block(Block* block) override {
-    auto start = std::chrono::system_clock::now();
+    auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
     // However, allocations using cudaHostRegister should use corresonding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
@@ -127,7 +127,7 @@ struct CUDACachingHostAllocatorImpl
       AT_CUDA_CHECK(cudaFreeHost(ptr));
     }
     use_host_register.erase(ptr);
-    auto end = std::chrono::system_clock::now();
+    auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     // Update the statistics on the time spent on cudaFreeHost/hostUnregister
@@ -249,58 +249,13 @@ struct CUDACachingHostAllocatorImpl
   }
 };
 
-void raw_local_deleter(void* ptr);
+DECLARE_HOST_ALLOCATOR(
+    CUDACachingHostAllocator,
+    CUDACachingHostAllocatorImpl,
+    raw_local_deleter,
+    caching_host_allocator);
 
-struct CUDACachingHostAllocator final
-    : public CachingHostAllocatorInterface<CUDACachingHostAllocatorImpl> {
-  at::DataPtr allocate(size_t size) override {
-    auto ptr_and_ctx = impl_->allocate(size);
-    return {
-        ptr_and_ctx.first,
-        ptr_and_ctx.second,
-        &raw_local_deleter,
-        at::DeviceType::CPU};
-  }
-};
-
-CUDACachingHostAllocator caching_host_allocator;
-
-static inline CUDACachingHostAllocator& getCUDACachingHostAllocator() {
-  return caching_host_allocator;
-}
-
-void raw_local_deleter(void* ptr) {
-  getCUDACachingHostAllocator().free(ptr);
-}
+REGISTER_HOST_ALLOCATOR(at::kCUDA, &caching_host_allocator)
 
 } // anonymous namespace
-
-bool CachingHostAllocator_recordEvent(
-    void* ptr,
-    void* ctx,
-    at::cuda::CUDAStream stream) {
-  return getCUDACachingHostAllocator().record_event(ptr, ctx, stream);
-}
-
-// Releases cached pinned memory allocations via cudaHostFree
-void CachingHostAllocator_emptyCache() {
-  getCUDACachingHostAllocator().empty_cache();
-}
-
-at::Allocator* getCachingHostAllocator() {
-  return &getCUDACachingHostAllocator();
-}
-
-at::HostStats CachingHostAllocator_getStats() {
-  return getCUDACachingHostAllocator().getStats();
-}
-
-void CachingHostAllocator_resetAccumulatedStats() {
-  return getCUDACachingHostAllocator().resetAccumulatedStats();
-}
-
-void CachingHostAllocator_resetPeakStats() {
-  return getCUDACachingHostAllocator().resetPeakStats();
-}
-
 } // namespace at::cuda

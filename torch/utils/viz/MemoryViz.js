@@ -980,6 +980,8 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       text = `${text}, Total memory used after allocation: ${formatSize(
         elem.max_allocated_mem,
       )}`;
+      const context = elem?.compile_context ?? 'None';
+      text = `${text}, Compile context: ${context}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }

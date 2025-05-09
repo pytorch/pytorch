@@ -647,7 +647,13 @@ struct ThreadLocalResults {
   ThreadLocalResults& operator=(const ThreadLocalResults&&) = delete;
 
   ~ThreadLocalResults() {
+    // Currently, there is a bug in Profiler when using Python 3.12 that causes
+    // a segfault when decrementing the refcount of a TraceContext during
+    // on-demand. We are purposefully allowing for a small leak in this
+    // situation to avoid the segfault. This should be fixed in the future.
+#if PY_MAJOR_VERSION < 3 || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 12)
     Py_DECREF((PyObject*)ctx_);
+#endif
   }
 
   template <CallType C, EventType E, typename Ephemeral, typename... Args>

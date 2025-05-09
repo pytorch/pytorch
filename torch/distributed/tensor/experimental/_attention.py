@@ -19,6 +19,7 @@ from torch import nn
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.overrides import TorchFunctionMode
 
 
 __all__ = ["context_parallel", "set_rotate_method"]
@@ -37,6 +38,15 @@ class _RotateMethod(Enum):
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+
+class _DispatchMode(Enum):
+    MONKEY_PATCH = auto()
+    TORCH_FUNCTION = auto()
+    TORCH_DISPATCH = auto()
+
+
+_dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
 
 
 @dataclass
@@ -799,7 +809,7 @@ def _templated_ring_attention_backward(
     grad_query = grad_query.to(query.dtype)
     next_grad_kv = dkv_rotater.next_buffer().to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
-    grad_value = next_grad_kv[grad_value.numel() :].reshape(grad_value.shape)
+    grad_value = next_grad_kv[grad_key.numel() :].reshape(grad_value.shape)
     return (
         grad_query,
         grad_key,
@@ -1166,22 +1176,60 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
         return tuple(new_outputs)
 
-    # TODO: provide a more robust way to replace SDPA.
-    # Currently we use monkey patch to replace scaled_dot_product_attention with the
-    # wrapped fn. This is okay if users do `import torch.nn.functional` but will not
-    # work if users do `import torch.nn.functional.scaled_dot_product_attention`.
-    _distribute_function(
-        F.scaled_dot_product_attention,
-        F,
-        mesh,
-        attention_input_fn,
-        attention_output_fn,
-    )
+    class DistributeFunction(TorchFunctionMode):
+        def __init__(
+            self,
+            fn: Callable,
+            device_mesh: DeviceMesh,
+            input_fn: Optional[Callable] = None,
+            output_fn: Optional[Callable] = None,
+        ):
+            self._device_mesh = device_mesh
+            self._input_fn = input_fn
+            self._output_fn = output_fn
+            self._fn = fn
 
-    with _enable_cp_dispatcher():
-        yield
+        def __torch_function__(
+            self,
+            func: Callable,
+            types: Any,
+            args: tuple[Any, ...] = (),
+            kwargs: Optional[dict[str, Any]] = None,
+        ) -> Any:
+            kwargs = kwargs or {}
 
-    _restore_function(F.scaled_dot_product_attention, F)
+            if func != self._fn:
+                return func(*args, **kwargs)
+
+            if self._input_fn is not None:
+                args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
+            output = func(*args, **kwargs)
+            if self._output_fn is not None:
+                output = self._output_fn(self._device_mesh, output)
+            return output
+
+    if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
+        _distribute_function(
+            F.scaled_dot_product_attention,
+            F,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
+        )
+        with _enable_cp_dispatcher():
+            yield
+        _restore_function(F.scaled_dot_product_attention, F)
+    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
+        with DistributeFunction(
+            F.scaled_dot_product_attention,
+            mesh,
+            attention_input_fn,
+            attention_output_fn,
+        ):
+            with _enable_cp_dispatcher():
+                yield
+    else:
+        raise NotImplementedError("torch dispatch mode is not supported yet.")
 
 
 class _LoadBalancer(ABC):
