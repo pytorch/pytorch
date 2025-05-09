@@ -32,7 +32,11 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_oblivious
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_true,
+    guard_size_oblivious,
+    statically_known_true,
+)
 
 from . import config, inductor_prims
 from .utils import (
@@ -265,13 +269,13 @@ def bmm(
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
     if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
-        if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
+        if statically_known_true(self.shape[1] == 1) or statically_known_true(
             batch2.shape[2] == 1
         ):
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
-        if guard_size_oblivious(self.size(1) == 1) and guard_size_oblivious(
+        if statically_known_true(self.size(1) == 1) and statically_known_true(
             batch2.size(-1) == 1
         ):
             counters["inductor"]["decompose_bmm"] += 1
@@ -291,7 +295,7 @@ def addmm(
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
     if self.device.type == "cpu":
-        if guard_size_oblivious(mat1.size(0) == 1) and guard_size_oblivious(
+        if statically_known_true(mat1.size(0) == 1) and statically_known_true(
             mat2.size(-1) == 1
         ):
             counters["inductor"]["decompose_addmm"] += 1
@@ -300,7 +304,7 @@ def addmm(
             ).unsqueeze(0)
             return alpha * out + beta * self
         if (
-            guard_size_oblivious(mat1.size(0) == 1)
+            statically_known_true(mat1.size(0) == 1)
             and definitely_true(mat2.size(0) <= 16)
             and definitely_true(mat2.size(1) <= 16)
         ):
@@ -322,21 +326,21 @@ def mm(
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
     if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
-        if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
+        if statically_known_true(self.shape[0] == 1) or statically_known_true(
             input2.shape[1] == 1
         ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
-            guard_size_oblivious(self.size(-1) == 1)
-            and guard_size_oblivious(self.size(0) > 0)
-            and guard_size_oblivious(input2.size(0) == 1)
+            statically_known_true(self.size(-1) == 1)
+            and statically_known_true(self.size(0) > 0)
+            and statically_known_true(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
             and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
-        if guard_size_oblivious(self.size(0) == 1) and guard_size_oblivious(
+        if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):
             counters["inductor"]["decompose_mm"] += 1
@@ -355,8 +359,6 @@ def cat(
     tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     def non_empty_tensor(x: torch.Tensor) -> bool:
         # For better or worse, this is a valid cat:
         #

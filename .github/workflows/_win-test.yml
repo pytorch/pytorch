@@ -96,7 +96,7 @@ jobs:
 
       # TODO: Move to a requirements.txt file for windows
       - name: Install pip dependencies
-        uses: nick-fields/retry@v3.0.0
+        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         with:
           shell: bash
           timeout_minutes: 5
@@ -117,7 +117,7 @@ jobs:
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
-        uses: seemethere/download-artifact-s3@v4
+        uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
         with:
           name: ${{ inputs.build-environment }}
           path: C:\${{ github.run_id }}\build-results

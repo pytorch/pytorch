@@ -1638,7 +1638,7 @@ void initJITBindings(PyObject* module) {
           "get_record_offset_no_read",
           [](PyTorchStreamReader& self,
              size_t zipfile_header_offset,
-             const std::string filename,
+             const std::string& filename,
              size_t size,
              uint64_t storage_alignment) {
             return self.getRecordOffsetNoRead(
@@ -1748,7 +1748,7 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_resolve_packet",
-      [](const char* op_name, py::args args, const py::kwargs& kwargs) {
+      [](const char* op_name, const py::args& args, const py::kwargs& kwargs) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
@@ -2140,7 +2140,7 @@ void initJITBindings(PyObject* module) {
                 return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) {
                 TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
@@ -2177,7 +2177,7 @@ void initJITBindings(PyObject* module) {
                 return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) {
                 TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
