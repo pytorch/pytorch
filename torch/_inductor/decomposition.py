@@ -57,7 +57,7 @@ _quantized = torch.ops._quantized
 quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
-    [
+    [   aten.view,
         aten._adaptive_avg_pool2d_backward,
         aten.index_select,
         aten.addmv,
