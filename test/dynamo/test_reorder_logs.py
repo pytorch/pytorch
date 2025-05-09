@@ -64,10 +64,13 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(orig_out, opt_out))
         if should_ignore_logger:
             self.assertNotIn("moo", printed_output)
-            self.assertEqual(len(counters["graph_break"]), 0)
+            self.assertEqual(sum(counters["graph_break"].values()), 0)
+        elif fn is f_info:
+            self.assertIn("moo", printed_output)
+            self.assertEqual(sum(counters["graph_break"].values()), 1)
         else:
             self.assertIn("moo", printed_output)
-            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(sum(counters["graph_break"].values()), 2)
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
