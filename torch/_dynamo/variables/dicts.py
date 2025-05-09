@@ -816,7 +816,7 @@ class SetVariable(ConstDictVariable):
             assert not kwargs
             assert len(args) == 1
             if args[0] not in self:
-                unimplemented("key does not exist")
+                raise_observed_exception(KeyError, tx, args=args)
             return super().call_method(tx, "pop", args, kwargs)
         elif name == "discard":
             assert not kwargs
