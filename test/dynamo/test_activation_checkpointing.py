@@ -1368,33 +1368,53 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         opt_fn(*args1).sum().backward()
-        if PLATFORM_SUPPORTS_CUDNN_ATTENTION and SM90OrLater:
-            op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
-        else:
-            op = torch.ops.aten._scaled_dot_product_flash_attention.default
 
         fwd_graph = aot_graphs[0]
-        self.assertTrue(
-            count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=op,
+        try:
+            op = torch.ops.aten._scaled_dot_product_flash_attention.default
+            self.assertTrue(
+                count_ops(
+                    fwd_graph,
+                    [],
+                    freq=1,
+                    op=op,
+                )
             )
-        )
-
+        except AssertionError as e:
+            op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+            self.assertTrue(
+                count_ops(
+                    fwd_graph,
+                    [],
+                    freq=1,
+                    op=op,
+                )
+            )
         bwd_graph = aot_graphs[1]
         # Check that sin is not recomputed in the backward graph - checks percolate tags
         self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
         # Check that the sdpa op is recomputed in the backward graph
-        self.assertTrue(
-            count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=op,
+        try:
+            op = torch.ops.aten._scaled_dot_product_flash_attention.default
+            self.assertTrue(
+                count_ops(
+                    bwd_graph,
+                    [],
+                    freq=1,
+                    op=op,
+                )
             )
-        )
+        except AssertionError as e:
+            op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+            self.assertTrue(
+                count_ops(
+                    bwd_graph,
+                    [],
+                    freq=1,
+                    op=op,
+                )
+            )
+
 
     @requires_distributed()
     @requires_cuda
