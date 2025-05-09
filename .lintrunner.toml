@@ -57,7 +57,7 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
-    'aten/src/ATen/cpu/vec/*.h',
+    'aten/src/ATen/cpu/vec/**/*.h',
     'aten/src/ATen/mps/**/*.mm',
     'aten/src/ATen/mps/**/*.h',
     'aten/src/ATen/xpu/**/*.h',
