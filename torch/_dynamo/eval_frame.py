@@ -1047,7 +1047,6 @@ def _optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
-            rebuild_ctx=rebuild_ctx,
         )
 
     backend = get_compiler_fn(backend)
@@ -1896,14 +1895,22 @@ def export(
         return inner
 
 
-def optimize_assert(
+def optimize_assert(*args, **kwargs):
+    def rebuild_ctx():
+        assert not config.compiled_autograd_kwargs_override
+        return optimize_assert(*args, **kwargs)
+
+    return _optimize_assert(rebuild_ctx, *args, **kwargs)
+
+
+def _optimize_assert(
+    rebuild_ctx: Callable[[], OptimizeContext],
     backend,
     *,
     hooks=Hooks(None, None, None),
     export=False,
     export_constraints=None,
     dynamic=None,
-    rebuild_ctx=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
