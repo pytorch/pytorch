@@ -71,6 +71,7 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) const {
     args.collect(variable);
     args.collect(variable.grad());
   }
+  args.collect(GradMode::is_enabled());
   const auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
     hook->compiled_args(args);
@@ -93,7 +94,7 @@ variable_list AccumulateGrad::apply_with_saved(
   // proxy a call to torch.ops.inductor.accumulate_grad_.default
   const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
   pyinterface->call_accumulate_grad(
-      saved.get_py_compiler(), variable_copy, grads[0]);
+      saved.get_py_compiler(), variable_copy, grads[0], GradMode::is_enabled());
 
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {

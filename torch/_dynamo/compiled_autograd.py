@@ -698,7 +698,7 @@ class AutogradCompilerInstance:
         self.bind_objects_to_proxies([result], [proxy_out])
         return result
 
-    def accumulate_grad(self, variable, grad):
+    def accumulate_grad(self, variable, grad, grad_mode):
         self.fx_tracer.create_proxy(
             "call_function",
             torch.ops.inductor.accumulate_grad_.default,
@@ -706,7 +706,9 @@ class AutogradCompilerInstance:
                 self.to_proxy(variable),
                 self.to_proxy(grad),
             ),
-            kwargs={},
+            kwargs={
+                "grad_mode": grad_mode
+            },
         )
 
     def proxy_call_hook(self, hook, *args, **kwargs):
@@ -1037,7 +1039,8 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
-        return runtime_wrapper, self.compiler_fn(graph)
+        # return runtime_wrapper, self.compiler_fn(graph)
+        return runtime_wrapper, graph
 
     @staticmethod
     def get_all_nodes(args):

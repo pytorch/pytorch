@@ -4108,6 +4108,34 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
+    def test_higher_order_gradients(self):
+        @torch.compile
+        def f(x):
+            return x**3
+
+        def fn():
+            torch.manual_seed(123)
+            x = torch.tensor(2.0, requires_grad=True)
+            with compiled_autograd._enable(torch.compile):
+                first = torch.autograd.grad(f(x), x, create_graph=True)[0]
+                second = torch.autograd.grad(first, x, create_graph=True)[0]
+                third = torch.autograd.grad(second, x, create_graph=True)[0]
+                fourth = torch.autograd.grad(third, x, create_graph=True)[0]
+
+            return (first, second, third, fourth)
+
+        first, second, third, fourth = fn()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 4)
+        self.assertEqual(first, 12)  # 3x^2
+        self.assertEqual(second, 12)  # 6x
+        self.assertEqual(third, 6)  # 6
+        self.assertEqual(fourth, 0)
+
+        # should cache hit
+        counters.clear()
+        _ = fn()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -4227,6 +4255,11 @@ known_graph_breaks_tests = {
     "test_prehook_ordering",  # retains_grad_hooks
     "test_will_engine_execute_node",  # retains_grad_hooks
     "test_backward_to_node",  # retains_grad_hooks
+    "test_backward_with_nonleaf_inputs",  # retains_grad_hook on non-leaf input
+    "test_create_graph_and_full_backward_hook_cycle",  # _pack_with_none
+    "test_full_backward_hook_double_backward",  # _pack_with_none
+    "test_grad_mode_restored_reentrant",  # assertTrue
+    "test_lobpcg",  # skip files
 }
 
 test_contexts = {
@@ -4244,9 +4277,38 @@ skipped_tests = {
     "test_callback_propagates_errors_from_device_thread",  # fullgraph for queue_callback, but graph break for RuntimeError
 }
 
+"""
+FAILED [0.2754s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_default_saved_tensors_hooks_double_backward - RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
+FAILED [0.0452s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_nested_anomaly_detect_nan - AssertionError: Source of 's35' is None when lifting it to input of top-level. If it's an unbacked symbol, this could be because it's not tracked with lazy_bind_unbacked_symbols. Otherwise, should provide a source when create_graph_input for `s35` at root tracer.
+FAILED [0.2548s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_saved_variable_packing_unpacking_saved_original_with_hooks - RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
+FAILED [1.4363s] test/inductor/test_compiled_autograd.py::TestAutogradWithCompiledAutograd::test_lobpcg - TypeError: add(): argument 'input' (position 1) must be Tensor, not NoneType
+"""
+
 known_failing_tests = {
     # Category: Compiled autograd
-    "test_grad_mode_restored_reentrant",  # create_graph
+    # "test_grad_mode_restored_reentrant",  # create_graph
+    # "test_accumulate_grad",  # create_graph
+    # "test_anomaly_assign_parent_cleanup",  # create_graph
+    # "test_backward_create_graph_warns",  # create_graph
+    # "test_backward_with_nonleaf_inputs",  # create_graph
+    # "test_create_graph_and_full_backward_hook_cycle",  # create_graph
+    # "test_custom_autograd_repeated_grad_grad",  # create_graph
+    # "test_default_saved_tensors_hooks_double_backward",  # create_graph
+    # "test_full_backward_hook_double_backward",  # create_graph
+    # "test_function",  # create_graph
+    # "test_grad",  # create_graph
+    # "test_grad_materialize_grads",  # create_graph
+    # "test_grad_nonleaf",  # create_graph
+    # "test_grad_nonleaf_many_outputs",  # create_graph
+    # "test_hessian_vector",  # create_graph
+    # "test_inplace_on_view_backward",  # create_graph
+    # "test_nested_anomaly_detect_nan",  # create_graph
+    # "test_nested_anomaly_printstack_cleanup",  # create_graph
+    # "test_once_differentiable",  # create_graph
+    # "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # create_graph
+    "test_select_sum",  # batched gradients
+    "test_custom_autograd_no_early_free",  # batched gradients
+    # "test_lobpcg",  # create_graph
     "test_reentrant_with_callbacks_both_depths",  # queue_callback
     "test_reentrant_with_callbacks_depth_0",  # queue_callback
     "test_reentrant_with_callbacks_depth_1",  # queue_callback
@@ -4254,34 +4316,13 @@ known_failing_tests = {
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
     "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
     "test_post_accumulate_grad_hook_ordering",  # accuracy error
-    "test_accumulate_grad",  # create_graph
-    "test_anomaly_assign_parent_cleanup",  # create_graph
-    "test_backward_create_graph_warns",  # create_graph
-    "test_backward_with_nonleaf_inputs",  # create_graph
-    "test_create_graph_and_full_backward_hook_cycle",  # create_graph
     "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
-    "test_custom_autograd_repeated_grad_grad",  # create_graph
     "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
     "test_custom_function_forward_mode_inplace_checks",  # forward AD
     "test_custom_function_forward_mode_view_checks",  # forward AD
     "test_custom_function_forward_mode_wrong_formula",  # forward AD
-    "test_default_saved_tensors_hooks_double_backward",  # create_graph
     "test_node_post_hook_registered_during_unpack_hook",  # 'NoneType' object has no attribute 'register_hook'
-    "test_full_backward_hook_double_backward",  # create_graph
-    "test_function",  # create_graph
-    "test_grad",  # create_graph
-    "test_grad_materialize_grads",  # create_graph
-    "test_grad_nonleaf",  # create_graph
-    "test_grad_nonleaf_many_outputs",  # create_graph
-    "test_hessian_vector",  # create_graph
-    "test_inplace_on_view_backward",  # create_graph
     "test_multi_grad_any_hooks",  # register_multi_grad_hook
-    "test_nested_anomaly_detect_nan",  # create_graph
-    "test_nested_anomaly_printstack_cleanup",  # create_graph
-    "test_once_differentiable",  # create_graph
-    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # create_graph
-    "test_select_sum",  # create_graph, also needs graph breaks
-    "test_custom_autograd_no_early_free",  # create_graph
     "test_custom_function_error",  # vjp
     "test_custom_function_save_for_forward",  # vjp
     "test_dont_materialize_grads",  # undefined grad
@@ -4290,7 +4331,6 @@ known_failing_tests = {
     "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
     "test_save_output_nr",  # output_nr grad passed as None
     "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
-    "test_lobpcg",  # create_graph
     # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_grad_nonleaf_register_hook",
     "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
@@ -4339,6 +4379,10 @@ known_failing_tests = {
     "test_anomaly_mode_no_check_nan",  # different error messages
     "test_anomaly_grad_warnings",  # different error messages
     "test_anomaly_detect_nan",  # fake tensor errors on NaN
+    "test_once_differentiable",  # different node name: CompiledFunctionBackward
+    "test_function",  # different node name: CompiledFunctionBackward
+    "test_inplace_on_view_backward",  # different node name: CompiledFunctionBackward
+    "test_nested_anomaly_printstack_cleanup",  # anomaly NaN error message different
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }

@@ -286,9 +286,10 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
   void call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
-      const at::Tensor& grad) const override {
+      const at::Tensor& grad,
+      bool grad_mode) const override {
     py::handle handle(py_compiler);
-    py::object stuff = handle.attr("accumulate_grad")(variable, grad);
+    py::object stuff = handle.attr("accumulate_grad")(variable, grad, grad_mode);
     TORCH_INTERNAL_ASSERT(stuff.is_none());
   }
 };

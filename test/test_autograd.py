@@ -830,7 +830,7 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=False)
         self.assertEqual(x_grad, x_grad_clone * 2)
 
-        # Accumulate out-of-place when create_graph is False
+        # Accumulate out-of-place when create_graph is True
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
@@ -9927,6 +9927,7 @@ for shape in [(1,), ()]:
             y = a**3
             s = torch.sum(y)
         (g,) = torch.autograd.grad(s, (a,), create_graph=True)
+        # todo: why g no grad_fn?
         g.sum().backward()
         # factor 2 because only a is saved once
         self.assertEqual(6 * 2 * a, a.grad)
