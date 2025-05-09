@@ -4591,6 +4591,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv1d(3, 4, 5)),
       "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1)");
+  {
+    auto options = Conv1dOptions(3, 4, 5);
+    ASSERT_EQ(
+        c10::str(Conv1d(options.padding(torch::kSame))),
+        "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1, padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv1d(options.padding(torch::kValid))),
+        "torch::nn::Conv1d(3, 4, kernel_size=5, stride=1, padding='valid')");
+  }
 
   ASSERT_EQ(
       c10::str(Conv2d(3, 4, 5)),
@@ -4604,6 +4613,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
     ASSERT_EQ(
         c10::str(Conv2d(options)),
         "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 2])");
+  }
+  {
+    auto options = Conv2dOptions(3, 4, std::vector<int64_t>{5, 6});
+    ASSERT_EQ(
+        c10::str(Conv2d(options.padding(torch::kSame))),
+        "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv2d(options.padding(torch::kValid))),
+        "torch::nn::Conv2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='valid')");
   }
 
   ASSERT_EQ(
@@ -4629,6 +4647,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
         "groups=2, "
         "bias=false, "
         "padding_mode=kCircular)");
+  }
+  {
+    auto options = Conv3dOptions(3, 4, std::vector<int64_t>{5, 6, 7});
+    ASSERT_EQ(
+        c10::str(Conv3d(options.padding(torch::kSame))),
+        "torch::nn::Conv3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(Conv3d(options.padding(torch::kValid))),
+        "torch::nn::Conv3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='valid')");
   }
 }
 
