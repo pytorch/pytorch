@@ -1290,8 +1290,8 @@ class TestPatternMatcher(TestCase):
         def test(x, y):
             return x + (y * 0)
 
-        x = torch.rand([256], device="cuda")
-        y = torch.rand([256], device="cuda")
+        x = torch.rand([256], device=GPU_TYPE)
+        y = torch.rand([256], device=GPU_TYPE)
 
         test_c = torch.compile(test)
 
