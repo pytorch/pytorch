@@ -2483,7 +2483,7 @@ def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
-    flags += ['-fno-gpu-rdc']
+    flags += [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
     return flags
 
 def _get_build_directory(name: str, verbose: bool) -> str:
