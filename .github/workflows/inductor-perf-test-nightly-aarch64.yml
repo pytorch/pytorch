@@ -65,6 +65,9 @@ jobs:
     name: linux-jammy-aarch64-py3.10-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.arm64.m7g.4xlarge

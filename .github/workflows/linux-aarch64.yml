@@ -30,6 +30,9 @@ jobs:
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10
