@@ -684,7 +684,7 @@ class TestXPUAPISanity(TestCase):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
-    def test_softmax_half_to_float(self):
+    def test_softmax_half_to_float(self, device):
         shape = [
             [8],
             [7, 8],
