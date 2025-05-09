@@ -33,7 +33,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import (
-    definitely_true,
+    guard_or_false,
     guard_size_oblivious,
     statically_known_true,
 )
@@ -307,8 +307,8 @@ def addmm(
             return alpha * out + beta * self
         if (
             statically_known_true(mat1.size(0) == 1)
-            and definitely_true(mat2.size(0) <= 16)
-            and definitely_true(mat2.size(1) <= 16)
+            and guard_or_false(mat2.size(0) <= 16)
+            and guard_or_false(mat2.size(1) <= 16)
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
@@ -339,7 +339,7 @@ def mm(
             and statically_known_true(self.size(0) > 0)
             and statically_known_true(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
-            and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
+            and guard_or_false((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])

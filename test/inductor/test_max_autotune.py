@@ -292,6 +292,38 @@ class TestMaxAutotune(TestCase):
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_max_autotune_regular_mm_tma_dynamic_outer_dim(self):
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+
+        # TMA requires 16-byte alignment: here we repeat the dims
+        # by the factor of 8, as float16 is 2-byte. All dims are
+        # repeated due to the possible transpositions below.
+        a = a.repeat(8, 8)
+        b = b.repeat(8, 8)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(mm)(a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
         """
@@ -467,6 +499,40 @@ class TestMaxAutotune(TestCase):
         # if any of the input inner dims are not 16-byte aligned. As a result,
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_max_autotune_addmm_tma_dynamic_outer_dim(self):
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+        x = torch.randn(N).to(torch.float16).cuda()
+
+        # TMA requires 16-byte alignment: here we repeat the dims
+        # by the factor of 8, as float16 is 2-byte. All dims are
+        # repeated due to the possible transpositions below.
+        x = x.repeat(8)
+        a = a.repeat(8, 8)
+        b = b.repeat(8, 8)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(addmm)(x, a, b)
+            c_expected = addmm(x, a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @fresh_inductor_cache()
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
@@ -1134,17 +1200,27 @@ class TestMaxAutotune(TestCase):
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @parametrize("dynamic", (True, False))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
     )
-    def test_max_autotune_decompose_k(self, sizes, dynamic):
+    def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
+        fp16_red_setting = (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        )
+        bf16_red_setting = (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        )
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
         M, N, K = sizes
 
-        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
-        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+        a = torch.randn(M, K, dtype=dtype, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=dtype, device="cuda", requires_grad=True)
 
         possible_splits = range(2, min(K // M, K // N) + 1)
 
@@ -1216,6 +1292,13 @@ class TestMaxAutotune(TestCase):
                 atol=1e-2,
                 rtol=1e-2,
             )
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            fp16_red_setting
+        )
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            bf16_red_setting
+        )
 
 
 @instantiate_parametrized_tests

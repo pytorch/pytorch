@@ -1487,20 +1487,6 @@ class FakeTensorOperatorInvariants(TestCase):
 
         self.assertEqual(mode.count, 0)
 
-    # PropagateRealTensors installs weakrefs
-    @expectedFailurePropagateRealTensors
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_module_to(self):
-
-        def _check_device(sd, device_type):
-            for v in sd.values():
-                self.assertEqual(v.device.type, device_type)
-
-        with FakeTensorMode():
-            m = torch.nn.Linear(2, 2)
-            _check_device(m.state_dict(), 'cpu')
-            m.to('cuda')
-            _check_device(m.state_dict(), 'cuda')
 
 make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
 
@@ -2216,16 +2202,16 @@ class FakeTensorDispatchCache(TestCase):
                 FakeTensorMode.cache_clear()
                 self.assertHitsMisses(0, 0)
 
-                ref = invoke_subgraph(fn, "subgraph", (x, y))
+                ref = invoke_subgraph(fn, "subgraph", x, y)
                 self.assertHitsMisses(0, 2)
                 self.assertBypasses("function argument", 1)
 
-                res = invoke_subgraph(fn, "subgraph", (x, y))
+                res = invoke_subgraph(fn, "subgraph", x, y)
                 # The hits are from the ops inside fn
                 self.assertHitsMisses(2, 2)
                 self.assertBypasses("function argument", 2)
 
-                res = invoke_subgraph(fn, "subgraph", (x, y))
+                res = invoke_subgraph(fn, "subgraph", x, y)
                 # The hits are from the ops inside fn
                 self.assertHitsMisses(4, 2)
                 self.assertBypasses("function argument", 3)
@@ -2246,14 +2232,14 @@ class FakeTensorDispatchCache(TestCase):
                 FakeTensorMode.cache_clear()
                 self.assertHitsMisses(0, 0)
 
-                ref = invoke_subgraph(mod, "subgraph", (x, y))
+                ref = invoke_subgraph(mod, "subgraph", x, y)
                 self.assertHitsMisses(0, 3)
 
-                res = invoke_subgraph(mod, "subgraph", (x, y))
+                res = invoke_subgraph(mod, "subgraph", x, y)
                 # The hits are from re-running the subgraph
                 self.assertHitsMisses(1, 3)
 
-                res = invoke_subgraph(mod, "subgraph", (x, y))
+                res = invoke_subgraph(mod, "subgraph", x, y)
                 # The hits are from re-running the subgraph
                 self.assertHitsMisses(2, 3)
 
@@ -2312,14 +2298,14 @@ class FakeTensorDispatchCache(TestCase):
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
 
-            ref = invoke_subgraph(mod, "subgraph", (x, y))
+            ref = invoke_subgraph(mod, "subgraph", x, y)
             self.assertHitsMisses(0, 3)
 
-            res = invoke_subgraph(mod, "subgraph", (x, y))
+            res = invoke_subgraph(mod, "subgraph", x, y)
             # The hits are from the ops inside fn and not the subgraph
             self.assertHitsMisses(1, 3)
 
-            res = invoke_subgraph(mod, "subgraph", (x, y))
+            res = invoke_subgraph(mod, "subgraph", x, y)
             # The hits are from the ops inside fn and not the subgraph
             self.assertHitsMisses(2, 3)
 

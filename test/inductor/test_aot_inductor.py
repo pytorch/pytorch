@@ -320,6 +320,31 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    def test_autotune_with_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device) -> None:
+                super().__init__()
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device=device)
+
+            def _quantize(self, input):
+                return torch.abs(input)
+
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
+        model = Model(self.device).to(self.device)
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
+        )
+
     @requires_gpu
     def test_multi_device(self):
         if self.device == "cpu" and GPU_TYPE == "xpu":
@@ -3028,8 +3053,8 @@ class AOTInductorTestsTemplate:
         if dynamic:
             dim0_xy = Dim("s0", min=2, max=1024)
             dynamic_shapes = {
-                "x": {0: dim0_xy},
-                "y": {0: dim0_xy},
+                "x": {0: dim0_xy, 1: None},
+                "y": {0: dim0_xy, 1: None},
             }
         example_inputs = (
             torch.randn(2, device=self.device),
@@ -4477,6 +4502,39 @@ class AOTInductorTestsTemplate:
                 1,
             ).run(code)
         self.check_model(Model(), example_inputs)
+
+    def test_input_codegen_with_sympy_expr(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class MyModel(torch.nn.Module):
+            def forward(self, getitem_54, getitem_52, getitem_19, values_2, offsets):
+                bitwise_or = torch.bitwise_or(getitem_54, getitem_52)
+                combined = torch.cat([getitem_19, values_2], dim=0)
+                add = combined + bitwise_or
+
+                sliced = values_2[:-1] + offsets
+                return add, sliced
+
+        inps = (
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randint(0, 1, (240,), device="cuda", dtype=torch.uint8),
+            torch.randn((192,), device="cuda"),
+            torch.randn((48,), device="cuda"),
+            torch.randint(0, 100, (47,), device="cuda", dtype=torch.uint8),
+        )
+
+        dim = torch.export.Dim("dimensionality")
+        derived_dim = 2 * dim
+        spec = {
+            "getitem_54": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_52": (Dim.AUTO,),  # [s33 + 2*s40 + 1]
+            "getitem_19": (derived_dim,),  # [2*s40]
+            "values_2": (Dim.AUTO,),  # [s33 + 1]
+            "offsets": (Dim.AUTO,),  # [s33]
+        }
+
+        self.check_model(MyModel(), inps, dynamic_shapes=spec)
 
     @common_utils.parametrize("mark_unbacked", (True, False))
     def test_unbacked_equals_input_size_runtime_assertion(self, mark_unbacked: bool):
