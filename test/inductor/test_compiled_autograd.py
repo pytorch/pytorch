@@ -52,25 +52,27 @@ from torch.testing._internal.logging_utils import logs_to_string
 def make_compiler_fn(
     fullgraph=True, dynamic=True, backend="inductor", gm_hook=lambda gm: None
 ):
-    assert backend in ["inductor", "aot_eager", "ca_eager"]
+    assert backend in ["inductor", "aot_eager", "eager", "ca_eager"]
 
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
         gm_hook(gm)
 
+        _backend = backend
         if backend == "ca_eager":
             return gm
+        elif backend != "eager":
 
-        def _inner_compiler(gm_, example_inputs_):
-            counters["compiled_autograd"]["compiles"] += 1
-            if backend == "inductor":
-                return inductor.compile(gm_, example_inputs_)
-            elif backend == "aot_eager":
-                return aot_eager(gm_, example_inputs_)
+            def _inner_compiler(gm_, example_inputs_):
+                counters["compiled_autograd"]["compiles"] += 1
+                if backend == "inductor":
+                    return inductor.compile(gm_, example_inputs_)
+                elif backend == "aot_eager":
+                    return aot_eager(gm_, example_inputs_)
 
-        return torch.compile(
-            gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
-        )
+            _backend = _inner_compiler
+
+        return torch.compile(gm, backend=_backend, fullgraph=fullgraph, dynamic=dynamic)
 
     return _compiler_fn
 
@@ -4307,8 +4309,8 @@ xfail_by_backend = {
         "test_custom_function_forward_mode_view_checks",  # forward AD
         "test_custom_function_forward_mode_wrong_formula",  # forward AD
         "test_node_post_hook_registered_during_unpack_hook",  # 'NoneType' object has no attribute 'register_hook'
-        "test_custom_function_error",  # vjp
-        "test_custom_function_save_for_forward",  # vjp
+        "test_custom_function_error",  # forward AD
+        "test_custom_function_save_for_forward",  # forward AD
         "test_dont_materialize_grads",  # undefined grad
         "test_no_grad_copy",  # setting static member in lifted backward
         "test_no_grad_copy_sparse",  # setting static member in lifted backward
@@ -4339,7 +4341,7 @@ xfail_by_backend = {
         "test_return_duplicate",  # gradient batching rule not implemented for aten::sym_size.int
         "test_return_duplicate_inplace",  # gradient batching rule not implemented for aten::sym_size.int
         "test_setitem",  # CopySlices accuracy error
-        "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
+        # "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
         "test_checkpoint_detects_non_determinism",  # different error
         "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
         "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
@@ -4356,8 +4358,6 @@ xfail_by_backend = {
         "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
         "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
-        # Category: Divergence from eager
-        "test_not_implemented_grad",  # Dynamo changes the types of exceptions
     },
     "aot_eager": {  # will be run with torch.compile(backend="eager")
         # Category: FakeTensor
@@ -4367,7 +4367,6 @@ xfail_by_backend = {
         "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
     },
     "inductor": {  # will be run with torch.compile(backend="aot_eager")
-        # Category: Inductor (pass on backend="aot_eager")
         "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
         "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
     },
@@ -4386,6 +4385,7 @@ xfail_divergence_from_eager = {
     "test_function",  # different node name: CompiledFunctionBackward
     "test_inplace_on_view_backward",  # different node name: CompiledFunctionBackward
     "test_nested_anomaly_printstack_cleanup",  # anomaly NaN error message different
+    "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
 
 skipped_tests = set()
