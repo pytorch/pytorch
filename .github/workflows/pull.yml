@@ -256,7 +256,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-distributed
       docker-image-name: ci-image:pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: '7.5'
       test-matrix: |
@@ -275,7 +275,7 @@ jobs:
       - target-determination
     with:
       timeout-minutes: 360
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-distributed
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build-distributed.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build-distributed.outputs.test-matrix }}
     secrets: inherit
