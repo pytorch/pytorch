@@ -1671,6 +1671,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_invalid_ConstantVariable_op(a, b):
+        s = set({"banana", "apple", "orange"})
+        try:
+            s - 1
+        except TypeError:
+            return a + b
+        except Exception:
+            return a - b
+        else:
+            return a * b
+
+    @make_test
     def test_set_pop_raise_KeyError(a, b):
         s = set()
         try:
