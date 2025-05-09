@@ -732,6 +732,38 @@ class TestXPUAPISanity(TestCase):
         if not torch.xpu._is_compiled():
             self.assertEqual(len(torch.xpu.get_arch_list()), 0)
 
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+class TestSoftmaxWithHalfToFloat(TestCase):
+    def test_softmax_half_to_float(self):
+        shape = [
+            [8],
+            [7, 8],
+            [8192, 64],
+            [8192, 8192],
+            [7, 8, 512],
+            [7, 8, 11],
+            [16, 7, 8, 512],
+            [16, 7, 8, 512, 35],
+            [117, 7, 9, 513, 35],
+        ]
+        device = "xpu"
+        input_type = torch.float16
+        output_type = torch.float
+        for i in range(len(shape)):
+            for j in range(len(shape[i])):
+                dim = j - 1
+                x = torch.randn(shape[i]).to(input_type)
+                grad = torch.randn(shape[i]).to(output_type)
+                x_cpu = x.clone().requires_grad_()
+                y_cpu = torch.nn.functional.softmax(x_cpu, dim, dtype=output_type)
+                y_cpu.backward(grad.clone())
+
+                x_xpu = x.clone().to(device).requires_grad_()
+                y_xpu = torch.nn.functional.softmax(x_xpu, dim, dtype=output_type)
+                self.assertEqual(y_xpu.dtype, torch.float32)
+                y_xpu.backward(grad.clone().to(device))
+                self.assertEqual(y_cpu, y_xpu.cpu())
+                self.assertEqual(x_cpu.grad, x_xpu.grad.cpu())
 
 if __name__ == "__main__":
     run_tests()
