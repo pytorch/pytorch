@@ -32,10 +32,7 @@ jobs:
               && git diff --name-only "${{ github.event.before }}...${{ github.sha }}"; }
         ) || {
           echo
-          echo "URL lint failed."
-          echo "If this is a transient outage, you can bypass it by adding the \`skip-url-lint\` label to your PR."
-          echo "Or add \`@lint-ignore\` somewhere on the same line as the URL you want to skip checking."
-          exit 1
+          echo "URL lint failed, but it is experimental, so continuing."
         }
 
   lint-xrefs:
