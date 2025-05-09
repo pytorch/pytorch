@@ -117,7 +117,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   }
 
   // Squeeze last dim of 1D linear
-  return weight_arg.dim() != 1 ? output :output.squeeze(-1);
+  return weight_arg.dim() != 1 ? output : output.squeeze(-1);
 }
 
 static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
