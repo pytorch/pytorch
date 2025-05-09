@@ -3724,7 +3724,7 @@ class ShapeEnv:
     def _rename_unbacked_to(self, orig_s: sympy.Symbol, new_s: sympy.Symbol) -> None:
         assert isinstance(orig_s, sympy.Symbol), orig_s
         assert isinstance(new_s, sympy.Symbol), new_s
-        # assert free_unbacked_symbols(new_s), new_s
+        assert free_unbacked_symbols(new_s), new_s
         assert free_unbacked_symbols(orig_s), orig_s
         dest = self.replacements.get(orig_s)
         if dest is not None:
