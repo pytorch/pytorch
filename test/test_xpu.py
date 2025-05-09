@@ -715,7 +715,6 @@ class TestXpuOps(TestCase):
                 self.assertEqual(y_cpu, y_xpu.cpu())
                 self.assertEqual(x_cpu.grad, x_xpu.grad.cpu())
 
-    @onlyXPU
     @suppress_warnings
     @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
     def test_compare_cpu(self, device, dtype, op):
