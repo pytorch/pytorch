@@ -2582,7 +2582,9 @@ class Scheduler:
         """
         Combine eligible nodes into FusedSchedulerNodes.
         """
-        with dynamo_timed("Scheduler.fused_nodes"):
+        with dynamo_timed(
+            "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
+        ):
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
