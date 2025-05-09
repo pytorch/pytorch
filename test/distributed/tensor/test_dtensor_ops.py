@@ -7,7 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
