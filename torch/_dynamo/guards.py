@@ -82,6 +82,7 @@ from torch._guards import (
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
+    _CppShapeGuardsHelper,
     _ShapeGuardsHelper,
     EqualityConstraint,
     is_symbolic,
@@ -495,10 +496,10 @@ def get_verbose_code_parts(
 
 def convert_int_to_concrete_values(dim) -> Optional[int]:
     if not is_symbolic(dim):
-        return
+        return dim
     else:
         assert isinstance(dim, torch.SymInt)
-        dim.node.maybe_as_int()
+        return dim.node.maybe_as_int()
 
 
 def convert_to_concrete_values(size_or_stride):
@@ -2049,10 +2050,14 @@ class GuardBuilder(GuardBuilderBase):
         if self.serialization_mode == "save":
             # For SHAPE_ENV we want to skip serializing the entire ShapeEnv so instead
             # we directly serialize the generated code here.
+            maybe_cpp_code_parts = locals().get("cpp_code_parts")
+            assert maybe_cpp_code_parts is None or isinstance(
+                maybe_cpp_code_parts, _CppShapeGuardsHelper
+            )
             self.check_fn_manager.shape_code_parts = ShapeCodeParts(
                 python_code_parts=python_code_parts,
                 verbose_code_parts=verbose_code_parts,
-                cpp_code_parts=locals().get("cpp_code_parts"),
+                cpp_code_parts=maybe_cpp_code_parts,
                 python_fallback=python_fallback,
             )
 
@@ -2523,7 +2528,7 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
 class ShapeCodeParts:
     python_code_parts: _ShapeGuardsHelper
     verbose_code_parts: _ShapeGuardsHelper
-    cpp_code_parts: Optional[_ShapeGuardsHelper]
+    cpp_code_parts: Optional[_CppShapeGuardsHelper]
     python_fallback: bool
 
 
