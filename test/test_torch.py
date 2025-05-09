@@ -8577,13 +8577,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             lambda: res.map2_(y, z, lambda a, b, c: a + b * c))
 
     def test_Size(self):
+        # expects iterable of int, not Tensor
+        self.assertRaises(TypeError, lambda: torch.Size(torch.ones(3)))
+        # initialization
         empty_size = torch.Size([])
         size = torch.Size([1, 2, 3])
-
+        self.assertIsInstance(empty_size, tuple)
         self.assertIsInstance(size, tuple)
+        # value check __len__
+        self.assertEqual(len(empty_size), 0)
         self.assertEqual(len(size), 3)
-        self.assertRaises(TypeError, lambda: torch.Size(torch.ones(3)))
-
         # type check __getitem__[int]
         self.assertIsInstance(size[0], int)
         self.assertIsInstance(size[1], int)
