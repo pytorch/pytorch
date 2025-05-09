@@ -43,7 +43,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },

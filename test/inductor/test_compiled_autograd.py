@@ -1169,47 +1169,8 @@ main()
                 yield model[2].bias.grad
                 model.zero_grad()
 
+        # TODO(jansel): we should be able to get this count to 1
         self.check_output_and_recompiles(fn)
-
-    def test_dynamic_shapes_from_forward(self):
-        class ToyModel(nn.Module):
-            def __init__(self, in_feat=10, hidden_feat=50, out_feat=5):
-                super().__init__()
-                self.linear1 = nn.Linear(in_feat, hidden_feat)
-                self.linear2 = nn.Linear(hidden_feat, hidden_feat)
-                self.linear3 = nn.Linear(hidden_feat, out_feat)
-                self.mse_loss = torch.nn.MSELoss()
-
-            def forward(self, inputs, output):
-                out1 = self.linear1(inputs)
-                out2 = self.linear2(out1)
-                out3 = self.linear3(out2)
-                return self.mse_loss(out3, output)
-
-        m = ToyModel()
-        m = torch.compile(m)
-
-        def run(i):
-            torch._dynamo.utils.counters.clear()
-            inp = torch.randn(i, 10)
-            target = torch.randn(i, 5)
-            loss = m(inp, target)
-            with compiled_autograd._enable(make_compiler_fn(dynamic=None)):
-                loss.backward()
-
-        counters = torch._dynamo.utils.counters
-        run(3)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
-        run(4)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
-        run(5)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
-        self.assertEqual(counters["compiled_autograd"]["compiles"], 0)
-        run(6)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
-        self.assertEqual(counters["compiled_autograd"]["compiles"], 0)
 
     def test_dynamic_shapes_eager_node(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
@@ -1236,25 +1197,6 @@ main()
                 model.zero_grad()
 
         self.check_output_and_recompiles(fn)
-
-    def test_dynamic_shapes_annotations(self):
-        @torch.compile
-        def f(x):
-            return x.sin().sin()
-
-        with torch._dynamo.compiled_autograd._enable(torch.compile):
-            x = torch.randn(2, 3, requires_grad=True)
-            torch._dynamo.mark_dynamic(x, 0)
-            out = f(x)
-            out.sum().backward()
-
-            x = torch.randn(4, 3, requires_grad=True)
-            torch._dynamo.mark_dynamic(x, 0)
-            out = f(x)
-            out.sum().backward()
-
-        # mark_dynamic should not cause ConstraintViolationError
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_torch_compile_api_dynamic_shapes(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
@@ -3398,25 +3340,29 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_6 = sizes[1]
         getitem_7 = sizes[2]
         getitem_8 = sizes[3]
-        getitem_21 = sizes[4]
-        getitem_22 = sizes[5]
-        getitem_23 = sizes[6]
-        getitem_24 = sizes[7];  sizes = None
-        unwrap_maybe_dynamic_int = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_5);  getitem_5 = None
-        unwrap_maybe_dynamic_int_1 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_6);  getitem_6 = None
-        unwrap_maybe_dynamic_int_2 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_7);  getitem_7 = None
-        unwrap_maybe_dynamic_int_3 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_8);  getitem_8 = None
-        unwrap_maybe_dynamic_int_16 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_21);  getitem_21 = None
-        unwrap_maybe_dynamic_int_17 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_22);  getitem_22 = None
-        unwrap_maybe_dynamic_int_18 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_23);  getitem_23 = None
-        unwrap_maybe_dynamic_int_19 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_24);  getitem_24 = None
+        getitem_9 = sizes[4];  getitem_9 = None
+        getitem_10 = sizes[5];  getitem_10 = None
+        getitem_11 = sizes[6];  getitem_11 = None
+        getitem_12 = sizes[7];  getitem_12 = None
+        getitem_13 = sizes[8];  getitem_13 = None
+        getitem_14 = sizes[9];  getitem_14 = None
+        getitem_15 = sizes[10];  getitem_15 = None
+        getitem_16 = sizes[11];  getitem_16 = None
+        getitem_17 = sizes[12];  getitem_17 = None
+        getitem_18 = sizes[13];  getitem_18 = None
+        getitem_19 = sizes[14];  getitem_19 = None
+        getitem_20 = sizes[15];  getitem_20 = None
+        getitem_21 = sizes[16]
+        getitem_22 = sizes[17]
+        getitem_23 = sizes[18]
+        getitem_24 = sizes[19];  sizes = None
 
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], True)]);  getitem = None
         getitem_25 = validate_outputs[0];  validate_outputs = None
 
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_25], [True], [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_25 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_25], [True], [getitem_5, getitem_6]);  getitem_25 = getitem_5 = getitem_6 = None
         getitem_26 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], True)]);  getitem_26 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [getitem_7, getitem_8], True)]);  getitem_26 = getitem_7 = getitem_8 = None
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_28 = hooks[0];  getitem_28 = None
@@ -3438,7 +3384,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_backward = torch__dynamo_external_utils_call_backward(getitem_33, (), make_subclass);  getitem_33 = make_subclass = None
         getitem_36 = call_backward[0]
         getitem_37 = call_backward[1];  call_backward = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_16, unwrap_maybe_dynamic_int_17], False), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_18, unwrap_maybe_dynamic_int_19], False)]);  getitem_36 = getitem_37 = unwrap_maybe_dynamic_int_16 = unwrap_maybe_dynamic_int_17 = unwrap_maybe_dynamic_int_18 = unwrap_maybe_dynamic_int_19 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [getitem_21, getitem_22], False), ((None, None, device(type='cpu'), 6, 0, None), [getitem_23, getitem_24], False)]);  getitem_36 = getitem_37 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
         getitem_39 = validate_outputs_2[0]
 
         accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_39);  getitem_4 = getitem_39 = accumulate_grad__default_1 = None
@@ -3655,25 +3601,13 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_11 = sizes[9]
         getitem_12 = sizes[10]
         getitem_13 = sizes[11];  sizes = None
-        unwrap_maybe_dynamic_int = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_2);  getitem_2 = None
-        unwrap_maybe_dynamic_int_1 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_3);  getitem_3 = None
-        unwrap_maybe_dynamic_int_2 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_4);  getitem_4 = None
-        unwrap_maybe_dynamic_int_3 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_5);  getitem_5 = None
-        unwrap_maybe_dynamic_int_4 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_6);  getitem_6 = None
-        unwrap_maybe_dynamic_int_5 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_7);  getitem_7 = None
-        unwrap_maybe_dynamic_int_6 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_8);  getitem_8 = None
-        unwrap_maybe_dynamic_int_7 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_9);  getitem_9 = None
-        unwrap_maybe_dynamic_int_8 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_10);  getitem_10 = None
-        unwrap_maybe_dynamic_int_9 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_11);  getitem_11 = None
-        unwrap_maybe_dynamic_int_10 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_12);  getitem_12 = None
-        unwrap_maybe_dynamic_int_11 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_13);  getitem_13 = None
 
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
         getitem_14 = validate_outputs[0];  validate_outputs = None
 
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_14], [True], [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_14 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_14], [True], [getitem_2, getitem_3]);  getitem_14 = getitem_2 = getitem_3 = None
         getitem_15 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_15], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], False)]);  getitem_15 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_15], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4, getitem_5], False)]);  getitem_15 = getitem_4 = getitem_5 = None
         getitem_16 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_17 = hooks[0]
@@ -3685,7 +3619,7 @@ class CompiledAutograd0(torch.nn.Module):
         mul_backward0 = torch__dynamo_compiled_autograd_ops_MulBackward0([getitem_16], [True, True], call_hook, 6, call_hook_1, 6);  getitem_16 = call_hook = call_hook_1 = None
         getitem_21 = mul_backward0[0]
         getitem_22 = mul_backward0[1];  mul_backward0 = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_21, getitem_22], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_4, unwrap_maybe_dynamic_int_5], False), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_6, unwrap_maybe_dynamic_int_7], False)]);  getitem_21 = getitem_22 = unwrap_maybe_dynamic_int_4 = unwrap_maybe_dynamic_int_5 = unwrap_maybe_dynamic_int_6 = unwrap_maybe_dynamic_int_7 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_21, getitem_22], [((None, None, device(type='cpu'), 6, 0, None), [getitem_6, getitem_7], False), ((None, None, device(type='cpu'), 6, 0, None), [getitem_8, getitem_9], False)]);  getitem_21 = getitem_22 = getitem_6 = getitem_7 = getitem_8 = getitem_9 = None
         getitem_23 = validate_outputs_2[0]
         getitem_24 = validate_outputs_2[1];  validate_outputs_2 = None
 
@@ -3694,7 +3628,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_hook_2 = torch__dynamo_external_utils_call_hook(getitem_25, getitem_26, hook_type = 'unpack_hook');  getitem_25 = getitem_26 = None
         cos_backward0 = torch__dynamo_compiled_autograd_ops_CosBackward0([getitem_24], [True], call_hook_2);  getitem_24 = call_hook_2 = None
         getitem_27 = cos_backward0[0];  cos_backward0 = None
-        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_8, unwrap_maybe_dynamic_int_9], False)]);  getitem_27 = unwrap_maybe_dynamic_int_8 = unwrap_maybe_dynamic_int_9 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [getitem_10, getitem_11], False)]);  getitem_27 = getitem_10 = getitem_11 = None
         getitem_28 = validate_outputs_3[0];  validate_outputs_3 = None
         add = torch.add(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
 
@@ -3703,7 +3637,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_hook_3 = torch__dynamo_external_utils_call_hook(getitem_29, getitem_30, hook_type = 'unpack_hook');  getitem_29 = getitem_30 = None
         sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([add], [True], call_hook_3);  add = call_hook_3 = None
         getitem_31 = sin_backward0[0];  sin_backward0 = None
-        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [getitem_12, getitem_13], False)]);  getitem_31 = getitem_12 = getitem_13 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
 
         accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_32);  getitem_1 = getitem_32 = accumulate_grad__default = None

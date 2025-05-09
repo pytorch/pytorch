@@ -296,7 +296,6 @@ class GraphModule(torch.nn.Module):
             mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg0_1, arg1_1)
             clone: "f32[3, 3]" = torch.ops.aten.clone.default(mm)
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(mm);  mm = None
-            cos: "f32[3, 3]" = torch.ops.aten.cos.default(sin);  cos = None
             sin_1: "f32[3, 3]" = torch.ops.aten.sin.default(sin);  sin = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin_1);  sin_1 = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, neg);  arg2_1 = neg = None

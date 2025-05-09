@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo, set_warn_always_context)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -10833,8 +10833,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertFalse(torch.cuda.is_bf16_supported())
 
     def test_tensor_with_grad_to_scalar_warning(self) -> None:
-
-        with warnings.catch_warnings(record=True) as w:
+        with (warnings.catch_warnings(record=True) as w,
+                set_warn_always_context(True)):
             warnings.simplefilter("always")
 
             x = torch.tensor(2.0, requires_grad=True)
@@ -10847,8 +10847,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 str(w[0].message)
             )
 
-            _ = math.pow(x, 3)  # calling it again does not result in a second warning
-            self.assertEqual(len(w), 1)
+    def test_tensor_item_no_warning(self):
+        with (warnings.catch_warnings(record=True) as w,
+                set_warn_always_context(True)):
+            warnings.simplefilter("always")
+
+            x = torch.tensor(2.0, requires_grad=True)
+            max(x, 3)  # No warning
+            x.item()  # No warning
+
+            self.assertEqual(len(w), 0)
+
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

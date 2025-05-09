@@ -6170,6 +6170,11 @@ def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
 def sample_inputs_corrcoef(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(t) for t in _generate_correlation_inputs(device, dtype, requires_grad))
 
+def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs)
+    if dtype.is_floating_point:
+        yield SampleInput(make_tensor(5, dtype=dtype, device=device, requires_grad=requires_grad), -3.14)
+
 
 def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     for t in _generate_correlation_inputs(device, dtype, requires_grad):
@@ -12926,6 +12931,7 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),)),
     BinaryUfuncInfo('copysign',
+                    sample_inputs_func=sample_inputs_copysign,
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                     promotes_int_to_float=True,

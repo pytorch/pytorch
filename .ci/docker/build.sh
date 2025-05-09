@@ -95,10 +95,12 @@ if [[ "$image" == *rocm* ]]; then
   _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
 fi
 
+tag=$(echo $image | awk -F':' '{print $2}')
+
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
-case "$image" in
+case "$tag" in
   pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11)
     CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
@@ -481,6 +483,7 @@ docker build \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
+       --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \

@@ -202,6 +202,50 @@ struct div_true_functor {
   }
 };
 
+struct div_floor_functor {
+  template <
+      typename T,
+      ::metal::enable_if_t<!::metal::is_integral_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return metal::floor(c10::metal::div(a, b));
+  }
+  template <
+      typename T,
+      ::metal::enable_if_t<
+          ::metal::is_integral_v<T>&& ::metal::is_signed_v<T>,
+          bool> = true>
+  inline T operator()(const T a, const T b) {
+    const auto quot = a / b;
+    if ((a < 0) == (b < 0)) {
+      return quot;
+    }
+    return a % b != 0 ? quot - 1 : quot;
+  }
+  template <
+      typename T,
+      ::metal::enable_if_t<
+          ::metal::is_integral_v<T> && !::metal::is_signed_v<T>,
+          bool> = true>
+  inline T operator()(const T a, const T b) {
+    return a / b;
+  }
+};
+
+struct div_trunc_functor {
+  template <
+      typename T,
+      ::metal::enable_if_t<!::metal::is_integral_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return T(metal::trunc(c10::metal::div(a, b)));
+  }
+  template <
+      typename T,
+      ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return a / b;
+  }
+};
+
 REGISTER_BINARY_OP(copysign, long, float);
 REGISTER_BINARY_OP(copysign, int, float);
 REGISTER_BINARY_OP(copysign, float, float);
@@ -256,6 +300,22 @@ REGISTER_BINARY_OP(sub, short, short);
 REGISTER_BINARY_OP(sub, uchar, uchar);
 REGISTER_BINARY_OP(sub, char, char);
 REGISTER_BINARY_OP(sub, bool, bool);
+REGISTER_BINARY_OP(div_floor, long, long);
+REGISTER_BINARY_OP(div_floor, int, int);
+REGISTER_OPMATH_BINARY_OP(div_floor, float, float);
+REGISTER_OPMATH_BINARY_OP(div_floor, half, half);
+REGISTER_BINARY_OP(div_floor, short, short);
+REGISTER_BINARY_OP(div_floor, uchar, uchar);
+REGISTER_BINARY_OP(div_floor, char, char);
+REGISTER_BINARY_OP(div_floor, bool, bool);
+REGISTER_BINARY_OP(div_trunc, long, long);
+REGISTER_BINARY_OP(div_trunc, int, int);
+REGISTER_BINARY_OP(div_trunc, float, float);
+REGISTER_BINARY_OP(div_trunc, half, half);
+REGISTER_BINARY_OP(div_trunc, short, short);
+REGISTER_BINARY_OP(div_trunc, uchar, uchar);
+REGISTER_BINARY_OP(div_trunc, char, char);
+REGISTER_BINARY_OP(div_trunc, bool, bool);
 REGISTER_BINARY_OP(div_true, long, float);
 REGISTER_BINARY_OP(div_true, int, float);
 REGISTER_OPMATH_BINARY_OP(div_true, float, float);
@@ -305,6 +365,8 @@ REGISTER_BINARY_OP(hermite_polynomial_he, bfloat, bfloat);
 REGISTER_BINARY_OP(add, bfloat, bfloat);
 REGISTER_OPMATH_BINARY_OP(mul, bfloat, bfloat);
 REGISTER_BINARY_OP(sub, bfloat, bfloat);
+REGISTER_OPMATH_BINARY_OP(div_floor, bfloat, bfloat);
+REGISTER_BINARY_OP(div_trunc, bfloat, bfloat);
 REGISTER_OPMATH_BINARY_OP(div_true, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat);

@@ -351,11 +351,12 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def truncdiv(a: CSEVariable, b: CSEVariable) -> str:
-        # Upcast to float otherwise the generated code doesn't typecheck.
-        # TODO (dcci): remove this workaround
-        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
-        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
-        return f"metal::trunc({float_a}/{float_b})"
+        quot = f"{a} / {b}"
+        if (a.dtype is not None and a.dtype.is_floating_point) or (
+            b.dtype is not None and b.dtype.is_floating_point
+        ):
+            return f"metal::trunc({quot})"
+        return quot
 
     @staticmethod
     def ceil(x: CSEVariable) -> str:

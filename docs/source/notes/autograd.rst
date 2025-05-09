@@ -793,7 +793,7 @@ Example:
 
     def pack_hook(x):
         if x.numel() < SAVE_ON_DISK_THRESHOLD:
-            return x
+            return x.detach()
         temp_file = SelfDeletingTempFile()
         torch.save(tensor, temp_file.name)
         return temp_file
@@ -833,7 +833,7 @@ Tensor object creation. For example:
 
 .. code::
 
-    with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
+    with torch.autograd.graph.saved_tensors_hooks(lambda x: x.detach(), lambda x: x):
         x = torch.randn(5, requires_grad=True)
         y = x * x
 

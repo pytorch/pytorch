@@ -1086,6 +1086,10 @@ def tuned_scaled_mm(
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
+    # We dont have triton lowerings for the MX variants yet
+    if scale_a.dtype != torch.float32:
+        return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+
     _, is_nonzero = _is_static_problem(layout)
 
     scaled_mm_configs = V.choices.get_scaled_mm_configs(device_type)

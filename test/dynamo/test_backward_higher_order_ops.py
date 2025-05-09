@@ -131,14 +131,15 @@ class _multiply_invoke(torch.nn.Module):
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, s69: "Sym(s21)"):
+    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(s21)"):
         l_inputs_ = L_inputs_
+        l_sizes_0_ = L_sizes_0_
 
         getitem: "f32[s21]" = l_inputs_[0]
         getitem_1: "f32[s21]" = l_inputs_[1]
         getitem_2: "f32[s21]" = l_inputs_[2];  l_inputs_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [s69], False)]);  getitem = s69 = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [l_sizes_0_], False)]);  getitem = l_sizes_0_ = None
         getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
@@ -161,14 +162,15 @@ class GraphModule(torch.nn.Module):
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, s69: "Sym(s21)"):
+    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(s21)"):
         l_inputs_ = L_inputs_
+        l_sizes_0_ = L_sizes_0_
 
         getitem: "f32[s21]" = l_inputs_[0]
         getitem_1: "f32[s21]" = l_inputs_[1]
         getitem_2: "f32[s21]" = l_inputs_[2];  l_inputs_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [s69], False)]);  getitem = s69 = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [l_sizes_0_], False)]);  getitem = l_sizes_0_ = None
         getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None
@@ -243,15 +245,16 @@ class GraphModule(torch.nn.Module):
                     actual,
                     """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_hooks_1_keywords_fn_keywords_obj_counter: "Sym(s45)"):
+    def forward(self, L_inputs_ : list, L_sizes_0_: "Sym(s21)", L_hooks_1_keywords_fn_keywords_obj_counter: "Sym(s45)"):
         l_inputs_ = L_inputs_
+        l_sizes_0_ = L_sizes_0_
         l_hooks_1_keywords_fn_keywords_obj_counter = L_hooks_1_keywords_fn_keywords_obj_counter
 
         getitem: "f32[s21]" = l_inputs_[0]
         getitem_1: "f32[s21]" = l_inputs_[1]
         getitem_2: "f32[s21]" = l_inputs_[2];  l_inputs_ = None
 
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [s69], False)]);  getitem = s69 = None
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [l_sizes_0_], False)]);  getitem = l_sizes_0_ = None
         getitem_9: "f32[s21]" = validate_outputs[0];  validate_outputs = None
 
         call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((), [], getitem_9);  getitem_9 = None

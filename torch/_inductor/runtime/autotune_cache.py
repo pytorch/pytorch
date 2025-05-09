@@ -11,7 +11,7 @@ from typing_extensions import override
 
 import torch
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton_package
 
 from ..remote_cache import (
     create_cache,
@@ -36,7 +36,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    if has_triton():
+    if has_triton_package():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:
@@ -238,8 +238,9 @@ class AutotuneCache:
             cache, key = local_cache
             cache.put(key, data)
             AutotuneCacheBundler.put(key, data)
+            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, os.path.basename(key), data
+                CacheArtifactType.AUTOTUNE, autotune_artifact_key, data
             )
 
             if log.isEnabledFor(logging.DEBUG):
@@ -560,8 +561,9 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
             # model would only bundle *newly* compiled kernels, not existing
             # kernels that were already compiled and cached.
             AutotuneCacheBundler.put(key, result)
+            autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.AUTOTUNE, os.path.basename(key), result
+                CacheArtifactType.AUTOTUNE, autotune_artifact_key, result
             )
         return result
 
