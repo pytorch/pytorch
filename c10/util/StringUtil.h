@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
@@ -213,6 +214,34 @@ inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
   stmt << "\"";
 }
 
+template <typename T>
+std::optional<T> tryToNumber(const char* symbol) = delete;
+template <typename T>
+std::optional<T> tryToNumber(const std::string& symbol) = delete;
+
+/*
+ * Convert a string to a 64 bit integer. Trailing whitespaces are not supported.
+ * Similarly, integer string with trailing characters like "123abc" will be
+ * rejected.
+ */
+template <>
+C10_API std::optional<int64_t> tryToNumber<int64_t>(const char* symbol);
+template <>
+C10_API std::optional<int64_t> tryToNumber<int64_t>(const std::string& symbol);
+
+/*
+ * Convert a string to a double. Trailing whitespaces are not supported.
+ * Similarly, integer string with trailing characters like "123abc" will
+ * be rejected.
+ */
+template <>
+C10_API std::optional<double> tryToNumber<double>(const char* symbol);
+template <>
+C10_API std::optional<double> tryToNumber<double>(const std::string& symbol);
+
+C10_API std::vector<std::string_view> split(
+    std::string_view target,
+    char delimiter);
 } // namespace c10
 
 C10_CLANG_DIAGNOSTIC_POP()

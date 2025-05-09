@@ -147,6 +147,20 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   return _mm512_cvtepi32_epi8(packed);
 }
 
+static inline float fp8e4m3_to_fp32_scalar(uint8_t val) {
+  __m512i v = _mm512_set1_epi8(val);
+  __m128i v_128 = _mm512_castsi512_si128(v);
+  __m512 o;
+  cvtfp8e4m3_fp32(v_128, o);
+  return _mm512_cvtss_f32(o);
+}
+
+static inline uint8_t fp32_to_fp8e4m3_scalar(float val) {
+  __m512 v = _mm512_set1_ps(val);
+  __m128i o = cvtfp32_fp8e4m3(v);
+  return static_cast<std::uint8_t>(_mm_cvtsi128_si32(o));
+}
+
 template <typename T>
 class Vectorizedf8 {
 static_assert(

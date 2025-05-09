@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
 import copy
 import enum
+import functools
 import logging
 import re
 import time
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Any, Optional, Union
+
+from torch._inductor.select_algorithm import create_inputs_key
+from torch._inductor.utils import clear_on_fresh_inductor_cache
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -39,7 +43,6 @@ GEMM_TEMPLATE_CUTLASS_3X = r"""
 extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
-  int B = {{kernel.size(Y, 0, -3, default_value=1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -110,13 +113,13 @@ GEMM_ARGS_CUTLASS_3X = r"""
       {
         {{template.cute_int(kernel.stride(X, -2), "stride_x0")}},
         {{template.cute_int(kernel.stride(X, -1), "stride_x1")}},
-        {{template.cute_int(kernel.stride(X, -3), "batch_stride_x")}}
+        {{template.cute_int(kernel.batch_stride(X), "batch_stride_x")}}
       },  // StrideA dA
       {{template.cutlass_type_cast(W, kernel.ptr(W))}},  // ElementB const* ptr_B
       {
         {{template.cute_int(kernel.stride(W, -1), "stride_w1")}},
         {{template.cute_int(kernel.stride(W, -2), "stride_w0")}},
-        {{template.cute_int(kernel.stride(W, -3), "batch_stride_w")}}
+        {{template.cute_int(kernel.batch_stride(W), "batch_stride_w")}}
       },  // StrideB dB
     },  // MainloopArguments mainloop
     {{epilogue_arguments}},
@@ -135,13 +138,13 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
       {
         {{template.cute_int(kernel.stride(Bias, -2, 1), "stride_bias0")}},
         {{template.cute_int(kernel.stride(Bias, -1, 1), "stride_bias1")}},
-        {{template.cute_int(kernel.stride(Bias, -3), "batch_stride_bias")}}
+        {{template.cute_int(kernel.batch_stride(Bias), "batch_stride_bias")}}
       },  // StrideC dC
       {{template.cutlass_type_cast(Y, kernel.ptr(Y))}},  // ElementD const* ptr_D
       {
         {{template.cute_int(kernel.stride(Y, -2), "stride_y0")}},
         {{template.cute_int(kernel.stride(Y, -1), "stride_y1")}},
-        {{template.cute_int(kernel.stride(Y, -3), "batch_stride_y")}}
+        {{template.cute_int(kernel.batch_stride(Y), "batch_stride_y")}}
       },  // StrideD dD
     },  // EpilogueArguments epilogue
 """
@@ -331,10 +334,11 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     int M = {{kernel.get_layout_args()[0]}};
     int N = {{kernel.get_layout_args()[1]}};
     int K = {{kernel.get_layout_args()[2]}};
-    int lda = {{kernel.get_layout_args()[3]}};
-    int ldb = {{kernel.get_layout_args()[4]}};
-    int ldc = {{kernel.get_layout_args()[5]}};
-    int ldd = {{kernel.get_layout_args()[6]}};
+    int B = {{kernel.get_layout_args()[3]}};
+    int lda = {{kernel.get_layout_args()[4]}};
+    int ldb = {{kernel.get_layout_args()[5]}};
+    int ldc = {{kernel.get_layout_args()[6]}};
+    int ldd = {{kernel.get_layout_args()[7]}};
     uint8_t swizzle = {{kernel.runtime_arg_values[0]}};
 
     using ElementA = {{kernel.cutlass_dtype(X)}};
@@ -392,11 +396,15 @@ int main(int argc, char** argv) {
 """  # noqa: B950
 
 
+@clear_on_fresh_inductor_cache
 class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     """
     CUTLASS GEMM Template, which is used to generate CUTLASS GEMM kernels
     including those which allow flexible fusions with epilogues.
     """
+
+    filtered_ops_cache: dict[str, list[Any]] = {}
+    cache_clear = staticmethod(filtered_ops_cache.clear)
 
     def __init__(
         self,
@@ -422,6 +430,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         assert self._are_inputs_layout_compatible(
             [node.get_layout() for node in input_nodes]
         )
+
+        self.cache_key: str = create_inputs_key(self.input_nodes)
 
     @staticmethod
     @abstractmethod
@@ -621,6 +631,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return cutlass_lib.LayoutType.RowMajor
 
     @staticmethod
+    @functools.lru_cache(32)
     def layout_match(
         torch_layout: ir.Layout,
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined] # noqa: F821
@@ -902,6 +913,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
+        if self.cache_key in self.filtered_ops_cache:
+            log.debug("Using cached ops for %s", self.cache_key)
+            return self.filtered_ops_cache[self.cache_key]
+
         # if changed, need to also change CUTLASS_OPERATION_KIND
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
@@ -913,16 +928,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     filter_res = self.filter_op(op)
                     if (
                         filter_res is not None
-                        and filter_res.configuration_name() != op.configuration_name()
-                    ):
-                        log.debug(
-                            "Detected change in configuration name. Original "
-                            "name: %s, filtered configuration name: %s",
-                            op.configuration_name(),
-                            filter_res.configuration_name(),
-                        )
-                    if (
-                        filter_res is not None
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
@@ -932,7 +937,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        ret_res = sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        if len(self.filtered_ops_cache) < 50:
+            self.filtered_ops_cache[self.cache_key] = ret_res
+        else:
+            log.debug("Not caching ops since filtered_ops_cache has reached size 50.")
+        return ret_res
 
     def gemm_mode(self) -> str:
         """
@@ -1007,13 +1017,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_reorder = self.input_reorder
         else:
             input_reorder = None
-
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs,  # type: ignore[arg-type]
             outputs=[Y],
             names_str=names_str,
             input_reorder=input_reorder,
-            dtype_to_cpp_type=cutlass_utils.DTYPE_TO_CUTLASS_TYPE,
+            epilogue_inputs=[],  # TODO mlazos: will be filled in in https://github.com/pytorch/pytorch/pull/150907
+            epilogue_outputs=[],  # TODO mlazos: will be filled in in https://github.com/pytorch/pytorch/pull/150907
         )
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
@@ -1085,7 +1095,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         Returns a C++ statement that calls the GEMM operation with the correct arguments.
         """
-        _, __, arg_types = kernel.args.cpp_argdefs(cutlass_utils.DTYPE_TO_CUTLASS_TYPE)
+        _, __, arg_types = kernel.args.cpp_argdefs()
         arg_names = [name.strip() for name in names_str.strip().split(",")]
         arg_names = self._update_arg_names_for_test_call_statement(
             arg_names, input_nodes
@@ -1094,7 +1104,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
@@ -1126,6 +1136,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
+    @functools.lru_cache(1)
     def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
@@ -1202,7 +1213,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         if len(layouts) == 3:
             C_layout = layouts[2]
-            C_size = [int(i) for i in C_layout.size]
+            C_size = [V.graph.sizevars.size_hint(i) for i in C_layout.size]
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims
