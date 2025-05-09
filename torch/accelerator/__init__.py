@@ -17,11 +17,7 @@ __all__ = [
     "current_stream",
     "device_count",
     "device_index",
-    "empty_cache",
     "is_available",
-    "memory_allocated",
-    "memory_reserved",
-    "memory_stats",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
@@ -46,15 +42,6 @@ def device_count() -> int:
 
     mod = torch.get_device_module(acc)
     return mod.device_count()
-
-
-# TODO: replace with C code once generic CachingAllocator is upstreamed
-def empty_cache() -> None:
-    acc = current_accelerator()
-    if acc is None:
-        return
-    mod = torch.get_device_module(acc)
-    mod.empty_cache()
 
 
 def is_available() -> bool:
@@ -203,6 +190,7 @@ def synchronize(device: _device_t = None, /) -> None:
     """
     device_index = _get_device_index(device, True)
     torch._C._accelerator_synchronizeDevice(device_index)
+<<<<<<< Updated upstream
 
 
 class device_index:
@@ -287,3 +275,5 @@ def memory_reserved(device: _device_t = None) -> int:
         int: the current memory reserved for a given device.
     """
     return memory_stats(device=device).get("reserved_bytes.all.current", 0)
+=======
+>>>>>>> Stashed changes
