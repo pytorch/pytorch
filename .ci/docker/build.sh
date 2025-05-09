@@ -85,9 +85,6 @@ elif [[ "$image" == *linter* ]]; then
   DOCKERFILE="linter/Dockerfile"
 fi
 
-# CMake 3.18 is needed to support CUDA17 language variant
-CMAKE_VERSION=3.18.5
-
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
 _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 if [[ "$image" == *rocm* ]]; then
@@ -110,7 +107,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
@@ -122,7 +118,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -135,7 +130,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -148,7 +142,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -161,7 +154,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks)
@@ -173,7 +165,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -186,7 +177,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -199,7 +189,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -212,57 +201,50 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     VISION=yes
-    CONDA_CMAKE=yes
     ONNX=yes
     ;;
   pytorch-linux-focal-py3.9-clang10)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-py3.11-clang10)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=10
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-focal-py3.9-gcc9)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-rocm-n-1-py3)
+  pytorch-linux-jammy-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.2.4
+    ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-rocm-n-py3)
+  pytorch-linux-jammy-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.3
+    ROCM_VERSION=6.4
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -275,7 +257,6 @@ case "$tag" in
     VISION=yes
     XPU_VERSION=0.5
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-xpu-2025.0-py3)
@@ -284,7 +265,6 @@ case "$tag" in
     VISION=yes
     XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
     pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
@@ -292,7 +272,6 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
@@ -309,19 +288,16 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=12
     VISION=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang15-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=15
-    CONDA_CMAKE=yes
     VISION=yes
     ;;
   pytorch-linux-jammy-py3-clang18-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
-    CONDA_CMAKE=yes
     VISION=yes
     ;;
   pytorch-linux-jammy-py3.9-gcc11)
@@ -329,7 +305,6 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    CONDA_CMAKE=yes
     TRITON=yes
     DOCS=yes
     UNINSTALL_DILL=yes
@@ -337,14 +312,12 @@ case "$tag" in
   pytorch-linux-jammy-py3-clang12-executorch)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
-    CONDA_CMAKE=yes
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
-    CONDA_CMAKE=yes
     HALIDE=yes
     TRITON=yes
     ;;
@@ -352,7 +325,6 @@ case "$tag" in
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
-    CONDA_CMAKE=yes
     TRITON_CPU=yes
     ;;
   pytorch-linux-focal-linter)
@@ -360,19 +332,16 @@ case "$tag" in
     # We will need to update mypy version eventually, but that's for another day. The task
     # would be to upgrade mypy to 1.0.0 with Python 3.11
     PYTHON_VERSION=3.9
-    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter)
     PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
-    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     ACL=yes
     VISION=yes
-    CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -382,7 +351,6 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
-    CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -405,8 +373,7 @@ case "$tag" in
       TRITON=yes
       # To ensure that any ROCm config will build using conda cmake
       # and thus have LAPACK/MKL enabled
-      CONDA_CMAKE=yes
-    fi
+      fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
     fi
@@ -421,9 +388,6 @@ case "$tag" in
     fi
     if [[ "$image" == *glibc* ]]; then
       extract_version_from_image_name glibc GLIBC_VERSION
-    fi
-    if [[ "$image" == *cmake* ]]; then
-      extract_version_from_image_name cmake CMAKE_VERSION
     fi
   ;;
 esac
@@ -465,7 +429,6 @@ docker build \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
        --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
-       --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
@@ -473,8 +436,6 @@ docker build \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
-       --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
-       --build-arg "PIP_CMAKE=${PIP_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
@@ -483,6 +444,7 @@ docker build \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
+       --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
@@ -557,5 +519,14 @@ if [[ -n "$TRITON" || -n "$TRITON_CPU" ]]; then
   fi
 elif [ "$HAS_TRITON" = "yes" ]; then
   echo "expecting triton to not be installed, but it is"
+  exit 1
+fi
+
+# Sanity check cmake version.  Executorch reinstalls cmake and I'm not sure if
+# they support 4.0.0 yet, so exclude them from this check.
+CMAKE_VERSION=$(drun cmake --version)
+if [[ "$EXECUTORCH" != *yes* && "$CMAKE_VERSION" != *4.* ]]; then
+  echo "CMake version is not 4.0.0:"
+  drun cmake --version
   exit 1
 fi

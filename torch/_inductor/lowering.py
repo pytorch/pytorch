@@ -164,6 +164,8 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
 def tag_to_layout_constraint(tag):
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
+    if tag == torch._C.Tag.needs_contiguous_strides:
+        return require_contiguous_strides
     if tag == torch._C.Tag.needs_fixed_stride_order:
         return constrain_to_fx_strides
     if tag == torch._C.Tag.flexible_layout:
@@ -2326,12 +2328,16 @@ def searchsorted(
             )
 
     device = self.get_device()
-    return Pointwise.create(
+    result = Pointwise.create(
         device=device,
         dtype=index_dtype,
         inner_fn=inner_fn,
         ranges=self.shape,
     )
+    # see [NOTE: inductor bucketize realize]
+    result.realize()
+
+    return result
 
 
 @register_lowering(
@@ -2376,12 +2382,23 @@ def bucketize(
 
         return indices
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=device,
         dtype=index_dtype,
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
+
+    # [NOTE: inductor bucketize realize]
+    # bucketize_binary_search is relatively expensive, so we don't want to re-compute
+    # it unnecessarily. If we run bucketize() and then broadcast the result, we don't
+    # want this to be fused into a large number of duplicate bucketize() computations
+    # for each of the elements in the result.
+    #
+    # If no broadcasting occurs, fusions can still occur in scheduler.py
+    result.realize()
+
+    return result
 
 
 def require_dense(_, *args, **kwargs):
@@ -2394,6 +2411,15 @@ def require_dense(_, *args, **kwargs):
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_contiguous_strides(_, *args, **kwargs):
+    # TODO: combine this with require_contiguous after
+    # https://github.com/pytorch/pytorch/pull/148235 lands.
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, ir.ExternKernel.require_contiguous_strides, (args, kwargs)
     )
     return args, kwargs
 

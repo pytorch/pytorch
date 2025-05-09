@@ -131,6 +131,15 @@ static float fp16_dot(
   return fp16_dot_stub(kCPU, n, x, incx, y, incy);
 }
 
+static float bf16_dot(
+  const int64_t n,
+  const BFloat16* x,
+  const int64_t incx,
+  const BFloat16* y,
+  const int64_t incy) {
+  return bf16_dot_stub(kCPU, n, x, incx, y, incy);
+}
+
 #endif // !defined(C10_MOBILE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
@@ -395,16 +404,6 @@ void gemv_fast_path<at::BFloat16>(
     y,
     *incy);
 }
-
-static float bf16_dot(
-  const int64_t n,
-  const BFloat16* x,
-  const int64_t incx,
-  const BFloat16* y,
-  const int64_t incy) {
-  return bf16_dot_stub(kCPU, n, x, incx, y, incy);
-}
-
 #if !defined(__aarch64__)
 // Currently, only fp16_gemv_trans is built for non-aarch64.
 template <>
@@ -562,7 +561,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
       opmath_t sum = 0;
       const scalar_t *row_ = a + lda * i;
       for (const auto j : c10::irange(m)) {
-        sum += x[j * incx] * row_[j];
+        sum += static_cast<opmath_t>(x[j * incx]) * static_cast<opmath_t>(row_[j]);
       }
       if (beta == scalar_t(0)) {
         y[i * incy] = alpha * sum;
@@ -693,7 +692,7 @@ scalar_t dot_impl(int64_t n, const scalar_t* x, int64_t incx, const scalar_t* y,
     incx = 1;
     incy = 1;
   }
-  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<scalar_t>{});
+  return blas_impl::dot_naive(n, x, incx, y, incy, std::multiplies<at::opmath_type<scalar_t>>{});
 }
 
 template <>
