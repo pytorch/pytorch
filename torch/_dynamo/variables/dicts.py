@@ -776,10 +776,14 @@ class SetVariable(ConstDictVariable):
             ).call_function(tx, [self, args[0]], {})
         elif name == "intersection":
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_intersection
-            ).call_function(tx, [self, args[0]], {})
+            ).call_function(tx, [self, *args], {})
+        elif name == "intersection_update":
+            assert not kwargs
+            return variables.UserFunctionVariable(
+                polyfills.set_intersection_update
+            ).call_function(tx, [self, *args], {})
         elif name == "union":
             assert not kwargs
             assert len(args) == 1
