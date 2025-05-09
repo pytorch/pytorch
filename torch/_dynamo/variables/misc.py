@@ -1543,7 +1543,7 @@ class NullVariable(VariableTracker):
             unimplemented_v2(
                 gb_type="Attempted to reconstruct a NULL value",
                 context=f"reconstruct {self}",
-                explanation="Dynamo encountered bytecode (`PUSH_NULL`) specific "
+                explanation="Dynamo attempted to generate bytecode (`PUSH_NULL`) specific "
                 "to Python 3.11+ but is running in an older Python version.",
                 hints=[
                     "Run your code with Python 3.11 or newer if you need to "
