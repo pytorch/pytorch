@@ -4278,12 +4278,6 @@ skipped_tests = {
 
 known_failing_tests = {
     # Category: Compiled autograd
-    "test_default_saved_tensors_hooks_double_backward",  # wrong when pack hook returns non-leaf
-    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # wrong when pack hook returns non-leaf
-    "test_nested_anomaly_detect_nan",  # nested anomaly
-    "test_select_sum",  # batched gradients
-    "test_custom_autograd_no_early_free",  # batched gradients
-    "test_lobpcg",  # NaNs
     "test_reentrant_with_callbacks_both_depths",  # queue_callback
     "test_reentrant_with_callbacks_depth_0",  # queue_callback
     "test_reentrant_with_callbacks_depth_1",  # queue_callback
@@ -4309,6 +4303,13 @@ known_failing_tests = {
     # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_grad_nonleaf_register_hook",
     "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
+    # Category: Higher Order Gradients
+    "test_default_saved_tensors_hooks_double_backward",  # wrong when pack hook returns non-leaf
+    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # wrong when pack hook returns non-leaf
+    "test_nested_anomaly_detect_nan",  # nested anomaly
+    "test_select_sum",  # batched gradients
+    "test_custom_autograd_no_early_free",  # batched gradients
+    "test_lobpcg",  # NaNs
     # Category: Dynamo (pass when directly running CA graph)
     "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
     "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
