@@ -12,15 +12,15 @@ import torch
 from torch.onnx._internal.exporter._torchlib._tensor_typing import (
     BOOL,
     FLOAT,
-    FloatType,
     INT64,
     IntType,
+    TensorType,
 )
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
 @onnx_impl(torch.sym_float, trace_only=True)
-def sym_float(self: FloatType | IntType) -> FLOAT:
+def sym_float(self: TensorType) -> FLOAT:
     """sym_float(SymInt self) -> SymFloat"""
     return op.Cast(self, to=FLOAT.dtype)
 
