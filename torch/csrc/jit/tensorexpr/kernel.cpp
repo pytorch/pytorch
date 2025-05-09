@@ -226,7 +226,7 @@ bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   }
 
   // Check dimension size first
-  int ndims = (*sizes).size();
+  auto ndims = (*sizes).size();
   if ((memory_format == at::MemoryFormat::ChannelsLast && ndims != 4) ||
       (memory_format == at::MemoryFormat::ChannelsLast3d && ndims != 5)) {
     return false;
@@ -758,7 +758,7 @@ static void pruneByThreadCount(std::vector<ForPtr>& loops) {
 // in the inner loop, and a maximum level of thread-level parallelism in the
 // outer loops.
 template <typename Bufs>
-static void parallelizeOuterLoops(LoopNest& l, Bufs&& bufs) {
+static void parallelizeOuterLoops(LoopNest& l, const Bufs& bufs) {
   for (auto const& buf : bufs) {
     auto loops = l.getLoopStmtsFor(buf);
     pruneByGrainSize(loops);
@@ -1066,10 +1066,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
   }
 
   inputTensorStrides.resize(rank);
-  std::vector<bool> stride_set;
-  for (size_t i = 0; i < rank; ++i) {
-    stride_set.push_back(false);
-  }
+  std::vector<bool> stride_set(rank, false);
   // first, generate non-dependent values
   size_t generated_strides = 0;
   for (const auto i : c10::irange(rank)) {
@@ -1291,8 +1288,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
         for (size_t i = 0; i < axes.size(); ++i) {
           ExprHandle stride(default_strides[i]);
-          ExprHandle axis = axes[i];
-          absolute_position = absolute_position + (stride * axis);
+          absolute_position = absolute_position + (stride * axes[i]);
         }
         std::vector<ExprHandle> new_axes(
             sorted_stride_indices_descending.size());
@@ -2083,7 +2079,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
 
   std::vector<int64_t> int_inputs(nInputs_);
   for (auto i : c10::irange(nInputs_)) {
-    auto inp = stack_inputs[i];
+    const auto& inp = stack_inputs[i];
     if (inp.isInt()) {
       int_inputs[i] = inp.toInt();
       args.emplace_back(&int_inputs[i]);

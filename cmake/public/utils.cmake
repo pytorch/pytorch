@@ -183,7 +183,7 @@ macro(caffe2_interface_library SRC DST)
     # use the populated INTERFACE_LINK_LIBRARIES property, because if one of the
     # dependent library is not a target, cmake creates a $<LINK_ONLY:src> wrapper
     # and then one is not able to find target "src". For more discussions, check
-    #   https://gitlab.kitware.com/cmake/cmake/issues/15415
+    #   https://cmake.org/Bug/print_bug_page.php?bug_id=15415
     #   https://cmake.org/pipermail/cmake-developers/2013-May/019019.html
     # Specifically the following quote
     #
@@ -383,6 +383,7 @@ function(torch_compile_options libname)
       -Wall
       -Wextra
       -Wdeprecated
+      -Wunused
       -Wno-unused-parameter
       -Wno-missing-field-initializers
       -Wno-array-bounds
@@ -390,13 +391,11 @@ function(torch_compile_options libname)
       -Wno-strict-overflow
       -Wno-strict-aliasing
       )
-    list(APPEND private_compile_options -Wunused-function)
-    list(APPEND private_compile_options -Wunused-variable)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wunused-but-set-variable -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused-private-field -Wextra-semi -Wno-error=extra-semi -Wmove)
+      list(APPEND private_compile_options -Wextra-semi -Wno-error=extra-semi -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -409,9 +408,9 @@ function(torch_compile_options libname)
         -Werror
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
-        -Werror=unused-function
-        -Werror=unused-variable
         -Werror=pedantic
+        -Werror=unused
+        -Wno-error=unused-parameter
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         list(APPEND private_compile_options -Werror=unused-but-set-variable)

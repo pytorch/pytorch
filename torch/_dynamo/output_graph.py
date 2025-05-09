@@ -297,7 +297,7 @@ class OutputGraphGuardsState:
     global_scope: Scope
     # This records the initial torch function mode stack for guarding
     torch_function_mode_stack: list[torch.overrides.TorchFunctionMode]
-    guard_on_key_order: set[str]
+    guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
     export: bool = False

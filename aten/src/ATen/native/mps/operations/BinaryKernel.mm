@@ -50,6 +50,26 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   lib.exec_binary_kernel(iter, "complex_mul");
 }
 
+void binary_op_kernel(const std::string func_name,
+                      const Tensor& input,
+                      const Tensor& other,
+                      const Tensor& output,
+                      const std::optional<Scalar> alpha) {
+  auto new_size = at::infer_size(input.sizes(), other.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+
+  auto iter =
+      TensorIteratorConfig().add_output(output).add_input(input).add_input(other).check_all_same_dtype(false).build();
+
+  lib.exec_binary_kernel(iter, func_name, alpha);
+}
+
 } // namespace mps
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {

@@ -27,7 +27,7 @@ Dependencies
 The ONNX exporter depends on extra Python packages:
 
   - `ONNX <https://onnx.ai>`_
-  - `ONNX Script <https://onnxscript.ai>`_
+  - `ONNX Script <https://microsoft.github.io/onnxscript>`_
 
 They can be installed through `pip <https://pypi.org/project/pip/>`_:
 

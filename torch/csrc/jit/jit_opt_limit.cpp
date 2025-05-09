@@ -1,9 +1,8 @@
 #include <cstdlib>
-#include <iomanip>
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
@@ -40,9 +39,9 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
     }
     auto index_at = line.find_last_of('=');
     auto pass_name = line.substr(0, index_at);
-    pass_name = c10::detail::ExcludeFileExtension(pass_name);
+    pass_name = std::filesystem::path(pass_name).replace_extension().string();
     auto opt_limit = parseOptLimit(line.substr(index_at + 1));
-    passes_to_opt_limits.insert({pass_name, opt_limit});
+    passes_to_opt_limits.emplace(std::move(pass_name), opt_limit);
   }
 
   return passes_to_opt_limits;
@@ -57,9 +56,7 @@ bool opt_limit(const char* pass_name) {
 
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
       parseJITOptLimitOption(opt_limit);
-  std::string pass{pass_name};
-  pass = c10::detail::StripBasename(pass);
-  pass = c10::detail::ExcludeFileExtension(pass);
+  std::string pass = std::filesystem::path(pass_name).stem().string();
 
   auto opt_limit_it = passes_to_opt_limits.find(pass);
   if (opt_limit_it == passes_to_opt_limits.end()) {

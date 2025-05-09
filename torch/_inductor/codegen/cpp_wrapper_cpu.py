@@ -747,12 +747,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     constant_type_str = "TensorConstant"
                 elif any(
                     name == normalize_name(parameter_name)
-                    for parameter_name, _ in V.graph.orig_gm.named_parameters()
+                    for parameter_name in V.graph.named_parameters
                 ):
                     constant_type_str = "Parameter"
                 elif any(
                     name == normalize_name(buffer_name)
-                    for buffer_name, _ in V.graph.orig_gm.named_buffers()
+                    for buffer_name in V.graph.named_buffers
                 ):
                     constant_type_str = "Buffer"
                 else:

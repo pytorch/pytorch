@@ -14,11 +14,11 @@ from torch.distributed.tensor.experimental._attention import (
     _CausalBehavior,
     _cp_options,
     _DispatchMode,
+    _FlexAttentionSequentialSharder,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
-    FlexAttentionContiguousSharder,
     set_rotate_method,
 )
 from torch.distributed.tensor.parallel import parallelize_module
@@ -29,7 +29,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_world_size,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -442,9 +445,9 @@ class RingAttentionTest(DTensorTestBase):
 class RingFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return 4
+        return torch.cuda.device_count() if torch.cuda.is_available() else 4
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_world_size()
     @with_comms
     def test_ring_flex_attention(self) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
@@ -486,8 +489,8 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         block_mask = create_block_mask(
             causal_mask,
-            B=bs,
-            H=nheads,
+            B=1,
+            H=1,
             Q_LEN=query_tokens,
             KV_LEN=context_tokens,
             device=self.device_type,
@@ -515,8 +518,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         # calling into flex_attention_hop.
         block_mask_post_sharding = create_block_mask(
             causal_mask,
-            B=bs,
-            H=nheads,
+            B=1,
+            H=1,
             Q_LEN=q_local_size[2],
             KV_LEN=k_local_size[2],
             device=self.device_type,
@@ -533,14 +536,13 @@ class RingFlexAttentionTest(DTensorTestBase):
         cp_v = v.detach().clone()
 
         # create sharder
-        sharder = FlexAttentionContiguousSharder()
+        sharder = _FlexAttentionSequentialSharder(device_mesh, block_mask=block_mask)
 
         with CommDebugMode() as comm_mode:
             with context_parallel(
                 device_mesh,
                 buffers=[cp_q, cp_k, cp_v],
                 buffer_seq_dims=[2, 2, 2],
-                block_mask=block_mask,
                 sharder=sharder,
             ):
                 cp_q.requires_grad = True

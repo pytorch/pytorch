@@ -2,7 +2,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>

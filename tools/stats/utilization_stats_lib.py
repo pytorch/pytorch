@@ -87,7 +87,7 @@ class OssCiUtilizationMetadataV1:
 
 
 # this data model is for the time series data:
-# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_utilization_time_series_schema.sql
+# https://github.com/pytorch/test-infra/blob/main/clickhouse_db_schema/oss_ci_utilization/oss_ci_time_series_schema.sql
 @dataclass
 class OssCiUtilizationTimeSeriesV1:
     created_at: int
