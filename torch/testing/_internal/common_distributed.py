@@ -56,7 +56,9 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-ACCELERATOR_DIST_BACKENDS = ['nccl', 'xccl', 'hccl']
+ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
+
+
 class TestSkip(NamedTuple):
     exit_code: int
     message: str
@@ -118,8 +120,7 @@ def skip_if_no_gpu(func):
     def wrapper(*args, **kwargs):
         if not (TEST_CUDA or TEST_HPU or TEST_XPU):
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
-        world_size = int(os.get["WORLD_SIZE"])
-        world_size = int(os.get["WORLD_SIZE"])
+        world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_HPU and torch.hpu.device_count() < world_size:
@@ -362,12 +363,13 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+
 def requires_accelerator_dist_backend(backends=None):
     """
     Decorator to skip tests if no accelerator communication backend (NCCL, XCCL, HCCL) is available.
 
     Args:
-        backends (Optional[List[str]]): Specific accelerator backends to check (e.g., ['nccl', 'xccl', 'hccl']).
+        backends (Optional[List[str]]): Specific accelerator backends to check (e.g., ["nccl", "xccl", "hccl"]).
                                        If None, checks all supported accelerator backends (NCCL, XCCL, HCCL).
 
     Returns:
@@ -376,16 +378,20 @@ def requires_accelerator_dist_backend(backends=None):
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
 
-    backend_available = any({
-        'nccl': c10d.is_nccl_available,
-        'xccl': c10d.is_xccl_available,
-        'hccl': lambda: TEST_HPU,
-    }.get(backend, lambda: False)() for backend in backends)
+    backend_available = any(
+        {
+        "nccl": c10d.is_nccl_available,
+        "xccl": c10d.is_xccl_available,
+        "hccl": lambda: TEST_HPU,
+        }.get(backend, lambda: False)()
+        for backend in backends
+    )
 
     return skip_but_pass_in_sandcastle_if(
         not backend_available,
-        f"No accelerator communication backend available among {backends}"
+        f"No accelerator communication backend available among {backends}",
     )
+
 
 def requires_multicast_support():
     has_multicast_support = (
@@ -1443,13 +1449,15 @@ class SaveForwardInputsModel(nn.Module):
 
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, backend="nccl", init_pg=True, fake_pg=False):
+def _dynamo_dist_per_rank_init(
+    rank, world_size, backend="nccl", init_pg=True, fake_pg=False
+):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     if not fake_pg:
         torch.accelerator.set_device_index(rank)
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6789'
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "6789"
     if init_pg:
         if fake_pg:
             store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1514,6 +1522,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
     Prefer MultiThreadedTestCase for most tests. Perhaps use this one
     sparingly for integration tests.
     """
+
     @property
     def world_size(self) -> int:
         return torch.cuda.device_count()
