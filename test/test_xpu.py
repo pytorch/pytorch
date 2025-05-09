@@ -679,6 +679,7 @@ class TestXPUAPISanity(TestCase):
         if not torch.xpu._is_compiled():
             self.assertEqual(len(torch.xpu.get_arch_list()), 0)
 
+
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
     @dtypes(torch.float16)
