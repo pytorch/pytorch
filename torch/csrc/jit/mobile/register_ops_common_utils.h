@@ -21,7 +21,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size);
     bool non_blocking,
     bool copy) {
   if (device && device->is_cuda()) {
-    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    at::globalContext().lazyInitDevice(at::DeviceType::CUDA);
   }
   if (!device && !scalarType && !copy) {
     return self;

@@ -1358,13 +1358,13 @@ ToArgs extract_to_args(ProcessedNode* p_node) {
     const auto& other = p_node->Input(1).toTensor();
     result.dtype = other.scalar_type();
     result.layout = other.layout();
-    TORCH_DCHECK_EQ(other.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(other.device().type(), at::DeviceType::CPU);
   } else {
     const auto& self = p_node->Input(0).toTensor();
     result.dtype = p_node->Input(1).toOptional<at::ScalarType>();
     result.layout = self.layout();
     // Static runtime only works with CPU tensors; don't need to read this.
-    TORCH_DCHECK_EQ(self.device().type(), c10::DeviceType::CPU);
+    TORCH_DCHECK_EQ(self.device().type(), at::DeviceType::CPU);
     result.know_to_will_alias = has_constant_non_tensor_dtype_and_flags &&
         (!result.dtype.has_value() ||
          result.dtype.value() == self.dtype().toScalarType());
@@ -1401,7 +1401,7 @@ struct CheckToWillAlias {
              self,
              to_args.dtype,
              to_args.layout,
-             c10::Device{c10::DeviceType::CPU},
+             c10::Device{at::DeviceType::CPU},
              copy,
              has_memory_format ? to_args.memory_format
                                : c10::MemoryFormat::Preserve));

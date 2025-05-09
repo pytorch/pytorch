@@ -412,7 +412,7 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     std::vector<flatbuffers::Offset<mobile::serialization::StorageData>>
         storage_data;
     for (auto td : tensor_data_) {
-      if (td.storage().device_type() != DeviceType::CPU) {
+      if (td.storage().device_type() != at::DeviceType::CPU) {
         td = at::empty({0}, td.options())
                  .set_(
                      td.storage(),

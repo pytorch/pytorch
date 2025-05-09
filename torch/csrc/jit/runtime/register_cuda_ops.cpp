@@ -156,7 +156,7 @@ RegisterOperators const reg({
           // unpacking it inside this operator. The unpacked stream is then used
           // to set the current CUDA stream.
           auto unpacked = c10::cuda::CUDAStream::unpack3(
-              s->id(), stream_device_idx, c10::DeviceType::CUDA);
+              s->id(), stream_device_idx, at::DeviceType::CUDA);
           c10::cuda::setCurrentCUDAStream(unpacked);
         },
         aliasAnalysisFromSchema()),
