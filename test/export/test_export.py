@@ -343,6 +343,23 @@ class TestDynamismExpression(TestCase):
         seq_len = torch.tensor(5)
         torch.export.export(MySlice(), args=(x, seq_len))
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_reshape_view_backed_size_oblivious(self):
+        N = 3
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                y = x[:-1, :]  # [s0 - 1, 32]
+                stacked = torch.stack([y] * N, dim=0)  # [N * (s0 - 1), 32]
+                reshaped = stacked.reshape(-1, N, 32)  # [(s0 - 1), N, 32]
+                return reshaped
+
+        inps = (torch.randn(10, 32),)
+        spec = {
+            "x": (Dim.AUTO, Dim.STATIC),
+        }
+        ep = export(MyModel(), inps, dynamic_shapes=spec)
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
@@ -4360,6 +4377,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    def test_unbacked_infer_size(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                torch._check_is_size(u0)
+                t = torch.empty(u0 - 1)
+                return t + t
+
+        ep = torch.export.export(Foo(), (torch.tensor([5]),))
+        ep.module()(torch.tensor([5]))
+        ep.module()(torch.tensor([1]))
+
     @testing.expectedFailureTrainingIRToRunDecomp
     @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_unbacked_pad(self):
@@ -4421,10 +4450,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}.*\n"
-            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}(.*\n)+"
+            f".*{re.escape('torch._check((items[1] % items[2]) == 0)')}.*\n"
+            f".*{re.escape('torch._check((items[1] % items[2]) != 0)')}(.*\n)+"
             f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1]')}"
-            f".*{re.escape('or r.shape[1], `u2` with items[2] in Ne(Mod(u1, u2), 0) and its negation.')}",
+            f".*{re.escape('or r.shape[1], `u2` with items[2] in Eq(Mod(u1, u2), 0) and its negation.')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -4478,24 +4507,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[
                 # Could not guard on data-dependent expression u0 < 0
                 "torch._check(i >= 0)",
-            ],
-        )
-
-        class cf_changevar(torch.nn.Module):
-            def forward(self, x, fixes):
-                i = x.item()
-                eval(fixes)
-                r = torch.arange(i // 2)
-                return r + r
-
-        retry_export(
-            cf_changevar(),
-            (torch.tensor(20),),
-            fixes=[
-                # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check((i // 2) != 0)",
-                # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check((i // 2) != 1)",
             ],
         )
 
