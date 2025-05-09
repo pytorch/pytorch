@@ -232,8 +232,12 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-rocm-n-py3)
-    ANACONDA_PYTHON_VERSION=3.10
+  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-noble-rocm-n-py3)
+    if [[ $tag =~ "jammy" ]]; then
+      ANACONDA_PYTHON_VERSION=3.10
+    else
+      ANACONDA_PYTHON_VERSION=3.12
+    fi
     GCC_VERSION=11
     VISION=yes
     ROCM_VERSION=6.4
