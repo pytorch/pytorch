@@ -37,8 +37,6 @@ from collections import Counter
 from importlib import import_module
 from typing import Any, Callable, Optional, TypeVar
 
-from mpmath.libmp.libintmath import ifac
-
 import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
@@ -824,17 +822,8 @@ def aot_graph_input_parser(
                 if dim:
                     resolved_shape.append(int(dim))
 
-        def constuctor(shape, dtype, device):
-            if dtype.is_floating_point:
-                if dtype.itemsize > 1:
-                    return torch.randn(shape, dtype=dtype, device=device)
-                else:
-                    return torch.rand(shape, device=device).to(dtype)
-
-            return torch.zeros(shape, dtype=dtype, device=device)
-
-        out = constuctor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
-
+        constructor = torch.randn if dtype.is_floating_point else torch.zeros
+        out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
         for d in dynamic_dims:
             torch._dynamo.mark_dynamic(out, d)
         return out

@@ -2289,11 +2289,13 @@ from torch._linalg_utils import (  # type: ignore[misc]
 )
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
+
 def skip_frame_if_max_graphs() -> None:
     """
     If we have hit a user specified max number of graphs, skip this frame.
     """
     from torch._dynamo.utils import GraphsCompiledState
+
     max_graphs = os.environ.get("TORCH_BISECT_MAX_GRAPHS", None)
     if max_graphs is None:
         return
@@ -2302,7 +2304,6 @@ def skip_frame_if_max_graphs() -> None:
     if GraphsCompiledState.get_num_graphs() > builtins.int(max_graphs):
         raise torch._dynamo.exc.SkipFrame(f"Hit max graph limit: {max_graphs}")
 
-    
 
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
@@ -2375,6 +2376,7 @@ class _TorchCompileInductorWrapper:
 
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
+
         skip_frame_if_max_graphs()
         return compile_fx(model_, inputs_, config_patches=self.config)
 
