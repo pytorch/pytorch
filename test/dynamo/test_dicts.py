@@ -948,6 +948,56 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(type(res), dict_items)
 
+    def test_builtin_or_with_invalid_types(self):
+        args = (
+            1,  # int
+            1.0,  # float
+            "a",  # str
+            (1, 2),  # tuple
+            [1, 2],  # list
+        )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(b: Any):
+            a = {"one": torch.ones(1)}
+            return a | b
+
+        from torch._dynamo.exc import InternalTorchDynamoError
+
+        for arg in args:
+            with self.assertRaisesRegex(
+                InternalTorchDynamoError, "unsupported operand type"
+            ):
+                _ = fn(arg)
+
+    def test_builtin_or_with_diff_keys(self):
+        def f():
+            a = {"one": torch.ones(1)}
+            b = {"two": torch.ones(2)}
+            return a, b, a | b, b | a, a.__or__(b), b.__or__(a)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_builtin_or_with_same_keys(self):
+        def f():
+            a = {"one": torch.ones(1), "two": torch.ones(2)}
+            b = {"one": torch.ones(1), "three": torch.ones(3)}
+            return a, b, a | b, b | a, a.__or__(b), b.__or__(a)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    def test_builtin_ior_(self):
+        def f():
+            a = {"one": torch.ones(1)}
+            b = {"two": torch.ones(2)}
+            a |= b
+            return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
