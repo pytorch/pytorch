@@ -65,7 +65,9 @@ def _get_path_without_sccache() -> str:
 un_ops_under_test = [torch.relu, torch.sigmoid, torch.tanh]
 bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
 
-evt_all_ops = evt_bin_ops = parametrize("op", [torch.add], name_fn=lambda f: f.__name__)
+evt_all_ops = evt_bin_ops = parametrize(
+    "op", un_ops_under_test + bin_ops_under_test, name_fn=lambda f: f.__name__
+)
 
 
 def gen_args(op, shape):
@@ -162,6 +164,14 @@ class TestCutlassBackend(TestCase):
 
         import cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
+
+    def test_cutlass_key(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+        from torch._inductor.codecache import cutlass_key
+
+        self.assertIsNotNone(cutlass_key())
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1394,7 +1404,7 @@ class TestCutlassBackend(TestCase):
         class TestModel(torch.nn.Module):
             def forward(self, a, b, extra_args):
                 res = (a @ b).relu()  # add extra activation to not hit addmm path
-                return res  # op(res, *extra_args)
+                return op(res, *extra_args)
 
         M = 16
         N = 16

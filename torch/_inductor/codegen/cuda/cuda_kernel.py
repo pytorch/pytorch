@@ -11,6 +11,7 @@ from sympy import Expr, symbols
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ from ...ir import (
 from ...utils import sympy_product
 from ...virtualized import V
 from ..common import (
+    CSEVariable,
     IndentedBuffer,
     Kernel,
     OpOverrides,
@@ -530,6 +532,12 @@ class CUDATemplateKernel(CUDAKernel):
             raise RuntimeError(
                 f"At least 1 stride should be 1. Strides: {node.get_stride()=}"
             )
+
+    def load(self, name: str, index: Expr, mode: Any = None) -> CSEVariable:
+        """
+        Mock load function for memory planning to optimize allocations properly.
+        """
+        return self.create_cse_var(name, bounds=ValueRanges.unknown())
 
     def store(self, name: str, index: Expr, value: Any, mode: Any = None) -> None:
         """
