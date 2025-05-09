@@ -92,6 +92,8 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from .graph_utils import _get_flat_args
+
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
@@ -3150,7 +3152,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
-    flat_args_kwargs, _ = pytree.tree_flatten((args, kwargs))
+    flat_args_kwargs = get_fake_values_from_nodes(
+        tx, _get_flat_args(node, {}), allow_non_graph_fake
+    )
     id_to_initial_version = {
         id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
     }
