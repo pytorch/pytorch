@@ -7292,9 +7292,7 @@ def _compute_grouped_gemm_output_size(mat1, mat2, offs):
             return mat1.size(1), mat2.size(1)
         else:
             # regular bmm
-            torch._check(
-                mat1.size(0) == mat2.size(0), "batched dimension has to match"
-            )
+            torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
             return mat1.size(0), mat1.size(1), mat2.size(-1)
 
 
@@ -7338,15 +7336,22 @@ def meta_scaled_grouped_mm(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ):
-   # Check dimensions
-    torch._check(mat_a.dim() == 2 or mat_a.dim() == 3, lambda: "mat_a has to be 2 or 3d")
-    torch._check(mat_b.dim() == 2 or mat_b.dim() == 3, lambda: "mat_b has to be 2 or 3d")
+    # Check dimensions
+    torch._check(
+        mat_a.dim() == 2 or mat_a.dim() == 3, lambda: "mat_a has to be 2 or 3d"
+    )
+    torch._check(
+        mat_b.dim() == 2 or mat_b.dim() == 3, lambda: "mat_b has to be 2 or 3d"
+    )
 
     a_is_2d = mat_a.dim() == 2
     b_is_2d = mat_b.dim() == 2
 
     # Check offsets
-    torch._check((offs is not None) == (a_is_2d or b_is_2d), lambda: "Have to provide offsets if there is a 2d matrix")
+    torch._check(
+        (offs is not None) == (a_is_2d or b_is_2d),
+        lambda: "Have to provide offsets if there is a 2d matrix",
+    )
 
     if offs is not None:
         torch._check(offs.dim() == 1, lambda: "offs has to be 1D")
@@ -7355,83 +7360,77 @@ def meta_scaled_grouped_mm(
     # Check matrix sizes
     torch._check(
         mat_a.size(-1) % 16 == 0,
-        lambda: f"Expected trailing dimension of mat_a to be divisible by 16 but got mat1 shape: {mat_a.size()}"
+        lambda: f"Expected trailing dimension of mat_a to be divisible by 16 but got mat1 shape: {mat_a.size()}",
     )
     torch._check(
         mat_b.size(-2) % 16 == 0 and mat_b.size(-1) % 16 == 0,
-        lambda: f"Expected mat_b shape to be divisible by 16 but got mat_b shape: {mat_b.size()}"
+        lambda: f"Expected mat_b shape to be divisible by 16 but got mat_b shape: {mat_b.size()}",
     )
 
     # Check scales
     torch._check(
         scale_a.dtype == torch.float and scale_b.dtype == torch.float,
-        lambda: "Both scale_a and scale_b must be float (fp32) tensors."
+        lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
     )
 
     # Check scale dimensions
-    scale_multiplier = offs.size(0) if (a_is_2d and b_is_2d) else 1
+    scale_multiplier = offs.size(0) if (a_is_2d and b_is_2d) else 1  # type: ignore[union-attr]
 
     if a_is_2d:
         torch._check(
             scale_a.dim() == 1,
-            lambda: f"scale must be a 1D tensor for 2D mat_a, but got {scale_a.dim()}D"
+            lambda: f"scale must be a 1D tensor for 2D mat_a, but got {scale_a.dim()}D",
         )
-        torch._check(
-            scale_a.is_contiguous(),
-            lambda: "scale_a must be contiguous"
-        )
+        torch._check(scale_a.is_contiguous(), lambda: "scale_a must be contiguous")
         torch._check(
             scale_a.size(0) == mat_a.size(0) * scale_multiplier,
-            lambda: "scale must have the same length as mat_a"
+            lambda: "scale must have the same length as mat_a",
         )
     else:
         torch._check(
             scale_a.dim() == 2,
-            lambda: f"scale must be a 2D tensor for 3D mat_a, but got {scale_a.dim()}D"
+            lambda: f"scale must be a 2D tensor for 3D mat_a, but got {scale_a.dim()}D",
         )
         torch._check(
             scale_a.stride(1) == 1,
-            lambda: "scale_a must be contiguous in the last dimension"
+            lambda: "scale_a must be contiguous in the last dimension",
         )
         torch._check(
             scale_a.size(0) == mat_a.size(0),
-            lambda: "scale must have the same batch dimension as mat_a"
+            lambda: "scale must have the same batch dimension as mat_a",
         )
         torch._check(
             scale_a.size(1) == mat_a.size(1),
-            lambda: "scale must have the same first dimension as mat_a"
+            lambda: "scale must have the same first dimension as mat_a",
         )
 
     # Similar checks for scale_b
     if b_is_2d:
         torch._check(
             scale_b.dim() == 1,
-            lambda: f"scale must be a 1D tensor for 2D mat_b, but got {scale_b.dim()}D"
+            lambda: f"scale must be a 1D tensor for 2D mat_b, but got {scale_b.dim()}D",
         )
-        torch._check(
-            scale_b.is_contiguous(),
-            lambda: "scale_b must be contiguous"
-        )
+        torch._check(scale_b.is_contiguous(), lambda: "scale_b must be contiguous")
         torch._check(
             scale_b.size(0) == mat_b.size(1) * scale_multiplier,
-            lambda: "scale must have the same length as mat_b"
+            lambda: "scale must have the same length as mat_b",
         )
     else:
         torch._check(
             scale_b.dim() == 2,
-            lambda: f"scale must be a 2D tensor for 3D mat_b, but got {scale_b.dim()}D"
+            lambda: f"scale must be a 2D tensor for 3D mat_b, but got {scale_b.dim()}D",
         )
         torch._check(
             scale_b.stride(1) == 1,
-            lambda: "scale_b must be contiguous in the last dimension"
+            lambda: "scale_b must be contiguous in the last dimension",
         )
         torch._check(
             scale_b.size(0) == mat_b.size(0),
-            lambda: "scale must have the same batch dimension as mat_b"
+            lambda: "scale must have the same batch dimension as mat_b",
         )
         torch._check(
             scale_b.size(1) == mat_b.size(2),
-            lambda: "scale must have the same last dimension as mat_b"
+            lambda: "scale must have the same last dimension as mat_b",
         )
 
     # Check bias
@@ -7439,7 +7438,10 @@ def meta_scaled_grouped_mm(
 
     # Check output dtype
     out_dtype_ = out_dtype if out_dtype is not None else mat_a.dtype
-    torch._check(out_dtype_ == torch.bfloat16, lambda: "Only bf16 high precision output types are supported for grouped gemm")
+    torch._check(
+        out_dtype_ == torch.bfloat16,
+        lambda: "Only bf16 high precision output types are supported for grouped gemm",
+    )
 
     # Compute output size
     out_size = _compute_grouped_gemm_output_size(mat_a, mat_b, offs)
