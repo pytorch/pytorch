@@ -17,12 +17,16 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
-from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._higher_order_ops.flex_attention import (
+    flex_attention as flex_attention_hop,
+    flex_attention_backward as flex_attention_backward_hop,
+)
 from torch._ops import TorchDispatchMode
 from torch._prims_common import DeviceLikeType
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.fx.graph_module import GraphModule
 from torch.nn.attention.flex_attention import (
     _identity,
     _mask_mod_signature,
@@ -1590,6 +1594,12 @@ def context_parallel(
 
     for buffer, original_buffer in zip(buffers, original_buffers):
         if original_buffer is not None:
+            # tensor cannot resize if requires_grad is True
+            # key and value's requires_grad has been set to False in manual comm calls
+            # unless via DTensor.
+            if buffer.requires_grad:
+                buffer.requires_grad = False
+
             buffer.resize_(original_buffer.shape)
             buffer.copy_(original_buffer)
 
@@ -1716,3 +1726,75 @@ def cp_flex_attention_dispatch_mode(
     )
 
     return out, lse
+
+
+@flex_attention_backward_hop.py_impl(ContextParallelMode)
+def cp_flex_attention_backward_dispatch_mode(
+    mode: ContextParallelMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
+    fw_graph: Union[Callable, GraphModule],
+    joint_graph: GraphModule,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
+]:
+    assert mode._sharder is not None, (
+        "flex_attention is called but ContextParallelMode._sharder is not initialized. "
+        "Please pass the `sharder` argument to `context_parallel`."
+    )
+
+    assert isinstance(mode._sharder, _FlexAttentionSharder)
+    device_mesh = mode._sharder._mesh
+    cp_block_mask = mode._sharder.get_cp_block_mask(mode._sharder._block_mask)
+
+    # TODO: save global KV in forward
+    # all-gather KV
+    sharding = Shard(2)
+    k_dist = DTensor.from_local(key, device_mesh, [sharding])
+    v_dist = DTensor.from_local(value, device_mesh, [sharding])
+    k_global = k_dist.full_tensor()
+    v_global = v_dist.full_tensor()
+
+    # TODO: add kv reorder
+
+    (
+        grad_query,
+        grad_key,
+        grad_value,
+        grad_score_mod_captured,
+    ) = flex_attention_backward_hop(
+        query,
+        k_global,  # key
+        v_global,  # value
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        cp_block_mask.as_tuple(),  # block_mask
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+
+    # reduce-scatter KV grads
+    grad_key = ft_c.reduce_scatter_tensor(
+        grad_key, reduceOp="sum", scatter_dim=2, group=device_mesh
+    )
+    grad_value = ft_c.reduce_scatter_tensor(
+        grad_value, reduceOp="sum", scatter_dim=2, group=device_mesh
+    )
+
+    return grad_query, grad_key, grad_value, grad_score_mod_captured
