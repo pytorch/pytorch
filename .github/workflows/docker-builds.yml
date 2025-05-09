@@ -61,8 +61,8 @@ jobs:
           pytorch-linux-focal-py3.11-clang10,
           pytorch-linux-focal-py3.12-clang10,
           pytorch-linux-focal-py3.13-clang10,
-          pytorch-linux-focal-rocm-n-1-py3,
-          pytorch-linux-focal-rocm-n-py3,
+          pytorch-linux-jammy-rocm-n-1-py3,
+          pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12,
           pytorch-linux-jammy-py3.9-gcc11,
           pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
@@ -79,15 +79,13 @@ jobs:
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
-            runner: linux.arm64.2xlarge
+            runner: linux.arm64.m7g.4xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge
             timeout-minutes: 600
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
-    env:
-      DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:
       - name: Clean workspace
         shell: bash
@@ -108,23 +106,34 @@ jobs:
         id: build-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: ${{ matrix.docker-image-name }}
+          docker-image-name: ci-image:${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
+
+      - name: Push docker image to old name
+        shell: bash
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
+        run: |
+          # This can be deleted after people have rebased their PRs/the new name has been in main for a while
+          set -euox pipefail
+          docker_image_name="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}"
+          foldersha=${ECR_DOCKER_IMAGE##*-}
+          docker tag "${ECR_DOCKER_IMAGE}" "${docker_image_name}:${foldersha}"
+          docker push "${docker_image_name}:${foldersha}"
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
-      - uses: nick-fields/retry@v3.0.0
+      - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
         name: Push to https://https://ghcr.io/
         id: push-to-ghcr-io
         if: ${{ github.event_name == 'push' }}
         env:
           ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          IMAGE_NAME: ${{ matrix.docker-image-name }}
         with:
           shell: bash
           timeout_minutes: 30
@@ -135,8 +144,8 @@ jobs:
             tag=${ECR_DOCKER_IMAGE##*:}
             # Push docker image to the ghcr.io
             echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
-            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
-            docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
+            docker push "${ghcr_image}:${tag}"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace

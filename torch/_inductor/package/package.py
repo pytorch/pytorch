@@ -259,6 +259,7 @@ class AOTICompiledModel:
         constants_map: dict[str, torch.Tensor],
         *,
         check_full_update: bool,
+        user_managed: bool = False,
     ) -> None:
         """
         Given a mapping of constant fqns to tensors, load the constants into the model.
@@ -270,7 +271,9 @@ class AOTICompiledModel:
             check_full_update: Whether to add check to see if all the constants
             are updated and have values.
         """
-        self.loader.load_constants(constants_map, False, check_full_update)  # type: ignore[attr-defined]
+        self.loader.load_constants(  # type: ignore[attr-defined]
+            constants_map, False, check_full_update, user_managed
+        )
 
     def get_constant_fqns(self) -> list[str]:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
@@ -287,6 +290,7 @@ def load_package(
     model_name: str = "model",
     run_single_threaded: bool = False,
     num_runners: int = 1,
+    device_index: int = -1,
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
@@ -302,12 +306,12 @@ def load_package(
             path.seek(0)
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(
-                f.name, model_name, run_single_threaded, num_runners
+                f.name, model_name, run_single_threaded, num_runners, device_index
             )  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
-        path, model_name, run_single_threaded, num_runners
+        path, model_name, run_single_threaded, num_runners, device_index
     )  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

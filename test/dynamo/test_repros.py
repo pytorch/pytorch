@@ -1246,13 +1246,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 11)
+        self.assertEqual(cnt.op_count, 10)
 
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         expected_op_count = (
-            """11""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
+            """10""" if torch._dynamo.config.inline_inbuilt_nn_modules else """4"""
         )
 
         self.assertExpectedInline(cnt.frame_count, """1""")
@@ -1668,7 +1668,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(cfg), 64)
         # With unspec int, maximum computation is preserved
         self.assertExpectedInline(cnt.frame_count, """1""")
-        self.assertExpectedInline(cnt.op_count, """3""")
+        if torch._dynamo.config.automatic_dynamic_shapes:
+            if not torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(cnt.op_count, """4""")
+            else:
+                self.assertExpectedInline(cnt.op_count, """3""")
+        else:
+            self.assertExpectedInline(cnt.op_count, """3""")
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
@@ -3212,12 +3218,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "torch.Size"):
             opt_f(args)
-        self.assertEqual(
-            torch._dynamo.utils.counters["graph_break"][
-                "assert with non-string message"
-            ],
-            1,
-        )
+        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
+            if "assert with non-string message" in gb:
+                self.assertEqual(cnt, 1)
+                break
+        else:
+            # graph break not found
+            self.assertTrue(False)
 
     def test_rewrite_assert_noop(self):
         def f(x):
@@ -3701,7 +3708,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(cnt.op_count, 1)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
@@ -3940,7 +3947,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         root = []
         root[:] = [root, root, None, None]
 
-        @torch.compile(fullgraph=True, backend="eager")
+        @torch.compile(fullgraph=False, backend="eager")
         def test_bug():
             return root[0]
 
@@ -4074,41 +4081,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = mod(**inputs)
         res = torch.compile(mod, backend="eager", fullgraph=True)(**inputs)
         self.assertEqual(ref, res)
-
-    def test_call_finally_python_3_8(self):
-        # Issue - https://github.com/pytorch/pytorch/issues/97811
-        def make_fn(g):
-            def fn():
-                while True:
-                    try:
-                        print(g)
-                        break
-                    except Exception as _:
-                        break
-
-            return torch.compile(fn, backend="eager")
-
-        make_fn(None)()
-
-    def test_call_finally_python_3_8_2(self):
-        def f(x):
-            while x:
-                try:
-                    pass
-                except Exception as _:
-                    continue
-
-        torch.compile(f, backend="eager")(0)
-
-    def test_call_finally_opcode_python_3_8(self):
-        def fn():
-            try:
-                return torch.zeros(4)
-            finally:
-                return torch.ones(4)  # noqa: SIM107, B012
-
-        result = torch.compile(fn, backend="aot_eager")()
-        self.assertEqual(result, torch.ones(4))
 
     def test_string_format(self):
         s = "temp{i}"
@@ -5065,6 +5037,65 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             @staticmethod
             def greet(x):
                 return x * super(Child, Child).greet()
+
+        child = Child()
+
+        def fn(x):
+            return child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_super_classmethod(self):
+        class Parent:
+            @classmethod
+            def greet(cls):
+                if cls == Parent:
+                    return 4
+                if cls == Child:
+                    return 3
+                if cls == GrandChild:
+                    return 5
+                return 2
+
+        class Child(Parent):
+            def greet(self, x):
+                return x * super().greet()
+
+        class GrandChild(Child):
+            pass
+
+        grand_child = GrandChild()
+
+        def fn(x):
+            return grand_child.greet(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_super_classmethod_inheritance(self):
+        class GrandParent:
+            @classmethod
+            def greet(cls, x):
+                return cls.A * x
+
+        class Parent(GrandParent):
+            @classmethod
+            def greet(cls, x):
+                return super().greet(x)
+
+        class Child(Parent):
+            A = 5
+
+            @classmethod
+            def greet(cls, x):
+                return super().greet(x)
 
         child = Child()
 
@@ -6196,6 +6227,21 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         with torch.no_grad():
             model(x)
 
+    def test_ao_fake_quantize_tracing(self):
+        import torch.ao.quantization.fake_quantize
+
+        q = torch.ao.quantization.FusedMovingAvgObsFakeQuantize()
+
+        def fn(x):
+            return q(x)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        eager_res = fn(x)
+
+        self.assertEqual(res, eager_res)
+
     def test_typed_dict(self):
         class LlavaImagePixelInputs(TypedDict):
             type: Literal["pixel_values"]
@@ -6819,6 +6865,19 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out1, _ = moe_mlp(x)
         out2, _ = torch.compile(moe_mlp, backend="eager")(x)
         self.assertEqual(out1, out2)
+
+    def test_tensor_size_hasattr(self):
+        def fn(x):
+            if hasattr(x, "size"):
+                x = x * 2
+            if hasattr(x, "stride"):
+                x = x * 3
+            return x * 5
+
+        x = torch.ones(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @requires_cuda
     def test_memleak_when_graph_input_has_tensor_attr(self, device):

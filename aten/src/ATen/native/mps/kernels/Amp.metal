@@ -66,8 +66,7 @@ kernel void ampUpdateScale(
     device float& foundInf [[buffer(2)]],
     constant T& scaleGrowthFactor [[buffer(3)]],
     constant T& scaleBackoffFactor [[buffer(4)]],
-    constant int& growthInterval [[buffer(5)]],
-    uint tid [[thread_position_in_grid]]) {
+    constant int& growthInterval [[buffer(5)]]) {
   if (foundInf != 0.0f) {
     scale *= scaleBackoffFactor;
     growth_tracker = 0;
@@ -110,8 +109,7 @@ kernel void ampUpdateScale(
       device float& foundInf [[buffer(2)]],                    \
       constant DTYPE& scaleGrowthFactor [[buffer(3)]],         \
       constant DTYPE& scaleBackoffFactor [[buffer(4)]],        \
-      constant int& growthInterval [[buffer(5)]],              \
-      uint tid [[thread_position_in_grid]])
+      constant int& growthInterval [[buffer(5)]])
 
 INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE(float);
 INSTANTIATE_AMP_NONFINITE_CHECK_AND_UNSCALE(half);

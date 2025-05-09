@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -8,8 +9,11 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
+import tempfile
 import typing
+from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -60,6 +64,8 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 if TYPE_CHECKING:
     from collections.abc import Iterator, MutableMapping, Sequence
 
+    from torch.fx import GraphModule
+
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
@@ -83,6 +89,38 @@ def data_type_logger(msg: str) -> None:
         schedule_log.debug("Data type propagation: %s", msg)
 
 
+@dataclasses.dataclass
+class FileBackedGraphModule:
+    """
+    Output of FX wrapper codegen. Exposes the same methods as ModuleType, but these
+    map back to a GraphModule instead of Python source.
+    """
+
+    gm: GraphModule
+    compiled_fn: Callable[..., Any]
+
+    def __post_init__(self) -> None:
+        # Write the code to a file for compatibility with debugging utilities.
+        # The file is deleted upon program termination.
+        self.tempfile = tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".py", delete=False
+        )
+        atexit.register(os.remove, self.tempfile.name)
+        with self.tempfile as f:
+            f.write(self.value)
+
+    @property
+    def __file__(self) -> str:
+        return self.tempfile.name
+
+    def call(self, args: list[Any]) -> Any:
+        return self.compiled_fn(*args)
+
+    @property
+    def value(self) -> str:
+        return self.gm.code
+
+
 class WorkspaceZeroMode(enum.Enum):
     UNINITIALIZED = 0
     ZERO_ON_CALL = 1  # kernel may leave workspace dirty
@@ -103,8 +141,22 @@ class WorkspaceZeroMode(enum.Enum):
         return WorkspaceZeroMode.UNINITIALIZED
 
 
+class CodegenSymbol(ABC):
+    """
+    An IR object possibly corresponding to a variable in the wrapper code.
+    """
+
+    @abstractmethod
+    def get_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        pass
+
+
 @ir_dataclass(frozen=True)
-class WorkspaceArg:
+class WorkspaceArg(CodegenSymbol):
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
@@ -167,6 +219,9 @@ class WorkspaceArg:
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        return self.get_layout().get_example()
+
     def get_layout(self) -> FixedLayout:
         from ..ir import FixedLayout
 
@@ -184,6 +239,9 @@ class WorkspaceArg:
     get_output_spec = get_layout
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
+
+    def get_offset(self) -> sympy.Expr:
+        return sympy.S.Zero
 
     def get_size(self) -> list[sympy.Expr]:
         return [self.count]
@@ -808,35 +866,6 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return repr(value)
 
     @staticmethod
-    def libdevice_sigmoid(x: OpVarT) -> OpVarT:
-        one = ops.constant(1, torch.int32)
-        return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
-
-    @staticmethod
-    def libdevice_abs(x: OpVarT) -> OpVarT:
-        return ops.abs(x)
-
-    @staticmethod
-    def libdevice_sqrt(x: OpVarT) -> OpVarT:
-        return ops.sqrt(x)
-
-    @staticmethod
-    def libdevice_cos(x: OpVarT) -> OpVarT:
-        return ops.cos(x)
-
-    @staticmethod
-    def libdevice_sin(x: OpVarT) -> OpVarT:
-        return ops.sin(x)
-
-    @staticmethod
-    def libdevice_log(x: OpVarT) -> OpVarT:
-        return ops.log(x)
-
-    @staticmethod
-    def libdevice_exp(x: OpVarT) -> OpVarT:
-        return ops.exp(x)
-
-    @staticmethod
     def bitwise_not(x: OpVarT) -> OpVarT:
         return f"~{OpOverrides.paren(x)}"
 
@@ -1397,6 +1426,8 @@ class KernelArgs:
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name: str, output_name: str) -> None:
+        if input_name in V.graph.unaligned_buffers:
+            V.graph.unaligned_buffers.add(output_name)
         assert output_name not in self.inplace_buffers
         if input_name in self.inplace_buffers:
             buf = self.inplace_buffers[input_name]
@@ -2385,8 +2416,12 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
+        from .cuda.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
+            return ValueRanges.unknown()
+
+        if isinstance(V.kernel, CUDATemplateKernel):
             return ValueRanges.unknown()
 
         fx_node = V.interpreter.current_node

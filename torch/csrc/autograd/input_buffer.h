@@ -47,7 +47,8 @@ struct InputBuffer {
   // The events you need to wait for to ensure the corresponding buffers
   // are ready. The events are updated as we accumulate into the buffer.
   std::vector<std::optional<c10::Event>> ready_events;
-  // The streams corresponding to the events above.
+  // The streams corresponding to the events above. This is only used to
+  // check if more synchronization is needed or not.
   std::vector<std::optional<c10::Stream>> ready_streams;
 };
 

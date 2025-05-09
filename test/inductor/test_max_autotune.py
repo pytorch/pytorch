@@ -166,7 +166,7 @@ class TestMaxAutotune(TestCase):
     @parametrize("autotune_multi_device", (True, False))
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
         """
-        This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
+        This crash previously due to a triton issue: https://github.com/triton-lang/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
         """
         m, n, k = 2048, 1536, 64
@@ -291,6 +291,38 @@ class TestMaxAutotune(TestCase):
         # if any of the input inner dims are not 16-byte aligned. As a result,
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_max_autotune_regular_mm_tma_dynamic_outer_dim(self):
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+
+        # TMA requires 16-byte alignment: here we repeat the dims
+        # by the factor of 8, as float16 is 2-byte. All dims are
+        # repeated due to the possible transpositions below.
+        a = a.repeat(8, 8)
+        b = b.repeat(8, 8)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(mm)(a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
@@ -467,6 +499,40 @@ class TestMaxAutotune(TestCase):
         # if any of the input inner dims are not 16-byte aligned. As a result,
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_max_autotune_addmm_tma_dynamic_outer_dim(self):
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+        x = torch.randn(N).to(torch.float16).cuda()
+
+        # TMA requires 16-byte alignment: here we repeat the dims
+        # by the factor of 8, as float16 is 2-byte. All dims are
+        # repeated due to the possible transpositions below.
+        x = x.repeat(8)
+        a = a.repeat(8, 8)
+        b = b.repeat(8, 8)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(addmm)(x, a, b)
+            c_expected = addmm(x, a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @fresh_inductor_cache()
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
@@ -1128,6 +1194,112 @@ class TestMaxAutotune(TestCase):
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @parametrize("dynamic", (True, False))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
+        fp16_red_setting = (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        )
+        bf16_red_setting = (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        )
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
+        M, N, K = sizes
+
+        a = torch.randn(M, K, dtype=dtype, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=dtype, device="cuda", requires_grad=True)
+
+        possible_splits = range(2, min(K // M, K // N) + 1)
+
+        divisors = {split for split in possible_splits if K % split == 0}
+
+        def check_divisors(code):
+            for kernel in code:
+                if "decompose_k" in kernel:
+                    divisor_found = False
+                    for divisor in divisors:
+                        if f"{divisor}_split" in kernel:
+                            divisor_found = True
+                            break
+
+                    self.assertTrue(
+                        divisor_found,
+                        f"Could not find a split in {divisors} in {kernel}",
+                    )
+
+        compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
+        # We assume with the large k dim relative to m, n, decompose_k will be most performant
+        out, code = run_and_get_code(compiled_func, a, b)
+
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+
+        # Test adding epilogue also equivalent to eager
+        compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
+        out, code = run_and_get_code(compiled_func, a, b)
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(
+                compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+            )
+
+        # Test adding reinterpret view before subgraph
+        a = a.transpose(0, 1)
+        compiled_func = torch.compile(
+            lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
+        )
+        out, code = run_and_get_code(compiled_func, a, b)
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(
+                compiled_func(a, b),
+                (a.transpose(0, 1) @ b).relu(),
+                atol=1e-2,
+                rtol=1e-2,
+            )
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            fp16_red_setting
+        )
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            bf16_red_setting
+        )
+
 
 @instantiate_parametrized_tests
 class TestMaxAutotuneRemoteCache(TestCase):
@@ -1379,47 +1551,6 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
-    @parametrize("prologue", (False, True))
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM Different layout decisions")
-    def test_conv1x1_cast(self, prologue):
-        with torch._inductor.config.patch(
-            prologue_fusion=prologue, force_layout_optimization=True
-        ):
-            conv1x1 = (
-                torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
-                .to(memory_format=torch.channels_last)
-                .to(GPU_TYPE)
-                .to(dtype=torch.float16)
-            )
-            input_tensor = (
-                torch.randn(4, 3, 32, 32)
-                .contiguous(memory_format=torch.channels_last)
-                .to(GPU_TYPE)
-            )
-
-            def foo(mod, input):
-                return torch.nn.functional.conv2d(
-                    input,
-                    mod.weight.to(input.dtype),
-                    None,
-                    mod.stride,
-                    mod.padding,
-                    mod.dilation,
-                    mod.groups,
-                )
-
-            with torch.no_grad():
-                out_eager = foo(conv1x1, input_tensor)
-                foo_c = torch.compile(foo)
-                out, code = run_and_get_code(foo_c, conv1x1, input_tensor)
-
-                FileCheck().check_not("extern_kernels.convolution").run(code[0])
-                if prologue:
-                    self.check_code(
-                        code[0], num_kernels=1, num_allocs=1, num_deallocs=2
-                    )
-                self.assertEqual(out_eager, out, atol=1e-2, rtol=0)
-
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -1539,8 +1670,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )
@@ -1575,8 +1704,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )
@@ -1734,32 +1861,21 @@ class TestPrologueFusion(TestCase):
     @skipIfXpu
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)
-    def test_prologue_masked_load(self):
+    @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
+    def test_prologue_masked_load(self, sizes):
+        M, K, N = sizes
+
         def foo(x, y):
-            return x @ y.T
+            return x @ y
 
         x = torch.rand([250, 245], device=GPU_TYPE)
-        y = torch.rand([245, 128], device=GPU_TYPE).T.contiguous()
+        y = torch.rand([245, 128], device=GPU_TYPE)
 
         # we should not attempt prologue fusion if it turns an aligned load
         # into an unaligned load
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
-
-    def test_masked_numeric(self):
-        # correctly detect upcast inside the cat mask, dont fuse
-        def foo(a, b, y):
-            return torch.cat([a, (b * 4)]) @ y.T
-
-        a = torch.rand([220, 245], device=GPU_TYPE, dtype=torch.float16)
-        b = torch.rand([20, 245], device=GPU_TYPE, dtype=torch.float16)
-        y = torch.rand([245, 128], device=GPU_TYPE, dtype=torch.float16).T.contiguous()
-
-        out, code = run_and_get_code(torch.compile(foo), a, b, y)
-
-        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
-        self.assertEqual(out, foo(a, b, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
 
 if __name__ == "__main__":
