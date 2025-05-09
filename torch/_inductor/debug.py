@@ -53,11 +53,7 @@ GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=50
 
 @functools.lru_cache(None)
 def has_dot() -> bool:
-    try:
-        subprocess.check_output(["which", "dot"], stderr=subprocess.PIPE)
-        return True
-    except subprocess.SubprocessError:
-        return False
+    return shutil.which("dot") is not None
 
 
 def draw_buffers(
