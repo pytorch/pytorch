@@ -1747,7 +1747,7 @@ class TestPatternMatcher(TestCase):
         f2_replaced_inp = inp.clone().detach()
         f2_out = f2(f2_inp)
         f2_replaced_out = f2_replaced(f2_replaced_inp)
-        self.assertEqual(f1_inp, f1_replaced_inp)
+        self.assertEqual(f2_inp, f2_replaced_inp)
         self.assertEqual(f2_out, f2_replaced_out)
         self.assertEqual(count, 1)
 
