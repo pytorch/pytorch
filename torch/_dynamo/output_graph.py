@@ -1122,7 +1122,7 @@ class OutputGraph(OutputGraphGuardsState):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for value in stack_values:
-            value.realize()
+            variables.LazyVariableTracker.realize_all(value)
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -1554,6 +1554,8 @@ class OutputGraph(OutputGraphGuardsState):
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
+            log_waitcounter=True,
+            waitcounter_name_override="compile_aot_autograd",
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
             return self._call_user_compiler(gm)

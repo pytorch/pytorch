@@ -30,6 +30,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
@@ -50,6 +51,7 @@ from . import config, ir, metrics
 from .codegen.common import (
     BackendFeature,
     DeviceOpOverrides,
+    FileBackedGraphModule,
     get_backend_features,
     get_device_op_overrides,
     get_wrapper_codegen_for_device,
@@ -115,8 +117,11 @@ if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
     from torch.fx import GraphModule
     from torch.fx.graph import Graph
+
     from .codegen.wrapper import PythonWrapperCodegen
     from .scheduler import BaseSchedulerNode
+
+    CompiledModule = Union[ModuleType, FileBackedGraphModule]
 
 from torch._inductor.codecache import output_code_log
 
@@ -1831,16 +1836,6 @@ class GraphLowering(torch.fx.Interpreter):
         # Therefore needing some sort of stratification in the ShapeEnv.
         # This is all doable, it just hasn't been done yet.
 
-        def make_assert(expr: SympyBoolean, msg: str) -> None:
-            assert_op = ir.AssertScalar(expr, msg)
-            self.register_buffer(assert_op, set_name=True)
-            self.register_operation(assert_op)
-
-        # bound_unbacked_symbols tracks the symbols that are created so far,
-        # we use it to make sure that runtime assertions are added after all
-        # symbols used in them are defined.
-        self.bound_unbacked_symbols |= new_unbacked_defs
-
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
         )
@@ -1868,38 +1863,93 @@ class GraphLowering(torch.fx.Interpreter):
             f"fx node is: {n.format_node()}\n"
             f"new operations are:\n\n{format_new_defs()}"
         )
-
-        # Emit code for runtime asserts that can be inserted at this point.
-        for i0 in new_unbacked_defs:
-            ras = self.ras_by_symbol.pop(i0, [])
-            # NB: size-like not needed, we won't retrace
-            vr = shape_env.var_to_range[i0]
-            if not shape_env._default_unspecified_value_range().issubset(vr):
-
-                def is_convertible(s: Expr) -> bool:
-                    if s in (int_oo, -int_oo):
-                        return False
-                    try:
-                        int(s)
-                        return True
-                    except TypeError:
-                        return False
-
-                if is_convertible(vr.lower):
-                    make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
-                if is_convertible(vr.upper):
-                    make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
-
-            for ra in ras:
-                fvs = free_unbacked_symbols(ra.expr)
-                missing = fvs - self.bound_unbacked_symbols
-                if missing:
-                    i1 = min(missing, key=str)
-                    self.ras_by_symbol.setdefault(i1, []).append(ra)
-                else:
-                    make_assert(ra.expr, f"{ra.expr}")
-
+        self.create_deferred_runtime_asserts(n, new_unbacked_defs)
         return result
+
+    def create_deferred_runtime_asserts(
+        self, n: torch.fx.Node, new_unbacked_defs: OrderedSet[sympy.Symbol]
+    ) -> None:
+        # [NOTE] Codegen runtime asserts in Inductor
+        #
+        # We need to generate runtime asserts directly in Inductor instead
+        # of just re-using the asserts from input graphs becase we reuse the
+        # same ShapeEnv as before. In particular, on subsequent graph passes,
+        # we would immediately turn all of these assertions into noops,
+        # because when we evaluated their expressions, we would see that
+        # because we had a deferred runtime assert in the ShapeEnv, we
+        # know "oh, of course this expression is True" already.
+        # One example is below:
+        #
+        # class Model(torch.nn.Module):
+        #     def forward(self, a, b, c):
+        #         nz = torch.nonzero(a)
+        #         ones = a.new_ones([nz.size(0), b.size(0)])
+        #         torch._check(ones.size(0) >= 1)
+        #         equals = torch.add(ones, c)
+        #         return equals
+        # torch._dynamo.mark_dynamic(c, 0)
+        # When we re-use the ShapeEnv in Inductor lowering, the check that checks
+        # a and nonzero have the same shape would be evaluted to True after we resolve
+        # unbacked bindings using the ShapeEnv.
+        # See test_unbacked_equals_input_size_runtime_assertion in test_aot_inductor.
+        #
+        #
+        # In addition to the Inductor generated runtime asserts, we also
+        # need the runtime asserts from the input graph, because some derived
+        # runtime asserts on backed symints are not generated in Inductor. One example is
+        # this: `y = x.reshape(100, -1).clone()`. x.shape[0] needs to be a multiple of 100.
+        # See test_aoti_runtime_asserts_backed_symint in test_aot_inductor.
+
+        def make_assert(expr: SympyBoolean, msg: str) -> None:
+            assert_op = ir.AssertScalar(expr, msg)
+            self.register_buffer(assert_op, set_name=True)
+            self.register_operation(assert_op)
+
+        if (
+            full_aoti_runtime_assert()
+            and n.target == torch.ops.aten._assert_scalar.default
+            and self.aot_mode
+        ):
+            node_args, _ = self.fetch_args_kwargs_from_env(n)
+            if node_args[0] != True:  # noqa: E712
+                make_assert(node_args[0], f"{node_args[0]} to be True")
+        else:
+            # bound_unbacked_symbols tracks the symbols that are created so far,
+            # we use it to make sure that runtime assertions are added after all
+            # symbols used in them are defined.
+            self.bound_unbacked_symbols |= new_unbacked_defs
+
+            shape_env = V.graph.sizevars.shape_env
+
+            # Emit code for runtime asserts that can be inserted at this point.
+            for i0 in new_unbacked_defs:
+                ras = self.ras_by_symbol.pop(i0, [])
+                # NB: size-like not needed, we won't retrace
+                vr = shape_env.var_to_range[i0]
+                if not shape_env._default_unspecified_value_range().issubset(vr):
+
+                    def is_convertible(s: Expr) -> bool:
+                        if s in (int_oo, -int_oo):
+                            return False
+                        try:
+                            int(s)
+                            return True
+                        except TypeError:
+                            return False
+
+                    if is_convertible(vr.lower):
+                        make_assert(i0 >= vr.lower, f"{i0} >= {vr.lower}")
+                    if is_convertible(vr.upper):
+                        make_assert(i0 <= vr.upper, f"{i0} <= {vr.upper}")
+
+                for ra in ras:
+                    fvs = free_unbacked_symbols(ra.expr)
+                    missing = fvs - self.bound_unbacked_symbols
+                    if missing:
+                        i1 = min(missing, key=str)
+                        self.ras_by_symbol.setdefault(i1, []).append(ra)
+                    else:
+                        make_assert(ra.expr, f"{ra.expr}")
 
     def validate_can_generate_cpp_wrapper(self) -> None:
         if config.disable_cpp_codegen:
@@ -1943,12 +1993,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
         if self.const_module:
-            # If we have const module, we could reuse the kernels
-            # This could avoid duplication and save time on doing recompilation (if Triton.)
             self.wrapper_code._names_iter = self.const_module.wrapper_code._names_iter
-            self.wrapper_code.src_to_kernel = (
-                self.const_module.wrapper_code.src_to_kernel
-            )
 
     def extract_autotune_inputs(
         self, example_inputs: list[Union[int, float, torch.Tensor]]
@@ -2224,7 +2269,7 @@ class GraphLowering(torch.fx.Interpreter):
     # No-op to be patched for unit tests
     save_output_code: Optional[Callable[[str], None]] = None
 
-    def compile_to_module(self) -> ModuleType:
+    def compile_to_module(self) -> CompiledModule:
         with dynamo_timed(
             "GraphLowering.compile_to_module",
             phase_name="code_gen",
@@ -2233,14 +2278,41 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             return self._compile_to_module()
 
-    def _compile_to_module(self) -> ModuleType:
-        from .codecache import PyCodeCache
-
+    def _compile_to_module(self) -> CompiledModule:
         # Currently, if we're here, we don't have to worry about the kernel code, which
         # is only available in AOTInductor mode.
         wrapper_code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
+
+        if isinstance(wrapper_code, ValueWithLineMap):
+            mod = self._compile_to_module_lines(wrapper_code)
+        elif isinstance(wrapper_code, FileBackedGraphModule):
+            mod = wrapper_code
+        else:
+            raise NotImplementedError(
+                f"Unrecognized wrapper code type: {type(wrapper_code)}"
+            )
+
+        # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
+        # TODO. Revisit this once the logging API is more mature
+        assert mod.__file__ is not None
+
+        log_module_code(mod.__file__)
+        log.debug("Output code written to: %s", mod.__file__)
+        output_code_log.info("Output code written to: %s", mod.__file__)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
+        V.debug.output_code(mod.__file__)
+        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
+
+        return mod
+
+    def _compile_to_module_lines(
+        self, wrapper_code: ValueWithLineMap
+    ) -> CompiledModule:
+        from .codecache import PyCodeCache
+
         if config.triton.autotune_at_compile_time:
             tuning_code = (
                 '"""\n'
@@ -2291,17 +2363,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
             mod.benchmark_compiled_module(times=1, repeat=1)
-        # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
-        # TODO. Revisit this once the logging API is more mature
-        assert mod.__file__ is not None
 
-        log_module_code(mod.__file__)
-        log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.info("Output code written to: %s", mod.__file__)
-        if config.benchmark_kernel:
-            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
-        V.debug.output_code(mod.__file__)
-        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
     def get_output_names(self) -> list[str]:
