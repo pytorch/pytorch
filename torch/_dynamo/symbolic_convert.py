@@ -62,7 +62,12 @@ from . import (
     trace_rules,
     variables,
 )
-from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
+from .bytecode_analysis import (
+    get_indexof,
+    JUMP_OPNAMES,
+    livevars_analysis,
+    propagate_line_nums,
+)
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
@@ -3794,7 +3799,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         code: types.CodeType = func.get_code()
         result = None
-        if tracing_ctx := parent.output.tracing_context:
+        tracing_ctx = parent.output.tracing_context
+
+        # Check if we have already identified this function to be inline-able.
+        # The exception is dont_skip_tracing flag which affects the inline
+        # behavior. If the flag is True, don't rely on previous results.
+        if not config.dont_skip_tracing and tracing_ctx:
             if previous_result := tracing_ctx.previously_inlined_functions.get(
                 code, None
             ):
@@ -3813,7 +3823,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             result = InliningInstructionTranslator.check_inlineable(func)
             assert result.skipped is False
 
-            if tracing_ctx:
+            if not config.dont_skip_tracing and tracing_ctx:
                 tracing_ctx.previously_inlined_functions[code] = result
 
         try:
@@ -3972,6 +3982,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
         instructions = cleaned_instructions(code)
+        propagate_line_nums(instructions)
         super().__init__(
             output=parent.output,
             f_locals={},

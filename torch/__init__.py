@@ -357,6 +357,7 @@ def _load_global_deps() -> None:
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
+            "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
         # TODO: Remove once CUDA 11.8 binaries are deprecated

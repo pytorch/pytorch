@@ -1246,13 +1246,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 11)
+        self.assertEqual(cnt.op_count, 10)
 
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         expected_op_count = (
-            """11""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
+            """10""" if torch._dynamo.config.inline_inbuilt_nn_modules else """4"""
         )
 
         self.assertExpectedInline(cnt.frame_count, """1""")
@@ -3708,7 +3708,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(cnt.op_count, 1)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
@@ -6226,6 +6226,21 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.ones(2)
         with torch.no_grad():
             model(x)
+
+    def test_ao_fake_quantize_tracing(self):
+        import torch.ao.quantization.fake_quantize
+
+        q = torch.ao.quantization.FusedMovingAvgObsFakeQuantize()
+
+        def fn(x):
+            return q(x)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        eager_res = fn(x)
+
+        self.assertEqual(res, eager_res)
 
     def test_typed_dict(self):
         class LlavaImagePixelInputs(TypedDict):
