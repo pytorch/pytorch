@@ -87,6 +87,9 @@ LAYOUT_TO_ATEN = {
     torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
+# matches c10/core/DeviceType.h
+DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
+
 _IS_WINDOWS = sys.platform == "win32"
 
 INDEX_TYPE = "int64_t"

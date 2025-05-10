@@ -1013,32 +1013,23 @@ static Tensor _batch_tile_tensor(
 
 static Tensor _mask_to_indices(const Tensor& mask) {
   // This function returns a vector of the indices at which given
-  // boolean mask is True. at::nonzero can achieve the same, but
-  // we yet have to compare the performance difference.
-  TORCH_CHECK(
-      mask.dim() == 1, "Currently _mask_to_indices only supports 1-d masks.");
-  TORCH_CHECK(mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
-  return at::native::arange(mask.numel(), at::kLong, kStrided, mask.device())
-      .masked_select(mask);
+  // boolean mask is True. Here at::nonzero performs test (time/mem).
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mask.dim() == 1, "_mask_to_indices only supports 1-d masks.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  return at::native::flatten(at::nonzero(mask));
 }
 
 static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
-    Tensor not_zero_mask,
-    ScalarType index_dtype,
-    Device index_device) {
-  auto col_indices =
-      at::native::arange(
-          not_zero_mask.size(-1), index_dtype, kStrided, index_device)
-          .view({1, not_zero_mask.size(-1)})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  auto row_indices =
-      at::native::arange(
-          not_zero_mask.size(-2), index_dtype, kStrided, index_device)
-          .view({not_zero_mask.size(-2), 1})
-          .expand_as(not_zero_mask)
-          .masked_select(not_zero_mask);
-  return std::pair<Tensor, Tensor>(col_indices, row_indices);
+    Tensor not_zero_mask) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      not_zero_mask.dim() == 2,
+      "_not_zero_mask_to_col_row_indices only supports 2-d masks.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      not_zero_mask.dtype() == at::kBool, "Expected mask to be of dtype bool.");
+  auto nz = not_zero_mask.nonzero();
+  return {nz.select(1, 1), nz.select(1, 0)};
 }
 
 // Sparse layout conversions Start
@@ -1319,8 +1310,8 @@ static Tensor dense_to_sparse_compressed(
   Tensor col_indices;
   Tensor compressed_indices;
   if (compressed_rows_layout) {
-    std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask, at::kLong, not_zero_mask.device());
+    std::tie(col_indices, row_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask);
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         row_indices, not_zero_mask.size(0), false /*out_int32*/);
     {
@@ -1328,8 +1319,8 @@ static Tensor dense_to_sparse_compressed(
       values = values.flatten(0, 1).index_select(0, mask_indices);
     }
   } else {
-    std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
-        not_zero_mask.transpose(1, 0), at::kLong, not_zero_mask.device());
+    std::tie(row_indices, col_indices) =
+        _not_zero_mask_to_col_row_indices(not_zero_mask.transpose(1, 0));
     compressed_indices = at::_convert_indices_from_coo_to_csr(
         col_indices, not_zero_mask.size(-1), false /*out_int32*/);
     {
@@ -1708,7 +1699,7 @@ static Tensor sparse_compressed_to_flipped(
 
   // Step 4:
   // Convert the COO indices to the CSC/BSC indices and form the output.
-  // We need to sort COO indices along the "tranposed" dim to satisfy the
+  // We need to sort COO indices along the "transposed" dim to satisfy the
   // invariant of sorted plain indices.
   // Hash coo indices by converting 2d indices to linear offsets with
   // more "weight" (aka stride) placed on the "transposed" dimension.

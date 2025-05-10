@@ -943,6 +943,28 @@ class TestAssertCloseErrorMessage(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at index (1, 0)")):
                 fn()
 
+    def test_small_float_dtype(self):
+        for dtype in [
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        ]:
+            w = torch.tensor([3.14, 1.0], dtype=dtype)
+            x = torch.tensor([1.0, 3.14], dtype=dtype)
+            y = torch.tensor([3.14, 3.14], dtype=dtype)
+            z = torch.tensor([1.0, 3.14], dtype=dtype)
+            for fn in assert_close_with_inputs(x, y):
+                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 0")):
+                    fn()
+
+            for fn in assert_close_with_inputs(w, y):
+                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 1")):
+                    fn()
+            for fn in assert_close_with_inputs(x, z):
+                fn()
+
     def test_abs_diff_scalar(self):
         actual = 3
         expected = 5
