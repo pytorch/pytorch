@@ -409,7 +409,7 @@ test_inductor_aoti() {
     python3 tools/amd_build/build_amd.py
   fi
   BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
+  CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
 }
 
 test_inductor_cpp_wrapper_shard() {
