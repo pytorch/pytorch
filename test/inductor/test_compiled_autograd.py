@@ -4126,8 +4126,9 @@ class CompiledAutograd1(torch.nn.Module):
                     fourth = torch.autograd.grad(third, x, create_graph=True)[0]
             except RuntimeError as e:
                 assert "does not currently support higher order gradients" in str(e)
-            finally:
                 return (first, second, third, fourth)
+
+            return (first, second, third, fourth)
 
         def eager():
             return torch.compile(backend="eager")
