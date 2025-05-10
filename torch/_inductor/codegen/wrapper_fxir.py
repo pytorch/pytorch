@@ -492,26 +492,21 @@ class FxConverter:
             """
             Converts floor(x / c) to x // c.
             """
-            if isinstance(expr, sympy.core.mul.Mul):
-                for frac_arg_idx, frac in enumerate(expr.args):
-                    if isinstance(frac, sympy.Rational):
-                        numerator = (
-                            sympy_product(
-                                arg
-                                for other_arg_idx, arg in enumerate(expr.args)
-                                if other_arg_idx != frac_arg_idx
-                            )
-                            * frac.numerator
-                        )
-                        denominator = frac.denominator
+            if isinstance(expr, sympy.core.mul.Mul) and isinstance(
+                expr.args[0], sympy.Rational
+            ):
+                # If a Mul op has a Rational argument, it always comes first.
+                frac = expr.args[0]
+                numerator = sympy_product(expr.args[1:]) * frac.numerator
+                denominator = frac.denominator
 
-                        # Sanity check the results.
-                        new_expr = numerator / denominator
-                        assert V.graph.sizevars.statically_known_equals(
-                            new_expr, expr
-                        ), f"Unsound replacement: '{new_expr}' != '{expr}'"
+                # Sanity check the results.
+                new_expr = numerator / denominator
+                assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
+                    f"Unsound replacement: '{new_expr}' != '{expr}'"
+                )
 
-                        return FloorDiv(numerator, denominator)
+                return FloorDiv(numerator, denominator)
             else:
                 return sympy.floor(expr)
 
