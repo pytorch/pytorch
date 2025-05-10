@@ -7,7 +7,7 @@ export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export VC_YEAR=2022
 
 if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
-    export XPU_VERSION=2025.0
+    export XPU_VERSION=2025.1
 fi
 
 pushd "$PYTORCH_ROOT/.ci/pytorch/"
