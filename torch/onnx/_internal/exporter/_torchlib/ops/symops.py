@@ -11,7 +11,6 @@ import torch
 from torch.onnx._internal.exporter._torchlib._tensor_typing import (
     BOOL,
     FLOAT,
-    INT64,
     IntType,
     TensorType,
 )

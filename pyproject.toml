@@ -77,7 +77,6 @@ external = [
     "B001",
     "B902",
     "B950",
-    "C101",
     "E704",
     "E723",
     "E121",
@@ -207,6 +206,12 @@ select = [
 "functorch/notebooks/**" = [
     "F401",
 ]
+"test/export/**" = [
+    "PGH004"
+]
+"test/typing/**" = [
+    "PGH004"
+]
 "test/typing/reveal/**" = [
     "F821",
 ]
@@ -220,6 +225,9 @@ select = [
 "test/dynamo/test_debug_utils.py" = [
     "UP037",
 ]
+"test/dynamo/test_misc.py" = [
+    "PGH004",
+]
 "test/jit/**" = [
     "PLR0133", # tests require this for JIT
     "PYI",
@@ -232,6 +240,9 @@ select = [
     "RUF015",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
+"test/inductor/s429861_repro.py" = [
+    "PGH004",
+]
 "test/inductor/test_torchinductor.py" = [
     "UP037",
 ]
@@ -240,6 +251,9 @@ select = [
 "torch/jit/_shape_functions.py" = ["PGH004"]
 "torch/_inductor/fx_passes/serialized_patterns/**" = ["F401", "F501"]
 "torch/_inductor/autoheuristic/artifacts/**" = ["F401", "F501"]
+"torch/_inductor/codegen/**" = [
+    "PGH004"
+]
 "torchgen/api/types/__init__.py" = [
     "F401",
     "F403",
@@ -253,4 +267,7 @@ select = [
 ]
 "torch/_vendor/**" = [
     "UP", # No need to mess with _vendor
+]
+"tools/linter/**" = [
+    "LOG015" # please fix
 ]
