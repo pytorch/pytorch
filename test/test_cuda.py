@@ -22,6 +22,7 @@ import psutil
 
 import torch
 import torch.cuda
+import torch.nn as nn
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -79,6 +80,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -3960,6 +3962,67 @@ class TestCudaMallocAsync(TestCase):
                 self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
                 torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    @unittest.skipIf(not has_triton(), "test needs triton")
+    @requiresCppContext
+    def test_memory_compile_regions(self):
+        expected_allocation_sequence = [
+            "Torch-Compiled Region: 0/0",
+            "Torch-Compiled Region: 1/0",
+            "Torch-Compiled Region: 0/0",
+        ]
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(10, 10)
+                self.linear2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+
+                if x.sum() > 0:
+                    x = x + 1
+                else:
+                    x = x - 1
+
+                x = self.linear2(x)
+
+                return x
+
+        try:
+            torch.cuda.memory.empty_cache()
+            input_tensor = torch.randn(1, 10, device="cuda")
+            # Create an instance of the model
+            model = MyModel()
+            model.to("cuda")
+            # Compile the model using torch.compile
+            compiled_model = torch.compile(model)
+            # Create a sample input tensor
+            torch.cuda.memory._record_memory_history(
+                context="all", compile_context=True
+            )
+            compiled_model(input_tensor)
+            ss = torch.cuda.memory._snapshot()["device_traces"]
+            device_idx = 0
+            allocation_sequence = []
+            while len(ss[device_idx]) == 0:
+                device_idx = device_idx + 1
+            for s in ss[device_idx]:
+                context = s["compile_context"]
+                if context == "N/A":
+                    continue
+                if len(allocation_sequence) > 0 and allocation_sequence[-1] == context:
+                    continue
+                allocation_sequence.append(context)
+            self.assertTrue(allocation_sequence == expected_allocation_sequence)
+        except RuntimeError as e:
+            pass
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"

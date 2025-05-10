@@ -749,6 +749,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
   py::str time_us_s = "time_us";
+  py::str compile_context_s = "compile_context";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -865,6 +866,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       trace_entry[size_s] = te.size_;
       trace_entry[stream_s] = int64_t(te.stream_);
       trace_entry[time_us_s] = te.time_.t_;
+      trace_entry[compile_context_s] = te.compile_context_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -1107,7 +1109,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool)>(
+      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1117,6 +1119,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           std::optional<std::string>,
           const std::string&,
           size_t,
+          bool,
           bool)>(torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
