@@ -1,4 +1,4 @@
-import os  # noqa: C101
+import os
 import sys
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
