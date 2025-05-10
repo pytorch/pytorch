@@ -1474,7 +1474,7 @@ def _addmm_activation(
 ):
     out = addmm(self, mat1, mat2, beta, alpha)
     if use_gelu:
-        if self.is_cuda or self.is_xpu:
+        if self.is_cuda:
             return aten.gelu(out, approximate="tanh")
         else:
             return aten.gelu(out)
