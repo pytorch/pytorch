@@ -92,6 +92,12 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
     bundle_triton_into_fx_graph_cache_default()
 )
 
+non_blocking_remote_cache_write: bool = Config(
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
+    default=True,
+)
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
@@ -137,15 +143,6 @@ unsafe_marked_cacheable_functions: list[str] = []
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
-
-# The default layout constraint for custom operators.
-# This must be the name of one of the layout constraint tags
-# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
-# If the custom op does not have a layout constraint tag already
-# then we assume the following applies.
-custom_op_default_layout_constraint: Literal[
-    "needs_fixed_stride_order", "flexible_layout"
-] = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
@@ -1334,6 +1331,9 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+
+    # Whether to use CUTLASS EVT for epilogue fusion
+    cutlass_epilogue_fusion_enabled = False
 
     # Path to CUDA NVCC.
     # NVCC search order:
