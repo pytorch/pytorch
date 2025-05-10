@@ -559,8 +559,8 @@ class DebugFormatter:
             dot_graph_shape=config.trace.dot_graph_shape,
         )
 
-    def output_code(self, filename: str) -> None:
-        shutil.copy(filename, self.filename("output_code.py"))
+    def output_code(self, filename: str, extension: str = "py") -> None:
+        shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
     def log_inductor_triton_kernel_to_post_grad_node_info(
         self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
