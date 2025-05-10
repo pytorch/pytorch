@@ -643,7 +643,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # Handle non-overriden attributes inherited from `torch.Tensor`.
         attr_is_overriden = _is_attr_overidden(tx, self, name)
         if hasattr(torch.Tensor, name) and not attr_is_overriden:
-            if tx.symbolic_torch_function_state.torch_function_subclass_enabled:
+            args, kwargs = [self], {}
+            if can_dispatch_torch_function(tx, args, kwargs):
                 if self.source:
                     install_guard(
                         AttrSource(
@@ -656,8 +657,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     tx,
                     get_fn,
                     TupleVariable([self.class_type_var(tx)]),
-                    [self],
-                    {},
+                    args,
+                    kwargs,
                 )
         else:
             # `TensorVariable.var_getattr` doesn't handle user-defined
@@ -726,7 +727,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
-        if tx.symbolic_torch_function_state.torch_function_subclass_enabled:
+        tf_args = [self] + args
+        if can_dispatch_torch_function(tx, tf_args, kwargs):
             import torch
 
             if _is_attr_overidden(tx, self, name):
@@ -752,6 +754,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 source = None
                 value = getattr(torch.Tensor, name)
             func_var = VariableTracker.build(tx, value, source)
-            return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
+            return dispatch_torch_function(tx, func_var, tf_args, kwargs)
         else:
             return super().call_method(tx, name, args, kwargs)
