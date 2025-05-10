@@ -1845,6 +1845,11 @@ void Reducer::sync_bucket_indices(
   indices_accessor_Index = 0;
   for (const auto i : c10::irange(num_buckets)) {
     const auto& bucket_size = bucket_sizes_accessor[static_cast<int64_t>(i)];
+    TORCH_CHECK_WITH(
+        IndexError,
+        bucket_size >= 0 && bucket_size <= indices_accessor.size(0),
+        "received invalid bucket_size, was abort called?");
+
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
     for (const auto j : c10::irange(bucket_size)) {

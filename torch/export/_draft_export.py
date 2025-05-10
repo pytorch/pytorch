@@ -486,7 +486,7 @@ While tracing we found {len(report.op_profiles)} operator(s) which do not have a
 If you intend to retrace the exported graph or run it with fake tensors, please run it under the
 following context manager, which will register a fake kernel for those operators.
 ```
-with torch._library.fake_profile.register_fake_profile(ep._report.op_profiles):
+with torch._library.fake_profile.unsafe_generate_fake_kernels(ep._report.op_profiles):
     # run with fake tensors
 ```
 """

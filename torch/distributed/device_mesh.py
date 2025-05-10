@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import threading
+import warnings
 from functools import reduce
 from itertools import chain
 from typing import Optional, TYPE_CHECKING, Union
@@ -388,7 +389,7 @@ else:
 
         DeviceMesh could be used to setup the N dimensional device connections across the cluster,
         and manage the ProcessGroups for N dimensional parallelisms. Communications could happen on
-        each dimension of the DeviceMesh separately. DeviceMesh respect the device that user select
+        each dimension of the DeviceMesh separately. DeviceMesh respects the device that user selects
         already (i.e. if user call `torch.cuda.set_device` before the DeviceMesh initialization),
         and will select/set the device for the current process if user does not set the device
         beforehands. Note that manual device selection should happen BEFORE the DeviceMesh initialization.
@@ -491,8 +492,17 @@ else:
                 # env variable from launchers, we use it to set the device.
                 if "LOCAL_RANK" in os.environ:
                     local_rank = int(os.environ["LOCAL_RANK"])
+                    logger.info(f"Setting default device for the current process based on LOCAL_RANK={local_rank}")
                     device_handle.set_device(local_rank)
                 else:
+                    warnings.warn(
+                        "It seems like you did not set/select the default device for the current process before the DeviceMesh "
+                        "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
+                        "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
+                        "the underlying communicator (i.e. NCCL) can be initialized properly. "
+                        "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
+                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. "
+                    )
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
                     num_devices_per_host = device_handle.device_count()

@@ -687,6 +687,7 @@ class SimpleElasticAgent(ElasticAgent):
         for local_rank, w_id in worker_ids.items():
             worker = worker_group.workers[local_rank]
             worker.id = w_id
+            record(self._construct_event("START", EventSource.WORKER, worker))
 
         worker_group.state = WorkerState.HEALTHY
 
@@ -809,6 +810,7 @@ class SimpleElasticAgent(ElasticAgent):
             "agent_restarts": spec.max_restarts - self._remaining_restarts,
             "duration_ms": duration_ms,
         }
+
         return Event(
             f"torchelastic.worker.status.{state}", source=source, metadata=metadata
         )

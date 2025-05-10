@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
 )
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 if TEST_WITH_ROCM:
@@ -580,7 +581,7 @@ class CudaReproTests(TestCase):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate
         the input buffers when tuning with multiple configs. For more details, refer to
-        https://github.com/openai/triton/issues/781
+        https://github.com/triton-lang/triton/issues/781
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -1133,6 +1134,9 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
@@ -1583,7 +1587,7 @@ class CudaReproTests(TestCase):
 
     @config.patch("triton.use_block_ptr", True)
     def test_selecsls42b_misaligned_address(self):
-        # https://github.com/openai/triton/issues/2836
+        # https://github.com/triton-lang/triton/issues/2836
 
         @torch.compile(fullgraph=True)
         def fn(arg207_1, arg208_1, convert_element_type_40, expand, full, mul_3):
