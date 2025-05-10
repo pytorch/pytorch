@@ -1379,7 +1379,7 @@ def _produce_dynamic_shapes_for_export(path, x):
 
     if not isinstance(x, torch.Tensor):
         return None
-    return {i: Dim.AUTO for i in getattr(x, "_dynamo_dynamic_indices", {})}
+    return dict.fromkeys(getattr(x, "_dynamo_dynamic_indices", {}), Dim.AUTO)
 
 
 class AOTInductorModelCache:
@@ -1671,7 +1671,7 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
                     )
                 )
             except Exception as e:
-                logging.error("Failed to save memory snapshot, %s", e)
+                log.error("Failed to save memory snapshot, %s", e)
 
             torch.cuda.memory._record_memory_history(enabled=None)
 
@@ -2687,7 +2687,7 @@ class BenchmarkRunner:
         experiment,
         tag,
     ):
-        logging.info("Minifying %s...", name)
+        log.info("Minifying %s...", name)
         os.environ["TORCH_COMPILE_DEBUG"] = "1"
         os.environ["TORCHDYNAMO_REPRO_AFTER"] = "dynamo"
         os.environ["TORCHDYNAMO_REPRO_LEVEL"] = "4"
@@ -2702,9 +2702,9 @@ class BenchmarkRunner:
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
         except OSError:
-            logging.error("Could not find repro script for model %s", name)
+            log.error("Could not find repro script for model %s", name)
         else:
-            logging.info(
+            log.info(
                 "Repro script for model %s with minified graph saved to %s",
                 name,
                 repro_dir,

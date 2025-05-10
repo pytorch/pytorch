@@ -43,7 +43,7 @@ def torchao_optimize_ctx(quantization: str):
                     from torchao.quantization.autoquant import AUTOQUANT_CACHE
 
                     if len(AUTOQUANT_CACHE) == 0:
-                        raise Exception(  # noqa: TRY002`
+                        raise Exception(  # noqa: TRY002
                             "NotAutoquantizable"
                             f"Found no autoquantizable layers in model {type(module)}, stopping autoquantized run"
                         )

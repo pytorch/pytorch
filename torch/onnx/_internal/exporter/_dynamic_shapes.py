@@ -70,7 +70,7 @@ def from_dynamic_axes_to_dynamic_shapes(
                 raise ValueError(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
-            dynamic_shapes[input_name] = {k: torch.export.Dim.DYNAMIC for k in axes}
+            dynamic_shapes[input_name] = dict.fromkeys(axes, torch.export.Dim.DYNAMIC)
         elif axes is None:
             dynamic_shapes[input_name] = None
         else:
