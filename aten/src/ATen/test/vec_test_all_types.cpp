@@ -1700,6 +1700,173 @@ namespace {
             << "Test failed for uint16 to float " << u16 << "\n";
       }
     }
+    TEST(FP8E4M3Test, FP8E4M3ConversionFloat) {
+      for (uint32_t index = 0; index < 256; ++index) {
+        uint8_t input = static_cast<uint8_t>(index);
+      #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+        float f32 = at::vec::fp8e4m3_to_fp32_scalar(input);
+        uint8_t u8 = at::vec::fp32_to_fp8e4m3_scalar(f32);
+      #else
+        float f32 = c10::detail::fp8e4m3fn_to_fp32_value(input);
+        uint8_t u8 = c10::detail::fp8e4m3fn_from_fp32_value(f32);
+      #endif
+        if (index == 255 || index == 127) {
+          // EXPECT_EQ failed to check nan
+          EXPECT_TRUE(std::isnan(f32));
+        } else {
+          EXPECT_EQ(f32, c10::detail::fp8e4m3fn_to_fp32_value(input))
+              << "Test failed for u8 to float " << input << "\n";
+        }
+        EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32))
+            << "Test failed for float to u8 " << f32 << "\n";
+      }
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryAdd) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 + f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 + f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinarySub) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 - f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 - f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryMul) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 * f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 * f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryDiv) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 / f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 / f8_e4m3_1;
+          }
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryEQ) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 == f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 == f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryNE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 != f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 != f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryGT) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 > f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 > f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryGE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 >= f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 >= f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryLT) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 < f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 < f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
+    TEST(FP8E4M3Test, FP8E4M3BinaryLE) {
+    #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+      test_binary_fp8_e4m3(
+          [](c10::Float8_e4m3fn f8_e4m3_0, c10::Float8_e4m3fn f8_e4m3_1) {
+            return f8_e4m3_0 <= f8_e4m3_1;
+          },
+          [](
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_0,
+            at::vec::Vectorized<c10::Float8_e4m3fn> f8_e4m3_1) {
+            return f8_e4m3_0 <= f8_e4m3_1;
+          },
+          true
+      );
+    #endif
+    }
     TYPED_TEST(InfiniteTests, HasInfNan) {
       using vec = TypeParam;
       using VT = UholdType<TypeParam>;
