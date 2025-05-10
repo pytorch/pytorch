@@ -3022,6 +3022,34 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_sym_eq_assert(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            torch._check(b.item() == 5)
+            return a * 10
+
+        func(torch.tensor([5]), torch.tensor([5]))
+        with self.assertRaises(RuntimeError):
+            func(torch.tensor([100]), torch.tensor([1]))
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_deferred_with_unbacked_input(self):
+        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+        def func(a, b):
+            torch._check(a.size()[0] == b.size()[0])
+            return a * 10
+
+        a = torch.rand(1, 1)
+        b = torch.rand(1, 1)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        func(a, b)
+
+        with self.assertRaises(RuntimeError):
+            func(a, torch.rand(2, 1))
+
 
 if __name__ == "__main__":
     run_tests()

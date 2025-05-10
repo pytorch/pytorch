@@ -66,10 +66,11 @@ RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 FROM base as cuda
 ARG BASE_CUDA_VERSION
 # Install CUDA
-ADD ./common/install_cuda_aarch64.sh install_cuda_aarch64.sh
+ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
-RUN bash ./install_cuda_aarch64.sh ${BASE_CUDA_VERSION} && rm install_cuda_aarch64.sh install_nccl.sh ci_commit_pins/nccl-cu*
+RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh ci_commit_pins/nccl-cu* install_cusparselt.sh
 
 FROM base as magma
 ARG BASE_CUDA_VERSION

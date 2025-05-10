@@ -264,7 +264,7 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 
 PyObject* THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = at::cuda::getCachingHostAllocator();
+  c10::Allocator* allocator = at::getHostAllocator(at::kCUDA);
   return PyLong_FromVoidPtr(allocator);
   END_HANDLE_TH_ERRORS
 }
@@ -553,7 +553,7 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
 PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    at::cuda::CachingHostAllocator_emptyCache();
+    at::getHostAllocator(at::kCUDA)->empty_cache();
   }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
@@ -677,7 +677,7 @@ PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
     return dict;
   };
 
-  const HostStats stats = at::cuda::CachingHostAllocator_getStats();
+  const HostStats stats = at::getHostAllocator(at::kCUDA)->get_stats();
 
   py::dict result;
   result["num_host_alloc"] = stats.num_host_alloc;
@@ -697,7 +697,7 @@ PyObject* THCPModule_resetAccumulatedHostMemoryStats(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  at::cuda::CachingHostAllocator_resetAccumulatedStats();
+  at::getHostAllocator(at::kCUDA)->reset_accumulated_stats();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -706,7 +706,7 @@ PyObject* THCPModule_resetPeakHostMemoryStats(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  at::cuda::CachingHostAllocator_resetPeakStats();
+  at::getHostAllocator(at::kCUDA)->reset_peak_stats();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -1083,6 +1083,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
           )
       .def_readonly("uuid", &cudaDeviceProp::uuid)
+      .def_readonly("pci_bus_id", &cudaDeviceProp::pciBusID)
+      .def_readonly("pci_device_id", &cudaDeviceProp::pciDeviceID)
+      .def_readonly("pci_domain_id", &cudaDeviceProp::pciDomainID)
       .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
@@ -1094,6 +1097,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
                << ", uuid=" << uuid_to_string(prop.uuid.bytes)
+               << ", pci_bus_id=" << prop.pciBusID
+               << ", pci_device_id=" << prop.pciDeviceID
+               << ", pci_domain_id=" << prop.pciDomainID
                << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
                << "MB)";
         return stream.str();
@@ -1383,7 +1389,19 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
+      "_cuda_beginAllocateCurrentThreadToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        auto tid = std::this_thread::get_id();
+
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [=](cudaStream_t) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
+      });
+
+  m.def(
+      "_cuda_endAllocateToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
       });
@@ -1504,10 +1522,10 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
-    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(
+    auto cast_gen = THPGenerator_initDefaultGenerator(
         at::cuda::detail::getDefaultCUDAGenerator(i));
     // This reference is meant to be given away, so no need to incref here.
-    PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
+    PyTuple_SetItem(default_cuda_generators, i, cast_gen);
   }
   set_module_attr("default_generators", default_cuda_generators);
   bindGetDeviceProperties(m);
@@ -2163,7 +2181,6 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
-void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
