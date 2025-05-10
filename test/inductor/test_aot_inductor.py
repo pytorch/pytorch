@@ -324,6 +324,31 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    def test_autotune_with_constant_folding(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device) -> None:
+                super().__init__()
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device=device)
+
+            def _quantize(self, input):
+                return torch.abs(input)
+
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
+        model = Model(self.device).to(self.device)
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
+        )
+
     @requires_gpu
     def test_multi_device(self):
         if self.device == "cpu" and GPU_TYPE == "xpu":
@@ -551,6 +576,17 @@ class AOTInductorTestsTemplate:
             with config.patch({"freezing": True}):
                 model = LinearModel(device=self.device)
                 self.check_model(model, example_inputs)
+
+    def test_empty_cat_dtype_promotion(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.cat([x, y], dim=1)
+                z = z.to(dtype=torch.bfloat16)
+                return z * 2
+
+        model = Foo()
+        inps = (torch.randn(4, 10, dtype=torch.bfloat16), torch.randn(4, 0))
+        self.check_model(model, inps)
 
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -4652,6 +4688,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    # when freezing, we have no a priori way of knowing which weights to update, or what
+    # they're expected to contain
+    @config.patch("freezing", False)
     def test_so_without_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -4810,8 +4849,10 @@ class AOTInductorTestsTemplate:
         runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         # Let's check whether the model has correct constant name mapping.
+        is_freezing = config.freezing is None or config.freezing
+        weight_param = "L__self___weight" if not is_freezing else ("_frozen_param0" if self.device == GPU_TYPE else "_frozen_param1")
         expected_original_fqns = {
-            "L__self___weight": "L__self___weight",
+            weight_param: weight_param,
             "L__self___bias": "L__self___bias",
         }
         self.assertEqual(
@@ -4834,14 +4875,16 @@ class AOTInductorTestsTemplate:
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
 
-        new_weights = {
-            "L__self___weight": torch.randn(N, K, device=self.device),
-            "L__self___bias": torch.randn(N, device=self.device),
-        }
+        new_weights = {"L__self___bias": torch.randn(N, device=self.device)}
+        # If we're freezing, skip updating self.weight (which gets frozen in all
+        # configurations).
+        if not is_freezing:
+            new_weights[weight_param] = torch.randn(N, K, device=self.device)
         runner.update_constant_buffer(new_weights, False, False)
+
         new_output = runner_call(test_inputs)
         new_expected = torch.nn.functional.linear(
-            test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
+            test_inputs, new_weights[weight_param] if not is_freezing else model.weight, new_weights["L__self___bias"]
         )
         self.assertEqual(new_expected, new_output)
 

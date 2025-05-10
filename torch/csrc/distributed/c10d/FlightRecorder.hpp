@@ -1,8 +1,4 @@
 #pragma once
-
-// TODO: Make Fligth Recorder device agnostic
-#ifdef USE_C10D_NCCL
-
 #include <cstdio>
 #include <cstdlib>
 
@@ -10,7 +6,6 @@
 #include <mutex>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
@@ -88,11 +83,6 @@ class TORCH_API DebugInfoWriter {
   static std::atomic<bool> hasWriterRegistered_;
 };
 
-/* Helper used by work::getDuration() and nccl flight recorder */
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent);
-
 template <typename EventType>
 struct FlightRecorder {
   static FlightRecorder<EventType>* get() {
@@ -103,8 +93,10 @@ struct FlightRecorder {
     return instance;
   }
   FlightRecorder() {
-    max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
-    capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
+    max_entries_ =
+        getCvarInt({"TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    capture_cpp_stack_ = getCvarBool(
+        {"TORCH_FR_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
   struct Entry {
@@ -244,20 +236,16 @@ struct FlightRecorder {
   std::string dump_json(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool onlyActive);
 
-  // dump all collectives + ncclDumpMap
   std::string dump(
       const std::optional<std::unordered_map<
           std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+          std::unordered_map<std::string, std::string>>>& extraDumpMap,
       bool includeCollectives,
       bool includeStackTraces,
       bool onlyActive);
 };
-
 } // namespace c10d
-
-#endif // USE_C10D_NCCL
