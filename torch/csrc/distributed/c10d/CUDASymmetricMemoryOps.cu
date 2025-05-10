@@ -1099,7 +1099,7 @@ at::Tensor memset32_(
       count,
       at::cuda::getCurrentCUDAStream()));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
+  C10_CUDA_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
                                    val,
                                    count,
                                    at::cuda::getCurrentCUDAStream()));
@@ -1156,7 +1156,7 @@ at::Tensor stream_write_value32_(
       val,
       0));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipStreamWriteValue32(
+  C10_CUDA_CHECK(hipStreamWriteValue32(
                                       at::cuda::getCurrentCUDAStream(),
                                       reinterpret_cast<void*>(addr),
                                       val,
