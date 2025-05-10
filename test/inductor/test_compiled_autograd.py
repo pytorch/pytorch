@@ -4109,32 +4109,52 @@ class CompiledAutograd1(torch.nn.Module):
             fn()
 
     def test_higher_order_gradients(self):
-        @torch.compile
         def f(x):
             return x**3
 
-        def fn():
+        def fn(fwd_compiler, ca_compiler):
             torch.manual_seed(123)
             x = torch.tensor(2.0, requires_grad=True)
-            with compiled_autograd._enable(torch.compile):
-                first = torch.autograd.grad(f(x), x, create_graph=True)[0]
-                second = torch.autograd.grad(first, x, create_graph=True)[0]
-                third = torch.autograd.grad(second, x, create_graph=True)[0]
-                fourth = torch.autograd.grad(third, x, create_graph=True)[0]
+            first, second, third, fourth = None, None, None, None
+            try:
+                with compiled_autograd._enable(ca_compiler):
+                    first = torch.autograd.grad(fwd_compiler(f)(x), x, create_graph=True)[0]
+                    second = torch.autograd.grad(first, x, create_graph=True)[0]
+                    third = torch.autograd.grad(second, x, create_graph=True)[0]
+                    fourth = torch.autograd.grad(third, x, create_graph=True)[0]
+            except RuntimeError as e:
+                assert "does not currently support higher order gradients" in str(e)
+            finally:
+                return (first, second, third, fourth)
 
-            return (first, second, third, fourth)
+        def eager():
+            return torch.compile(backend="eager")
 
-        first, second, third, fourth = fn()
+        def aot_eager():
+            return torch.compile(backend="aot_eager")
+
+        # Without AOTAutograd, no problem
+        first, second, third, fourth = fn(eager(), eager())
         self.assertEqual(counters["compiled_autograd"]["captures"], 4)
         self.assertEqual(first, 12)  # 3x^2
         self.assertEqual(second, 12)  # 6x
         self.assertEqual(third, 6)  # 6
         self.assertEqual(fourth, 0)
-
-        # should cache hit
+        # and should cache hit
         counters.clear()
-        _ = fn()
+        _ = fn(eager(), eager())
         self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+        torch._dynamo.reset()
+
+        # With AOTAutograd, can't create_graph
+        first, second, third, fourth = fn(aot_eager(), aot_eager())
+        self.assertIsNone(second)
+
+        first, second, third, fourth = fn(aot_eager(), eager())
+        self.assertIsNone(second)
+
+        first, second, third, fourth = fn(eager(), aot_eager())
+        self.assertIsNone(third)
 
 
 def load_test_module(name):
