@@ -495,7 +495,7 @@ class FxConverter:
             if isinstance(expr, sympy.core.mul.Mul) and isinstance(
                 expr.args[0], sympy.Rational
             ):
-                # If a Mul op has a Rational argument, it always comes first.
+                # Only the first argument of a Mul can be a Rational.
                 frac = expr.args[0]
                 numerator = sympy_product(expr.args[1:]) * frac.numerator
                 denominator = frac.denominator
