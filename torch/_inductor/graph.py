@@ -2233,8 +2233,8 @@ class GraphLowering(torch.fx.Interpreter):
             return self._compile_to_module()
 
     def _compile_to_module(self) -> CompiledModule:
-        # Currently, if we're here, we don't have to worry about the kernel code, which
-        # is only available in AOTInductor mode.
+        # If we're here, we don't have to worry about the kernel code, which is only
+        # returned separately in AOTInductor mode.
         wrapper_code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
