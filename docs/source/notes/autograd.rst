@@ -103,7 +103,7 @@ To try and reduce the impact of functions that are non-differentiable, we define
 #. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
 #. If the function is not a deterministic mapping (i.e. it is not a `mathematical function`_), it will be marked as non-differentiable. This will make it error out in the backward if used on tensors that require grad outside of a ``no_grad`` environment.
 
-.. _mathematical function: https://en.wikipedia.org/wiki/Function_(mathematics)
+.. _mathematical function: https://en.wikipedia.org/wiki/Function_%28mathematics%29
 
 .. _locally-disable-grad-doc:
 
