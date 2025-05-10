@@ -88,6 +88,16 @@ Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
 
 
+@torch.library.custom_op("inductor::opaque_view", mutates_args={})
+def opaque_view(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+    # raise NotImplementedError("opaque_view is only used in PatternMatcher pattern and should not be called directly")
+
+@torch.library.register_fake("inductor::opaque_view")
+def opaque_view_fake(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
 class SearchFn(Protocol):
     __name__: str
 
@@ -2052,6 +2062,53 @@ def fx_to_pattern(
 
                 process_arg_fn = process_arg_fn_impl
 
+            # For matching mutable ops with view inputs,
+            # we special-case higher_order.auto_functionalized_v2 if and only if
+            # all tensors that appear in its _all_bases list come from an
+            # `torch._inductor.opaque_view.default` node.
+            if target is torch.ops.higher_order.auto_functionalized_v2:
+                bases = kwargs.get("_all_bases", ())
+
+                # quick reject: _all_bases must be a (list/tuple) of Nodes
+                if not isinstance(bases, (list, tuple)) or not bases:
+                    # fall through to normal conversion
+                    pass
+                else:
+                    # Check every base comes from an opaque_view node
+                    def _is_opaque_view_node(node):
+                        return (
+                            isinstance(node, torch.fx.Node)
+                            and node.op == "call_function"
+                            and node.target is torch.ops.inductor.opaque_view.default
+                        )
+
+                    if all(_is_opaque_view_node(b) for b in bases):
+                        # Match the fuzzy pattern: TODO 
+
+                        # first positional arg – the wrapped mutable op
+                        pos0 = Arg()
+
+                        kw_patts = {}
+
+                        # _all_bases  – keep length & order, but replace each
+                        #               opaque_view(...) by plain Arg()
+                        kw_patts["_all_bases"] = [Arg() for _ in bases]
+
+                        # every '<name>_base_index' must match exactly
+                        for k, v in kwargs.items():
+                            if k.endswith("_base_index"):
+                                # literal int, must match exactly
+                                kw_patts[k] = v
+                            elif not k.endswith(("_size", "_stride", "_storage_offset")):
+                                # Non-view input args to the original mutable op
+                                # Capture it with Arg() if it is a node; keep
+                                # literal constants otherwise.
+                                kw_patts[k] = Arg() if isinstance(v, torch.fx.Node) else v
+                            else:
+                                continue
+
+                        return CallFunction(target, pos0, **kw_patts)
+
             args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
@@ -2098,13 +2155,16 @@ def fwd_only(
             fn = dispatch_functionalize(fn)
         gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
         if apply_auto_functionalize:
-            print(f"DEBUG here3: fwd_only: called make_fx, gm.graph: {gm.graph}")
+            print(f"DEBUG here3: fwd_only: called make_fx, before DCE: gm.graph: {gm.graph}")
 
     from .fx_passes.post_grad import remove_noop_ops
 
     if run_functional_passes:
         remove_noop_ops(gm.graph)
         gm.graph.eliminate_dead_code()
+
+    if apply_auto_functionalize:
+        print(f"DEBUG here3: fwd_only: called make_fx, after DCE: gm.graph: {gm.graph}")
 
     gm.recompile()
     return gm
