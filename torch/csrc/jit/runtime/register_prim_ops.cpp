@@ -1032,8 +1032,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           auto d = pop(stack);
           push(
-              stack,
-              at::DeviceTypeName(d.toDevice().type(), /* lower_case=*/true));
+              stack, DeviceTypeName(d.toDevice().type(), /* lower_case=*/true));
         },
         aliasAnalysisFromSchema()),
     // tensor length op (size of 1st dimension)

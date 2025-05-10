@@ -76,16 +76,6 @@ cxx_library(
     ],
 )
 
-cxx_library(
-    name = "torch_standalone_headers",
-    exported_headers = subdir_glob(
-        [
-            ("", "torch/standalone/header_only/**/*.h"),
-        ],
-    ),
-    visibility = ['PUBLIC'],
-)
-
 pt_operator_library(
     name = "torch_mobile_ops_full_dev",
     include_all_operators = True,

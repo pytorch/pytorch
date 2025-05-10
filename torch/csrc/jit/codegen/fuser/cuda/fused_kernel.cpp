@@ -262,6 +262,6 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-RegisterFusionBackend reg(at::DeviceType::CUDA, createFusionKernel);
+RegisterFusionBackend reg(DeviceType::CUDA, createFusionKernel);
 
 } // namespace torch::jit::fuser::cuda

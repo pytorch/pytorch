@@ -670,6 +670,14 @@ flatbuffer_cc_library(
     out_prefix = "torch/csrc/jit/serialization/",
 )
 
+cxx_library(
+    name = "torch_standalone_headers",
+    hdrs = glob([
+        "torch/standalone/header_only/**/*.h"
+    ]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "torch_headers",
     hdrs = if_cuda(
