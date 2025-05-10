@@ -657,6 +657,12 @@ class IRNode:
         except NotImplementedError:
             return None
 
+    def is_input_buffer(self) -> bool:
+        try:
+            return self.get_name() in V.graph.graph_inputs
+        except NotImplementedError:
+            return False
+
     def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
         return False
 
@@ -6655,7 +6661,7 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=True)))
+        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
@@ -7261,6 +7267,9 @@ class MutableBox(IRNode):
     def unwrap_view(self) -> IRNode:
         return self.data.unwrap_view()
 
+    def is_input_buffer(self) -> bool:
+        return self.data.is_input_buffer()
+
     def freeze_layout(self) -> None:
         return self.data.freeze_layout()
 
@@ -7380,7 +7389,7 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
-    def is_input_buffer(self):  # type: ignore[no-untyped-def]
+    def is_input_buffer(self) -> bool:
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
         return False
