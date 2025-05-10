@@ -41,9 +41,6 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
     os.environ["RANK"] = f"{rank}"
     if local_rank != -1:
         os.environ["LOCAL_RANK"] = f"{local_rank}"
-    else:
-        # by default assume local_rank == rank on the same host
-        os.environ["LOCAL_RANK"] = f"{rank}"
 
 
 class DeviceMeshTestGlooBackend(DTensorTestBase):
@@ -115,7 +112,11 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
             world_size=self.world_size,
             rank=self.rank,
         )
-        DeviceMesh(self.device_type, mesh_tensor)
+        with self.assertWarnsRegex(
+            UserWarning,
+            "It seems like you did not set/select the default device"
+        ):
+            DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
