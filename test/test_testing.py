@@ -2353,6 +2353,7 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch.csrc",  # files here are devtools, not part of torch
+                           "torch.include",  # torch include files after install
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
