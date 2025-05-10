@@ -4186,10 +4186,13 @@ def wrap_test_class(orig_cls):
         ):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
+            backend = lookup_backend(name)
+            if not HAS_CUDA and backend == "inductor":
+                continue
             ctxs = [
                 compiled_autograd._enable(
                     make_compiler_fn(
-                        backend=lookup_backend(name),
+                        backend=backend,
                         fullgraph=name not in known_graph_breaks_tests,
                     )
                 ),
@@ -4283,6 +4286,7 @@ known_graph_breaks_tests = {
     "test_grad_mode_restored_reentrant",  # assertTrue
     "test_multi_grad_any_hooks",  # register_multi_grad_hook
     "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks
+    "test_graph_save_on_cpu",  # dynamo disabled
 }
 
 test_contexts = {
@@ -4332,14 +4336,15 @@ xfail_by_backend = {
         "test_custom_autograd_no_early_free",  # batched gradients
         "test_lobpcg",  # NaNs
         # Uncategorized
+        "test_autograd_simple_views_python",  # gradient is None
+        "test_function_returns_undefined_tensor",  # gradient is None
+        "test_input_buffer_accum",  # add(sparse, dense) not supported
     },
     "eager": {  # will be run without torch.compiling the CA graph
         "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
         "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
         "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
         "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
-        "test_autograd_simple_views_python",  # gradient is None
-        "test_function_returns_undefined_tensor",  # gradient is None
         "test_naughty_autograd_function_stashing_ctx",  # bytecode issue
         "test_unrelated_inputs",  # gradient batching rule not implemented for aten::sym_size.int
         "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
@@ -4351,6 +4356,7 @@ xfail_by_backend = {
         "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
         "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
+        "test_graph_save_on_cpu",  # PGO strides check out of bounds
     },
     "aot_eager": {  # will be run with torch.compile(backend="eager")
         # Category: FakeTensor
@@ -4359,10 +4365,7 @@ xfail_by_backend = {
         "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
         "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
     },
-    "inductor": {  # will be run with torch.compile(backend="aot_eager")
-        "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
-        "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
-    },
+    "inductor": {},  # will be run with torch.compile(backend="aot_eager")
     # tests not present in this dict will be run with torch.compile(backend="inductor")
 }
 
