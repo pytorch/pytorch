@@ -3,7 +3,7 @@ import os
 from typing import Any, Optional
 from typing_extensions import Unpack
 
-from .triton_compat import ASTSource, CompiledKernel, knobs
+from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -47,12 +47,12 @@ class StaticallyLaunchedCudaKernel:
 
         self.hash = kernel.hash
 
-        if knobs is None:
+        if triton_knobs is None:
             launch_enter = kernel.__class__.launch_enter_hook
             launch_exit = kernel.__class__.launch_exit_hook
         else:
-            launch_enter = knobs.runtime.launch_enter_hook
-            launch_exit = knobs.runtime.launch_exit_hook
+            launch_enter = triton_knobs.runtime.launch_enter_hook
+            launch_exit = triton_knobs.runtime.launch_exit_hook
 
         if launch_enter is not None or launch_exit is not None:
             raise NotImplementedError(

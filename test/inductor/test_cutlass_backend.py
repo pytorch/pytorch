@@ -137,6 +137,14 @@ class TestCutlassBackend(TestCase):
         import cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
+    def test_cutlass_key(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+        from torch._inductor.codecache import cutlass_key
+
+        self.assertIsNotNone(cutlass_key())
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_mm(self):
@@ -317,7 +325,6 @@ class TestCutlassBackend(TestCase):
             expected = model(a, b, c)
             actual, codes = run_and_get_code(compiled, a, b, c)
             torch.testing.assert_close(actual, expected)
-            logging.warning(codes[0])
             self.assertTrue(re.search(r"cutlass_.*.cutlass_.*", codes[0]))
             # Verifies expected number of precompilations
             self.assertEqual(
