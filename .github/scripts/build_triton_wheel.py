@@ -101,11 +101,14 @@ def build_triton(
             )
             print("ROCm libraries setup for triton installation...")
 
-        check_call(
-            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
-        )
+        if device == "xpu":
+            # https://github.com/triton-lang/triton/commit/a782a3665c48707752f1d71f8db832f10e522d5a
+            cwd = triton_basedir
+        else:
+            cwd = triton_pythondir
 
-        whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
+        check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=cwd, env=env)
+        whl_path = next(iter((cwd / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
         if device == "rocm":
