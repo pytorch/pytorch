@@ -159,6 +159,11 @@ def meta_linspace_logspace(
     )
 
 
+@register_meta([aten.view.default])
+def view_meta(a, *shape):
+    return torch._refs._unbacked_fallback_reshape_view(a, *shape, allow_copy=False)
+
+
 @register_meta([aten.take.default, aten.take.out])
 @out_wrapper()
 def meta_take(self, index):
