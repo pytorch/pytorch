@@ -760,7 +760,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
+
+                extra_str_from_graph_partition = (
+                    "self, " if torch._inductor.config.graph_partition else ""
+                )
+
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for fwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
@@ -796,7 +803,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for bwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
