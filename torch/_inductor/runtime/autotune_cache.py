@@ -12,6 +12,7 @@ from typing_extensions import override
 import torch
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.utils._triton import has_triton_package
+from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 
 from ..remote_cache import (
     create_cache,
@@ -214,7 +215,11 @@ class AutotuneCache:
 
     # Save the config in the caches
     def save(
-        self, config: Config, time_taken_ns: int, found_by_coordesc: bool = False
+        self,
+        config: Config,
+        time_taken_ns: int,
+        found_by_coordesc: bool = False,
+        triton_cache_hash: Optional[str] = None,
     ) -> None:
         data = {
             **config.kwargs,
@@ -223,6 +228,7 @@ class AutotuneCache:
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+            "triton_cache_hash": triton_cache_hash,
         }
         if HAS_WARP_SPEC:
             data.update(
@@ -485,6 +491,8 @@ def _load_cached_autotuning(
 
     # Remove time taken for comparison
     best_config.pop("time_taken_ms", None)
+
+    best_config.pop("triton_cache_hash", None)
 
     if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
         "found_by_coordesc", False
