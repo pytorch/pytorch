@@ -1057,6 +1057,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "cond",
                 source_target=self.value,
                 should_flatten_outputs=True,
+                supports_input_mutation=False,
+                supports_aliasing=False,
             )
 
             if not only_consist_of(ret_val, (TensorVariable,)):
@@ -1298,6 +1300,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # So it's best we always enforce the ordering of carried_inputs the same as outputs
             # with "flatten_manual".
             set_subgraph_inputs="flatten_manual",
+            supports_input_mutation=False,
+            supports_aliasing=False,
         )
         cond_nn_modules = dict(tx.output.nn_modules)
         validate_subgraph_output_types(cond_r)
@@ -1336,6 +1340,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
+            supports_input_mutation=False,
+            supports_aliasing=False,
         )
         validate_subgraph_output_types(body_r)
 
@@ -1512,6 +1518,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description="associative_scan_combine_fn",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
+            supports_input_mutation=False,
+            supports_aliasing=False,
         )
 
         # Ensure that the output of scan is a flattened list of elements,
@@ -1561,30 +1569,23 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
-        from torch._higher_order_ops.utils import (
-            _has_potential_branch_input_alias,
-            _has_potential_branch_input_mutation,
-            _maybe_fake_tracing,
+        # Compute the proxies for the input check
+        proxy_vars_inputcheck = (
+            tuple(sarg.as_proxy() for sarg in sub_args) + combine_freevars_proxy
         )
+
+        from torch._higher_order_ops.utils import _maybe_fake_tracing
         from torch._inductor.utils import is_pointwise_use
-        from torch._subclasses.fake_tensor import FakeTensor
 
         with tx.fake_mode:
-            xs_fake = [
-                first_slice_copy(leaf.proxy.node.meta["example_value"].clone())
-                for leaf in itertools.chain(xs_vars, xs_vars)
-            ]
-            additional_fake = [
-                leaf.proxy.node.meta["example_value"].clone()
-                for leaf in additional_inputs_vars
-            ] + [
+            sub_args_fake = [
                 leaf.node.meta["example_value"].clone()
-                if isinstance(leaf.node.meta["example_value"], FakeTensor)
+                if hasattr(leaf.node.meta["example_value"], "clone")
                 else leaf.node.meta["example_value"]
-                for leaf in combine_lifted_freevars.keys()
+                for leaf in pytree.tree_leaves(proxy_vars_inputcheck)
             ]
-            sub_args_fake = xs_fake + additional_fake
             pre_dispatch = False
 
             fx = _maybe_fake_tracing(
@@ -1599,15 +1600,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     raise RuntimeError(
                         "For combine_mode='pointwise', the combine_fn needs to be pointwise"
                     )
-
-            if _has_potential_branch_input_mutation(
-                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
-            ):
-                raise RuntimeError("Combine_fn might be modifying the input!")  # noqa: F541
-            if _has_potential_branch_input_alias(
-                combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
-            ):
-                raise RuntimeError("Combine_fn might be aliasing the input!")  # noqa: F541
 
         combine_fn_name = tx.output.install_subgraph(
             "associative_scan_combine_fn", combine_gm
@@ -1751,7 +1743,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description="scan_combine_fn",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
+            supports_input_mutation=False,
+            supports_aliasing=False,
         )
+
         # Ensure that the output of scan is a flattened list of elements,
         # because downstream operations assume that the output of HOPs
         # is flattened
@@ -1897,6 +1892,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
+            supports_input_mutation=False,
+            supports_aliasing=False,
         )
 
         subgraph_example_value = [
