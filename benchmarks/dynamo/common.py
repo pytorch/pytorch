@@ -1014,7 +1014,9 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     return msg
 
 
-def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
+def speedup_experiment(
+    args, model_iter_fn, model: torch.nn.Module, example_inputs, **kwargs
+):
     """
     Measure speedups over eager.
 
@@ -1077,6 +1079,15 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     times=times,
                     collect_outputs=args.collect_outputs,
                 )
+
+            # TESTING
+            if isinstance(expected_output, torch._subclasses.FakeTensor):
+                print(
+                    "FakeTensor eager output! This is probably an issue with how the "
+                    "model handles being exported."
+                )
+                timings[:] = 0  # make the function return a NaN
+                break
 
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
