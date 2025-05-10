@@ -7,6 +7,8 @@
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
 #include <cuda_awbarrier_primitives.h>
+// Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
+#include <ATen/cuda/cub.cuh>
 #include <nvshmem.h>
 
 namespace c10d::nvshmem_extension {
@@ -138,31 +140,31 @@ at::Tensor nvshmem_all_to_all(
   return out;
 }
 
-// This is a prefix sum function that calculates read (or write) offsets for each peer
-// TODO: currently it is assumed that the number of PE's is smaller than `THREADS_PER_BLOCK` (512)
-__device__ void scan(int64_t *odata, int64_t *idata, int n) {
-  constexpr int N = THREADS_PER_BLOCK;
-  assert (n <= N);
-  __shared__ int64_t temp[N * 2];
-  int thid = threadIdx.x;
-  int pout = 1, pin = 0;
-  // Load input into shared memory scratchpad.
-  // This is exclusive scan, so shift right by one
-  // and set first element to 0
-  if (thid < n) {
-    temp[pout * N + thid] = temp[pin * N + thid] = (thid > 0) ? idata[thid - 1] : 0;
+// This is an exclusive prefix sum function that calculates read (or write) offsets for each peer.
+__device__ void prefixSum(int64_t *odata, int64_t *idata, int n) {
+  // Specialize BlockScan for a 1D block of threads, of type int64_t.
+  // - `BLOCK_SCAN_WARP_SCANS` is a low-latency scan algorithm (instead of high
+  // throughput which we don't need here).
+  // - `at_cuda_detail::cub` is torch's cub wrapper, see #55292.
+  using BlockScanT = at_cuda_detail::cub::BlockScan<int64_t, THREADS_PER_BLOCK, at_cuda_detail::cub::BLOCK_SCAN_WARP_SCANS>;
+  // Allocate shared memory for BlockScan
+  __shared__ typename BlockScanT::TempStorage temp_storage;
+
+  // TODO: currently it is assumed that the number of PE's is smaller than
+  // `THREADS_PER_BLOCK`
+  CUDA_KERNEL_ASSERT(n <= THREADS_PER_BLOCK);
+
+  // Obtain input item for each thread
+  int tid = threadIdx.x;
+  int64_t thread_data = (tid < n) ? idata[tid] : 0;
+
+  // Collectively compute the block-wide exclusive prefix sum
+  BlockScanT(temp_storage).ExclusiveSum(thread_data, thread_data);
+
+  // Store the result
+  if (tid < n) {
+    odata[tid] = thread_data;
   }
-  __syncthreads();
-  for (int offset = 1; offset < n; offset *= 2) {
-    pout = 1 - pout; // swap double buffer indices
-    pin = 1 - pout;
-    if (thid >= offset && thid < n)
-      temp[pout * N + thid] = temp[pin * N + thid] + temp[pin * N + thid - offset];
-    else if (thid < offset)
-      temp[pout * N + thid] = temp[pin * N + thid];
-    __syncthreads();
-  }
-  odata[thid] = temp[pout * N + thid]; // write output
 }
 
 // This kernel is used to exchange output splits and source offsets between peers.
@@ -179,7 +181,7 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
 
   // Scan input splits to get the source offsets
-  scan(peer_offsets, input_splits, npes);
+  prefixSum(peer_offsets, input_splits, npes);
   __syncthreads();;
 
   // Use 1 block to do the exchange
@@ -202,7 +204,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
 
   // Calculate the output offsets
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
-  scan(peer_offsets, output_splits, npes);
+  prefixSum(peer_offsets, output_splits, npes);
   __syncthreads();
 
   // Each block targets a different peer
