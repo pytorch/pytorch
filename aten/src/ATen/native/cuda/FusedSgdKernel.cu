@@ -232,7 +232,7 @@ void _fused_sgd_with_momentum_kernel_cuda_(
   }
   TORCH_CHECK(
       lr.device() == params[0].device(),
-      "found_inf must be on the same GPU device as the params");
+      "lr must be on the same GPU device as the params");
   float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =
