@@ -582,7 +582,7 @@ Vectorized<c10::Half> inline fmsub(
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-  return Vectorized<c10::Half>(vfmsq_f16(c, a, b));
+  return Vectorized<c10::Half>(vnegq_f16(vfmsq_f16(c, a, b)));
 #else
   return a * b - c;
 #endif

@@ -398,22 +398,19 @@ def dynamo_timed_cudagraph(
     name: str,
     compile_id: Optional[CompileId],
     mode: Optional[CompilationMode],
-    dynamo_compile: bool = False,
 ) -> Generator[Any, None, None]:
     """
-    Makes usages of dynamo_timed in this file less verbose. Pay careful attention
-    to the 'dynamo_compile' param; if True, then we add the timing to the overall
-    cudagraphify overhead logged to dynamo_compile. We only want to count those
-    regions that are purely cudagraph overhead.
+    Makes usages of dynamo_timed in this file less verbose. NOTE: This CM sums
+    all durations into a single column in the dynamo_compile table. Use only if
+    you consider the timed region to be part of the runtime overhead associated
+    with the compiler.
     """
     with dynamo_timed(
         name,
         log_pt2_compile_event=True,
         compile_id=compile_id,
         is_backward=mode == CompilationMode.BACKWARD,
-        dynamo_compile_runtime_column_us="runtime_cudagraphify_time_us"
-        if dynamo_compile
-        else None,
+        dynamo_compile_column_us="runtime_cudagraphify_time_us",
     ):
         yield
 
@@ -439,23 +436,20 @@ def cudagraphify(
         else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
     )
 
-    with dynamo_timed_cudagraph(
-        "cudagraphify.get_container", compile_id, mode, dynamo_compile=True
-    ):
+    with dynamo_timed_cudagraph("cudagraphify.get_container", compile_id, mode):
         manager = get_container(device_index).get_tree_manager()
 
-    with dynamo_timed_cudagraph("CUDAGraphTreeManager.add_function", compile_id, mode):
-        return manager.add_function(
-            model,
-            inputs,
-            static_input_idxs,
-            stack_traces,
-            mode,
-            constants,
-            placeholders,
-            mutated_input_idxs,
-            compile_id,
-        )
+    return manager.add_function(
+        model,
+        inputs,
+        static_input_idxs,
+        stack_traces,
+        mode,
+        constants,
+        placeholders,
+        mutated_input_idxs,
+        compile_id,
+    )
 
 
 class StorageWeakRefWrapper:
@@ -561,11 +555,14 @@ def _use_cuda_memory_pool_manager(
     stream.wait_stream(torch.cuda.current_stream())
 
     with torch.cuda.stream(stream), torch.device(device):
-        torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
+        # Begin allocate to mem pool for all memory allocation on the current thread.
+        # This is thread safe since a thread can only warmup or record 1 cudagraph
+        # at the same time.
+        torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
         try:
             yield
         finally:
-            torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
+            torch._C._cuda_endAllocateToPool(device, mem_pool)
             torch._C._cuda_releasePool(device, mem_pool)
 
     torch.cuda.current_stream().wait_stream(stream)
@@ -1015,9 +1012,7 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        with dynamo_timed_cudagraph(
-            "CUDAGraphNode.record", compile_id, mode, dynamo_compile=True
-        ):
+        with dynamo_timed_cudagraph("CUDAGraphNode.record", compile_id, mode):
             self.recording_outputs: Optional[OutputType] = self._record(
                 wrapped_function.model, recording_inputs
             )
@@ -1036,8 +1031,7 @@ class CUDAGraphNode:
                 assert isinstance(out, (int, type(None))), type(out)
                 self.outputs_metadata.append(out)
 
-        with dynamo_timed_cudagraph("CUDAGraphNode.replay", compile_id, mode):
-            self.graph.replay()
+        self.graph.replay()
 
     def _copy_inputs_and_remove_from_src(
         self, dsts: list[InputType], srcs: list[InputType]
@@ -2099,12 +2093,7 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            with dynamo_timed_cudagraph(
-                "CUDAGraphTreeManager.run_eager", self.compile_id, self.mode
-            ):
-                out = self.run_eager(new_inputs, function_id)
-
-            return out
+            return self.run_eager(new_inputs, function_id)
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2170,12 +2159,7 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        with dynamo_timed_cudagraph(
-            "CUDAGraphTreeManager.record_function", self.compile_id, self.mode
-        ):
-            out = self.record_function(new_inputs, function_id)
-
-        return out
+        return self.record_function(new_inputs, function_id)
 
     def shutdown(self) -> None:
         """
