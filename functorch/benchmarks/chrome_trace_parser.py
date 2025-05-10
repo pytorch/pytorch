@@ -7,6 +7,7 @@ import pandas as pd
 
 from torch._functorch.benchmark_utils import compute_utilization
 
+
 log = logging.getLogger(__name__)
 
 # process the chrome traces output by the pytorch profiler

@@ -204,9 +204,16 @@ def generate_inputs_for_model(
 
     input_dict = {"input_ids": input}
 
-    if (
-        model_name.startswith(("T5", "M2M100", "MT5")) or model_cls in [BlenderbotModel, BlenderbotSmallModel, BlenderbotForConditionalGeneration, BlenderbotSmallForConditionalGeneration, PegasusModel, PegasusForConditionalGeneration, MarianModel, MarianMTModel]
-    ):
+    if model_name.startswith(("T5", "M2M100", "MT5")) or model_cls in [
+        BlenderbotModel,
+        BlenderbotSmallModel,
+        BlenderbotForConditionalGeneration,
+        BlenderbotSmallForConditionalGeneration,
+        PegasusModel,
+        PegasusForConditionalGeneration,
+        MarianModel,
+        MarianMTModel,
+    ]:
         input_dict["decoder_input_ids"] = input
 
     if model_name.startswith("Lxmert"):
@@ -238,8 +245,8 @@ def generate_inputs_for_model(
                 device, 0, seq_length, (bs,)
             )
             input_dict["end_positions"] = rand_int_tensor(device, 0, seq_length, (bs,))
-        elif (
-            model_name.endswith(("MaskedLM", "HeadModel", "CausalLM", "DoubleHeadsModel"))
+        elif model_name.endswith(
+            ("MaskedLM", "HeadModel", "CausalLM", "DoubleHeadsModel")
         ):
             input_dict["labels"] = rand_int_tensor(
                 device, 0, vocab_size, (bs, seq_length)

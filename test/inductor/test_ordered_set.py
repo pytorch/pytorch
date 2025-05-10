@@ -833,7 +833,9 @@ class TestBasicOps(TestCase):
             p = pickle.dumps(self.OrderedSet, proto)
             copy = pickle.loads(p)
             self.assertEqual(
-                self.OrderedSet, copy, "%s != %s" % (self.OrderedSet, copy)  # noqa: UP031
+                self.OrderedSet,
+                copy,
+                "%s != %s" % (self.OrderedSet, copy),  # noqa: UP031
             )
 
     def test_issue_37219(self):

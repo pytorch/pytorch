@@ -7,7 +7,9 @@ import click
 import pandas as pd
 from tabulate import tabulate
 
+
 log = logging.getLogger(__name__)
+
 
 def gmean(s):
     return s.product() ** (1 / len(s))
