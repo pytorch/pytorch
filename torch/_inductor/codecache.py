@@ -48,6 +48,7 @@ from typing_extensions import Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._C._export.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -93,7 +94,6 @@ from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
-from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler

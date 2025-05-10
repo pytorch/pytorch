@@ -11,17 +11,16 @@ from typing_extensions import Self
 import torch
 import torch._inductor
 import torch.utils._pytree as pytree
+from torch._C._export.pt2_archive_constants import (
+    AOTINDUCTOR_DIR,
+    ARCHIVE_VERSION_VALUE,
+    CONSTANTS_DIR,
+    CUSTOM_OBJ_FILENAME_PREFIX,
+)
 from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
 from torch.types import FileLike
-
-from .pt2_archive_constants import (
-    AOTINDUCTOR_DIR,
-    ARCHIVE_VERSION,
-    CONSTANTS_DIR,
-    CUSTOM_OBJ_FILENAME_PREFIX,
-)
 
 
 log = logging.getLogger(__name__)
@@ -37,7 +36,7 @@ class PT2ArchiveWriter:
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "w", compression=zipfile.ZIP_STORED
         )
-        self.writestr("version", str(ARCHIVE_VERSION))
+        self.writestr("version", str(ARCHIVE_VERSION_VALUE))
         self.writestr("archive_format", "pt2")
         return self
 
