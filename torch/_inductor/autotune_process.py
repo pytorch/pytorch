@@ -41,10 +41,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
-    from .codegen.common import WorkspaceArg
-
 from . import config
-from .codegen.common import WorkspaceZeroMode
 from .runtime.benchmarking import benchmarker
 from .virtualized import V
 
@@ -578,20 +575,22 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         module_cache_key: str,
         num_stages: int,
         num_warps: int,
+        num_consumer_groups: int = 0,
+        num_buffers_warp_spec: int = 0,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
         waves_per_eu: int = 0,  # only used for hip to schedule waves per execution unit
         kpack: int = 0,  # ROCm specific gemm paramete
-        workspace_arg: Optional[WorkspaceArg] = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
         self.module_cache_key = module_cache_key
         self.num_stages = num_stages
         self.num_warps = num_warps
+        self.num_consumer_groups = num_consumer_groups
+        self.num_buffers_warp_spec = num_buffers_warp_spec
         self.matrix_instr_nonkdim = matrix_instr_nonkdim
         self.waves_per_eu = waves_per_eu
         self.kpack = kpack
-        self.workspace_arg = workspace_arg
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -624,36 +623,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 self.output_tensor_meta.device.index
             )
 
-        if self.workspace_arg is not None:
-            # Create a function that handles both workspace creation and kernel execution
-            workspace_arg = self.workspace_arg
-
-            def run_with_workspace():
-                # Create workspace tensor
-                workspace_size = workspace_arg.count
-                workspace_tensor = torch.empty_strided(
-                    (workspace_size,),
-                    (1,),
-                    dtype=torch.uint8,
-                    device=output_tensor.device,
-                )
-
-                # Handle zero initialization if needed
-                if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
-                    workspace_tensor.zero_()
-
-                # Run the kernel with workspace
-                run_method(
-                    *input_tensors,
-                    output_tensor,
-                    workspace_tensor,
-                    *extra_args,
-                    **warmup_arg,
-                    stream=stream,
-                    benchmark_run=True,
-                )
-
-            return run_with_workspace
         if isinstance(
             getattr(mod, self.kernel_name),
             torch._inductor.runtime.triton_heuristics.DebugAutotuner,

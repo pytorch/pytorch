@@ -132,7 +132,7 @@ static inline MemoryFormat suggest_memory_format_contig(const Tensor& t) {
 }
 
 template<typename scalar_t, typename param_t>
-std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
+static std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     const Tensor& save_mean /* optional */, const Tensor& save_invstd /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
@@ -197,7 +197,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 }
 
 template<typename scalar_t, typename param_t, template<typename T> class VarTransform>
-std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
+static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
     double momentum, double eps, Tensor& save_mean, Tensor& save_var_transform) {
 
@@ -287,7 +287,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 }
 
 template<typename scalar_t, typename param_t, template<typename T> class VarTransform>
-std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
+static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
     double momentum, double eps) {
   int64_t n_input = input.size(1);
@@ -306,7 +306,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 }
 
 template<typename scalar_t, typename param_t>
-std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
+static std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     const Tensor& grad_out_, const Tensor& input, const Tensor& weight,
     const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
     bool train, double eps, std::array<bool,3> grad_input_mask) {

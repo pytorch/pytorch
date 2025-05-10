@@ -54,7 +54,8 @@ cmake .. -DGPU_TARGET="%GPU_TARGET%" ^
             -DCMAKE_BUILD_TYPE=%CONFIG% ^
             -DCMAKE_GENERATOR=Ninja ^
             -DCMAKE_INSTALL_PREFIX=..\install\ ^
-            -DCUDA_ARCH_LIST="%CUDA_ARCH_LIST%"
+            -DCUDA_ARCH_LIST="%CUDA_ARCH_LIST%" ^
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 if errorlevel 1 exit /b 1
 
 cmake --build . --target install --config %CONFIG% -- -j%NUMBER_OF_PROCESSORS%

@@ -478,14 +478,6 @@ inline float zeta(float x, float q) {
   return s;
 }
 
-template <typename T0>
-inline float polygamma(const int64_t order, const T0 input) {
-  float x = input;
-  float n = order;
-  float sgn = ((order % 2) ? 1 : -1);
-  return sgn * gamma(n + 1) * zeta(n + 1, x);
-}
-
 inline float calc_digamma_positive_domain(float x) {
   constexpr float DIGAMMA_COEF[7] = {
       8.33333333333333333333E-2,
@@ -544,6 +536,19 @@ inline float digamma(T0 x) {
   } else {
     return calc_digamma_positive_domain(x);
   }
+}
+
+template <typename T0>
+inline float polygamma(const int64_t order, const T0 input) {
+  // Filter out n == 0.
+  if (order == 0) {
+    return digamma(input);
+  }
+
+  float x = input;
+  float n = order;
+  float sgn = ((order % 2) ? 1 : -1);
+  return sgn * gamma(n + 1) * zeta(n + 1, x);
 }
 
 template <typename T>
@@ -1715,6 +1720,74 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
 
   return r;
 } // chebyshev_polynomial_w_forward(T x, int64_t n)
+
+template <typename T>
+// TODO: Add 512 if/when double will be supported in Metal
+inline constexpr int getHermitianLimit() {
+  return 128;
+}
+
+template <typename T>
+inline float hermite_polynomial_h_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return x + x;
+  }
+
+  if (n > getHermitianLimit<T>()) {
+    return NAN;
+  }
+
+  float p = 1.0;
+  float q = x + x;
+  float r = 0.0;
+
+  for (int64_t k = 2; k < n + n; k += 2) {
+    r = (x + x) * q - k * p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // hermite_polynomial_h_forward(T x, int64_t n)
+
+template <typename T>
+inline float hermite_polynomial_he_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return x;
+  }
+
+  if (n > getHermitianLimit<T>()) {
+    return NAN;
+  }
+
+  float p = 1.0;
+  float q = x;
+  float r;
+
+  for (int64_t k = 1; k < n; k++) {
+    r = x * q - k * p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // hermite_polynomial_he_forward(T x, int64_t n)
 
 } // namespace metal
 } // namespace c10

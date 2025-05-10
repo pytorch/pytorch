@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - .github/workflows/inductor-nightly.yml
+      - benchmarks/dynamo/ci_expected_accuracy/dynamic_cpu_max_autotune_inductor_amp_freezing_huggingface_inference.csv
+      - benchmarks/dynamo/ci_expected_accuracy/dynamic_cpu_max_autotune_inductor_amp_freezing_timm_inference.csv
+      - benchmarks/dynamo/ci_expected_accuracy/dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench_inference.csv
   workflow_dispatch:
   schedule:
     # Run every day at 7:00 AM UTC
@@ -32,7 +35,7 @@ jobs:
     needs: get-default-label-prefix
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [

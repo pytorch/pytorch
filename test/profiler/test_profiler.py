@@ -2169,6 +2169,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/150059 for example",
+    )
     def test_profile_all_threads(self):
         profiling_started = threading.Event()
         profiling_ended = threading.Event()

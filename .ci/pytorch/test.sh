@@ -191,6 +191,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     # shellcheck disable=SC1091
     source /opt/intel/oneapi/umf/latest/env/vars.sh
   fi
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/ccl/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Check XPU status before testing
   xpu-smi discovery
 fi
@@ -311,6 +315,12 @@ test_python_shard() {
 test_python() {
   # shellcheck disable=SC2086
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
+  assert_git_not_dirty
+}
+
+test_python_smoke() {
+  # Smoke tests for H100
+  time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -1175,7 +1185,6 @@ build_xla() {
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
   retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
-  retry install_post_deps_pytorch_xla
   assert_git_not_dirty
 }
 
@@ -1475,8 +1484,7 @@ test_executorch() {
   pushd /executorch
 
   export PYTHON_EXECUTABLE=python
-  export EXECUTORCH_BUILD_PYBIND=ON
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
   # For llama3
   bash examples/models/llama3_2_vision/install_requirements.sh
@@ -1522,7 +1530,7 @@ test_linux_aarch64() {
        inductor/test_inplacing_pass inductor/test_kernel_benchmark inductor/test_layout_optim \
        inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
-       inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
+       inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
@@ -1708,6 +1716,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   test_python
   test_aten
   test_xpu_bin
+elif [[ "${TEST_CONFIG}" == smoke ]]; then
+  test_python_smoke
 else
   install_torchvision
   install_monkeytype
