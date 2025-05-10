@@ -226,14 +226,14 @@ CUDA_NOT_FOUND_MESSAGE = (
     "CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH"
     "environment variable or add NVCC to your system PATH. The extension compilation will fail."
 )
-ROCM_HOME = _find_rocm_home()
+ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hip) else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
 
-CUDA_HOME = _find_cuda_home() if torch.cuda._is_compiled() else None
+CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 SYCL_HOME = _find_sycl_home() if torch.xpu._is_compiled() else None
 
@@ -291,16 +291,25 @@ def _get_sycl_arch_list():
 # If arch list returned by _get_sycl_arch_list() is empty, then sycl kernels will be compiled
 # for default spir64 target and avoid device specific compilations entirely. Further, kernels
 # will be JIT compiled at runtime.
+def _get_sycl_target_flags():
+    if _get_sycl_arch_list() != '':
+        return ['-fsycl-targets=spir64_gen,spir64']
+    return ['']
+
+def _get_sycl_device_flags():
+    arch_list = _get_sycl_arch_list()
+    if arch_list != '':
+        return [f'-Xs "-device {arch_list}"']
+    return ['']
+
 _COMMON_SYCL_FLAGS = [
     '-fsycl',
-    '-fsycl-targets=spir64_gen,spir64' if _get_sycl_arch_list() != '' else '',
 ]
 
 _SYCL_DLINK_FLAGS = [
     *_COMMON_SYCL_FLAGS,
     '-fsycl-link',
     '--offload-compress',
-    f'-Xs "-device {_get_sycl_arch_list()}"' if _get_sycl_arch_list() != '' else '',
 ]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
@@ -812,6 +821,7 @@ class BuildExtension(build_ext):
             sycl_dlink_post_cflags = None
             if with_sycl:
                 sycl_cflags = extra_cc_cflags + common_cflags + _COMMON_SYCL_FLAGS
+                sycl_cflags += _get_sycl_target_flags()
                 if isinstance(extra_postargs, dict):
                     sycl_post_cflags = extra_postargs['sycl']
                 else:
@@ -829,6 +839,7 @@ class BuildExtension(build_ext):
                 sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
                 sycl_cflags += _wrap_sycl_host_flags(host_cflags)
                 sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
+                sycl_dlink_post_cflags += _get_sycl_device_flags()
                 sycl_post_cflags = [shlex.quote(f) for f in sycl_post_cflags]
 
             _write_ninja_file_and_compile_objects(
@@ -2688,6 +2699,7 @@ def _write_ninja_file_to_build_library(path,
 
     if with_sycl:
         sycl_cflags = cflags + _COMMON_SYCL_FLAGS
+        sycl_cflags += _get_sycl_target_flags()
         sycl_cflags += extra_sycl_cflags
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
@@ -2696,6 +2708,7 @@ def _write_ninja_file_to_build_library(path,
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
         sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
+        sycl_dlink_post_cflags += _get_sycl_device_flags()
     else:
         sycl_cflags = None
         sycl_dlink_post_cflags = None
