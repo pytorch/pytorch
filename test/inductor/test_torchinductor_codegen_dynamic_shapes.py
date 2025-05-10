@@ -137,6 +137,7 @@ test_failures = {
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
     "test_pad_single_dynamic_shapes": TestFailure(("cpu",)),
+    "test_embedding_sparse_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -158,6 +159,7 @@ test_failures = {
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumprod_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cummin_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumsum_no_mask_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumsum_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
@@ -169,7 +171,11 @@ test_failures = {
     "test_bucketize_nd_tiling_False_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_nd_tiling_True_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_default_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    "test_bucketize_int_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_int_uint8_uint8_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_int_int8_int8_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_int_int16_int16_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_int_int32_int32_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -261,9 +267,6 @@ test_failures = {
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_custom_op_3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-        ("cuda", "xpu") if IS_LINUX else ("cpu", "cuda", "xpu")
-    ),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
@@ -383,11 +386,12 @@ test_failures = {
     **dynamic_shapes_test_failures,
 }
 
-if TEST_WITH_ROCM:
+if not TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
+                ("cuda", "xpu") if IS_LINUX else ("cpu", "cuda", "xpu")
+            ),
         }
     )
 

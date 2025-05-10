@@ -40,20 +40,12 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
-ARG CONDA_CMAKE
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
-
-# (optional) Install protobuf for ONNX
-ARG PROTOBUF
-COPY ./common/install_protobuf.sh install_protobuf.sh
-RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
-RUN rm install_protobuf.sh
-ENV INSTALLED_PROTOBUF ${PROTOBUF}
 
 # (optional) Install vision packages like OpenCV
 ARG VISION
@@ -81,12 +73,6 @@ ENV PATH /opt/rocm/llvm/bin:$PATH
 ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG en_US.utf8
 ENV LC_ALL en_US.utf8
-
-# (optional) Install non-default CMake version
-ARG CMAKE_VERSION
-COPY ./common/install_cmake.sh install_cmake.sh
-RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
-RUN rm install_cmake.sh
 
 # (optional) Install non-default Ninja version
 ARG NINJA_VERSION
