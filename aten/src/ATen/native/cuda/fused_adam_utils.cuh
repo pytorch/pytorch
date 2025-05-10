@@ -62,10 +62,9 @@ C10_DEVICE inline void adam_math(
         param -= lr * weight_decay * param;
       }
     }
-    // todo(crcrpar): use lerp
-    // ref: https://developer.nvidia.com/blog/lerp-faster-cuda/
-    exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
-    exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
+    exp_avg = std::fma(beta1, exp_avg, std::fma(-beta1, grad, grad));
+    exp_avg_sq =
+        std::fma(beta2, exp_avg_sq, std::fma(-beta2, grad * grad, grad * grad));
     const opmath_t step_size = lr / bias_correction1;
     opmath_t denom;
     if (amsgrad) {
