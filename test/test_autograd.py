@@ -830,7 +830,7 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=False)
         self.assertEqual(x_grad, x_grad_clone * 2)
 
-        # Accumulate out-of-place when create_graph is False
+        # Accumulate out-of-place when create_graph is True
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
