@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+
 #ifdef USE_C10D_GLOO
 
 #include <cstdlib>
@@ -17,6 +19,10 @@
 
 #if GLOO_HAVE_TRANSPORT_UV
 #include <gloo/transport/uv/device.h>
+#endif
+
+#if GLOO_HAVE_TRANSPORT_IBVERBS
+#include <gloo/transport/ibverbs/device.h>
 #endif
 
 // On Linux, check that the tcp transport is available.
@@ -138,6 +144,45 @@ static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
 C10_REGISTER_CREATOR(GlooDeviceRegistry, APPLE, makeUVDevice)
 C10_REGISTER_CREATOR(GlooDeviceRegistry, WIN32, makeUVDevice)
 C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice)
+#endif
+
+#if GLOO_HAVE_TRANSPORT_IBVERBS
+static std::shared_ptr<::gloo::transport::Device> makeIBVerbsDevice(
+    const std::string& interface,
+    const std::string& hostname,
+    bool lazyInit) {
+  TORCH_CHECK(hostname.empty(), "ibverbs transport does not support hostname");
+
+  TORCH_CHECK(!lazyInit, "transport does not support lazy init");
+
+  ::gloo::transport::ibverbs::attr attr;
+  attr.name = getCvarString(
+      {
+          "TORCH_GLOO_IBV_NAME",
+      },
+      "");
+  attr.port = getCvarInt(
+      {
+          "TORCH_GLOO_IBV_PORT",
+      },
+      1);
+  attr.index = getCvarInt(
+      {
+          "TORCH_GLOO_IBV_INDEX",
+      },
+      0);
+
+  if (!interface.empty()) {
+    attr.name = interface;
+  }
+
+  // use global port
+  attr.port = 1;
+
+  return ::gloo::transport::ibverbs::CreateDevice(attr);
+}
+
+C10_REGISTER_CREATOR(GlooDeviceRegistry, IBVERBS, makeIBVerbsDevice)
 #endif
 
 namespace {
