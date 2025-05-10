@@ -284,8 +284,8 @@ iterDP_file_path: str = "iter"
 iterDP_files_to_exclude: set[str] = {"__init__.py", "utils.py"}
 iterDP_deprecated_files: set[str] = set()
 iterDP_method_to_special_output_type: dict[str, str] = {
-    "demux": "List[IterDataPipe]",
-    "fork": "List[IterDataPipe]",
+    "demux": "list[IterDataPipe]",
+    "fork": "list[IterDataPipe]",
 }
 
 mapDP_file_path: str = "map"
