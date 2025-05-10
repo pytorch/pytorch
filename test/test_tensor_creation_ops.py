@@ -2536,6 +2536,13 @@ class TestTensorCreation(TestCase):
                                    torch.tensor(3),
                                    torch.tensor(1, dtype=torch.int16)).dtype)
 
+    def test_arange_float_inconsistent_bounds(self):
+        for device in ["cpu", "cuda"]:
+            if device == "cuda" and not torch.cuda.is_available():
+                continue
+            with self.assertRaisesRegex(RuntimeError, "upper bound and lower bound inconsistent with step sign"):
+                torch.arange(1549556900, 1549556828, 1989724, dtype=torch.float, device=device)
+
     # cannot call storage() on meta tensor
     @skipMeta
     def test_empty_strided(self, device):
