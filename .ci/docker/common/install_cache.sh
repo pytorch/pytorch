@@ -9,7 +9,7 @@ install_ubuntu() {
   # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
   apt-get install -y cargo
   echo "Checking out sccache repo"
-  git clone https://github.com/pytorch/sccache
+  git clone https://github.com/mozilla/sccache -b v0.10.0
   cd sccache
   echo "Building sccache"
   cargo build --release
@@ -19,6 +19,10 @@ install_ubuntu() {
   rm -rf sccache
   apt-get remove -y cargo rustc
   apt-get autoclean && apt-get clean
+
+  echo "Downloading old sccache binary from S3 repo for PCH builds"
+  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
+  chmod 755 /opt/cache/bin/sccache-0.2.14a
 }
 
 install_binary() {
@@ -32,22 +36,42 @@ sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
-if [ -n "$ROCM_VERSION" ]; then
-  curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
-else
-  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-  # TODO: Install the pre-built binary from S3 as building from source
-  # https://github.com/pytorch/sccache has started failing mysteriously
-  # in which sccache server couldn't start with the following error:
-  #   sccache: error: Invalid argument (os error 22)
-  install_binary
-fi
+install_ubuntu
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
-  printf "#!/bin/sh\nif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
+  if [ $1 == "gcc" ]; then
+    # Do not call sccache recursively when dumping preprocessor argument
+    # For some reason it's very important for the first cached nvcc invocation
+    cat >"/opt/cache/bin/$1" <<EOF
+#!/bin/sh
+
+# sccache does not support -E flag, so we need to call the original compiler directly in order to avoid calling this wrapper recursively
+for arg in "\$@"; do
+  if [ "\$arg" = "-E" ]; then
+    exec $(which $1) "\$@"
+  fi
+done
+
+if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
+  exec sccache $(which $1) "\$@"
+else
+  exec $(which $1) "\$@"
+fi
+EOF
+  else
+    cat >"/opt/cache/bin/$1" <<EOF
+#!/bin/sh
+
+if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
+  exec sccache $(which $1) "\$@"
+else
+  exec $(which $1) "\$@"
+fi
+EOF
+  fi
   chmod a+x "/opt/cache/bin/$1"
 }
 
@@ -88,7 +112,7 @@ if [ -n "$ROCM_VERSION" ]; then
     TOPDIR=$(dirname $OLDCOMP)
     WRAPPED="$TOPDIR/original/$COMPNAME"
     mv "$OLDCOMP" "$WRAPPED"
-    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" > "$OLDCOMP"
+    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
     chmod a+x "$OLDCOMP"
   }
 

@@ -25,7 +25,7 @@ namespace torch::jit::fuser {
 // descriptions to create PartitionDesc objects.
 struct TORCH_API PartitionInfo {
   PartitionInfo(const int64_t _nSubTensors, const int64_t _dim)
-      : nSubTensors_{_nSubTensors}, dim_{_dim} {};
+      : nSubTensors_{_nSubTensors}, dim_{_dim} {}
 
   int64_t nSubTensors() const {
     return nSubTensors_;
@@ -58,12 +58,9 @@ struct TORCH_API KernelSpec {
       : key_{_key},
         graph_{_graph},
         code_{_graph, "<fused code>"},
-        nInputs_{_graph->inputs().size()},
+        nInputs_{_graph->inputs().size()}
 
-        inputBroadcastGroups_{},
-        inputChunks_{},
-
-        kernels_{} {
+  {
     // No need to iterate over reference since n is pointer
     for (const auto n : graph_->nodes()) {
       static_assert(std::is_pointer_v<decltype(n)>, "n must be a pointer");

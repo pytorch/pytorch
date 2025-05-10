@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from typing_extensions import TypeAlias
 
 from torch._C import device, dtype, layout
@@ -41,6 +41,7 @@ class ProfilerActivity(Enum):
     CUDA = ...
     XPU = ...
     MTIA = ...
+    HPU = ...
     PrivateUse1 = ...
 
 class _EventType(Enum):
@@ -72,6 +73,7 @@ class ProfilerConfig:
         with_flops: bool,
         with_modules: bool,
         experimental_config: _ExperimentalConfig,
+        trace_id: Optional[str] = None,
     ) -> None: ...
 
 class _ProfilerEvent:

@@ -65,7 +65,7 @@ class unwrapping_shared_ptr {
 
 } // namespace torch::jit
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, torch::jit::unwrapping_shared_ptr<T>, true);
+PYBIND11_DECLARE_HOLDER_TYPE(T, torch::jit::unwrapping_shared_ptr<T>, true)
 
 namespace pybind11::detail {
 

@@ -8,6 +8,7 @@ import torch._functorch.config as config
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._triton import has_triton
+from torch.utils.checkpoint import checkpoint
 from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
 
 
@@ -104,7 +105,7 @@ class MemoryBudgetTest(TestCase):
         def call():
             return f(x, ws)
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        _, eager_flops = get_mem_and_flops(call)
         for budget in range(0, 11):
             mem, flops = get_mem_and_flops(call, memory_budget=budget / 10)
             if budget <= 5:
@@ -133,16 +134,8 @@ class MemoryBudgetTest(TestCase):
 
         def make_weights(w_shapes):
             ws = []
-            for idx, dim in enumerate(w_shapes):
+            for dim in w_shapes:
                 ws.append(torch.randn(512, dim * 512, requires_grad=True))
-            return ws
-
-        def make_weights_chain(w_shapes):
-            ws = []
-            for idx, _ in enumerate(w_shapes):
-                old_dim = 512 if idx == 0 else w_shapes[idx - 1] * 512
-                new_dim = w_shapes[idx] * 512
-                ws.append(torch.randn(old_dim, new_dim, requires_grad=True))
             return ws
 
         weight_configs = [
@@ -186,7 +179,7 @@ class MemoryBudgetTest(TestCase):
             def call():
                 return f(x, ws)
 
-            eager_mem, eager_flops = get_mem_and_flops(call)
+            eager_mem, _ = get_mem_and_flops(call)
             total_mem = sum(weight_shapes)
             self.assertEqual(eager_mem, sum(weight_shapes))
             for mem_achieved in exact_solves:
@@ -302,7 +295,7 @@ class MemoryBudgetTest(TestCase):
         def call():
             return f(x, ws)
 
-        eager_mem, eager_flops = get_mem_and_flops(call)
+        _, eager_flops = get_mem_and_flops(call)
         mem, flops = get_mem_and_flops(call, memory_budget=0.2)
         # We start saving the matmuls
         self.assertEqual(mem, 2)
@@ -381,6 +374,33 @@ class MemoryBudgetTest(TestCase):
         try_seq_length(2, 5, "attn")
         try_seq_length(4, 7, "mm")
         try_seq_length(4, 9, "attn")
+
+    def test_manual_ac(self):
+        # test that manual checkpoint boundaries are respected
+        # when autoac is set
+        def f(x):
+            tmp1 = torch.matmul(x, x.T)
+            tmp1 = torch.matmul(tmp1, tmp1)
+            tmp1 = torch.matmul(tmp1, tmp1)
+            out = torch.matmul(tmp1, x)
+            return out
+
+        def g(x):
+            x = checkpoint(f, x, use_reentrant=False)
+            x = checkpoint(f, x, use_reentrant=False)
+            return x
+
+        x = torch.randn(64, 1024, requires_grad=True)
+
+        def call():
+            return g(x).sum()
+
+        eager_mem, eager_flops = get_mem_and_flops(call)
+        # give the memory budget logic a value that should cause it to run,
+        # but not recompute the matmuls
+        mem, flops = get_mem_and_flops(call, memory_budget=0.01)
+        self.assertEqual(mem, eager_mem)
+        self.assertEqual(flops, eager_flops)
 
 
 if __name__ == "__main__":

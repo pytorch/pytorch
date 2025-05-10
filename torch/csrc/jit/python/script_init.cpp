@@ -48,7 +48,6 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
-#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -247,7 +246,7 @@ FunctionDefaults calcOverloadedFunctionDefaults(
 
 } // namespace
 
-bool checkMutableFunctionDefault(const py::object& def_arg) {
+static bool checkMutableFunctionDefault(const py::object& def_arg) {
   if (py::isinstance<py::list>(def_arg) || py::isinstance<py::dict>(def_arg)) {
     return true;
   }
@@ -263,7 +262,7 @@ bool checkMutableFunctionDefault(const py::object& def_arg) {
   return false;
 }
 
-void checkMutableFunctionDefault(
+static void checkMutableFunctionDefault(
     const SourceRange& range,
     const Argument& arg,
     const py::object& def_arg) {
@@ -277,7 +276,7 @@ void checkMutableFunctionDefault(
   }
 }
 
-FunctionSchema getSchemaWithNameAndDefaults(
+static FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
     const FunctionSchema& schema,
     const std::optional<std::string>& new_name,
@@ -473,7 +472,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
   return retval;
 }
 
-void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
+static void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
   auto graph = toGraphFunction(*func.function_).graph()->copy();
   auto v = graph->insertInput(0, "self");
@@ -485,7 +484,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
 }
 
 // this is used in our test suite to check that we correctly preserved type tags
-bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
+static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
   struct Work {
     IValue a;
     IValue b;
@@ -606,7 +605,7 @@ struct slot_dict_impl {
 };
 
 template <typename T>
-py::list debugMakeList(const T& list) {
+static py::list debugMakeList(const T& list) {
   py::list result;
   for (const auto& elem : list) {
     result.append(py::cast(elem));
@@ -614,7 +613,7 @@ py::list debugMakeList(const T& list) {
   return result;
 }
 template <typename T>
-py::list debugMakeNamedList(const T& list) {
+static py::list debugMakeNamedList(const T& list) {
   py::list result;
   for (auto elem : list) {
     result.append(py::cast(std::make_pair(elem.name, elem.value)));
@@ -622,7 +621,7 @@ py::list debugMakeNamedList(const T& list) {
   return result;
 }
 template <typename T>
-py::set debugMakeSet(const T& list) {
+static py::set debugMakeSet(const T& list) {
   py::set result;
   for (const auto& elem : list) {
     result.add(py::cast(elem));
@@ -675,7 +674,7 @@ struct DeepCopyMemoTable {
   std::shared_ptr<IValue::HashIdentityIValueMap> map;
 };
 
-IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
+static IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   if (!memo.contains(py::str("__torch_script_memo_table"))) {
     memo["__torch_script_memo_table"] =
         DeepCopyMemoTable{std::make_shared<IValue::HashIdentityIValueMap>()};
@@ -685,7 +684,7 @@ IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   return ivalue.deepcopy(ivalue_memo);
 }
 
-ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
+static ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
   ExtraFilesMap r;
   for (const auto& it : pydict) {
     r[py::cast<std::string>(it.first)] = "";
@@ -693,14 +692,16 @@ ExtraFilesMap extra_files_from_python(const py::dict& pydict) {
   return r;
 }
 
-void extra_files_to_python(const ExtraFilesMap& m, const py::dict& pydict) {
+static void extra_files_to_python(
+    const ExtraFilesMap& m,
+    const py::dict& pydict) {
   // py::dict is pointer-like type so it gets modified despite const&
   for (const auto& it : m) {
     pydict[py::str(it.first)] = py::bytes(it.second);
   }
 }
 
-void pyCompilationUnitDefine(
+static void pyCompilationUnitDefine(
     CompilationUnit& cu,
     const std::string& src,
     const ResolutionCallback* rcb,
@@ -786,7 +787,8 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -807,7 +809,8 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -837,7 +840,8 @@ void initJitScriptBindings(PyObject* module) {
                   auto ivalue = toIValue(std::move(value), type);
                   self.setattr(name, ivalue);
                 } catch (const ObjectAttributeError& err) {
-                  throw AttributeError("%s", err.what());
+                  PyErr_SetString(PyExc_AttributeError, err.what());
+                  throw py::error_already_set();
                 }
               })
           .def(
@@ -865,6 +869,53 @@ void initJitScriptBindings(PyObject* module) {
               [](const Object& self) {
                 // Similar to Tensor's `__hash__`, which is `id()`.
                 return std::hash<c10::ivalue::Object*>{}(self._ivalue().get());
+              })
+          .def(
+              "__deepcopy__",
+              [](const Object& self, const py::dict& memo) {
+                if (auto getstate_method = self.find_method("__getstate__")) {
+                  auto object_state = toPyObject((*getstate_method)(Stack{}));
+
+                  if (auto qualname = self.type()->name()) {
+                    auto class_type = getCustomClass(qualname->qualifiedName());
+                    auto self = Object(c10::ivalue::Object::create(
+                        c10::StrongTypePtr(
+                            std::shared_ptr<torch::jit::CompilationUnit>(),
+                            class_type),
+                        1));
+
+                    if (auto setstate_method =
+                            self.find_method("__setstate__")) {
+                      auto setstate_schema =
+                          setstate_method->function().getSchema();
+                      TORCH_INTERNAL_ASSERT(
+                          setstate_schema.arguments().size() == 2,
+                          "__setstate__ method for class ",
+                          class_type->repr_str(),
+                          " must have exactly 2 arguments!");
+                      auto state_type =
+                          setstate_schema.arguments().at(1).type();
+                      (*setstate_method)(
+                          Stack{toIValue(object_state, state_type)});
+                      return self;
+                    }
+                    std::stringstream err;
+                    err << "Tried to deepcopy object ";
+                    if (auto qualname = class_type->name()) {
+                      err << qualname->qualifiedName() << " ";
+                    }
+                    err << "which does not have a __setstate__ method defined!";
+                    throw std::runtime_error(err.str());
+                  }
+                }
+
+                std::stringstream err;
+                err << "Tried to deepcopy object ";
+                if (auto qualname = self.type()->name()) {
+                  err << qualname->qualifiedName() << " ";
+                }
+                err << "which does not have a __getstate__ method defined!";
+                throw std::runtime_error(err.str());
               })
           .def(py::pickle(
               [](const Object& self)

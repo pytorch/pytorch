@@ -3,7 +3,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -27,6 +26,8 @@ from .utils import (
     _unstack_pytree,
     clone_outputs_aliasing_inputs,
     prepare_fw_with_masks,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
 )
 
 
@@ -51,16 +52,6 @@ class MapImpl(HigherOrderOperator):
 map = MapWrapper()
 
 map_impl = MapImpl()
-
-dummy_aot_config = AOTConfig(
-    fw_compiler=None,  # type: ignore[arg-type]
-    bw_compiler=None,  # type: ignore[arg-type]
-    partition_fn=None,  # type: ignore[arg-type]
-    decompositions={},
-    num_params_buffers=0,
-    aot_id=0,
-    keep_inference_input_mutations=False,
-)
 
 
 def create_fw_bw_graph(f, num_mapped_args, *args):
@@ -93,6 +84,18 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
             example_grad = [_from_fun(out) for out in example_flat_out]
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
+
+        from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+        dummy_aot_config = AOTConfig(
+            fw_compiler=None,  # type: ignore[arg-type]
+            bw_compiler=None,  # type: ignore[arg-type]
+            partition_fn=None,  # type: ignore[arg-type]
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+        )
 
         def joint_f(*example_args):
             joint_mapped_args = example_args[:joint_num_mapped]
@@ -157,7 +160,7 @@ def map_wrapper(f, xs, *args):
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, fw_graph, joint_graph, num_mapped_args, *flat_args):
-        ctx.save_for_backward(*flat_args)
+        save_tensors_and_symints_for_backward(ctx, flat_args)
         ctx._joint_graph = joint_graph
         ctx._num_mapped_args = num_mapped_args
         with torch._C._AutoDispatchBelowAutograd():
@@ -169,7 +172,7 @@ class MapAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        fw_args = ctx.saved_tensors
+        fw_args = saved_tensors_and_symints(ctx)
         fw_mapped_args = fw_args[: ctx._num_mapped_args]
         pos_args = fw_args[ctx._num_mapped_args :]
 
@@ -215,12 +218,11 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 
 @map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_dense(f, xs, pos_args):
-    pytrees = []
-    for inp in _unstack_pytree(xs):
-        pytrees.append(f(*inp, *pos_args))
+    pytrees = [f(*inp, *pos_args) for inp in _unstack_pytree(xs)]
     return _stack_pytree(pytrees)
 
 
+# TODO: Rework DispatchKey.Autograd to py_autograd_impl
 @map_impl.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)

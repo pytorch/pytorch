@@ -23,8 +23,9 @@ start=`date +%s`
 
 for file in $python_programs_dir/*.py
 do
-    # Execute the Python program and append the output to the output file
-   python $file $output_file
+    if [ "$file" != "$python_programs_dir/benchmark_base.py" ]; then
+        python $file $output_file
+    fi
 done
 end=`date +%s`
 

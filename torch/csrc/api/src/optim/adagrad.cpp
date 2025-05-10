@@ -10,8 +10,7 @@
 
 #include <functional>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 AdagradOptions::AdagradOptions(double lr) : lr_(lr) {}
 
@@ -151,5 +150,4 @@ void Adagrad::load(serialize::InputArchive& archive) {
     }
   }
 }
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

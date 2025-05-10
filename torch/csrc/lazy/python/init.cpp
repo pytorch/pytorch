@@ -18,16 +18,17 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #endif // FBCODE_CAFFE2 || OVRSOURCE
 #include <string>
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // TODO(whc) backend 'device' related APIs are not very clear, this code could
 // be simplified but it should probably be done together with
 // designing/refactoring the overall approach to get/set of default eager/lazy
 // device types
-torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
+static torch::lazy::BackendDevice GetDeviceOrCurrent(
+    const std::string& device_str) {
   if (device_str.empty()) {
     getBackend()->GetDefaultDeviceType();
     return torch::lazy::BackendDevice();
@@ -35,12 +36,12 @@ torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
   return torch::lazy::atenDeviceToBackendDevice(c10::Device(device_str));
 }
 
-std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
+static std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
   torch::lazy::LazyTensorPtr lazy_tensor = torch::lazy::TryGetLtcTensor(tensor);
   return lazy_tensor->GetUniqueId();
 }
 
-std::string GetTensorsDump(
+static std::string GetTensorsDump(
     const std::vector<at::Tensor>& tensors,
     const std::function<std::string(c10::ArrayRef<const torch::lazy::Node*>)>&
         coverter) {
@@ -56,7 +57,7 @@ std::string GetTensorsDump(
   return coverter(nodes);
 }
 
-std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
+static std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
     const std::vector<at::Tensor>& tensors,
     bool want_all) {
   std::vector<torch::lazy::LazyTensorPtr> lazy_tensors;
@@ -76,14 +77,15 @@ std::vector<torch::lazy::LazyTensorPtr> GetLtcTensors(
   return lazy_tensors;
 }
 
-std::string GetTensorsBackendGraph(const std::vector<at::Tensor>& tensors) {
+static std::string GetTensorsBackendGraph(
+    const std::vector<at::Tensor>& tensors) {
   std::vector<torch::lazy::LazyTensorPtr> lazy_tensors =
       GetLtcTensors(tensors, /*want_all=*/false);
   return torch::lazy::LazyGraphExecutor::Get()->DumpBackendComputation(
       lazy_tensors);
 }
 
-void SyncTensors(
+static void SyncTensors(
     const std::vector<at::Tensor>& tensors,
     const std::vector<std::string>& devices,
     bool wait,
@@ -101,7 +103,7 @@ void initLazyBindings(PyObject* module) {
 
   lazy.def(
       "_mark_step",
-      // TODO(whc) this API should probably change from vector<string> to
+      // TODO(whc) this API should probably change from vector<std::string> to
       // vector<c10::device> but in a separate PR
       [](const std::string& device_str,
          const std::vector<std::string>& devices,
@@ -190,10 +192,10 @@ void initLazyBindings(PyObject* module) {
     return torch::lazy::getLTCForceFallback();
   });
   lazy.def("_set_force_fallback", [](std::string newval) {
-    torch::lazy::getLTCForceFallback() = newval;
+    torch::lazy::getLTCForceFallback() = std::move(newval);
   });
   lazy.def("_clear_ir_cache", []() { TrieCache::Get()->Clear(); });
-  lazy.def("_dump_ir_cache", [](std::string filename) {
+  lazy.def("_dump_ir_cache", [](const std::string& filename) {
     TrieCache::Get()->DumpToDotFile(filename);
   });
   lazy.def("_set_reuse_ir", [](bool val) { FLAGS_torch_lazy_reuse_ir = val; });
@@ -337,5 +339,4 @@ void initLazyBindings(PyObject* module) {
 #endif // USE_DEPLOY
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

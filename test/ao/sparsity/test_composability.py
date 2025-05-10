@@ -14,7 +14,8 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     prepare_qat_fx,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_utils import TestCase, xfailIfS390X
 
 
 logging.basicConfig(
@@ -71,10 +72,12 @@ def _calculate_sparsity(tensor):
 # This series of tests are to check the composability goals for sparsity and quantization. Namely
 # that performing quantization and sparsity model manipulations in various orderings
 # does not cause problems
+@skipIfNoFBGEMM
 class TestComposability(TestCase):
     # This test checks whether performing quantization prepare before sparse prepare
     # causes any issues and verifies that the correct observers are inserted and that
     # the quantized model works as expected
+    @xfailIfS390X
     def test_q_prep_before_s_prep(self):
         (
             mod,
@@ -104,6 +107,7 @@ class TestComposability(TestCase):
     # the post sparse prepare module names (adding parametrizations changes the module class names)
     # which would result in those parametrized modules not being quantized. This test verifies that
     # the fix for this was successful.
+    @xfailIfS390X
     def test_s_prep_before_q_prep(self):
         (
             mod,
@@ -135,6 +139,7 @@ class TestComposability(TestCase):
     # that the problem outlined in test_s_prep_before_q_prep would occur. This test verifies
     # both that the fix to the convert flow avoids this issue and that the resulting quantized
     # module uses the sparse version of the weight value.
+    @xfailIfS390X
     def test_convert_without_squash_mask(self):
         (
             mod,
@@ -175,6 +180,7 @@ class TestComposability(TestCase):
     # This tests whether performing sparse prepare before fusion causes any issues. The
     # worry was that the link created between the sparsifier and the modules that need to
     # be sparsified would be broken.
+    @xfailIfS390X
     def test_s_prep_before_fusion(self):
         (
             mod,
@@ -204,6 +210,7 @@ class TestComposability(TestCase):
 
     # This tests whether performing fusion before sparse prepare causes and issues. The
     # main worry was that the links to the modules in the sparse config would be broken by fusion.
+    @xfailIfS390X
     def test_fusion_before_s_prep(self):
         (
             mod,
@@ -258,6 +265,7 @@ class TestComposability(TestCase):
     # The primary worries were that qat_prep wouldn't recognize the parametrized
     # modules and that the convert step for qat would remove the parametrizations
     # from the modules.
+    @xfailIfS390X
     def test_s_prep_before_qat_prep(self):
         (
             mod,
@@ -285,6 +293,7 @@ class TestComposability(TestCase):
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
     # This tests whether performing qat prepare before sparse prepare causes issues.
+    @xfailIfS390X
     def test_qat_prep_before_s_prep(self):
         mod, sparsifier, _ = _get_model_and_sparsifier_and_sparse_config(
             tq.get_default_qat_qconfig("fbgemm")
@@ -338,6 +347,7 @@ class TestFxComposability(TestCase):
     compose cleanly despite variation in sequencing.
     """
 
+    @xfailIfS390X
     def test_q_prep_fx_before_s_prep(self):
         r"""
         This test checks that the ordering of prepare_fx -> sparse prepare -> convert_fx
@@ -403,6 +413,7 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
+    @xfailIfS390X
     def test_q_prep_fx_s_prep_ref_conv(self):
         r"""
         This checks that the ordering: prepare_fx -> sparse prepare -> convert_to_reference_fx
@@ -470,6 +481,7 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
+    @xfailIfS390X
     def test_s_prep_before_q_prep_fx(self):
         r"""
         This test checks that the ordering of sparse prepare -> prepare_fx -> convert_fx
@@ -521,6 +533,7 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
+    @xfailIfS390X
     def test_s_prep_before_qat_prep_fx(self):
         r"""
         This test checks that the ordering of sparse prepare -> prepare_qat_fx -> convert_fx
@@ -575,6 +588,7 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
+    @xfailIfS390X
     def test_s_prep_q_prep_fx_ref(self):
         r"""
         This checks that the ordering: sparse prepare -> prepare_fx -> convert_to_reference_fx

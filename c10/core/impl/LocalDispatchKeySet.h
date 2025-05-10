@@ -132,6 +132,11 @@ struct C10_API ForceDispatchKeyGuard {
     updated_set.excluded_ = exclude;
     c10::impl::_force_tls_local_dispatch_key_set(updated_set);
   }
+
+  ForceDispatchKeyGuard(ForceDispatchKeyGuard&&) noexcept = delete;
+  ForceDispatchKeyGuard(const ForceDispatchKeyGuard&) = delete;
+  ForceDispatchKeyGuard& operator=(const ForceDispatchKeyGuard&) = delete;
+  ForceDispatchKeyGuard& operator=(ForceDispatchKeyGuard&&) = delete;
   ~ForceDispatchKeyGuard() {
     c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
   }

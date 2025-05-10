@@ -21,14 +21,17 @@
 
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
+#include <c10/util/irange.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE256)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -62,23 +65,47 @@ struct Welford {
 template <typename T>
 struct IsVecType: std::false_type {};
 
+template <typename T>
+struct IsVecMaskType: std::false_type {};
+
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
+template <typename T, int N>
+struct IsVecType<at::vec::VectorizedN<T, N>>: std::true_type {};
+
+template <typename T, int N>
+struct IsVecMaskType<at::vec::VecMask<T, N>>: std::true_type {};
 #endif
 
-template <typename T>
-struct WeightRecp {
-  using scalar_t = typename T::value_type;
-  std::vector<scalar_t> weight_recps;
-  WeightRecp(uint64_t N) {
-    weight_recps.reserve(N);
-    for (const auto i : c10::irange(N)) {
-      weight_recps.push_back(
-          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
-    }
+template <typename T, uint64_t kChunkSize>
+struct WelfordHelper {
+  // A data struct to help welford reduction:
+  // 1. Save the reciprocal of weights to avoid redundant divisions.
+  // 2. Save the welford stack, which is used to combine welford reduction
+  //    with cascade summation to improve numerical stability.
+  static std::vector<typename T::value_type> weight_recps;
+  std::vector<Welford<T>> welford_stk;
+  uint64_t depth; // depth of welford_stk.
+  uint64_t num_chunks; // number of chunks stored in welford_stk.
+  WelfordHelper() = default;
+  WelfordHelper(uint64_t N) {
+    uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
+    depth = m > 0 ? ceil(log2(m)) : 0;
+    num_chunks = 0;
+    welford_stk.assign(depth, Welford<T>());
   }
 };
+
+template<typename T, uint64_t kChunkSize>
+std::vector<typename T::value_type> WelfordHelper<T, kChunkSize>::weight_recps = []() {
+  using scalar_t = typename T::value_type;
+  std::vector<scalar_t> temp(kChunkSize);
+  for (const auto i : c10::irange(kChunkSize)) {
+    temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
+  }
+  return temp;
+}();
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_index=false) {
@@ -107,8 +134,27 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
   return result;
 }
 
-template <typename T>
-Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRecp<T>* w=nullptr) {
+template <typename T, uint64_t kChunkSize = 0>
+Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T, kChunkSize>* w=nullptr) {
+  // Combine welford reduction with cascade summation to improve numerical stability.
+  // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+  // https://en.wikipedia.org/wiki/Pairwise_summation
+  if constexpr (IsVecType<T>::value) {
+    if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
+      w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
+      w->num_chunks += 1;
+      acc.mean = T(0);
+      acc.m2 = T(0);
+      acc.weight = T(0);
+      acc.index = 0;
+      uint64_t mask = w->num_chunks;
+      for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
+        w->welford_stk[j] = welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
+        w->welford_stk[j - 1] = Welford<T>();
+        mask >>= 1;
+      }
+    }
+  }
   // Add a single data point
   uint64_t new_index = acc.index + 1;
   auto new_weight = acc.weight + T(1);
@@ -133,17 +179,25 @@ Welford<T> welford_combine(const Welford<T>& acc, const T& data, const WeightRec
   return result;
 }
 
+template <typename T, uint64_t kChunkSize = 0>
+Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
+  for (const auto i : c10::irange(w->depth)) {
+    acc = welford_combine(acc, w->welford_stk[i]);
+  }
+  return acc;
+}
+
 template <typename T>
 struct IndexValue {
-  int64_t index;
+  int64_t index{};
   T value;
-  IndexValue(int64_t idx, T val) :index(idx), value(val) {};
-  IndexValue() {};
+  IndexValue(int64_t idx, T val) :index(idx), value(val) {}
+  IndexValue() = default;
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T>
-Welford<T> welford_combine(const Welford<T>& acc, const T& data, const int64_t tail_size, const WeightRecp<T>* w=nullptr) {
+template <typename T, uint64_t kChunkSize>
+Welford<T> welford_combine(Welford<T>& acc, T& data, int64_t tail_size, WelfordHelper<T, kChunkSize>* w=nullptr) {
   auto out = welford_combine(acc, data, w);
   return Welford<T>{
     T::set(acc.mean, out.mean, tail_size),
@@ -459,7 +513,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
   case 4:
     return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -481,7 +535,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -537,7 +591,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 
 #endif
 
 
-template <typename T, typename U> inline typename std::common_type<T, U>::type mod(T a, U b) { return a % b; }
+template <typename T, typename U> inline typename std::common_type_t<T, U> mod(T a, U b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
 
@@ -563,16 +617,16 @@ constexpr float uint32_to_uniform_float(uint32_t value) {
   return static_cast<float>(value & 0x7FFFFFFF) * scale;
 }
 
-float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
+inline float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
   return uint32_to_uniform_float(at::Philox4_32(seed, 0, offset)());
 }
 
-float randn_cpu(uint32_t seed, uint32_t offset) {
+inline float randn_cpu(uint32_t seed, uint32_t offset) {
   at::Philox4_32 engine(seed, 0, offset);
   return engine.randn(10);
 }
 
-int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+inline int64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
   auto gen = at::Philox4_32(seed, 0, offset);
   uint64_t r0 = gen();
   uint64_t r1 = gen();
@@ -586,13 +640,13 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-typename std::enable_if_t<!std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<!c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
 template <typename T>
-typename std::enable_if_t<std::is_reduced_floating_point_v<T>, T>
+typename std::enable_if_t<c10::is_reduced_floating_point_v<T>, T>
 inline fetch_value(volatile T *addr) {
   return T(addr->x, T::from_bits());
 }
@@ -637,15 +691,46 @@ void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::V
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
-  offset.store(tmpbuf.data());
-  index.store(tmpidx.data());
+  offset.store(tmpbuf.data(), len);
+  index.store(tmpidx.data(), len);
   for (int i = 0; i < len; i++){
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
 }
+
+template <typename T, bool atomic_add>
+struct transpose_mxn_helper;
+
+template <typename T>
+struct transpose_mxn_helper<T, true> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        for (int i = 0; i < M; i++) {
+          for (int j = 0; j < N; j++) {
+            atomic_add(&dst[j*ld_dst + i], src[i*ld_src + j]);
+          }
+        }
+    }
+};
+
+template <typename T>
+struct transpose_mxn_helper<T, false> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        at::vec::transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
+    }
+};
+
+template <typename T, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+  transpose_mxn_helper<T, atomic_add>::call(src, ld_src, dst, ld_dst, M, N);
+}
+
+template <typename T, int M, int N, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  transpose_mxn<T, atomic_add>(src, ld_src, dst, ld_dst, M, N);
+}
 #endif
 
-std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
+inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
   int count = 0;
   for (int64_t i = std::sqrt(number); i > 0; --i) {
     if (number % i == 0) {
@@ -663,7 +748,7 @@ std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
   return std::make_tuple(factors, count);
 }
 
-std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
+inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
   thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>> cache;
   auto it = cache.find(number);
   if (it != cache.end()) {
@@ -675,7 +760,7 @@ std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
   }
 }
 
-void _mm_get_thread_blocking(
+inline void _mm_get_thread_blocking(
     int num_threads,
     int max_k_slices,
     int64_t M,
@@ -771,7 +856,7 @@ void _mm_get_thread_blocking(
   assert(Mt != 0);
 }
 
-void mm_get_thread_blocking(
+inline void mm_get_thread_blocking(
     int num_threads,
     int max_k_slices,
     int64_t M,
@@ -886,25 +971,23 @@ void mm_get_cache_blocking(
 }
 
 struct amx_tilecfg {
-  uint8_t palette_id;
-  uint8_t start_row;
-  uint8_t reserved_0[14];
-  uint16_t colsb[16];
-  uint8_t rows[16];
+  uint8_t palette_id{0};
+  uint8_t start_row{0};
+  uint8_t reserved_0[14]{};
+  uint16_t colsb[16]{};
+  uint8_t rows[16]{};
 };
 
 class AMXState {
  private:
-  amx_tilecfg tilecfg_;
-  uint8_t rows_;
-  uint16_t colsb_;
-  uint8_t num_tile_rows_;
-  uint8_t num_tile_columns_;
+  amx_tilecfg tilecfg_{};
+  uint8_t rows_{0};
+  uint16_t colsb_{0};
+  uint8_t num_tile_rows_{0};
+  uint8_t num_tile_columns_{0};
 
  public:
-  AMXState() : rows_(0), colsb_(0), num_tile_rows_(0), num_tile_columns_(0) {
-    memset(&tilecfg_, 0, sizeof(tilecfg_));
-  }
+  AMXState() = default;
 
   inline void configure(
       uint8_t rows,

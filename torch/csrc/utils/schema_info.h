@@ -29,9 +29,9 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable(const c10::SchemaArgument& argument);
 
-  bool is_mutable(c10::string_view name);
+  bool is_mutable(std::string_view name);
 
-  bool has_argument(c10::string_view name);
+  bool has_argument(std::string_view name);
 
   bool is_nondeterministic() const;
 
@@ -106,6 +106,7 @@ struct TORCH_API SchemaInfo {
   // Alias map of outputs to inputs
   std::vector<std::unordered_set<size_t>> output_alias_map_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::FunctionSchema schema_;
 
   bool alias_maps_current_;

@@ -228,11 +228,14 @@ void multi_tensor_apply(
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
+  int processed = 0;
+
   for (size_t t = 0; t < n_tensors; t++) {
     // short-circuit to avoid adding empty tensors to tensorListMeta
     if (tensor_lists[0][t].numel() == 0) {
       continue;
     }
+    processed++;
     tensorListMeta.numel_for_tensor[loc_tensor_info] =
         tensor_lists[0][t].numel();
     for (int d = 0; d < depth; d++) {
@@ -268,7 +271,7 @@ void multi_tensor_apply(
         loc_block_info = 0;
         if (chunk == chunks - 1) {
           loc_tensor_info = 0;
-          tensorListMeta.start_tensor_this_launch = t + 1;
+          tensorListMeta.start_tensor_this_launch = processed;
         } else {
           tensorListMeta.numel_for_tensor[0] =
               tensorListMeta.numel_for_tensor[loc_tensor_info - 1];
@@ -277,7 +280,7 @@ void multi_tensor_apply(
                 tensorListMeta.addresses[d][loc_tensor_info - 1];
           }
           loc_tensor_info = 1;
-          tensorListMeta.start_tensor_this_launch = t;
+          tensorListMeta.start_tensor_this_launch = processed - 1;
         }
       }
     }

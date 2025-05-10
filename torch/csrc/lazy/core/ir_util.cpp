@@ -1,25 +1,26 @@
 #include <torch/csrc/lazy/core/ir_util.h>
 
+#include <stack>
+
 #include <c10/util/Logging.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 std::vector<const Node*> Util::ComputePostOrder(
     const Node* node,
     EmissionMap* emap) {
   std::vector<const Node*> post_order;
-  std::vector<const Node*> queue;
-  queue.push_back(node);
-  while (!queue.empty()) {
-    node = queue.back();
+  std::stack<const Node*> node_stack;
+  node_stack.push(node);
+  while (!node_stack.empty()) {
+    node = node_stack.top();
     auto it = emap->find(node);
     if (it == emap->end()) {
       (*emap)[node] = kEmitting;
       for (auto& output : node->operands()) {
         auto oit = emap->find(output.node);
         if (oit == emap->end()) {
-          queue.push_back(output.node);
+          node_stack.push(output.node);
         } else {
           TORCH_CHECK(
               oit->second != kEmitting,
@@ -37,10 +38,10 @@ std::vector<const Node*> Util::ComputePostOrder(
       }
       (*emap)[node] = kEmitted;
       post_order.push_back(node);
-      queue.pop_back();
+      node_stack.pop();
     } else {
       TORCH_CHECK(it->second == kEmitted);
-      queue.pop_back();
+      node_stack.pop();
     }
   }
   return post_order;
@@ -68,5 +69,4 @@ size_t Util::GetGraphSize(c10::ArrayRef<const Node*> nodes) {
   return ComputePostOrder(nodes).size();
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

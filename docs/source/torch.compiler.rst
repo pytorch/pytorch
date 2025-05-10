@@ -85,6 +85,7 @@ Read More
 
    torch.compiler_get_started
    torch.compiler_api
+   torch.compiler.config
    torch.compiler_fine_grain_apis
    torch.compiler_aot_inductor
    torch.compiler_inductor_profiling
@@ -92,7 +93,7 @@ Read More
    torch.compiler_faq
    torch.compiler_troubleshooting
    torch.compiler_performance_dashboard
-
+   torch.compiler_inductor_provenance
 ..
   _If you want to contribute a developer-level topic
    that provides in-depth overview of a torch._dynamo feature,

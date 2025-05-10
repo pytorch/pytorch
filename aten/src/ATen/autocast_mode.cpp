@@ -64,7 +64,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // IDEEP.
         at::kHalf, // AMD HIP
         at::ScalarType::Undefined, // FPGA
-        at::ScalarType::Undefined, // ONNX Runtime / Microsoft
+        at::kBFloat16, // ONNX Runtime / Microsoft
         at::kBFloat16, // XLA / TPU
         at::ScalarType::Undefined, // Vulkan
         at::ScalarType::Undefined, // Metal
@@ -75,7 +75,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // SX-Aurora / NEC
         at::ScalarType::Undefined, // Lazy Tensors
         at::kHalf, // Graphcore IPU
-        at::ScalarType::Undefined, // Meta training and inference devices
+        at::kHalf, // Meta training and inference devices
         at::kHalf, // PrivateUse1 device
 };
 
@@ -149,7 +149,7 @@ Banned functions
 *******************************/
 
 static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const std::optional<Tensor>&, int64_t) {
-  AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
+  TORCH_CHECK(false, "torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"
            "or torch.nn.BCEWithLogitsLoss.  binary_cross_entropy_with_logits and BCEWithLogits are\n"
@@ -212,13 +212,13 @@ TORCH_LIBRARY_IMPL(_, AutocastMPS, m) {
 
 TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   // lower_precision_fp
-  KERNEL_MPS2(_convolution, deprecated, lower_precision_fp)
+  KERNEL_MPS(_convolution, deprecated, lower_precision_fp)
   KERNEL_MPS(_convolution, lower_precision_fp)
   KERNEL_MPS(conv1d, lower_precision_fp)
   KERNEL_MPS(conv2d, lower_precision_fp)
   KERNEL_MPS(conv_tbc, lower_precision_fp)
   KERNEL_MPS(conv_transpose1d, lower_precision_fp)
-  KERNEL_MPS2(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_MPS(conv_transpose2d, input, lower_precision_fp)
   KERNEL_MPS(convolution, lower_precision_fp)
   KERNEL_MPS(_mps_convolution, lower_precision_fp)
   KERNEL_MPS(prelu, lower_precision_fp)
@@ -236,6 +236,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(chain_matmul, lower_precision_fp)
   KERNEL_MPS(linalg_multi_dot, lower_precision_fp)
   KERNEL_MPS(lstm_cell, lower_precision_fp)
+  KERNEL_MPS(scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
   KERNEL_MPS(acos, fp32)
@@ -252,16 +253,16 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(rsqrt, fp32)
   KERNEL_MPS(sinh, fp32)
   KERNEL_MPS(tan, fp32)
-  KERNEL_MPS2(pow, Tensor_Scalar, fp32)
-  KERNEL_MPS2(pow, Tensor_Tensor, fp32)
-  KERNEL_MPS2(pow, Scalar, fp32)
+  KERNEL_MPS(pow, Tensor_Scalar, fp32)
+  KERNEL_MPS(pow, Tensor_Tensor, fp32)
+  KERNEL_MPS(pow, Scalar, fp32)
   KERNEL_MPS(softplus, fp32)
   KERNEL_MPS(layer_norm, fp32)
   KERNEL_MPS(native_layer_norm, fp32)
   KERNEL_MPS(group_norm, fp32)
-  KERNEL_MPS2(frobenius_norm, dim, fp32)
+  KERNEL_MPS(frobenius_norm, dim, fp32)
   KERNEL_MPS(nuclear_norm, fp32)
-  KERNEL_MPS2(nuclear_norm, dim, fp32)
+  KERNEL_MPS(nuclear_norm, dim, fp32)
   KERNEL_MPS(batch_norm, fp32)
   KERNEL_MPS(cosine_similarity, fp32)
   KERNEL_MPS(poisson_nll_loss, fp32)
@@ -288,22 +289,22 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
 
   // fp32_set_opt_dtype
   KERNEL_MPS(prod, fp32)
-  KERNEL_MPS2(prod, dim_int, fp32)
-  KERNEL_MPS2(prod, dim_Dimname, fp32)
-  KERNEL_MPS2(softmax, int, fp32)
-  KERNEL_MPS2(softmax, Dimname, fp32)
-  KERNEL_MPS2(log_softmax, int, fp32)
-  KERNEL_MPS2(log_softmax, Dimname, fp32)
+  KERNEL_MPS(prod, dim_int, fp32)
+  KERNEL_MPS(prod, dim_Dimname, fp32)
+  KERNEL_MPS(softmax, int, fp32)
+  KERNEL_MPS(softmax, Dimname, fp32)
+  KERNEL_MPS(log_softmax, int, fp32)
+  KERNEL_MPS(log_softmax, Dimname, fp32)
   KERNEL_MPS(cumprod, fp32)
-  KERNEL_MPS2(cumprod, dimname, fp32)
+  KERNEL_MPS(cumprod, dimname, fp32)
   KERNEL_MPS(cumsum, fp32)
-  KERNEL_MPS2(cumsum, dimname, fp32)
+  KERNEL_MPS(cumsum, dimname, fp32)
   KERNEL_MPS(linalg_vector_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, fp32)
-  KERNEL_MPS2(linalg_matrix_norm, str_ord, fp32)
+  KERNEL_MPS(linalg_matrix_norm, str_ord, fp32)
   KERNEL_MPS(sum, fp32)
-  KERNEL_MPS2(sum, dim_IntList, fp32)
-  KERNEL_MPS2(sum, dim_DimnameList, fp32)
+  KERNEL_MPS(sum, dim_IntList, fp32)
+  KERNEL_MPS(sum, dim_DimnameList, fp32)
   //
   // promote
   KERNEL_MPS(addcdiv, promote)
@@ -461,6 +462,83 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
 }
 
+// MTIA
+TORCH_LIBRARY_IMPL(_, AutocastMTIA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMTIA, m) {
+  // lower_precision_fp
+#define _KERNEL_MTIA_LOW_PRECISION_FP(...) \
+  KERNEL_MTIA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_MTIA_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_MTIA_FP32(...) KERNEL_MTIA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_MTIA_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_MTIA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_MTIA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_MTIA_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MTIA)
+
+  // promote
+#define _KERNEL_MTIA_PROMOTE(...) KERNEL_MTIA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_MTIA_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+// MAIA
+TORCH_LIBRARY_IMPL(_, AutocastMAIA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMAIA, m) {
+  // lower_precision_fp
+#define _KERNEL_MAIA_LOW_PRECISION_FP(...) \
+  KERNEL_MAIA(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_MAIA_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_MAIA_FP32(...) KERNEL_MAIA(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_MAIA_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_MAIA_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_MAIA(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_MAIA_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_MAIA)
+
+  // promote
+#define _KERNEL_MAIA_PROMOTE(...) KERNEL_MAIA(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_MAIA_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+// XPU
 TORCH_LIBRARY_IMPL(_, AutocastXPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }

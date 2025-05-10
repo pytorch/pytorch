@@ -2,8 +2,7 @@
 
 #include <c10/util/Exception.h>
 
-#include <iostream>
-#include <optional>
+#include <functional>
 #include <queue>
 #include <unordered_map>
 #include <vector>
@@ -217,9 +216,7 @@ struct DinicFlowGraph {
     return seen;
   }
 
-  std::pair<std::vector<size_t>, std::vector<size_t>> partition(
-      size_t s,
-      size_t t) {
+  std::pair<std::vector<size_t>, std::vector<size_t>> partition(size_t t) {
     // Note: the partitioning returns "reachable" / "unreachable",
     //   but specifically, for "unreachable", it returns "all vertices
     //   that are reachable from t in the reverse residual graph"
@@ -259,7 +256,7 @@ struct DinicFlowGraph {
       };
     }
 
-    auto [reachable_idxs, unreachable_idxs] = partition(s_int, t_int);
+    auto [reachable_idxs, unreachable_idxs] = partition(t_int);
     std::vector<std::string> reachable, unreachable;
 
     auto idxs_to_names = [&](std::vector<size_t>& src,

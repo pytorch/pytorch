@@ -1,12 +1,14 @@
-from typing import Callable, List, Union
+from typing import Callable, Union
 from typing_extensions import TypeAlias
 
 
 try:
-    from fbscribelogger import make_scribe_logger  # type: ignore[import-untyped]
+    from fbscribelogger import (  # type: ignore[import-untyped, import-not-found]
+        make_scribe_logger,
+    )
 except ImportError:
     TAtom: TypeAlias = Union[int, float, bool, str]
-    TField: TypeAlias = Union[TAtom, List[TAtom]]
+    TField: TypeAlias = Union[TAtom, list[TAtom]]
     TLazyField: TypeAlias = Union[TField, Callable[[], TField]]
 
     def make_scribe_logger(name: str, thrift_src: str) -> Callable[..., None]:
@@ -42,7 +44,7 @@ struct TorchOpenSourceSignpostLogEntry {
   # A unique number for each run of a particular workflow in a repository, e.g., 238742. Derived from GITHUB_RUN_NUMBER.
   10: optional string github_run_number_str;
 
-  # The name of the current job. Derived from JOB_NAME, e.g., linux-jammy-py3.8-gcc11 / test (default, 3, 4, amz2023.linux.2xlarge).
+  # The name of the current job. Derived from JOB_NAME, e.g., linux-jammy-py3.8-gcc11 / test (default, 3, 4, linux.2xlarge).
   11: optional string job_name;
 
   # The GitHub user who triggered the job.  Derived from GITHUB_TRIGGERING_ACTOR.

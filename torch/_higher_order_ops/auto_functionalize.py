@@ -1,10 +1,12 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
+import torch._library.utils as library_utils
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
@@ -25,24 +27,30 @@ def get_base(tensor):
         return tensor._base
 
 
-@dataclass
-class ViewInfo:
+class ViewInfo(ABC):
     base_index: int
-    size: Optional[Sequence[Union[int, torch.SymInt]]] = None
-    stride: Optional[Sequence[Union[int, torch.SymInt]]] = None
-    storage_offset: Optional[int] = None
-    # When is_view is false, the tensor is the base, and
-    # size, stride and storage_offset are all None.
-    is_view: bool = True
 
-    def regenerate_view(self, bases_list: List[Tensor]):
-        if not self.is_view:
-            return bases_list[self.base_index]
+    def __init__(self, base_index):
+        self.base_index = base_index
 
-        assert self.stride is not None
-        assert self.size is not None
-        assert self.storage_offset is not None
+    @abstractmethod
+    def regenerate_view(self, bases_list: list[Tensor]):
+        pass
 
+
+@dataclass
+class AsStridedViewInfo(ViewInfo):
+    size: Sequence[Union[int, torch.SymInt]]
+    stride: Sequence[Union[int, torch.SymInt]]
+    storage_offset: int
+
+    def __init__(self, base_index, size, stride, storage_offset):
+        super().__init__(base_index)
+        self.size = size
+        self.stride = stride
+        self.storage_offset = storage_offset
+
+    def regenerate_view(self, bases_list: list[Tensor]):
         return torch.as_strided(
             bases_list[self.base_index],
             self.size,
@@ -51,11 +59,90 @@ class ViewInfo:
         )
 
 
+@dataclass
+class SliceViewInfo(ViewInfo):
+    dim: Union[int, torch.SymInt]
+    start: Union[int, torch.SymInt]
+    end: Union[int, torch.SymInt]
+
+    def __init__(self, base_index, dim, start, end):
+        super().__init__(base_index)
+        self.dim = dim
+        self.start = start
+        self.end = end
+
+    def regenerate_view(self, bases_list: list[Tensor]):
+        return torch.ops.aten.slice.Tensor(
+            bases_list[self.base_index], self.dim, self.start, self.end
+        )
+
+
+@dataclass
+class AliasViewInfo(ViewInfo):
+    def __init__(self, base_index):
+        super().__init__(base_index)
+
+    def regenerate_view(self, bases_list: list[Tensor]):
+        return torch.ops.aten.alias.default(bases_list[self.base_index])
+
+
+@dataclass
+class NotView(ViewInfo):
+    def __init__(self, base_index):
+        super().__init__(base_index)
+
+    def regenerate_view(self, bases_list: list[Tensor]):
+        return bases_list[self.base_index]
+
+
+def is_alias(base, tensor):
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+
+    return all(
+        statically_known_true(a)
+        for a in [
+            sym_eq(base.storage_offset(), tensor.storage_offset()),
+            sym_eq(base.stride(), tensor.stride()),
+            sym_eq(base.size(), tensor.size()),
+        ]
+    )
+
+
+# return None or (dim, start, end)
+def try_use_slice(base, tensor):
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+
+    # This condition should never be triggered.
+    if is_alias(base, tensor):
+        return (0, 0, base.size()[0])
+
+    # TODO is there cases can we use slice even if stride or len(sizes) are not equal?
+    if not statically_known_true(sym_eq(tensor.stride(), base.stride())):
+        return None
+    if not statically_known_true(sym_eq(len(tensor.size()), len(base.size()))):
+        return None
+
+    dim = None
+    count = 0
+    for i in range(len(tensor.size())):
+        if base.size()[i] != tensor.size()[i]:
+            dim = i
+            count = count + 1
+    if count != 1:
+        return None
+
+    if tensor.storage_offset() % tensor.stride()[dim] != 0:
+        return None
+    start = tensor.storage_offset() // tensor.stride()[dim]
+    end = start + tensor.size()[dim]
+    return (dim, start, end)
+
+
 def write_view_information_to_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
-    arg_to_base_index: Dict[str, Any],
+    mutable_arg_names: list[str],
+    mutable_arg_types: list[torch.Type],
+    kwargs: dict[str, Any],
+    arg_to_base_index: dict[str, Any],
 ):
     """
     This function writes the view information into kwargs. It reads mutable_args from kwargs.
@@ -73,30 +160,52 @@ def write_view_information_to_args(
         assert f"{prefix}_stride" not in kwargs
         assert f"{prefix}_storage_offset" not in kwargs
 
-        if tensor is None:
-            kwargs[f"{prefix}_base_index"] = None
-        elif get_base(tensor) is None:
-            # if the tensor is the base (not view), for simplicity we do not serialize view meta.
-            kwargs[f"{prefix}_base_index"] = base_index
-        else:
-            kwargs[f"{prefix}_base_index"] = base_index
+        assert f"{prefix}_slice_dim" not in kwargs
+        assert f"{prefix}_slice_start" not in kwargs
+        assert f"{prefix}_slice_end" not in kwargs
+
+        def use_as_strided(tensor):
             kwargs[f"{prefix}_size"] = tensor.size()
             kwargs[f"{prefix}_stride"] = tensor.stride()
             kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
 
+        def use_slice(dim, start, end):
+            kwargs[f"{prefix}_slice_dim"] = dim
+            kwargs[f"{prefix}_slice_start"] = start
+            kwargs[f"{prefix}_slice_end"] = end
+
+        def use_alias():
+            kwargs[f"{prefix}_alias"] = True
+
+        # The start if the function
+        if tensor is None:
+            kwargs[f"{prefix}_base_index"] = None
+        else:
+            base = get_base(tensor)
+            kwargs[f"{prefix}_base_index"] = base_index
+            if base is None:
+                # no need to add anything else other than _base_index
+                return
+            elif is_alias(base, tensor):
+                use_alias()
+            elif (slice_info := try_use_slice(base, tensor)) is not None:
+                use_slice(*slice_info)
+            else:
+                use_as_strided(tensor)
+
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
         arg = kwargs[arg_name]
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             if arg is None:
                 kwargs[f"_{arg_name}_length"] = None
+            else:
+                kwargs[f"_{arg_name}_length"] = len(arg)
+                for i, elem in enumerate(arg):
+                    write_single_view(
+                        f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
+                    )
 
-            kwargs[f"_{arg_name}_length"] = len(arg)
-            for i, elem in enumerate(arg):
-                write_single_view(
-                    f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
-                )
-
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
@@ -108,10 +217,10 @@ def write_view_information_to_args(
 
 # Returns a dict of arg_name -> ViewInfo | [ViewInfo]
 def read_view_information_from_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
-    all_bases: List[Tensor],
+    mutable_arg_names: list[str],
+    mutable_arg_types: list[torch.Type],
+    kwargs: dict[str, Any],
+    all_bases: list[Tensor],
 ):
     """
     This reads the view information added by `write_view_information_to_args` from kwargs, pop them,
@@ -129,22 +238,27 @@ def read_view_information_from_args(
         base_index = get_arg(f"{prefix}_base_index")
         if base_index is None:
             return None
-        elif f"{prefix}_size" not in kwargs:
-            assert f"{prefix}_stride" not in kwargs
-            assert f"{prefix}_storage_offset" not in kwargs
-
-            # This means that the argument is the base tensor
-            return ViewInfo(base_index, all_bases[base_index], is_view=False)
-
-        else:
+        elif f"{prefix}_alias" in kwargs:
+            get_arg(f"{prefix}_alias")
+            return AliasViewInfo(base_index)
+        elif f"{prefix}_storage_offset" in kwargs:
+            # The view is regenerated using as_strided.
             size = get_arg(f"{prefix}_size")
             stride = get_arg(f"{prefix}_stride")
             storage_offset = get_arg(f"{prefix}_storage_offset")
-            return ViewInfo(base_index, size, stride, storage_offset, is_view=True)
+            return AsStridedViewInfo(base_index, size, stride, storage_offset)
+        elif f"{prefix}_slice_dim" in kwargs:
+            dim = get_arg(f"{prefix}_slice_dim")
+            start = get_arg(f"{prefix}_slice_start")
+            end = get_arg(f"{prefix}_slice_end")
+            return SliceViewInfo(base_index, dim, start, end)
+        else:
+            # This means that the argument is the base tensor
+            return NotView(base_index)
 
-    args_view_info: Dict[str, Any] = {}
+    args_view_info: dict[str, Any] = {}
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             length = get_arg(f"_{arg_name}_length")
             if length is None:
                 # The whole list is None.
@@ -154,7 +268,7 @@ def read_view_information_from_args(
                     read_single_view(f"_{arg_name}_{i}") for i in range(length)
                 ]
 
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             args_view_info[arg_name] = read_single_view(f"_{arg_name}")
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -202,14 +316,14 @@ class AutoFunctionalized(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized")
+        super().__init__("auto_functionalized", cacheable=True)
 
     def __call__(
         self,
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
-    ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
@@ -231,14 +345,14 @@ class AutoFunctionalizedV2(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("auto_functionalized_v2")
+        super().__init__("auto_functionalized_v2", cacheable=True)
 
     def __call__(
         self,
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
-    ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
@@ -269,20 +383,10 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
             continue
         if not arg.alias_info.is_write:
             continue
-        if type(arg.type) is torch.TensorType:
+        if torch._library.utils.is_tensor_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.OptionalType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
+        if torch._library.utils.is_tensorlist_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.ListType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
-            continue
-        # Not yet supported: other Tensor types. This includes things like
-        # Tensor?[], Tensor[]?.
         return False
 
     if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
@@ -299,29 +403,36 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
-def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
+def get_mutable_args_from_schema(
+    schema: torch.FunctionSchema,
+) -> tuple[list[str], list[torch.Type]]:
     """
     Returns the list of argument names that get mutated according to the
     schema and their types.
     """
     mutable_args_names = [
         arg.name
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
 
     mutable_args_types = [
         arg.type
-        for arg in op._schema.arguments
+        for arg in schema.arguments
         if arg.alias_info is not None and arg.alias_info.is_write
     ]
-    return mutable_args_names, mutable_args_types
+    return mutable_args_names, mutable_args_types  # type: ignore[return-value]
+
+
+def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
+    return get_mutable_args_from_schema(op._schema)
 
 
 def do_auto_functionalize(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
     `outs = auto_functionalized(op, normalized_kwargs)`
@@ -332,7 +443,7 @@ def do_auto_functionalize(
     """
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -364,7 +475,7 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, _ = get_mutable_args(op)
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
+    unwrapped_actual_out: Union[Any, tuple[Any]] = unwrapped_outs[
         : -len(mutable_args_names)
     ]
     unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
@@ -408,13 +519,14 @@ def do_auto_functionalize(
 
 
 def do_auto_functionalize_v2(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> Any:
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -441,7 +553,7 @@ def do_auto_functionalize_v2(
     all_bases_addresses: list[int] = []
 
     # Map arg_name to the index of its base in all_bases.
-    arg_to_base_index: Dict[str, Any] = {}
+    arg_to_base_index: dict[str, Any] = {}
 
     def update_dict(tensor, arg_name, index=None):
         base = tensor if get_base(tensor) is None else get_base(tensor)
@@ -501,7 +613,7 @@ def do_auto_functionalize_v2(
             op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
         )
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = (
+    unwrapped_actual_out: Union[Any, tuple[Any]] = (
         unwrapped_outs if len(all_bases) == 0 else unwrapped_outs[: -len(all_bases)]
     )
 
@@ -549,9 +661,9 @@ def do_auto_functionalize_v2(
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
+    _only_clone_these_tensors: Optional[tuple[str, ...]] = None,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
 
@@ -566,9 +678,11 @@ def auto_functionalized_dense(
             new_kwargs[name] = (
                 [clone_preserve_strides(x) for x in kwargs[name]]
                 if kwargs[name] is not None and isinstance(kwargs[name], list)
-                else clone_preserve_strides(kwargs[name])
-                if kwargs[name] is not None
-                else None
+                else (
+                    clone_preserve_strides(kwargs[name])
+                    if kwargs[name] is not None
+                    else None
+                )
             )
         result.append(new_kwargs[name])
     out = _mutable_op(**new_kwargs)
@@ -584,9 +698,11 @@ def auto_functionalized_fake(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(_mutable_op, **kwargs)
+        result = auto_functionalized_dense(
+            _mutable_op, _only_clone_these_tensors=None, **kwargs
+        )
         return result
 
 
@@ -595,7 +711,7 @@ def auto_functionalized_proxy(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized(_mutable_op, **kwargs)
 
@@ -622,17 +738,36 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 @auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_v2_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_bases: Optional[Tuple[int, ...]] = None,
+    _only_clone_these_bases: Optional[tuple[int, ...]] = None,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
-    all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
-    mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
+) -> tuple[Any, tuple[Tensor, ...]]:
+    _all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
+    if _only_clone_these_bases is None:
+        _only_clone_these_bases = tuple(range(len(_all_bases)))
+
+    schema = _mutable_op._schema
+    op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
+        schema,
+        kwargs,
+        _all_bases,
+        _only_clone_these_bases,
+    )
+
+    out = _mutable_op(**op_kwargs_new)
+
+    if isinstance(out, tuple):
+        return (*out, *all_bases_new)  # type: ignore[return-value]
+    else:
+        return (out, *all_bases_new)  # type: ignore[return-value]
+
+
+def _generate_new_op_kwargs_from_bases(
+    schema, kwargs, all_bases, _only_clone_these_bases
+):
+    mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
     )
-
-    if _only_clone_these_bases is None:
-        _only_clone_these_bases = tuple(range(len(all_bases)))
 
     def maybe_copy(i, t):
         if t is None:
@@ -666,22 +801,19 @@ def auto_functionalized_v2_dense(
                 all_bases_new
             )
 
-    out = _mutable_op(**new_kwargs)
-
-    if isinstance(out, tuple):
-        return (*out, *all_bases_new)  # type: ignore[return-value]
-    else:
-        return (out, *all_bases_new)  # type: ignore[return-value]
+    return new_kwargs, all_bases_new
 
 
 @auto_functionalized_v2.py_impl(FakeTensorMode)
 def auto_functionalized_v2_fake(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Dict[str, Any],
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+    **kwargs: dict[str, Any],
+) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_v2_dense(_mutable_op, **kwargs)
+        result = auto_functionalized_v2_dense(
+            _mutable_op, _only_clone_these_bases=None, **kwargs
+        )
         return result
 
 
@@ -689,8 +821,8 @@ def auto_functionalized_v2_fake(
 def auto_functionalized_v2_proxy(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Dict[str, Any],
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+    **kwargs: dict[str, Any],
+) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)
 

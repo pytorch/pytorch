@@ -5,7 +5,7 @@ import sys
 from collections import Counter
 from enum import auto, Enum
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -26,7 +26,7 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
@@ -363,7 +363,7 @@ class TestFSDPHybridShard(FSDPTest):
         torch.manual_seed(global_pg.rank() + 1)
         for _ in range(5):
             inp = fsdp_model.module.get_input(torch.device("cuda"))
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for model, optim in ((fsdp_model, fsdp_optim), (hsdp_model, hsdp_optim)):
                 optim.zero_grad()
                 loss = model(*inp).sum()
@@ -384,7 +384,7 @@ class TestFSDPHybridShard(FSDPTest):
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             hsdp_kwargs,
             deterministic=True,
         )
@@ -396,7 +396,7 @@ class TestFSDPHybridShard(FSDPTest):
         sharding_strategy_mode: str,
         use_orig_params: bool,
         hsdp_process_groups: Optional[
-            Tuple[dist.ProcessGroup, dist.ProcessGroup]
+            tuple[dist.ProcessGroup, dist.ProcessGroup]
         ] = None,
         hsdp_device_mesh: Optional = None,
     ):
@@ -415,7 +415,7 @@ class TestFSDPHybridShard(FSDPTest):
             hsdp_model = TransformerWithSharedParams.init(
                 hsdp_process_groups or self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 hsdp_kwargs,
                 deterministic=True,
             )
@@ -423,7 +423,7 @@ class TestFSDPHybridShard(FSDPTest):
             model = TransformerWithSharedParams.init(
                 hsdp_process_groups or self.process_group,
                 FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {},
                 deterministic=True,
             )

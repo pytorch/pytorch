@@ -14,7 +14,11 @@ import threading
 import time
 from typing import Optional
 
-import etcd  # type: ignore[import]
+
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    from . import _etcd_stub as etcd
 
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
@@ -409,9 +413,9 @@ class EtcdRendezvous:
         active_version = self.wait_for_peers(expected_version)
         state = json.loads(active_version.value)
 
-        assert (
-            state["version"] == expected_version
-        ), "Logic error: failed to observe version mismatch"
+        assert state["version"] == expected_version, (
+            "Logic error: failed to observe version mismatch"
+        )
 
         return self.confirm_phase(expected_version, this_rank)
 
@@ -529,9 +533,9 @@ class EtcdRendezvous:
                     "Rendezvous version changed. Must try join the new one."
                 )
 
-            assert (
-                len(state["participants"]) < self._num_max_workers
-            ), "Logic error: joinable rendezvous should always have space left"
+            assert len(state["participants"]) < self._num_max_workers, (
+                "Logic error: joinable rendezvous should always have space left"
+            )
 
             this_rank = len(state["participants"])
             state["participants"].append(this_rank)

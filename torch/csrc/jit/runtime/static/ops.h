@@ -38,7 +38,7 @@ TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
       return fn(n);                                          \
     }                                                        \
   };                                                         \
-  C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
+  C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id)
 
 TORCH_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 #define REGISTER_NATIVE_OPERATOR_FUNCTOR(name, id, ...)            \
@@ -49,7 +49,7 @@ TORCH_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
     }                                                              \
   };                                                               \
   C10_REGISTER_CLASS(                                              \
-      SRNativeOperatorRegistry, name, SRNativeOperatorFunctor_##id);
+      SRNativeOperatorRegistry, name, SRNativeOperatorFunctor_##id)
 
 inline at::Tensor create_empty_from(const at::Tensor& t) {
   return at::detail::empty_cpu(
@@ -182,5 +182,6 @@ bool sr_schema_check(
 }
 
 bool sr_schema_check_kind(torch::jit::Node* node, c10::Symbol node_kind);
-
 } // namespace torch::jit
+
+C10_DECLARE_bool(static_runtime_enable_fast_math);

@@ -47,7 +47,7 @@ struct unique_type_checker {
 // tensors on one or more devices.
 
 // no checks
-static inline std::vector<Tensor>& _broadcast_out_impl(
+static std::vector<Tensor>& _broadcast_out_impl(
     const Tensor& tensor,
     std::vector<Tensor>& out_tensors) {
 #ifdef USE_NCCL
@@ -94,7 +94,6 @@ std::vector<Tensor>& broadcast_out(
 }
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Tensor> diff_device_dst_tensors;
   diff_device_dst_tensors.reserve(devices.size());
   for (auto device : devices) {
@@ -109,7 +108,6 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     }
   }
   _broadcast_out_impl(tensor, diff_device_dst_tensors);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Tensor> dst_tensors;
   dst_tensors.reserve(devices.size());
   auto it = diff_device_dst_tensors.begin();
@@ -172,7 +170,6 @@ tensor_list2d broadcast_coalesced(
   buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
 #endif
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   tensor_list2d outputs(devices.size());
   outputs[0] = tensors.vec();
   for (auto& o : outputs)
@@ -239,7 +236,6 @@ std::vector<at::Tensor>& scatter_out(
       "Expected at least one output tensor to scatter to");
   dim = at::maybe_wrap_dim(dim, tensor);
   int64_t total_size = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(out_tensors.size());
   for (const auto i : c10::irange(out_tensors.size())) {
@@ -286,8 +282,7 @@ std::vector<at::Tensor>& scatter_out(
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (const auto i : c10::irange(chunks.size())) {
     if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
-      const auto device_index =
-          static_cast<int16_t>(out_tensors[i].get_device());
+      const auto device_index = out_tensors[i].get_device();
       TORCH_CHECK(
           (*streams)[i]->device_index() == device_index,
           "Expected the device associated with the stream at index ",
@@ -297,7 +292,7 @@ std::vector<at::Tensor>& scatter_out(
           ") ",
           "to match the device supplied at that index ",
           "(expected ",
-          device_index,
+          static_cast<int16_t>(device_index),
           ")");
       cuda_guard.reset_stream(*(*streams)[i]);
     }
@@ -370,11 +365,10 @@ std::vector<at::Tensor> scatter(
 // device, either CPU or CUDA.
 
 // no checks
-static inline at::Tensor& _gather_out_impl(
+static at::Tensor& _gather_out_impl(
     at::TensorList tensors,
     at::Tensor& out_tensor,
     int64_t dim) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(tensors.size());
   for (auto& tensor : tensors) {
@@ -397,7 +391,6 @@ at::Tensor& gather_out(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
@@ -452,7 +445,6 @@ at::Tensor gather(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   auto memory_format = first.suggest_memory_format();
   for (const auto i : c10::irange(tensors.size())) {

@@ -32,19 +32,19 @@ struct ClientSession {
   pid_t pid;
 };
 
-std::vector<struct pollfd> pollfds;
-std::unordered_map<int, ClientSession> client_sessions;
+static std::vector<struct pollfd> pollfds;
+static std::unordered_map<int, ClientSession> client_sessions;
 // TODO: check if objects have been freed from time to time
-std::set<std::string> used_objects;
+static std::set<std::string> used_objects;
 
-void register_fd(int fd) {
-  struct pollfd pfd = {0};
+static void register_fd(int fd) {
+  struct pollfd pfd = {};
   pfd.fd = fd;
   pfd.events = POLLIN;
   pollfds.push_back(pfd);
 }
 
-void unregister_fd(int fd) {
+static void unregister_fd(int fd) {
   pollfds.erase(
       std::remove_if(
           pollfds.begin(),
@@ -54,7 +54,7 @@ void unregister_fd(int fd) {
   client_sessions.erase(fd);
 }
 
-void print_init_message(std::string_view message) {
+static void print_init_message(std::string_view message) {
   ssize_t written_bytes = -1;
   while (!message.empty()) {
     // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
@@ -69,7 +69,7 @@ void print_init_message(std::string_view message) {
   }
 }
 
-bool object_exists(const char* name) {
+static bool object_exists(const char* name) {
   int fd = shm_open(name, O_RDONLY, 0);
   if (fd >= 0) {
     close(fd);
@@ -79,7 +79,7 @@ bool object_exists(const char* name) {
   }
 }
 
-void free_used_object(const std::string& name) {
+static void free_used_object(const std::string& name) {
   if (!object_exists(name.c_str())) {
     DEBUG("object %s appears to have been freed", name.c_str());
     used_objects.erase(name);

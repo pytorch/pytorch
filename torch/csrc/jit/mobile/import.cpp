@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
+#include <torch/library.h>
 #include <optional>
 #include <string>
 #include <vector>
@@ -339,8 +340,7 @@ void BytecodeDeserializer::parseMethods(
     auto element = std::move(vals[i]);
     auto m_tuple = std::move(element.toTupleRef()).elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    auto codeTableElements =
-        std::move(std::move(m_tuple[1]).toTupleRef()).elements();
+    auto codeTableElements = std::move(m_tuple[1].toTupleRef()).elements();
     IValue* schemaTable = // older files do not store function schema
         (bytecode_version_ > 0x4L ||
          (bytecode_version_ == 0x4L && m_tuple.size() >= 3))
@@ -647,6 +647,9 @@ mobile::Module _load_for_mobile(
     std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+  torch::initialize_torch_libraries();
+#endif
   auto observer = torch::observerConfig().getModuleObserver();
   if (observer) {
     extra_files.insert(std::make_pair("model_path", filename));

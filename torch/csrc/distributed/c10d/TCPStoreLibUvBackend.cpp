@@ -2,12 +2,12 @@
 #include <deque>
 #include <exception>
 #include <memory>
-#include <ostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include <c10/util/Exception.h>
 #include <c10/util/thread_name.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -35,15 +35,15 @@ Other callbacks don't provide exception safety so avoid there.
 // This controls how many un-accepted TCP connections can be waiting in the
 // backlog. This should be at least world size to avoid issues on init. We set
 // it to -1 to use the host max value which is controlled by `soconnmax`.
-#define DEFAULT_BACKLOG -1
-#define MAX_KEY_COUNT (128 * 1024)
-#define MAX_STRING_LEN (8 * 1024)
-#define MAX_PAYLOAD_LEN (8 * 1024 * 1024)
+auto constexpr DEFAULT_BACKLOG = -1;
+auto constexpr MAX_KEY_COUNT = size_t(128 * 1024);
+auto constexpr MAX_STRING_LEN = 8 * 1024;
+auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
 
 // This controls the preferred size for buffers.
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
-#define ALLOC_BUFFER_SIZE ((size_t)4000)
+auto constexpr ALLOC_BUFFER_SIZE = size_t(4096);
 class UvHandle : public c10::intrusive_ptr_target {
  public:
   ~UvHandle() override = default;
@@ -105,7 +105,8 @@ class UvTcpSocket : public UvHandle {
       uv_handle_t* handle,
       size_t suggested_size,
       uv_buf_t* buf) {
-    suggested_size = std::min(suggested_size, (size_t)ALLOC_BUFFER_SIZE);
+    suggested_size = std::min(suggested_size, ALLOC_BUFFER_SIZE);
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     buf->base = (char*)malloc(suggested_size);
     buf->len = suggested_size;
   }
@@ -116,23 +117,27 @@ class UvTcpSocket : public UvHandle {
       const uv_buf_t* buf) {
     auto uv_socket = UvTcpSocket::borrow(client);
 
-    if (nread < 0) {
+    if (nread > 0) {
+      try {
+        uv_socket->processBuf(buf, nread);
+        return; // We do free inside processBuf.
+      } catch (std::exception& ex) {
+        C10D_WARNING("Error processing client message: {}", ex.what());
+        uv_socket->close();
+      }
+    } else if (nread == UV_EOF) { // Handle EOF cases
+      C10D_DEBUG("Remote peer closed the connection.");
+      uv_socket->close();
+    } else if (nread < 0) { // Handle error and EOF cases
       C10D_DEBUG(
           "Read callback failed. code:{} name:{} desc:{}",
           nread,
           uv_err_name(nread),
           uv_strerror(nread));
       uv_socket->close();
-      return;
     }
-    if (nread > 0) {
-      try {
-        uv_socket->processBuf(buf, nread);
-      } catch (std::exception& ex) {
-        C10D_WARNING("Error processing client message: {}", ex.what());
-        uv_socket->close();
-      }
-    }
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    free(buf->base);
   }
 
  public:
@@ -189,8 +194,9 @@ class UvTcpSocket : public UvHandle {
   }
 
   virtual void processBuf(const uv_buf_t* buf, size_t nread) {
-    TORCH_CHECK(
-        false, "Trying to read from a socket subclass that lacks processBuf");
+    C10D_THROW_ERROR(
+        DistStoreError,
+        "Trying to read from a socket subclass that lacks processBuf");
   }
 
   void onClose() override {
@@ -212,7 +218,8 @@ class UvTcpServer : public UvTcpSocket {
     res->handleReady();
     try {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
-      TORCH_CHECK(
+      C10D_CHECK_WITH(
+          SocketError,
           uv_res == 0,
           "Failed to open existing socket. ",
           "socket: ",
@@ -224,6 +231,18 @@ class UvTcpServer : public UvTcpSocket {
           ", message: ",
           uv_strerror(uv_res));
 
+      uv_res =
+          uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
+      C10D_CHECK_WITH(
+          SocketError,
+          uv_res == 0,
+          fmt::format(
+              "The server socket has failed to listen on provided socket. "
+              "socket: {}, code: {}, name: {}, message: {}",
+              socket,
+              uv_res,
+              uv_err_name(uv_res),
+              uv_strerror(uv_res)));
       res->cacheSocketPort();
     } catch (std::exception& ex) {
       res->close();
@@ -251,7 +270,8 @@ class UvTcpServer : public UvTcpSocket {
       } else {
         uv_res = uv_ip4_addr("0.0.0.0", port, (struct sockaddr_in*)&addr);
       }
-      TORCH_CHECK(
+      TORCH_CHECK_WITH(
+          DistStoreError,
           uv_res == 0,
           "UV Store addr parsing failure. ",
           "port: ",
@@ -267,7 +287,8 @@ class UvTcpServer : public UvTcpSocket {
 
       uv_res = uv_tcp_bind(
           res->unsafeGetSocket(), (const struct ::sockaddr*)&addr, 0);
-      TORCH_CHECK(
+      C10D_CHECK_WITH(
+          SocketError,
           uv_res == 0,
           "The server socket has failed to bind. ",
           "port: ",
@@ -283,20 +304,17 @@ class UvTcpServer : public UvTcpSocket {
 
       uv_res =
           uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
-      TORCH_CHECK(
+      C10D_CHECK_WITH(
+          SocketError,
           uv_res == 0,
-          "The server socket has failed to listen on any local network address. ",
-          "port: ",
-          port,
-          ", useIpv6: ",
-          useIpv6,
-          ", code: ",
-          uv_res,
-          ", name: ",
-          uv_err_name(uv_res),
-          ", message: ",
-          uv_strerror(uv_res));
-
+          fmt::format(
+              "The server socket has failed to listen on any local network address. "
+              "port: {}, useIpv6: {}, code: {}, name: {}, message: {}",
+              port,
+              useIpv6,
+              uv_res,
+              uv_err_name(uv_res),
+              uv_strerror(uv_res)));
       res->cacheSocketPort();
     } catch (std::exception& ex) {
       res->close();
@@ -313,7 +331,8 @@ class UvTcpServer : public UvTcpSocket {
   void accept(const c10::intrusive_ptr<UvTcpSocket>& socket) {
     int res =
         uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
-    TORCH_CHECK(
+    C10D_CHECK_WITH(
+        SocketError,
         res == 0,
         "Failed to accept socket. ",
         "code: ",
@@ -358,7 +377,8 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   static void missingOnConnect(int status) {
-    TORCH_CHECK(false, "Socket accepted byt onConnect callback missing");
+    C10D_THROW_ERROR(
+        DistStoreError, "Socket accepted byt onConnect callback missing");
   }
 
   static void on_new_connection(uv_stream_t* server, int status) {
@@ -486,6 +506,7 @@ class ChunkedStream {
 
   void append(uv_buf_t buf) {
     if (buf.len == 0) {
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       free(buf.base);
     } else {
       capacity += buf.len;
@@ -509,8 +530,8 @@ class ChunkedStream {
         buff_offset = 0;
         ++buff_idx;
         if (buff_idx >= buffers.size() && remaining > 0) {
-          TORCH_CHECK(
-              false,
+          C10D_THROW_ERROR(
+              DistStoreError,
               "Trying to read past end of buffer. ",
               "buffer_idx: ",
               buff_idx,
@@ -552,7 +573,8 @@ class ChunkedStream {
     uint64_t size = 0;
     if (!read_value(size))
       return false;
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         size <= MAX_STRING_LEN,
         "Invalid string size. ",
         "size: ",
@@ -571,7 +593,8 @@ class ChunkedStream {
     if (!read_value(size))
       return false;
     auto size_in_bytes = size * sizeof(uint8_t);
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         size_in_bytes <= MAX_PAYLOAD_LEN,
         "Invalid payload size. ",
         "size: ",
@@ -597,6 +620,7 @@ class ChunkedStream {
     }
 
     for (size_t i = 0; i < buff_idx; ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       free(buffers[0].base);
       capacity -= buffers[0].len;
       buffers.pop_front();
@@ -614,6 +638,15 @@ class ChunkedStream {
 class LibUVStoreDaemon : public BackgroundThread {
  public:
   explicit LibUVStoreDaemon(int port);
+  // Disable copy constructor
+  LibUVStoreDaemon(const LibUVStoreDaemon& other) = delete;
+  // Disable move constructor
+  LibUVStoreDaemon(LibUVStoreDaemon&& other) = delete;
+  // Disable copy assignment operator
+  LibUVStoreDaemon& operator=(const LibUVStoreDaemon& other) = delete;
+  // Disable move assignment operator
+  LibUVStoreDaemon& operator=(LibUVStoreDaemon&& other) = delete;
+
   ~LibUVStoreDaemon() override;
 
   uint16_t port() const override;
@@ -632,6 +665,12 @@ class LibUVStoreDaemon : public BackgroundThread {
   int64_t size();
   int64_t deleteKey(const std::string& key);
   void append(const std::string& key, const std::vector<uint8_t>& value);
+
+  void queuePush(const std::string& queueName, const std::vector<uint8_t>& val);
+  void queuePop(
+      const std::string& queueName,
+      const c10::intrusive_ptr<UvHandle>& client);
+  int64_t queueLen(const std::string& queueName);
 
   void registerClient(const c10::intrusive_ptr<UvHandle>& client);
   void unregisterClient(const c10::intrusive_ptr<UvHandle>& client);
@@ -658,6 +697,10 @@ class LibUVStoreDaemon : public BackgroundThread {
   std::unordered_map<c10::intrusive_ptr<UvHandle>, size_t> keysAwaited_;
   std::unordered_set<c10::intrusive_ptr<UvHandle>> clients_;
   std::unordered_set<c10::intrusive_ptr<UvHandle>> miscellaneousClients_;
+
+  // Queues
+  std::unordered_map<std::string, std::deque<std::vector<uint8_t>>> queues_;
+
   int port_;
 
   static LibUVStoreDaemon& from_uv(uv_handle_t* stream) {
@@ -675,6 +718,7 @@ class LibUVStoreDaemon : public BackgroundThread {
   void onConnect(int status);
   void onExitRequest();
   void wakeupWaitingClients(const std::string& key);
+  void wakeupOneWaitingClient(const std::string& key);
   // bool tryListen(bool use_ipv6);
 
   static void print_active_handles(uv_handle_t* handle, void* arg);
@@ -754,6 +798,18 @@ class UvClient : public UvTcpSocket {
             if (!parse_cancel_wait_command())
               return;
             break;
+          case QueryType::QUEUE_PUSH:
+            if (!parse_queue_push_command())
+              return;
+            break;
+          case QueryType::QUEUE_POP:
+            if (!parse_queue_pop_command())
+              return;
+            break;
+          case QueryType::QUEUE_LEN:
+            if (!parse_queue_len_command())
+              return;
+            break;
           default:
             C10D_DEBUG(
                 "Client sent invalid command. client:{} command:{}",
@@ -780,7 +836,7 @@ class UvClient : public UvTcpSocket {
   }
 
   bool parse_ping_command() {
-    uint32_t nonce;
+    uint32_t nonce = 0;
     if (!stream.read_value(nonce)) {
       return false;
     }
@@ -868,7 +924,8 @@ class UvClient : public UvTcpSocket {
     uint64_t key_count = 0;
     if (!stream.read_value(key_count))
       return false;
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         key_count <= MAX_KEY_COUNT,
         "Too many keys being waited. ",
         "keys: ",
@@ -882,7 +939,11 @@ class UvClient : public UvTcpSocket {
         return false;
     }
 
-    C10D_TRACE("check key_count:{} address:{}", key_count, this->address());
+    C10D_TRACE(
+        "check key_count:{} keys[0]:{} address:{}",
+        key_count,
+        keys[0],
+        this->address());
 
     // Now we have received all the keys
     StreamWriter sw(iptr());
@@ -900,7 +961,8 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(key_count)) {
       return false;
     }
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         key_count <= MAX_KEY_COUNT,
         "Too many keys being waited. ",
         "keys: ",
@@ -914,7 +976,11 @@ class UvClient : public UvTcpSocket {
         return false;
     }
 
-    C10D_TRACE("wait key_count:{} address:{}", key_count, this->address());
+    C10D_TRACE(
+        "wait key_count:{} keys[0]:{} address:{}",
+        key_count,
+        keys[0],
+        this->address());
 
     if (store->waitKeys(keys, iptr())) {
       StreamWriter sw(iptr());
@@ -972,7 +1038,8 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(key_count)) {
       return false;
     }
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         key_count <= MAX_KEY_COUNT,
         "Too many keys with multi_get. ",
         "keys: ",
@@ -1002,7 +1069,8 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(key_count)) {
       return false;
     }
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         key_count <= MAX_KEY_COUNT,
         "Too many keys with multi_get. ",
         "keys: ",
@@ -1032,12 +1100,55 @@ class UvClient : public UvTcpSocket {
   bool parse_cancel_wait_command() {
     store->clearClientWaitState(iptr());
 
-    C10D_TRACE("cancel_wait key_count:{} address:{}", this->address());
+    C10D_TRACE("cancel_wait address:{}", this->address());
 
     StreamWriter sw(iptr());
     sw.write1((uint8_t)WaitResponseType::WAIT_CANCELED);
     sw.send();
 
+    return true;
+  }
+
+  bool parse_queue_push_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    std::vector<uint8_t> data;
+    if (!stream.read_payload(data)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_push key:{} address:{}", key, this->address());
+
+    store->queuePush(key, data);
+    return true;
+  }
+
+  bool parse_queue_pop_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_pop key:{} address:{}", key, this->address());
+
+    store->queuePop(key, iptr());
+    return true;
+  }
+
+  bool parse_queue_len_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_len key:{} address:{}", key, this->address());
+
+    StreamWriter sw(iptr());
+    sw.write_value<int64_t>(store->queueLen(key));
+    sw.send();
     return true;
   }
 
@@ -1099,10 +1210,11 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
       [this](auto status) { this->onConnect(status); });
 
   port_ = tcpServer_->port();
-  TORCH_CHECK(
+  TORCH_CHECK_WITH(
+      DistStoreError,
       port_ == opts.port || opts.port == 0, // zero means use any port
       "listen fd ",
-      *opts.masterListenFd,
+      opts.masterListenFd,
       " is bound to port ",
       port_,
       ", expected to be bound to port ",
@@ -1110,8 +1222,10 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
 }
 
 LibUVStoreDaemon::LibUVStoreDaemon(int port) : port_(port) {
-  TORCH_CHECK(uv_loop_init(&loop_) == 0, "Failed to init uv loop");
-  TORCH_CHECK(
+  TORCH_CHECK_WITH(
+      DistStoreError, uv_loop_init(&loop_) == 0, "Failed to init uv loop");
+  TORCH_CHECK_WITH(
+      DistStoreError,
       uv_async_init(&loop_, &exit_handle_, LibUVStoreDaemon::on_exit_request) ==
           0,
       "Failed to init uv async event");
@@ -1122,7 +1236,9 @@ LibUVStoreDaemon::~LibUVStoreDaemon() {
   if (!is_running()) {
     uv_close((uv_handle_t*)&exit_handle_, nullptr);
     uv_run(&loop_, UV_RUN_NOWAIT);
-    TORCH_CHECK(uv_loop_close(&loop_) == 0, "loop cleanup didn't work");
+    if (uv_loop_close(&loop_) != 0) {
+      C10D_ERROR("loop cleanup didn't work");
+    }
   } else {
     // the daemon thread cleanup libuv
     dispose();
@@ -1259,12 +1375,14 @@ const std::vector<uint8_t>& LibUVStoreDaemon::compareAndSet(
     if (expectedValue.empty()) {
       tcpStore_[key] = newValue;
       wakeupWaitingClients(key);
+      // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
       return newValue;
     } else {
       // TODO: This code path is not ideal as we are "lying" to the caller in
       // case the key does not exist. We should come up with a working solution.
       // It might make more sense to return ""
       wakeupWaitingClients(key);
+      // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
       return expectedValue;
     }
   } else {
@@ -1303,7 +1421,13 @@ int64_t LibUVStoreDaemon::add(const std::string& key, int64_t addVal) {
 
 bool LibUVStoreDaemon::checkKeys(const std::vector<std::string>& keys) {
   return std::all_of(keys.begin(), keys.end(), [&](const std::string& s) {
-    return tcpStore_.count(s) > 0;
+    if (tcpStore_.count(s) > 0) {
+      return true;
+    }
+    if (auto it = queues_.find(s); it != queues_.end() && !it->second.empty()) {
+      return true;
+    }
+    return false;
   });
 }
 
@@ -1326,11 +1450,11 @@ bool LibUVStoreDaemon::waitKeys(
 }
 
 int64_t LibUVStoreDaemon::size() {
-  return tcpStore_.size();
+  return static_cast<int64_t>(tcpStore_.size());
 }
 
 int64_t LibUVStoreDaemon::deleteKey(const std::string& key) {
-  return tcpStore_.erase(key);
+  return static_cast<int64_t>(tcpStore_.erase(key));
 }
 
 void LibUVStoreDaemon::append(
@@ -1362,6 +1486,50 @@ void LibUVStoreDaemon::wakeupWaitingClients(const std::string& key) {
   }
 }
 
+void LibUVStoreDaemon::wakeupOneWaitingClient(const std::string& key) {
+  auto socketsToWait = waitingSockets_.find(key);
+  if (socketsToWait != waitingSockets_.end()) {
+    for (const auto& client : socketsToWait->second) {
+      if (--keysAwaited_[client] == 0) {
+        StreamWriter sw(client->iptr());
+        sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
+        sw.send();
+        return;
+      }
+    }
+  }
+}
+
+void LibUVStoreDaemon::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  queues_[key].push_back(value);
+  wakeupOneWaitingClient(key);
+}
+
+void LibUVStoreDaemon::queuePop(
+    const std::string& key,
+    const c10::intrusive_ptr<UvHandle>& client) {
+  auto& queue = queues_[key];
+
+  StreamWriter sw(client->iptr());
+  sw.write_value<int64_t>(queue.size());
+
+  if (queue.size() > 0) {
+    auto value = queue.front();
+    queue.pop_front();
+    sw.write_vector(value);
+  }
+
+  sw.send();
+}
+int64_t LibUVStoreDaemon::queueLen(const std::string& key) {
+  auto it = queues_.find(key);
+  if (it == queues_.end()) {
+    return 0;
+  }
+  return static_cast<int64_t>(it->second.size());
+}
 #endif
 
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
@@ -1371,7 +1539,7 @@ std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
   res->init(opts);
   return res;
 #else
-  TORCH_CHECK(false, "LibUV TCPStore implementation missing");
+  C10D_THROW_ERROR(DistStoreError, "LibUV TCPStore implementation missing");
 #endif
 }
 

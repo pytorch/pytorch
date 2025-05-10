@@ -35,9 +35,7 @@ def prepare_pt2e(
     """Prepare a model for post training quantization
 
     Args:
-      * `model` (torch.fx.GraphModule): a model captured by `torch.export` API
-        in the short term we are using `torch._export.capture_pre_autograd_graph`,
-        in the long term we'll migrate to some `torch.export` API
+      * `model` (torch.fx.GraphModule): a model captured by `torch.export.export_for_training` API.
       * `quantizer`: A backend specific quantizer that conveys how user want the
         model to be quantized. Tutorial for how to write a quantizer can be found here:
         https://pytorch.org/tutorials/prototype/pt2e_quantizer.html
@@ -49,7 +47,6 @@ def prepare_pt2e(
 
         import torch
         from torch.ao.quantization.quantize_pt2e import prepare_pt2e
-        from torch._export import capture_pre_autograd_graph
         from torch.ao.quantization.quantizer import (
             XNNPACKQuantizer,
             get_symmetric_quantization_config,
@@ -76,7 +73,7 @@ def prepare_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -99,7 +96,12 @@ def prepare_pt2e(
     model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    model = prepare(model, node_name_to_scope, is_qat=False)
+    model = prepare(
+        model,
+        node_name_to_scope,
+        is_qat=False,
+        obs_or_fq_callback=quantizer.prepare_obs_or_fq_callback,
+    )
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model
@@ -122,7 +124,6 @@ def prepare_qat_pt2e(
     Example::
         import torch
         from torch.ao.quantization.quantize_pt2e import prepare_qat_pt2e
-        from torch._export import capture_pre_autograd_graph
         from torch.ao.quantization.quantizer import (
             XNNPACKQuantizer,
             get_symmetric_quantization_config,
@@ -148,7 +149,7 @@ def prepare_qat_pt2e(
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
         # result shoud mostly stay the same
-        m = capture_pre_autograd_graph(m, *example_inputs)
+        m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
         # Step 2. quantization
@@ -172,7 +173,12 @@ def prepare_qat_pt2e(
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
-    model = prepare(model, node_name_to_scope, is_qat=True)
+    model = prepare(
+        model,
+        node_name_to_scope,
+        is_qat=True,
+        obs_or_fq_callback=quantizer.prepare_obs_or_fq_callback,
+    )
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model
@@ -182,6 +188,7 @@ _QUANT_OPS = [
     torch.ops.quantized_decomposed.quantize_per_tensor.default,
     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
     torch.ops.quantized_decomposed.quantize_per_channel.default,
+    torch.ops.pt2e_quant.quantize_affine,
 ]
 
 

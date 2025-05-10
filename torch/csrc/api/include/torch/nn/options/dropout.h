@@ -4,8 +4,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for the `Dropout` module.
 ///
@@ -126,5 +125,4 @@ struct TORCH_API FeatureAlphaDropoutFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

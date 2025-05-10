@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.15)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TEST_ROOT ${TORCH_ROOT}/test/edge)
@@ -73,5 +73,6 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
           )
 endif()
 if(INSTALL_TEST)
+  set_target_properties(test_edge_op_registration PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_edge_op_registration DESTINATION bin)
 endif()

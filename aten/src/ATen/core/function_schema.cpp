@@ -41,9 +41,15 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
     }
   };
   std::vector<Argument> new_arguments, new_returns;
-  std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);
+  new_arguments.reserve(arguments().size());
+  for (const auto& arg: arguments()) {
+    new_arguments.push_back(cloneWithRealTypes(arg));
+  }
   // NB: SymInt returns are always SymInt
-  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), alwaysCloneWithRealTypes);
+  new_returns.reserve(returns().size());
+  for (const auto& ret: returns()) {
+    new_returns.push_back(alwaysCloneWithRealTypes(ret));
+  }
   return FunctionSchema(
     name(),
     overload_name(),
@@ -474,7 +480,8 @@ bool FunctionSchema::isForwardCompatibleWith(
 
   // Validate that all new arguments provided has a default value
   for (size_t i = old_out_start_idx; i < new_out_start_idx; ++i) {
-    if (!arguments().at(i).default_value()) {
+    auto const &default_value = arguments().at(i).default_value();
+    if (!default_value.has_value()) {
       if (why_not) {
         why_not
             << "Function schema is not forward compatible since the new argument '"
@@ -485,8 +492,7 @@ bool FunctionSchema::isForwardCompatibleWith(
       return false;
     }
 
-    auto default_val = arguments().at(i).default_value().value();
-    if (default_val.isList() || default_val.isGenericDict()) {
+    if (default_value->isList() || default_value->isGenericDict()) {
       if (why_not) {
         why_not
             << "Function schema is not forward compatible since the new argument '"

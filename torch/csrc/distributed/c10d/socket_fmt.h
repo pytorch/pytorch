@@ -22,11 +22,9 @@ as it exposes the underlying platform specific socket headers.
 #include <netinet/in.h>
 #endif
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 
 // Returns a human-readable representation of the given socket address.
 std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len);
 
-} // namespace detail
-} // namespace c10d
+} // namespace c10d::detail

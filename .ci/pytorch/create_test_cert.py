@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from tempfile import mkdtemp
 
 from cryptography import x509
@@ -42,11 +42,10 @@ def create_cert(path, C, ST, L, O, key):
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.utcnow())
+        .not_valid_before(datetime.now(timezone.utc))
         .not_valid_after(
             # Our certificate will be valid for 10 days
-            datetime.utcnow()
-            + timedelta(days=10)
+            datetime.now(timezone.utc) + timedelta(days=10)
         )
         .add_extension(
             x509.BasicConstraints(ca=True, path_length=None),
@@ -88,11 +87,10 @@ def sign_certificate_request(path, csr_cert, ca_cert, private_ca_key):
         .issuer_name(ca_cert.subject)
         .public_key(csr_cert.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.utcnow())
+        .not_valid_before(datetime.now(timezone.utc))
         .not_valid_after(
             # Our certificate will be valid for 10 days
-            datetime.utcnow()
-            + timedelta(days=10)
+            datetime.now(timezone.utc) + timedelta(days=10)
             # Sign our certificate with our private key
         )
         .sign(private_ca_key, hashes.SHA256())

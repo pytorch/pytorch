@@ -41,6 +41,7 @@ DynamicLayer::DynamicLayer(
   }
   switch (transform_type) {
     case TransformType::Vmap:
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
@@ -50,6 +51,7 @@ DynamicLayer::DynamicLayer(
       interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value());
       break;
     case TransformType::Functionalize:
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       interpreter_ = Interpreter::Functionalize(layerId, functionalize_add_back_views.value());
       break;
     default:
@@ -202,6 +204,8 @@ struct SaveLocalDispatchKeySet {
   }
   SaveLocalDispatchKeySet(const SaveLocalDispatchKeySet&) = delete;
   SaveLocalDispatchKeySet& operator=(const SaveLocalDispatchKeySet&) = delete;
+  SaveLocalDispatchKeySet(SaveLocalDispatchKeySet&&) = delete;
+  SaveLocalDispatchKeySet& operator=(SaveLocalDispatchKeySet&&) = delete;
 };
 
 const std::vector<DynamicLayer>& getDynamicLayerStack() {
@@ -219,11 +223,6 @@ DynamicLayer popDynamicLayer() {
   dynamicLayerStack.pop_back();
 
   if (dynamicLayerStack.empty()) {
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-    if (c10::show_dispatch_trace_enabled()) {
-      std::cout << "DynamicLayer off" << std::endl;
-    }
-#endif
     setDynamicLayerFrontBackKeysIncluded(false);
   }
 
@@ -232,17 +231,12 @@ DynamicLayer popDynamicLayer() {
 
 int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  int64_t layerId = 1 + dynamicLayerStack.size();
+  int64_t layerId = static_cast<int64_t>(1 + dynamicLayerStack.size());
   TORCH_INTERNAL_ASSERT(layerId == dynamic_layer.layerId());
   dynamicLayerStack.emplace_back(std::move(dynamic_layer));
 
   if (layerId == 1) {
     setDynamicLayerFrontBackKeysIncluded(true);
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-    if (c10::show_dispatch_trace_enabled()) {
-      std::cout << "DynamicLayer on" << std::endl;
-    }
-#endif
   }
 
   return layerId;
@@ -256,7 +250,7 @@ int64_t initAndPushDynamicLayer(
     std::optional<bool> prev_fwd_grad_mode,
     std::optional<bool> functionalize_add_back_views) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  const auto layerId = 1 + dynamicLayerStack.size();
+  const int64_t layerId = static_cast<int64_t>(1 + dynamicLayerStack.size());
   DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
@@ -343,9 +337,7 @@ void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int6
     if (!ivalue.isTensor()) {
       continue;
     }
-    Tensor value = ivalue.toTensor();
-    Tensor replacement = func(value, flag);
-    args[idx] = std::move(replacement);
+    args[idx] = func(ivalue.toTensor(), flag);
     // sanity checks
     if (ivalue.toTensor().defined()) {
       TORCH_INTERNAL_ASSERT(args[idx].toTensor().defined());
@@ -396,16 +388,12 @@ std::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int6
   return std::nullopt;
 }
 
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-static void dump_local_tls() {
-  auto tls = c10::impl::tls_local_dispatch_key_set();
-  std::cout << "[Local Include] " << tls.included_ << std::endl;
-  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
-}
-#endif
-
 struct WithoutTop {
   WithoutTop();
+  WithoutTop(WithoutTop&& other) = delete;
+  WithoutTop(const WithoutTop&) = delete;
+  WithoutTop& operator=(const WithoutTop&) = delete;
+  WithoutTop& operator=(WithoutTop&&) = delete;
   ~WithoutTop();
   DynamicLayer layer_;
 };
@@ -445,12 +433,6 @@ static void dynamicLayerFrontFallback(
     torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(!dynamicLayerStack.empty());
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-  if (c10::show_dispatch_trace_enabled()) {
-    std::cout << dynamicLayerStack << std::endl;
-    dump_local_tls();
-  }
-#endif
   // Save the current LocalDispatchKeySet (to the current DynamicLayer).
   // Upon exiting the current scope, that LocalDispatchKeySet gets restored.
   // When the current DynamicLayer dispatches to the next (inner) DynamicLayer,
@@ -459,7 +441,7 @@ static void dynamicLayerFrontFallback(
 
   // Unwrap escaped GradWrappers
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), unwrapIfDead);
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - num_args), static_cast<int64_t>(stack->size()), unwrapIfDead);
 
   auto& layer = dynamicLayerStack.back();
   layer.interpreter().process(op, stack);

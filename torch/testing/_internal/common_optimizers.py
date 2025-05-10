@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Union
 
 import torch
 from torch import Tensor
@@ -40,7 +40,7 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    skipIfMps,
+    skipIfMPS,
     skipIfTorchDynamo,
     skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
@@ -55,8 +55,10 @@ class OptimizerInput:
 
     def __init__(
         self,
-        params: Union[List[Parameter], List[Tensor], Dict[Any, Any]],
-        kwargs: Dict[str, Any],
+        params: Union[
+            list[Parameter], list[Tensor], dict[Any, Any], list[dict[str, Any]]
+        ],
+        kwargs: dict[str, Any],
         desc: str = "",
     ):
         # params can be a list of Tensors OR param_groups OR None
@@ -121,10 +123,10 @@ class OptimizerInfo:
         ),
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
         # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
-        supported_impls: Tuple[str, ...] = ("foreach", "differentiable"),
+        supported_impls: tuple[str, ...] = ("foreach", "differentiable"),
         # A subset of all flags, signifying which ones were only supported after the
         # original optimizer had already been released. aka impls where we need to check BC.
-        not_og_supported_flags: Tuple[str, ...] = (
+        not_og_supported_flags: tuple[str, ...] = (
             "foreach",
             "differentiable",
             "maximize",
@@ -151,7 +153,7 @@ class OptimizerInfo:
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
-        supports_fused_on: Tuple[str, ...] = (),
+        supports_fused_on: tuple[str, ...] = (),
     ):
         self.optim_cls = optim_cls
         self.optim_inputs_func = optim_inputs_func
@@ -244,6 +246,7 @@ class optims(_TestParametrizer):
 def get_error_inputs_for_all_optims(device, dtype):
     if _get_device_type(device) == "cpu":
         sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
+        sample_param2 = Parameter(torch.randn(1, device=device, dtype=dtype))
         return [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -280,6 +283,28 @@ def get_error_inputs_for_all_optims(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="Tensor lr must be 1-element",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[("weight", sample_param), sample_param2],
+                    kwargs={},
+                    desc="all optimizer params should be with/without names",
+                ),
+                error_type=ValueError,
+                error_regex="all optimizer params should be with/without names. Some param names are missing",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[
+                        {"params": [sample_param], "lr": 1e-2},
+                        {"params": [("weight", sample_param2)]},
+                    ],
+                    kwargs={},
+                    desc="all optimizer param groups should be with/without names.",
+                ),
+                error_type=ValueError,
+                error_regex="all optimizer param groups should be with/without names. "
+                "cannot add param group with names to the optimizer",
             ),
         ]
     else:
@@ -497,6 +522,26 @@ def optim_inputs_func_adam(device, dtype=None):
             kwargs={"lr": torch.tensor(0.001), "amsgrad": True, "capturable": True},
             desc="Tensor lr with capturable and amsgrad",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "amsgrad": True,
+                "capturable": True,
+            },
+            desc="Tensor lr, Tensor betas, with capturable and amsgrad",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "amsgrad": False,
+                "capturable": True,
+            },
+            desc="Tensor lr, Tensor betas, with capturable",
+        ),
     ]
     mps_supported_configs = [
         OptimizerInput(
@@ -570,6 +615,37 @@ def optim_error_inputs_func_adam(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(0.9, torch.tensor(0.99))),
+                    desc="betas must be either both floats or both Tensors",
+                ),
+                error_type=ValueError,
+                error_regex="betas must be either both floats or both Tensors",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(torch.tensor(0.9), 0.99)),
+                    desc="betas must be either both floats or both Tensors",
+                ),
+                error_type=ValueError,
+                error_regex="betas must be either both floats or both Tensors",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(
+                        lr=1e-2,
+                        betas=(torch.tensor(0.9), torch.tensor(0.99)),
+                        foreach=True,
+                    ),
+                    desc=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
+                ),
+                error_type=ValueError,
+                error_regex=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
             ),
         ]
     if _get_device_type(device) == "cuda":
@@ -1180,7 +1256,7 @@ def _get_device_type(device: Union[str, torch.device]) -> str:
 
 def _get_optim_inputs_including_global_cliquey_kwargs(
     device, dtype, optim_info, skip=()
-) -> List[OptimizerInput]:
+) -> list[OptimizerInput]:
     """
     Return a list of all configs for a given optimizer as a list of OptimizerInputs,
     including configs that have supported global cliquey kwargs (foreach, fused,
@@ -1236,7 +1312,7 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
 
 
 # Database of OptimizerInfo entries in alphabetical order.
-optim_db: List[OptimizerInfo] = [
+optim_db: list[OptimizerInfo] = [
     OptimizerInfo(
         Adadelta,
         optim_inputs_func=optim_inputs_func_adadelta,
@@ -1244,12 +1320,6 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
@@ -1473,16 +1543,11 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1575,16 +1640,11 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1617,16 +1677,11 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -1709,16 +1764,11 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1750,12 +1800,6 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1806,7 +1850,10 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
-                skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
+                skipIfMPS,
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
+                device_type="mps",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1840,12 +1887,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             # https://github.com/pytorch/pytorch/issues/131398
             DecorateInfo(
                 unittest.expectedFailure,
@@ -1864,16 +1905,11 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1912,12 +1948,6 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1959,16 +1989,11 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
+                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -2009,16 +2034,11 @@ optim_db: List[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMps,  # Rprop doesn't update for non-contiguous, see #118117
+                skipIfMPS,  # Rprop doesn't update for non-contiguous, see #118117
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
@@ -2096,12 +2116,6 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
-                "TestOptimRenewed",
-                "test_tensor_lr",
-                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -2144,8 +2158,9 @@ optim_db: List[OptimizerInfo] = [
         supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
-                skipIfMps,  # SparseAdam does not support MPS
+                skipIfMPS,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
+                device_type="mps",
             ),
             DecorateInfo(
                 skipIfXpu(msg="SparseAdam is not yet supported on the XPU stack"),
@@ -2221,9 +2236,9 @@ class TensorTracker:
 
     def add(self, tensor):
         """
-        Add a clone().detach()'d version of the tensor
+        Add a detach().clone()'d version of the tensor
         """
-        self.tensors.append(tensor.clone().detach())
+        self.tensors.append(tensor.detach().clone())
 
     # pops from beginning, like a queue and not a stack!
     def pop_check_set(self, tensor_to_set, testcase):

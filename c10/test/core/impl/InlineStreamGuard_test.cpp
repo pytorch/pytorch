@@ -1,7 +1,11 @@
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
 #include <gtest/gtest.h>
 
 #include <c10/core/impl/FakeGuardImpl.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <vector>
 
 using namespace c10;
 using namespace c10::impl;
@@ -10,7 +14,7 @@ constexpr auto TestDeviceType = DeviceType::CUDA;
 using TestGuardImpl = FakeGuardImpl<TestDeviceType>;
 
 static Device dev(DeviceIndex index) {
-  return Device(TestDeviceType, index);
+  return Device{TestDeviceType, index};
 }
 
 static Stream stream(DeviceIndex index, StreamId sid) {
@@ -109,19 +113,19 @@ TEST(InlineOptionalStreamGuard, Constructor) {
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 1);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 2);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), std::make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), std::make_optional(stream(1, 2)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(1, 2));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
   {
-    OptionalTestGuard g(std::make_optional(stream(1, 2)));
+    OptionalTestGuard g(stream(1, 2));
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 1);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 2);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), std::make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), std::make_optional(stream(1, 2)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(1, 2));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
@@ -146,8 +150,8 @@ TEST(InlineOptionalStreamGuard, ResetStreamSameDevice) {
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 1);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 3);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), std::make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), std::make_optional(stream(1, 3)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(1, 3));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
@@ -164,8 +168,8 @@ TEST(InlineOptionalStreamGuard, ResetStreamDifferentDevice) {
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(2), 3);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(1), 0);
     ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(0), 0);
-    ASSERT_EQ(g.original_stream(), std::make_optional(stream(0, 0)));
-    ASSERT_EQ(g.current_stream(), std::make_optional(stream(2, 3)));
+    ASSERT_EQ(g.original_stream(), stream(0, 0));
+    ASSERT_EQ(g.current_stream(), stream(2, 3));
   }
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), 0);
   ASSERT_EQ(TestGuardImpl::getCurrentStreamIdFor(2), 0);

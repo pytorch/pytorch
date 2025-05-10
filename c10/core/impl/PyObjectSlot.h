@@ -112,7 +112,7 @@ struct C10_API PyObjectSlot {
       if (!ignore_hermetic_tls && c10::impl::HermeticPyObjectTLS::get_state()) {
         return std::nullopt;
       } else {
-        return std::make_optional(_unchecked_untagged_pyobj());
+        return _unchecked_untagged_pyobj();
       }
     } else {
       TORCH_CHECK(

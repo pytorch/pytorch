@@ -51,7 +51,7 @@ void logaddexp2_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
-REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda);
-REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
+REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda)
+REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda)
 
 } // namespace at::native

@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 
+#include <array>
 #include <iostream>
 
 namespace torch::jit {
@@ -66,7 +67,7 @@ void ArgumentSpecCreator::scan(
   } else {
     instructions_.emplace_back(SKIP);
   }
-};
+}
 
 // this is a coarse-grained guarantee that the slots of a class will not be
 // modified by the function. It works fine for things that used be read-only
@@ -132,8 +133,8 @@ void ArgumentSpecCreator::dump() const {
 ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
     const {
   ArgumentSpec spec(num_tensors_, num_optionals_);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  const IValue* stack[ARG_SPEC_DEPTH_LIMIT]; // The stack of IValue lists
+  std::array<const IValue*, ARG_SPEC_DEPTH_LIMIT>
+      stack{}; // The stack of IValue lists
   // The stack gets initialized with the input list
   stack[0] = last(input, num_inputs_).begin();
   size_t stack_top = 0; // offset to the top of the stack
@@ -141,7 +142,6 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
     switch (inst) {
       case SPECIALIZE_OPTIONAL_TENSOR: {
         // consume a tensor optional and add to the argspec
-        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         auto& arg = *stack[stack_top]++;
         spec.addOptional(arg);
         if (!arg.isNone()) {
@@ -150,17 +150,14 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       } break;
       case SPECIALIZE_TENSOR:
         // consume a tensor and add to the argspec
-        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         spec.addTensor(*stack[stack_top]++, with_grad);
         break;
       case SPECIALIZE_OPTIONAL:
         // consume a non-tensor optional and add to the argspec
-        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         spec.addOptional(*stack[stack_top]++);
         break;
       case ENTER_TUPLE: {
         // consume tuple
-        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
         auto p = *reinterpret_cast<const at::ivalue::Tuple* const*>(iv);
@@ -170,7 +167,6 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       } break;
       case ENTER_OBJECT: {
         // consume object
-        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isObject(), "Expected Object but got ", iv->tagKind());
         auto obj_ptr = &iv->toObjectRef().slots()[0];
@@ -179,7 +175,6 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       } break;
       case SKIP:
         // consume and skip an element
-        // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         stack[stack_top]++;
         break;
       case LEAVE:

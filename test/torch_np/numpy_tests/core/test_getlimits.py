@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -212,7 +212,7 @@ class TestMisc(TestCase):
                 # This test may fail on some platforms
                 assert len(w) == 0
 
-    @xpassIfTorchDynamo  # (reason="None of nmant, minexp, maxexp is implemented.")
+    @xpassIfTorchDynamo_np  # (reason="None of nmant, minexp, maxexp is implemented.")
     def test_plausible_finfo(self):
         # Assert that finfo returns reasonable results for all types
         for ftype in (

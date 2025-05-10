@@ -1,11 +1,10 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import torch
 import torch.export
 import torch.fx
 from torch.onnx._internal.exporter import _decomp, _registration
-from torch.onnx._internal.fx import diagnostics, passes
+from torch.onnx._internal.fx import passes
 
 
 def decompose_with_registry(
@@ -22,13 +21,11 @@ def decompose_with_registry(
 
 def insert_type_promotion_nodes(
     graph_module: torch.fx.GraphModule,
-) -> torch.fx.GraphModule:
-    """Inplace pass to insert explicit type promotion nodes."""
-    diagnostic_context = diagnostics.DiagnosticContext(
-        "torch.onnx.export",
-        torch.__version__,
-    )
-    return passes.InsertTypePromotion(diagnostic_context, graph_module).run()
+) -> None:
+    """Inplace pass to insert explicit type promotion nodes, recursively through nested modules."""
+    for module in graph_module.modules():
+        assert isinstance(module, torch.fx.GraphModule)
+        passes.InsertTypePromotion(module).run()
 
 
 def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:

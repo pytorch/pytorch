@@ -76,3 +76,12 @@ guidance here
    :maxdepth: 1
 
    func.batch_norm
+
+Debug utilities
+---------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+     debug_unwrap

@@ -182,7 +182,6 @@ class Linear(torch.nn.Module):
         self.zero_point = int(state_dict[prefix + "zero_point"])
         state_dict.pop(prefix + "zero_point")
 
-        op_type = int(state_dict[prefix + "op_type"])
         state_dict.pop(prefix + "op_type")
 
         version = local_metadata.get("version", None)
@@ -266,8 +265,8 @@ class Linear(torch.nn.Module):
             dtype=dtype,
         )
         qlinear.set_weight_bias(
-            qweight, mod.bias, row_block_size, col_block_size
-        )  # type: ignore[arg-type]
+            qweight, mod.bias, row_block_size, col_block_size  # type: ignore[arg-type]
+        )
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
         return qlinear

@@ -47,6 +47,6 @@ static void threshold_kernel_cuda(
 
 } // namespace
 
-REGISTER_DISPATCH(threshold_stub, &threshold_kernel_cuda);
+REGISTER_DISPATCH(threshold_stub, &threshold_kernel_cuda)
 
 } // namespace at::native

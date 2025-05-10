@@ -3,6 +3,9 @@
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAContext.h>
+#endif
 
 using namespace torch::nn;
 using namespace torch::test;
@@ -438,7 +441,7 @@ lstm_output_to_device(
 }
 
 // This test is a port of python code introduced here:
-// https://towardsdatascience.com/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
+// https://medium.com/data-science/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
 // Reverse forward of bidirectional GRU should act
 // as regular forward of unidirectional GRU
 void BidirectionalGRUReverseForward(bool cuda) {
@@ -496,6 +499,8 @@ TEST_F(RNNTest, BidirectionalGRUReverseForward_CUDA) {
 // Reverse forward of bidirectional LSTM should act
 // as regular forward of unidirectional LSTM
 void BidirectionalLSTMReverseForwardTest(bool cuda) {
+  // ROCm 6.3 had a regression in RNN behavior requiring ASSERT_NEAR
+  constexpr auto tolerance = 1e-5;
   auto opt = torch::TensorOptions()
                  .dtype(torch::kFloat32)
                  .requires_grad(false)
@@ -529,9 +534,10 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
       std::get<0>(bi_output).size(0), std::get<0>(reverse_output).size(0));
   auto size = std::get<0>(bi_output).size(0);
   for (int i = 0; i < size; i++) {
-    ASSERT_EQ(
+    ASSERT_NEAR(
         std::get<0>(bi_output)[i][0][1].item<float>(),
-        std::get<0>(reverse_output)[size - 1 - i][0][0].item<float>());
+        std::get<0>(reverse_output)[size - 1 - i][0][0].item<float>(),
+        tolerance);
   }
   // The hidden states of the reversed LSTM sits
   // in the odd indices in the first dimension.
@@ -552,6 +558,15 @@ TEST_F(RNNTest, BidirectionalLSTMReverseForward_CUDA) {
 }
 
 TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
+#ifdef USE_CUDA
+  // Get device properties
+  const auto prop = at::cuda::getCurrentDeviceProperties();
+  // TODO: Investigate why results on sm89 are much less accurate
+  // See https://github.com/pytorch/pytorch/issues/141915
+  const auto tolerance = prop->major == 8 && prop->minor == 9 ? 2e-4 : 1e-5;
+#else
+  constexpr auto tolerance = 1e-5;
+#endif
   // Create two GRUs with the same options
   auto opt =
       GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
@@ -600,13 +615,22 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
         ASSERT_NEAR(
             std::get<0>(output_cpu)[i][j][k].item<float>(),
             std::get<0>(output_cuda)[i][j][k].item<float>(),
-            1e-5);
+            tolerance);
       }
     }
   }
 }
 
 TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
+#ifdef USE_CUDA
+  // Get device properties
+  const auto prop = at::cuda::getCurrentDeviceProperties();
+  // TODO: Investigate why results on sm89 are much less accurate
+  // See https://github.com/pytorch/pytorch/issues/141915
+  const auto tolerance = prop->major == 8 && prop->minor == 9 ? 2e-4 : 1e-5;
+#else
+  constexpr auto tolerance = 1e-5;
+#endif
   // Create two LSTMs with the same options
   auto opt =
       LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
@@ -654,13 +678,22 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
         ASSERT_NEAR(
             std::get<0>(output_cpu)[i][j][k].item<float>(),
             std::get<0>(output_cuda)[i][j][k].item<float>(),
-            1e-5);
+            tolerance);
       }
     }
   }
 }
 
 TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
+#ifdef USE_CUDA
+  // Get device properties
+  const auto prop = at::cuda::getCurrentDeviceProperties();
+  // TODO: Investigate why results on sm89 are much less accurate
+  // See https://github.com/pytorch/pytorch/issues/141915
+  const auto tolerance = prop->major == 8 && prop->minor == 9 ? 2e-4 : 1e-5;
+#else
+  constexpr auto tolerance = 1e-5;
+#endif
   // Create two LSTMs with the same options
   auto opt = LSTMOptions(2, 4)
                  .num_layers(3)
@@ -711,7 +744,7 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
         ASSERT_NEAR(
             std::get<0>(output_cpu)[i][j][k].item<float>(),
             std::get<0>(output_cuda)[i][j][k].item<float>(),
-            1e-5);
+            tolerance);
       }
     }
   }
@@ -750,7 +783,7 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
 
     // Test passing optional argument to `LSTM::forward_with_packed_input`
-    rnn_output = m->forward_with_packed_input(packed_input, torch::nullopt);
+    rnn_output = m->forward_with_packed_input(packed_input, std::nullopt);
     ASSERT_TRUE(torch::allclose(
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
   }

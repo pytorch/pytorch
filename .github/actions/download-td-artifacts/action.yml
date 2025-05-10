@@ -18,7 +18,7 @@ runs:
 
     - name: Download TD Artifacts from GHA
       if: inputs.use-gha
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: td_results.json
 
@@ -26,4 +26,4 @@ runs:
       shell: bash
       run: |
         mkdir -p .additional_ci_files
-        mv td_results.json .additional_ci_files/td_results.json
+        mv td_results.json .additional_ci_files/td_results.json || true

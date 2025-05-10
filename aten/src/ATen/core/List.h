@@ -88,6 +88,7 @@ public:
 
   ListElementReference(const ListElementReference&) = delete;
   ListElementReference& operator=(const ListElementReference&) = delete;
+  ~ListElementReference() = default;
 
 private:
   ListElementReference(Iterator iter)
@@ -234,6 +235,7 @@ const IValue* ptr_to_first_element(const List<IValue>& list);
  * breaking backwards compatibility for the kernel API.
  */
 template<class T>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class List final {
 private:
   // This is an intrusive_ptr because List is a pointer type.
@@ -273,6 +275,7 @@ public:
 
   List(const List&) = default;
   List& operator=(const List&) = default;
+  ~List() = default;
 
   /**
    * Create a new List pointing to a deep copy of the same data.

@@ -4,8 +4,7 @@
 #include <memory>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Graph;
 
@@ -77,5 +76,4 @@ struct FileCheck {
   std::unique_ptr<FileCheckImpl> fcImpl;
 };
 } // namespace testing
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

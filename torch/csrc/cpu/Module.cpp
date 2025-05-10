@@ -13,6 +13,7 @@ void initModule(PyObject* module) {
   cpu.def("_is_avx512_vnni_supported", at::cpu::is_avx512_vnni_supported);
   cpu.def("_is_avx512_bf16_supported", at::cpu::is_avx512_bf16_supported);
   cpu.def("_is_amx_tile_supported", at::cpu::is_amx_tile_supported);
+  cpu.def("_is_amx_fp16_supported", at::cpu::is_amx_fp16_supported);
   cpu.def("_init_amx", at::cpu::init_amx);
   cpu.def("_L1d_cache_size", at::cpu::L1d_cache_size);
   cpu.def("_L2_cache_size", at::cpu::L2_cache_size);

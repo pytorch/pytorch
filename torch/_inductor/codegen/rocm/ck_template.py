@@ -1,7 +1,12 @@
+from typing import Any
+from typing_extensions import override
+
 import torch
 from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
 from torch._inductor.ir import IRNode
 from torch._inductor.utils import IndentedBuffer
+
+from .rocm_template import ArgInfo
 
 
 class CKTemplate(ROCmTemplate):
@@ -24,10 +29,6 @@ class CKTemplate(ROCmTemplate):
         res = super().header()
         res.splice(
             """
-                // HIP headers
-
-                #include <hip/hip_bfloat16.h>
-
                 // CK headers
 
                 #ifdef DEBUG_LOG
@@ -65,6 +66,9 @@ class CKTemplate(ROCmTemplate):
 
                 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
                 using Bilinear = ck::tensor_operation::element_wise::Bilinear;
+                using Scale = ck::tensor_operation::element_wise::Scale;
+                using ScaleAdd = ck::tensor_operation::element_wise::ScaleAdd;
+                using MultiplyMultiply = ck::tensor_operation::element_wise::MultiplyMultiply;
 
                 // see "composable_kernel/include/ck/utility/data_type.hpp"
                 using F8  = ck::f8_t;
@@ -91,3 +95,14 @@ class CKTemplate(ROCmTemplate):
             return ptr
         else:
             return f"({self._TORCH_DTYPE_TO_CK.get(node.get_dtype())}*)({ptr})"
+
+    @override
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return [ArgInfo("kBatch", "int32_t")]
+
+    @override
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
+        return [kwargs[arg.name] for arg in self.get_runtime_arg_info()]

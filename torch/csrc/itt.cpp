@@ -1,5 +1,5 @@
+#include <torch/csrc/itt.h>
 #include <torch/csrc/itt_wrapper.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace torch::profiler {
 void initIttBindings(PyObject* module) {

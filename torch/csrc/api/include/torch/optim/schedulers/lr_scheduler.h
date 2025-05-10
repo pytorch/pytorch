@@ -4,8 +4,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API LRScheduler {
  public:
@@ -33,7 +32,7 @@ class TORCH_API LRScheduler {
  private:
   void set_optimizer_lrs(const std::vector<double>& learning_rates);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   torch::optim::Optimizer& optimizer_;
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

@@ -31,7 +31,7 @@ bool initialize() {
   return is_initialized_;
 }
 
-bool C10_UNUSED deinitialize() {
+[[maybe_unused]] bool deinitialize() {
   using namespace internal;
 
   // This implementation allows for retries.

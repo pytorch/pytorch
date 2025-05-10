@@ -59,7 +59,7 @@ void clear_registered_instances(void* ptr) {
 // SymIntList is in fact only ints, and if so, you called this with T=int64_t.
 // This precondition is NOT checked at runtime.
 template <typename T>
-IValue listToIValue(py::handle obj) {
+static IValue listToIValue(py::handle obj) {
   c10::List<T> rs;
   for (auto it = obj.begin(); it != obj.end(); it++) {
     auto elm = *it;
@@ -532,7 +532,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #ifdef USE_RPC
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
-      AT_ERROR("RRef is only supported with the distributed package");
+      TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
     } break;
     case TypeKind::PyObjectType: {
@@ -612,7 +612,7 @@ py::object toPyObject(IValue ivalue) {
       }
     } else {
       guardAgainstNamedTensor<at::Tensor>(tensor);
-      return py::cast(autograd::Variable(std::move(tensor)));
+      return py::cast(std::move(tensor));
     }
   } else if (ivalue.isStorage()) {
     return py::cast(std::move(ivalue).toStorage());
@@ -641,7 +641,11 @@ py::object toPyObject(IValue ivalue) {
     for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(t);
+#else
+    return t;
+#endif
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
@@ -676,7 +680,11 @@ py::object toPyObject(IValue ivalue) {
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
       return std::move(t);
+#else
+      return t;
+#endif
     }
   } else if (ivalue.isDevice()) {
     return py::cast(std::move(ivalue).toDevice());
@@ -689,7 +697,11 @@ py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] =
           toPyObject(IValue{pair.value()});
     }
+#if C10_RETURN_MOVE_IF_OLD_COMPILER
     return std::move(py_dict);
+#else
+    return py_dict;
+#endif
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     auto RRefPtr =
@@ -697,7 +709,7 @@ py::object toPyObject(IValue ivalue) {
             std::move(ivalue).toRRef());
     return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
 #else
-    AT_ERROR("RRef is only supported with the distributed package");
+    TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
@@ -751,7 +763,8 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Missing cases in 'toPyObject'! Can't convert ",
         ivalue.tagKind(),
         " to a Python object");

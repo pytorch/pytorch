@@ -76,7 +76,7 @@ void IRVisitor::visit(const CompareSelectPtr& v) {
 
 #define IMM_VISIT(Type, Name) \
   void IRVisitor::visit(const Name##ImmPtr& v) {}
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_VISIT)
 #undef IMM_VISIT
 
 void IRVisitor::visit(const CastPtr& v) {

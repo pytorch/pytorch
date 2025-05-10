@@ -152,7 +152,7 @@ def train(db, net, device, meta_opt, epoch, log):
                 spt_logits = fnet(new_params, buffers, x_spt[i])
                 spt_loss = F.cross_entropy(spt_logits, y_spt[i])
                 grads = torch.autograd.grad(spt_loss, new_params, create_graph=True)
-                new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
+                new_params = [p - g * 1e-1 for p, g in zip(new_params, grads)]
 
             # The final set of adapted parameters will induce some
             # final loss and accuracy on the query dataset.
@@ -215,7 +215,7 @@ def test(db, net, device, epoch, log):
                 spt_logits = fnet(new_params, buffers, x_spt[i])
                 spt_loss = F.cross_entropy(spt_logits, y_spt[i])
                 grads = torch.autograd.grad(spt_loss, new_params)
-                new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
+                new_params = [p - g * 1e-1 for p, g in zip(new_params, grads)]
 
             # The query loss and acc induced by these parameters.
             qry_logits = fnet(new_params, buffers, x_qry[i]).detach()
@@ -225,7 +225,7 @@ def test(db, net, device, epoch, log):
 
     qry_losses = torch.cat(qry_losses).mean().item()
     qry_accs = 100.0 * torch.cat(qry_accs).float().mean().item()
-    print(f"[Epoch {epoch+1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}")
+    print(f"[Epoch {epoch + 1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}")
     log.append(
         {
             "epoch": epoch + 1,

@@ -17,13 +17,13 @@
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
-    "If set, keeps memory when a tensor is shrinking its size.");
+    "If set, keeps memory when a tensor is shrinking its size.")
 
 C10_DEFINE_int64(
     caffe2_max_keep_on_shrink_memory,
     LLONG_MAX,
     "The maximum memory in bytes to keep on shrink, if the difference between "
-    "tensor sizes is bigger than this then tensor will be reset.");
+    "tensor sizes is bigger than this then tensor will be reset.")
 
 namespace c10 {
 
@@ -81,11 +81,7 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     // Use std::forward to suppress static analyzer false positive.
-    : TensorImpl(
-          std::forward<Storage>(storage),
-          key_set,
-          data_type,
-          storage.device()) {}
+    : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
 
 // [Note: Python key removal]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -106,12 +102,11 @@ TensorImpl::TensorImpl(
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
-    ImplType type,
+    ImplType /*type*/,
     Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
@@ -123,7 +118,6 @@ TensorImpl::TensorImpl(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
@@ -137,7 +131,6 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     std::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
-
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {

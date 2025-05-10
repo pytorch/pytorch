@@ -647,7 +647,7 @@ void conv_depthwise2d_grad_weight_out(
 
 }  // namespace (anonymous)
 
-const Tensor& conv_depthwise2d_cuda_out(
+Tensor& conv_depthwise2d_cuda_out(
     const Tensor &input_,
     const Tensor &weight_,
     IntArrayRef kernel_size,
@@ -655,7 +655,7 @@ const Tensor& conv_depthwise2d_cuda_out(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
-    const Tensor &out) {
+    Tensor &out) {
   TORCH_CHECK(kernel_size.size() == 2);
   TORCH_CHECK(stride.size() == 2);
   TORCH_CHECK(padding.size() == 2);
@@ -760,6 +760,6 @@ std::tuple<Tensor, Tensor> conv_depthwise2d_backward_cuda(
       grad_weight);
 }
 
-REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda);
+REGISTER_CUDA_DISPATCH(conv_depthwise2d_backward_stub, &conv_depthwise2d_backward_cuda)
 
 } // namespace at::native

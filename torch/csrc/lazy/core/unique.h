@@ -1,6 +1,6 @@
 /**
  * Unique in this file is adapted from PyTorch/XLA
- * https://github.com/pytorch/xla/blob/master/third_party/xla_client/unique.h
+ * https://github.com/pytorch/xla/blob/e0e5f937a0ba8d904f9608137dc8c51ba439df2d/third_party/xla_client/unique.h
  */
 
 #pragma once
@@ -10,8 +10,7 @@
 #include <functional>
 #include <set>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Helper class to allow tracking zero or more things, which should be forcibly
 // be one only thing.
@@ -52,5 +51,4 @@ class Unique {
   std::optional<T> value_;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

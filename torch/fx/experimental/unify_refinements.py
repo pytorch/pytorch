@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from torch.fx.experimental.graph_gradual_typechecker import Refine
+from torch.fx.experimental.unification import unify, Var  # type: ignore[attr-defined]
 from torch.fx.tensor_type import TensorType
-from torch.fx.experimental.unification import Var, unify  # type: ignore[attr-defined]
 
 
 def infer_symbolic_types_single_pass(traced):
@@ -12,6 +12,7 @@ def infer_symbolic_types_single_pass(traced):
     r.refine()
     mgu = unify_eq(r.constraints)
     substitute_all_types(traced.graph, mgu)
+
 
 def infer_symbolic_types(traced):
     """
@@ -31,6 +32,7 @@ def infer_symbolic_types(traced):
     substitute_all_types(traced.graph, mgu)
 
     r.symbolic_relations()
+
 
 def convert_eq(list_of_eq):
     """
@@ -108,6 +110,7 @@ def substitute_all_types(graph, mapping):
 
     for n in graph.nodes:
         n.type = substitute_solution_one_type(mapping, n.type)
+
 
 def check_for_type_equality(g1, g2):
     """

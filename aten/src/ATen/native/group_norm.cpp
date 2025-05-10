@@ -19,18 +19,17 @@
 #endif
 
 #include <array>
-#include <functional>
 #include <tuple>
 #include <vector>
 
 namespace at::native {
 
 template <typename T>
-void check_group_norm_inputs(
+static void check_group_norm_inputs(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
-    T C,
+    const T& C,
     int64_t num_groups) {
   TORCH_CHECK(
       num_groups > 0,
@@ -72,7 +71,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-  const Tensor& beta = c10::value_or_else(beta_opt, [] { return Tensor(); });
+  const Tensor& beta = beta_opt.value_or(Tensor());
 
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
@@ -185,7 +184,7 @@ Tensor group_norm(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   const auto N = input.sym_size(0);
   const auto C = input.sym_size(1);
@@ -224,7 +223,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   auto input_shape = input.sizes();
   at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});
@@ -237,8 +236,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
       /*training=*/true,
       /*momentum=*/0,
       eps);
-  at::Tensor out = std::get<0>(outputs);
-  out = out.view(input_shape);
+  auto out = std::get<0>(outputs).view(input_shape);
   std::vector<int64_t> affine_param_shape(input.dim(), 1);
   affine_param_shape[1] = C;
   if (weight.defined() && bias.defined()) {
@@ -253,6 +251,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   // This follows the same behavior as the CPU and CUDA kernels.
   at::Tensor mean = std::get<1>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
-  return std::make_tuple(out, mean, rstd);
+  return std::make_tuple(std::move(out), std::move(mean), std::move(rstd));
 }
 } // namespace at::native

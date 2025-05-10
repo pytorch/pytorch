@@ -1,13 +1,17 @@
 # Owner(s): ["module: unknown"]
 import gc
 import unittest
-from typing import Tuple
 
 import torch
 import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocm,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils.checkpoint import checkpoint
 
 
@@ -26,6 +30,7 @@ class TestMemTracker(TestCase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @skipIfRocm()
     def test_cuda_tracker_equivalence(
         self,
     ):
@@ -155,7 +160,7 @@ class TestMemTracker(TestCase):
 
         def get_param_grad_optstate_actual_bytes(
             model: nn.Module, opt: torch.optim.Optimizer
-        ) -> Tuple[int, int, int]:
+        ) -> tuple[int, int, int]:
             param_bytes = 0
             grad_bytes = 0
             opt_state_bytes = 0
@@ -173,7 +178,7 @@ class TestMemTracker(TestCase):
 
         def get_param_grad_optstate_bytes_from_tracker(
             tracker: MemTracker,
-        ) -> Tuple[int, int, int]:
+        ) -> tuple[int, int, int]:
             snapshot = tracker.get_tracker_snapshot()
             param_bytes = snapshot[dev]["Parameter"]
             grad_bytes = snapshot[dev]["Gradient"]

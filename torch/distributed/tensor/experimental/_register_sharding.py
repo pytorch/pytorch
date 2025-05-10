@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from collections.abc import Sequence
 from functools import partial
-from typing import Callable, List, Sequence, Tuple, Union
+from typing import Callable, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
     OpSchema,
@@ -21,7 +22,7 @@ from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 __all__ = ["register_sharding"]
 
 
-def register_sharding(op: Union[OpOverload, List[OpOverload]]):
+def register_sharding(op: Union[OpOverload, list[OpOverload]]):
     """
     :meth:`register_sharding` is an experimental API that allows users to register sharding
     strategies for an operator when the tensor inputs and outputs are DTensor.
@@ -68,9 +69,8 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
 
     def custom_strategy(
         custom_sharding_fn: Callable[
-            ..., Sequence[Tuple[PlacementList, PlacementList]]
+            ..., Sequence[tuple[PlacementList, PlacementList]]
         ],
-        mesh: DeviceMesh,
         op_schema: OpSchema,
     ) -> StrategyType:
         def strategy_to_spec(strategy: object) -> object:
@@ -82,6 +82,8 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
             else:
                 return strategy
 
+        mesh = op_schema.get_mesh_from_args()
+
         args_schema = tuple(strategy_to_spec(i) for i in op_schema.args_schema)
         kwargs_schema = {
             k: strategy_to_spec(v) for k, v in op_schema.kwargs_schema.items()
@@ -89,7 +91,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
 
         acceptable_shardings = custom_sharding_fn(*args_schema, **kwargs_schema)
 
-        single_mesh_dim_strategies: List[PlacementList] = []
+        single_mesh_dim_strategies: list[PlacementList] = []
         for output_specs, input_specs in acceptable_shardings:
             single_mesh_dim_strategies.append(output_specs + input_specs)
 
@@ -110,7 +112,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
             #       2. let static_kwargkey include all the int type kwargs
             #       3. always set needs_pytree=True
             static_argnum = 100
-            static_kwargkey: List[str] = []
+            static_kwargkey: list[str] = []
             for i, arg in enumerate(op._schema.arguments):
                 if isinstance(arg.type, torch.IntType) or (
                     isinstance(arg.type, torch.OptionalType)

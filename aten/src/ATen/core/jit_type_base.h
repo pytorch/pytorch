@@ -87,29 +87,29 @@ struct IsSingletonType : public std::integral_constant<bool, false> {};
   template <> struct IsSingletonType<Type> : public std::integral_constant<bool, true> {}; \
   }
 
-TORCH_DECLARE_SINGLETON(AnyType);
-TORCH_DECLARE_SINGLETON(AnyEnumType);
-TORCH_DECLARE_SINGLETON(NumberType);
-TORCH_DECLARE_SINGLETON(FloatType);
-TORCH_DECLARE_SINGLETON(ComplexType);
-TORCH_DECLARE_SINGLETON(IntType);
-TORCH_DECLARE_SINGLETON(BoolType);
-TORCH_DECLARE_SINGLETON(StringType);
-TORCH_DECLARE_SINGLETON(StorageType);
-TORCH_DECLARE_SINGLETON(NoneType);
-TORCH_DECLARE_SINGLETON(GeneratorType);
-TORCH_DECLARE_SINGLETON(QuantizerType);
-TORCH_DECLARE_SINGLETON(QSchemeType);
-TORCH_DECLARE_SINGLETON(DeviceObjType);
-TORCH_DECLARE_SINGLETON(StreamObjType);
-TORCH_DECLARE_SINGLETON(CapsuleType);
-TORCH_DECLARE_SINGLETON(PyObjectType);
-TORCH_DECLARE_SINGLETON(ScalarTypeType);
-TORCH_DECLARE_SINGLETON(LayoutType);
-TORCH_DECLARE_SINGLETON(MemoryFormatType);
-TORCH_DECLARE_SINGLETON(AnyListType);
-TORCH_DECLARE_SINGLETON(AnyTupleType);
-TORCH_DECLARE_SINGLETON(AnyClassType);
+TORCH_DECLARE_SINGLETON(AnyType)
+TORCH_DECLARE_SINGLETON(AnyEnumType)
+TORCH_DECLARE_SINGLETON(NumberType)
+TORCH_DECLARE_SINGLETON(FloatType)
+TORCH_DECLARE_SINGLETON(ComplexType)
+TORCH_DECLARE_SINGLETON(IntType)
+TORCH_DECLARE_SINGLETON(BoolType)
+TORCH_DECLARE_SINGLETON(StringType)
+TORCH_DECLARE_SINGLETON(StorageType)
+TORCH_DECLARE_SINGLETON(NoneType)
+TORCH_DECLARE_SINGLETON(GeneratorType)
+TORCH_DECLARE_SINGLETON(QuantizerType)
+TORCH_DECLARE_SINGLETON(QSchemeType)
+TORCH_DECLARE_SINGLETON(DeviceObjType)
+TORCH_DECLARE_SINGLETON(StreamObjType)
+TORCH_DECLARE_SINGLETON(CapsuleType)
+TORCH_DECLARE_SINGLETON(PyObjectType)
+TORCH_DECLARE_SINGLETON(ScalarTypeType)
+TORCH_DECLARE_SINGLETON(LayoutType)
+TORCH_DECLARE_SINGLETON(MemoryFormatType)
+TORCH_DECLARE_SINGLETON(AnyListType)
+TORCH_DECLARE_SINGLETON(AnyTupleType)
+TORCH_DECLARE_SINGLETON(AnyClassType)
 
 namespace detail {
 template <typename T, typename Enable = void>
@@ -227,6 +227,7 @@ struct TORCH_API Type {
     SingletonOrSharedTypePtr(SingletonOrSharedTypePtr&&) noexcept = default;
     SingletonOrSharedTypePtr& operator=(const SingletonOrSharedTypePtr&) = default;
     SingletonOrSharedTypePtr& operator=(SingletonOrSharedTypePtr&&) noexcept = default;
+    ~SingletonOrSharedTypePtr() = default;
 
     T* get() const {
       return repr_.isSharedAndNonNull() ? repr_.shared_.repr_.get() : static_cast<T*>(repr_.rawRepr().first);
@@ -585,7 +586,7 @@ struct TORCH_API Type {
   virtual TypePtr createWithContained(
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<TypePtr> /*contained_types*/) const {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "type with contained types did not overload createWithContained: ",
         str());
   }

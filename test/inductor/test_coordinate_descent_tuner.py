@@ -66,7 +66,7 @@ class TestCoordinateDescentTuner(TestCase):
         """
 
         # size hint for x being 1 limits the max XBLOCK we try to be 1
-        tuner = CoordescTuner(size_hints=[1])
+        tuner = CoordescTuner(size_hints={"x": 1})
         baseline_config = triton.Config({"XBLOCK": 1}, num_warps=8, num_stages=1)
 
         def func(config):
@@ -102,15 +102,15 @@ class TestCoordinateDescentTuner(TestCase):
 
     def test_value_too_large(self):
         # Simulate a reduction
-        size_hints = [2**20, 2**20]
+        size_hints = {"x": 2**20, "y": 2**20}
 
         tuner = CoordescTuner(size_hints=size_hints)
 
         max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
-        self.assertFalse(tuner.value_too_large("RBLOCK", max_block["R"]))
-        self.assertTrue(tuner.value_too_large("RBLOCK", max_block["R"] * 2))
+        self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
+        self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
 
 
 if __name__ == "__main__":

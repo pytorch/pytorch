@@ -10,8 +10,7 @@
 #include <memory>
 #include <utility>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 /// The `clone()` method in the base `Module` class does not have knowledge of
 /// the concrete runtime type of its subclasses. Therefore, `clone()` must
 /// either be called from within the subclass, or from a base class that has
@@ -50,9 +49,8 @@ class Cloneable : public Module {
         "and not the constructor?");
     for (const auto& parameter : named_parameters(/*recurse=*/false)) {
       auto& tensor = *parameter;
-      auto data = device && tensor.device() != *device
-          ? tensor.to(*device)
-          : autograd::Variable(tensor).clone();
+      auto data = device && tensor.device() != *device ? tensor.to(*device)
+                                                       : tensor.clone();
       copy->parameters_[parameter.key()].set_data(data);
     }
     TORCH_CHECK(
@@ -63,9 +61,8 @@ class Cloneable : public Module {
         "and not the constructor?");
     for (const auto& buffer : named_buffers(/*recurse=*/false)) {
       auto& tensor = *buffer;
-      auto data = device && tensor.device() != *device
-          ? tensor.to(*device)
-          : autograd::Variable(tensor).clone();
+      auto data = device && tensor.device() != *device ? tensor.to(*device)
+                                                       : tensor.clone();
       copy->buffers_[buffer.key()].set_data(data);
     }
     TORCH_CHECK(
@@ -94,5 +91,4 @@ class Cloneable : public Module {
   }
 };
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

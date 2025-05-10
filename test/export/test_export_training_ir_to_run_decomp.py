@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: export"]
 import torch
-from torch.testing._internal.common_utils import IS_FBCODE
 
 
 try:
@@ -15,24 +14,16 @@ test_classes = {}
 
 
 def mocked_training_ir_to_run_decomp_export_strict(*args, **kwargs):
-    ep = torch.export.export_for_training(*args, **kwargs)
-    if IS_FBCODE:
-        return ep.run_decompositions(
-            {}, _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY
-        )
+    if "strict" in kwargs:
+        ep = torch.export.export_for_training(*args, **kwargs)
+    else:
+        ep = torch.export.export_for_training(*args, **kwargs, strict=True)
     return ep.run_decompositions({})
 
 
 def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
-    if "strict" in kwargs:
-        ep = torch.export.export_for_training(*args, **kwargs)
-    else:
-        ep = torch.export.export_for_training(*args, **kwargs, strict=False)
+    ep = torch.export.export_for_training(*args, **kwargs)
 
-    if IS_FBCODE:
-        return ep.run_decompositions(
-            {}, _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY
-        )
     return ep.run_decompositions({})
 
 

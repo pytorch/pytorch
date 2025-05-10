@@ -16,8 +16,7 @@
 #include <string>
 #include <type_traits>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// The base class for all modules in PyTorch.
 ///
@@ -690,13 +689,12 @@ void Module::to_impl(Ts&&... ts) {
   }
   // Then move every parameter to the new dtype/device.
   for (auto& parameter : named_parameters(/*recurse=*/false)) {
-    parameter->set_data(autograd::Variable(*parameter).to(ts...));
+    parameter->set_data(parameter->to(ts...));
   }
   // Then move every buffer to the new dtype/device.
   for (auto& buffer : named_buffers(/*recurse=*/false)) {
-    buffer->set_data(autograd::Variable(*buffer).to(ts...));
+    buffer->set_data(buffer->to(ts...));
   }
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

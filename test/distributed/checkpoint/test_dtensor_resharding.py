@@ -1,20 +1,24 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed._tensor import (
-    distribute_tensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-    zeros,
+from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
 )
-from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
-from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+from torch.testing._internal.distributed.checkpoint_utils import (
+    get_test_extension_registry,
+    Rot13Example,
+    with_temp_dir,
+)
 
 
 CHECKPOINT_DIR = "checkpoint"
@@ -41,6 +45,7 @@ for p1 in TWO_D_PLACEMENTS:
             TWO_D_TO_TWO_D_PLACEMENTS.append((p1, p2))
 
 
+@instantiate_parametrized_tests
 class TestDTensorReshardPlacementChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
@@ -49,7 +54,8 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_1d_to_1d_reshard_placement_change(self) -> None:
+    @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
+    def test_1d_to_1d_reshard_placement_change(self, extensions) -> None:
         CHECKPOINT_DIR = self.temp_dir
 
         for one_d_to_one_d_placements in ONE_D_TO_ONE_D_PLACEMENTS:
@@ -63,9 +69,11 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
             state_dict_to_save = {"dtensor": dtensor}
 
-            dist_cp.save_state_dict(
+            dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
+                storage_writer=dist_cp.FileSystemWriter(
+                    path=CHECKPOINT_DIR, _extensions=extensions
+                ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
 
@@ -74,9 +82,11 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
             state_dict_to_load = {"dtensor": zero_dtensor}
 
-            dist_cp.load_state_dict(
+            dist_cp.load(
                 state_dict=state_dict_to_load,
-                storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
+                storage_reader=dist_cp.FileSystemReader(
+                    CHECKPOINT_DIR, _extension_registry=get_test_extension_registry()
+                ),
                 planner=dist_cp.DefaultLoadPlanner(),
             )
 
@@ -115,7 +125,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
             state_dict_to_save = {"dtensor": dtensor}
 
-            dist_cp.save_state_dict(
+            dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
                 planner=dist_cp.DefaultSavePlanner(),
@@ -124,7 +134,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             zero_dtensor = zeros([4, 4], device_mesh=mesh_2d, placements=new_placement)
             state_dict_to_load = {"dtensor": zero_dtensor}
 
-            dist_cp.load_state_dict(
+            dist_cp.load(
                 state_dict=state_dict_to_load,
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
                 planner=dist_cp.DefaultLoadPlanner(),
@@ -165,7 +175,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             )
             state_dict_to_save = {"dtensor": dtensor}
 
-            dist_cp.save_state_dict(
+            dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
                 planner=dist_cp.DefaultSavePlanner(),
@@ -180,7 +190,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
                 )
                 state_dict_to_load = {"dtensor": zero_dtensor}
 
-                dist_cp.load_state_dict(
+                dist_cp.load(
                     state_dict=state_dict_to_load,
                     storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
                     planner=dist_cp.DefaultLoadPlanner(),
@@ -211,7 +221,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             )
             state_dict_to_save = {"dtensor": dtensor}
 
-            dist_cp.save_state_dict(
+            dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
                 planner=dist_cp.DefaultSavePlanner(),
@@ -226,7 +236,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
                 )
                 state_dict_to_load = {"dtensor": zero_dtensor}
 
-                dist_cp.load_state_dict(
+                dist_cp.load(
                     state_dict=state_dict_to_load,
                     storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
                     planner=dist_cp.DefaultLoadPlanner(),
@@ -255,7 +265,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
         ref_state_dict = {"dtensor": dtensor}
 
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=ref_state_dict,
             storage_writer=dist_cp.FileSystemWriter(path=self.temp_dir),
         )
@@ -264,7 +274,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         mesh_2 = init_device_mesh(self.device_type, (2, self.world_size // 2))
         dtensor = distribute_tensor(tensor, mesh_2, [Shard(0), Shard(0)])
         state_dict = {"dtensor": dtensor}
-        dist_cp.load_state_dict(
+        dist_cp.load(
             state_dict=state_dict,
             storage_reader=dist_cp.FileSystemReader(self.temp_dir),
         )

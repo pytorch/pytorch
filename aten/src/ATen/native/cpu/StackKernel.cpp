@@ -19,6 +19,6 @@ void stack_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(stack_serial_stub, &stack_serial_kernel);
+REGISTER_DISPATCH(stack_serial_stub, &stack_serial_kernel)
 
 } // namespace at::native

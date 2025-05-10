@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import operator
+from unittest.mock import patch
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -9,6 +12,7 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
+from torch.testing._internal.triton_utils import requires_cuda
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -48,7 +52,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor([3.0])
         with RewriteAddToMul():
             eager_res = fn(x)
-            compiled_res = torch._dynamo.optimize(cnt)(fn)(x)
+            compiled_res = torch.compile(fn, backend=cnt)(x)
 
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
@@ -202,6 +206,18 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             _push_on_torch_function_stack(m)
 
         self.assertEqual(_len_torch_function_stack(), 0)
+
+    def test_is_torch_function_all_disabled(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return (
+                torch._C._is_torch_function_all_disabled(),
+                torch.add(x, 1.0),
+            )
+
+        input = torch.ones(2, 2)
+        res, _ = fn(input)
+        self.assertFalse(res)
 
     def test_error_empty_stack_pop_torch_function_mode(self):
         @torch.compile(fullgraph=True)
@@ -357,9 +373,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
         fn_opt = torch.compile(fn, fullgraph=True)
-        with TestMode(), torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {TestSubclass}
-        ):
+        with TestMode():
             with torch._C.DisableTorchFunctionSubclass():
                 expected = fn(inp)
                 actual = fn_opt(inp)
@@ -388,9 +402,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
         fn_opt = torch.compile(fn, fullgraph=True)
-        with TestMode(), torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {TestSubclass}
-        ):
+        with TestMode():
             expected = fn(inp)
             actual = fn_opt(inp)
 
@@ -483,6 +495,161 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inp)
 
         self.assertEqual(expected, actual)
+
+    # Needs larger cache size since we recompile for each op
+    @patch.object(torch._dynamo.config, "recompile_limit", 48)
+    def test_builtin_equivalent_funcs(self):
+        from torch._dynamo.variables.torch_function import (
+            bin_int_ops,
+            bin_ops,
+            BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
+            tensor_and_int_ops,
+            un_int_ops,
+            un_ops,
+        )
+
+        expected_func = None
+        valid = False
+
+        class FuncEquivMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal expected_func
+                nonlocal valid
+                if not kwargs:
+                    kwargs = {}
+                if torch._dynamo.is_compiling():
+                    valid = expected_func == func
+                return super().__torch_function__(func, types, args, kwargs)
+
+        inp0 = torch.ones(1, 1)
+        inp1 = torch.ones(1, 1)
+        inp0_int = torch.ones(1, 1, dtype=torch.int32)
+        inp1_int = torch.ones(1, 1, dtype=torch.int32)
+
+        @torch.compile(fullgraph=True)
+        def fn_un(op, inp):
+            return op(inp)
+
+        @torch.compile(fullgraph=True)
+        def fn_un_int(op, inp):
+            return op(inp)
+
+        @torch.compile(fullgraph=True)
+        def fn_bin(op, inp0, inp1):
+            return op(inp0, inp1)
+
+        @torch.compile(fullgraph=True)
+        def fn_bin_int(op, inp0, inp1):
+            return op(inp0, inp1)
+
+        @torch.compile(fullgraph=True)
+        def fn_tensor_and_int(op, inp0, inp1):
+            return op(inp0, inp1)
+
+        setups_and_oplists = [
+            (lambda o: fn_un(o, inp0), un_ops),
+            (lambda o: fn_un_int(o, inp0_int), un_int_ops),
+            (lambda o: fn_bin(o, inp0, inp1), bin_ops),
+            (lambda o: fn_bin_int(o, inp0_int, inp1_int), bin_int_ops),
+            (lambda o: fn_tensor_and_int(o, inp0_int, 0), tensor_and_int_ops),
+        ]
+
+        # gather the reverse functions
+        rsetups_and_oplists = [
+            (
+                lambda o: fn_bin(o, 1, inp1),
+                bin_ops,
+            ),  # Get r* ops, (ex. __sub__(int, Tensor) -> __rsub__(Tensor, int))
+            (lambda o: fn_bin_int(o, 1, inp1_int), bin_int_ops),
+            (lambda o: fn_tensor_and_int(o, 0, inp0_int), tensor_and_int_ops),
+        ]
+
+        skips = {operator.not_}  # Has local scalar dense call which graph breaks
+        rskips = {
+            operator.matmul,
+            operator.imatmul,
+            operator.getitem,
+        }  # Doesn't type check with reversed args
+
+        def run_checks(setups_and_oplists, skips, ref_map):
+            nonlocal valid
+            nonlocal expected_func
+            for setup_fn, op_list in setups_and_oplists:
+                for op in op_list:
+                    if op in skips or op not in ref_map:
+                        continue
+                    with FuncEquivMode():
+                        expected_func = ref_map[op]
+                        setup_fn(op)
+                        self.assertTrue(valid)
+
+                    expected_func = None
+                    valid = False
+
+        run_checks(setups_and_oplists, skips, BUILTIN_TO_TENSOR_FN_MAP)
+        run_checks(rsetups_and_oplists, rskips, BUILTIN_TO_TENSOR_RFN_MAP)
+
+    def test_expand(self):
+        from torch.distributions import (
+            AffineTransform,
+            ComposeTransform,
+            Normal,
+            TanhTransform,
+            TransformedDistribution,
+        )
+
+        # https://github.com/pytorch/pytorch/issues/141232
+        with torch.device("cpu"):
+
+            @torch.compile(fullgraph=True)
+            def func(a):
+                d = TransformedDistribution(
+                    Normal(a, 1),
+                    ComposeTransform([TanhTransform(), AffineTransform(2, 2)]),
+                )
+                b = d.log_prob(d.rsample((10,)))
+                return b
+
+            func(torch.randn(3))
+
+    @requires_cuda
+    def test_flex_attention(self):
+        import torch
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        torch.set_default_device("cuda")
+
+        flex_attention = torch.compile(flex_attention, dynamic=False)
+
+        prefix_lengths = torch.arange(8)
+
+        def prefix_lm(b, h, q, kv):
+            return prefix_lengths[b] >= kv
+
+        # This runs in fullgraph already
+        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+
+    def test_register_hook(self):
+        import functools
+
+        def my_hook(grad, *, k=0):
+            return grad + k
+
+        hook = functools.partial(my_hook, k=3)
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                x.register_hook(hook)
+                y = x.mul(2)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        x = torch.ones(4, requires_grad=True)
+
+        with torch.device("cpu"):
+            torch.compile(mod, fullgraph=True)(x)
 
 
 if __name__ == "__main__":

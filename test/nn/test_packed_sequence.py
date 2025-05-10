@@ -2,7 +2,6 @@
 
 import itertools
 import random
-from typing import List
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
@@ -59,7 +58,7 @@ class PackedSequenceTest(TestCase):
                     )
                     # Apply cast to `PackedSequence` instance and unpack
                     masked = getattr(packed, cast_str)()
-                    unpacked, lengths_out = rnn_utils.pad_packed_sequence(masked)
+                    unpacked, _ = rnn_utils.pad_packed_sequence(masked)
                     self.assertEqual(unpacked.type(), expected_type_str)
 
     def test_wrong_order(self):
@@ -219,7 +218,7 @@ class PackedSequenceTest(TestCase):
         # more dimensions
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
-            sequences: List[torch.Tensor] = []
+            sequences: list[torch.Tensor] = []
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i
@@ -394,7 +393,6 @@ class PackedSequenceTest(TestCase):
                 sum(map(bool, filter(lambda x: x >= i, sorted_lengths)))
                 for i in range(1, max_length + 1)
             ]
-            offset = 0
             padded = torch.cat(
                 [
                     pad(

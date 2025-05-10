@@ -40,7 +40,7 @@ using lerp_fn_scalar = void (*)(
 using lerp_fn_tensor = void (*)(
     at::TensorIteratorBase& iter);
 
-DECLARE_DISPATCH(lerp_fn_scalar, lerp_kernel_scalar_weight);
-DECLARE_DISPATCH(lerp_fn_tensor, lerp_kernel_tensor_weight);
+DECLARE_DISPATCH(lerp_fn_scalar, lerp_kernel_scalar_weight)
+DECLARE_DISPATCH(lerp_fn_tensor, lerp_kernel_tensor_weight)
 
 } // namespace at::native

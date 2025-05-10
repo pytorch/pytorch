@@ -1,12 +1,10 @@
 # Owner(s): ["module: dynamo"]
-import logging
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-import torch._logging
 from torch._dynamo.utils import dynamo_timed
 from torch.testing._internal.common_utils import TemporaryFileName
 
@@ -44,7 +42,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         x, y = (torch.rand((2, 2)) for _ in range(2))
 
         with torch.profiler.profile(with_stack=False) as prof:
-            torch._dynamo.optimize("aot_eager")(fn)(x, y)
+            torch.compile(fn, backend="aot_eager")(x, y)
 
         self.assertTrue(
             any(f"{fn_name} (dynamo_timed)" in evt.name for evt in prof.events())
@@ -55,7 +53,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return x @ y + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = [
             (torch.rand(a, b), torch.rand(b, c), torch.rand(a, c))
@@ -73,7 +71,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return x @ y + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = (torch.rand(15, 16), torch.rand(16, 17), torch.rand(15, 17))
 
@@ -85,7 +83,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return torch.cat([x, y], dim=0) + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = (torch.rand(4, 16), torch.rand(12, 16), torch.rand(16, 16))
 
@@ -103,7 +101,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with TemporaryFileName() as fname:
             et.register_callback(fname)
             et.start()
-            out = opt_fn(*inputs)
+            opt_fn(*inputs)
             et.stop()
             et.unregister_callback()
 
@@ -144,7 +142,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return torch.add(torch.sub(x, y), z)
 
-        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager")
 
         (
             x,
@@ -165,16 +163,14 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_profiler_dynamo_compiled_region(self):
-        torch._logging.set_logs(dynamo=logging.INFO)
-
         def fn(x, y):
             r = y.sum(dim=1)
             print(r.shape)
             return x * r
 
-        fn_c = torch.compile(fn)
+        with torch.profiler.profile() as prof:
+            fn_c = torch.compile(fn)
 
-        with torch.profiler.profile(record_shapes=True) as prof:
             fn_c(
                 torch.randn(10),
                 torch.randn(10, 10),
@@ -185,20 +181,15 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 torch.randn(10, 15),
             )
 
-        for e in prof.events():
-            if e.name == "Torch-Compiled Region":
-                print(e.kwinputs)
-        self.assertTrue(
-            any(
-                e.name == "Torch-Compiled Region" and e.kwinputs["context"] == "0/0_1"
-                for e in prof.events()
-            )
-        )
-        self.assertTrue(
-            any(
-                e.name == "Torch-Compiled Region" and e.kwinputs["context"] == "1/0"
-                for e in prof.events()
-            )
+        annotations = [e.name for e in prof.events() if "Compiled" in e.name]
+        self.assertEqual(
+            annotations,
+            [
+                "Torch-Compiled Region: 0/0",
+                "Torch-Compiled Region: 1/0",
+                "Torch-Compiled Region: 0/1",
+                "Torch-Compiled Region: 1/0",
+            ],
         )
 
 

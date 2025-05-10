@@ -139,6 +139,7 @@ struct KeyOrValueEquality : functor_storage<bool, key_equal> {
 };
 static constexpr int8_t min_lookups = 4;
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct sherwood_v3_entry {
   // NOLINTNEXTLINE(modernize-use-equals-default)
   sherwood_v3_entry() {}

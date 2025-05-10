@@ -1,10 +1,10 @@
 # Owner(s): ["oncall: distributed"]
-from typing import Dict, Union
+from typing import Union
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
@@ -58,14 +58,14 @@ class MyTestModule(torch.nn.Module):
     def extra_state_tensor(self, new_extra_state_tensor: torch.Tensor) -> None:
         self._extra_state_tensor = new_extra_state_tensor
 
-    def get_extra_state(self) -> Dict[str, Union[int, torch._tensor.Tensor]]:
+    def get_extra_state(self) -> dict[str, Union[int, torch._tensor.Tensor]]:
         return {
             "extra_state": self._extra_state,
             "extra_state_tensor": self._extra_state_tensor,
         }
 
     def set_extra_state(
-        self, state: Dict[str, Union[int, torch._tensor.Tensor]]
+        self, state: dict[str, Union[int, torch._tensor.Tensor]]
     ) -> None:
         self._extra_state = state["extra_state"]  # pyre-ignore[8]
         self._extra_state_tensor = state["extra_state_tensor"]  # pyre-ignore[8]
@@ -172,7 +172,7 @@ class DTensorPlanner(DTensorTestBase):
             )
         """
 
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=state_dict,
             storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
             planner=dist_cp.DefaultSavePlanner(),
@@ -224,7 +224,7 @@ class DTensorPlanner(DTensorTestBase):
             )
         """
 
-        dist_cp.load_state_dict(
+        dist_cp.load(
             state_dict=state_dict,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             planner=dist_cp.DefaultLoadPlanner(),

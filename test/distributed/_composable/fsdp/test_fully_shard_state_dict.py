@@ -4,13 +4,13 @@ import copy
 import functools
 import unittest
 from contextlib import nullcontext
-from typing import Dict
+from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
-from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
+from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -39,33 +39,68 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             {"mlp_dim": [2, 3, 4, 5], "mesh": [fsdp_mesh]},
             self._test_dp_state_dict_save_load,
         )
+        if 16 % self.world_size == 0:
+            # TODO: remove this evenness check when FSDP2 supports uneven sharding
+            # see: https://github.com/pytorch/pytorch/blob/cbb03e69717943ddf912f9a68b3a6f935bbf21f5/torch/distributed/fsdp/_fully_shard/_fsdp_param.py#L353-L361  # noqa: B950
+            self.run_subtests(
+                {
+                    "mlp_dim": [16],
+                    "mesh": [fsdp_mesh],
+                    "use_shard_placement_fn": [True],
+                },
+                self._test_dp_state_dict_save_load,
+            )
         if self.world_size % 2 != 0:
             return
-        hsdp_mesh = init_device_mesh("cuda", (self.world_size // 2, 2))
+        hsdp_mesh = init_device_mesh(
+            "cuda",
+            (self.world_size // 2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5], "mesh": [hsdp_mesh]},
             self._test_dp_state_dict_save_load,
         )
+        self.run_subtests(
+            {"mlp_dim": [16], "mesh": [hsdp_mesh], "use_shard_placement_fn": [True]},
+            self._test_dp_state_dict_save_load,
+        )
 
-    def _test_dp_state_dict_save_load(self, mlp_dim: int, mesh: DeviceMesh):
+    def _test_dp_state_dict_save_load(
+        self, mlp_dim: int, mesh: DeviceMesh, use_shard_placement_fn: bool = False
+    ):
         torch.manual_seed(42)
         base_model = nn.Sequential(
             MLP(mlp_dim),
             nn.Sequential(MLP(mlp_dim), nn.Linear(mlp_dim, mlp_dim)),
             MLP(mlp_dim),
         )
+
+        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            return Shard(largest_dim)
+
+        shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
+        fully_shard_fn = functools.partial(
+            fully_shard, mesh=mesh, shard_placement_fn=shard_placement_fn
+        )
+
         # Check basic `reshard_after_forward=True`
         model1 = copy.deepcopy(base_model)
         for module in model1:
-            fully_shard(module, mesh=mesh)
-        fully_shard(model1, mesh=mesh)
+            fully_shard_fn(module)
+        fully_shard_fn(model1)
         self._test_state_dict_save_load(model1)
 
         # Check `reshard_after_forward=False` before and after a forward
         model2 = copy.deepcopy(base_model)
         for module in model2:
-            fully_shard(module, mesh=mesh, reshard_after_forward=False)
-        fully_shard(model2, mesh=mesh, reshard_after_forward=False)
+            fully_shard_fn(module, reshard_after_forward=False)
+        fully_shard_fn(model2, reshard_after_forward=False)
         self._test_state_dict_save_load(model2)
         ref_sharded_sd = model2.state_dict()
         inp = torch.randn((2, mlp_dim), device="cuda")
@@ -280,7 +315,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # Verify that we can load a new state dict that contains DTensors with
         # storages different from the current model parameters
-        new_state_dict: Dict[str, DTensor] = {}
+        new_state_dict: dict[str, DTensor] = {}
         for param_name, dtensor in state_dict.items():
             # Construct new DTensors to exercise load state dict writeback
             new_state_dict[param_name] = dtensor.detach().clone().fill_(new_fill_value)

@@ -186,7 +186,7 @@ OptionalType::OptionalType(const TypePtr& contained)
     std::vector<TypePtr> to_subtract{NoneType::get()};
     auto without_none = subtractTypeSetFrom(to_subtract, types_);
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    contained_ = UnionType::create({*without_none});
+    contained_ = UnionType::create({std::move(without_none.value())});
   }
   has_free_variables_ = contained_->hasFreeVariables();
 }

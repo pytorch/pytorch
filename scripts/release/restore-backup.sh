@@ -26,38 +26,6 @@ restore_libtorch() {
     aws_promote libtorch-* libtorch
 }
 
-ANACONDA="true anaconda"
-if [[ ${DRY_RUN} = "disabled" ]]; then
-    ANACONDA="anaconda"
-fi
-PYTORCH_CONDA_TO=${PYTORCH_CONDA_TO:-pytorch-test}
-
-upload_conda() {
-    local pkg
-    pkg=${1}
-    (
-        set -x
-        ${ANACONDA} upload --skip -u "${PYTORCH_CONDA_TO}" "${pkg}"
-    )
-}
-
-export -f upload_conda
-
-restore_conda() {
-    TMP_DIR="$(mktemp -d)"
-    trap 'rm -rf ${TMP_DIR}' EXIT
-    (
-        set -x
-        aws s3 cp --recursive "${PYTORCH_S3_BACKUP_BUCKET}/conda" "${TMP_DIR}/"
-    )
-    export ANACONDA
-    export PYTORCH_CONDA_TO
-    # Should upload all bz2 packages in parallel for quick restoration
-    find "${TMP_DIR}" -name '*.bz2' -type f \
-        | xargs -P 10 -I % bash -c "(declare -t upload_conda); upload_conda %"
-}
-
 
 restore_wheels
 restore_libtorch
-restore_conda

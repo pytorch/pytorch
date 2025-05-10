@@ -6,6 +6,8 @@
 #include <c10/util/TypeTraits.h>
 #include <c10/util/irange.h>
 
+#include <functional>
+
 namespace torch {
 
 namespace detail {
@@ -80,7 +82,7 @@ struct WrapMethod<R (CurrClass::*)(Args...)> {
   WrapMethod(R (CurrClass::*m)(Args...)) : m(std::move(m)) {}
 
   R operator()(c10::intrusive_ptr<CurrClass> cur, Args... args) {
-    return c10::guts::invoke(m, *cur, args...);
+    return std::invoke(m, *cur, args...);
   }
 
   R (CurrClass::*m)(Args...);
@@ -91,7 +93,7 @@ struct WrapMethod<R (CurrClass::*)(Args...) const> {
   WrapMethod(R (CurrClass::*m)(Args...) const) : m(std::move(m)) {}
 
   R operator()(c10::intrusive_ptr<CurrClass> cur, Args... args) {
-    return c10::guts::invoke(m, *cur, args...);
+    return std::invoke(m, *cur, args...);
   }
 
   R (CurrClass::*m)(Args...) const;
@@ -225,6 +227,7 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
 // Given an IValue, return true if the object contained in that IValue
 // is a custom C++ class, otherwise return false.
+// NOLINTNEXTLINE(readability-redundant-declaration)
 TORCH_API bool isCustomClass(const c10::IValue& v);
 
 // This API is for testing purposes ONLY. It should not be used in

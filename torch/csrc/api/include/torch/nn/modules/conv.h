@@ -17,8 +17,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
@@ -26,8 +25,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
  public:
   explicit ConvNdImpl(detail::ConvNdOptions<D> options_)
       : options(std::move(options_)) {
-    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-    reset();
+    ConvNdImpl::reset();
   }
 
   void reset() override {
@@ -447,5 +445,4 @@ class TORCH_API ConvTranspose3dImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ConvTranspose3d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -276,10 +276,10 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
   // Device Invariants
   // 4.1
   TORCH_CHECK(
-      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kMeta,
+      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kXPU || values.device().type() == kMeta || values.device().type() == kPrivateUse1,
       "device type of values (",
       values.device().type(),
-      ") must be CPU or CUDA or Meta");
+      ") must be one of CPU, CUDA, XPU, Meta or PrivateUse1")
   // 4.2, 4.3, 4.4
   TORCH_CHECK(
       compressed_indices.get_device() == values.get_device(),
@@ -359,6 +359,9 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
     break;
   case kCUDA:
     dispatch_key = DispatchKey::SparseCsrCUDA;
+    break;
+  case kXPU:
+    dispatch_key = DispatchKey::SparseCsrXPU;
     break;
   case kMeta:
     dispatch_key = DispatchKey::SparseCsrMeta;
@@ -459,7 +462,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
      std::optional<Device> device,
      std::optional<bool> pin_memory) {
   if (!layout) {
-    AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
+    TORCH_CHECK(false, "sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
@@ -477,7 +480,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
 }
 
 template <Layout required_layout>
-Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
+static Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
                                                  const Tensor& plain_indices,
                                                  const Tensor& values,
                                                  IntArrayRef size,
@@ -512,10 +515,10 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
     return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
   }
 
-SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
-SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc);
-SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr);
-SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc)
 
 static DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
@@ -587,7 +590,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
@@ -616,7 +619,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
@@ -964,7 +967,7 @@ Tensor empty_like_sparse_csr(
 }
 
 template <bool require_view, bool require_copy>
-Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
+static Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
 #ifndef STRIP_ERROR_MESSAGES
   constexpr const char* select_name = (require_view ? "select()" : "select_copy()");
 #endif

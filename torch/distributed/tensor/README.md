@@ -10,7 +10,7 @@ We propose distributed tensor primitives to allow easier distributed computation
 # torchrun --standalone --nnodes=1 --nproc-per-node=4 dtensor_example.py
 import os
 import torch
-from torch.distributed._tensor import init_device_mesh, Shard, distribute_tensor
+from torch.distributed.tensor import init_device_mesh, Shard, distribute_tensor
 
 # Create a mesh topology with the available devices:
 # 1. We can directly create the mesh using elastic launcher, (recommended)
@@ -54,7 +54,7 @@ Here are some basic DTensor API examples that showcase:
 ```python
 # torchrun --standalone --nnodes=1 --nproc-per-node=4 dtensor_example.py
 import torch
-from torch.distributed._tensor import DTensor, Shard, Replicate, distribute_tensor, distribute_module, init_device_mesh
+from torch.distributed.tensor import DTensor, Shard, Replicate, distribute_tensor, distribute_module, init_device_mesh
 
 # construct a device mesh with available devices (multi-host or single host)
 device_mesh = init_device_mesh("cuda", (4,))
@@ -114,7 +114,7 @@ def distribute_module(
 
 ```python
 import torch.nn as nn
-from torch.distributed._tensor import Shard, distribute_tensor, distribute_module, init_device_mesh
+from torch.distributed.tensor import Shard, distribute_tensor, distribute_module, init_device_mesh
 
 class MyModule(nn.Module):
     def __init__(self) -> None:
@@ -168,7 +168,7 @@ TensorFlow DTensor:
 -   DTensor also allows sharding and replication on an n-d mesh like device network.
 -   DTensor implements MLIR passes to do propagation and operator implementations.
 
-There are also several cutting edge research fields that embeds tensor sharding as part of the system, i.e. [Megatron-LM](https://arxiv.org/pdf/1909.08053.pdf) for tensor parallelism on Transformer based models. [DeepSpeed](https://github.com/microsoft/DeepSpeed) for training large scale models with different optimization techniques on top of tensor sharding.
+There are also several cutting edge research fields that embeds tensor sharding as part of the system, i.e. [Megatron-LM](https://arxiv.org/pdf/1909.08053.pdf) for tensor parallelism on Transformer based models. [DeepSpeed](https://github.com/deepspeedai/DeepSpeed) for training large scale models with different optimization techniques on top of tensor sharding.
 
 ### Additional context
 

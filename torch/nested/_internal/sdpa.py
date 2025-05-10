@@ -1,13 +1,15 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn
 import torch.nn.functional as F
 from torch.backends.cuda import (
+    can_use_cudnn_attention,
     can_use_efficient_attention,
     can_use_flash_attention,
+    cudnn_sdp_enabled,
     flash_sdp_enabled,
     math_sdp_enabled,
     mem_efficient_sdp_enabled,
@@ -102,6 +104,32 @@ def _check_head_dim_size_flash_nested(params: SDPAParams, debug=False) -> bool:
             log.warning(
                 "For NestedTensor inputs, Flash attention requires q,k,v to have the same "
                 "last dimension and to be a multiple of 8 and less than or equal to 256. "
+                "Got Query.size(-1): %d, Key.size(-1): %d, Value.size(-1): %d instead.",
+                query_size_last,
+                key_size_last,
+                value_size_last,
+            )
+        return False
+    return True
+
+
+def _check_head_dim_size_cudnn_nested(params: SDPAParams, debug=False) -> bool:
+    max_size = 128
+    query_size_last = params.query.size(-1)
+    key_size_last = params.key.size(-1)
+    value_size_last = params.value.size(-1)
+    same_head_dim_size = (
+        query_size_last == key_size_last and query_size_last == value_size_last
+    )
+    if not (
+        same_head_dim_size
+        and (query_size_last % 8 == 0)
+        and (query_size_last <= max_size)
+    ):
+        if debug:
+            log.warning(
+                "For NestedTensor inputs, cuDNN attention requires q,k,v to have the same "
+                "last dimension and to be a multiple of 8 and less than or equal to 128. "
                 "Got Query.size(-1): %d, Key.size(-1): %d, Value.size(-1): %d instead.",
                 query_size_last,
                 key_size_last,
@@ -267,6 +295,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
         not flash_sdp_enabled()
         and not mem_efficient_sdp_enabled()
         and not math_sdp_enabled()
+        and not cudnn_sdp_enabled()
     ):
         return SDPBackend.ERROR
 
@@ -274,11 +303,15 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
         SDPBackend.FLASH_ATTENTION,
         SDPBackend.EFFICIENT_ATTENTION,
         SDPBackend.MATH,
+        SDPBackend.CUDNN_ATTENTION,
     )
 
     params = SDPAParams(query, key, value, attn_mask, dropout, is_causal, enable_gqa)
 
     for backend in ordering:
+        if backend == SDPBackend.CUDNN_ATTENTION:
+            if can_use_cudnn_attention(params):
+                return SDPBackend.CUDNN_ATTENTION
         if backend == SDPBackend.FLASH_ATTENTION:
             if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):
                 return SDPBackend.FLASH_ATTENTION
@@ -299,10 +332,12 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
     _can_use_flash_sdpa_jagged(params, debug=True)
     log.warning("Math attention kernel not used because:")
     _can_use_math_sdpa_jagged(params, debug=True)
+    log.warning("cuDNN attention kernel not used because:")
+    can_use_cudnn_attention(params, debug=True)
     return SDPBackend.ERROR
 
 
-def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
+def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> tuple[torch.Tensor, int, int]:
     # This function is used to calculate two pieces of metadata that are needed
     # for use with flash-attention and efficient_attention kernels. They are the
     # cumulative sequence_length over a batch of sequences and the maximum
@@ -323,7 +358,6 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
         cumulative_seqlen = (
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
-        batch_size = qkv.size(0)
         max_seqlen = qkv._get_max_seqlen()
         # TODO: Explore performance impact when compiling
         n_elem = int(cumulative_seqlen[-1].item())
@@ -568,8 +602,9 @@ def _sdpa_nested_preprocessing(query, key, value):
 
     output_nt_info = {
         "offsets": q_t.offsets(),
-        "_max_seqlen": q_t._get_max_seqlen(),
-        "_min_seqlen": q_t._get_min_seqlen(),
+        "lengths": q_t.lengths(),
+        "max_seqlen": q_t._get_max_seqlen(),
+        "min_seqlen": q_t._get_min_seqlen(),
     }
 
     return (
@@ -623,7 +658,7 @@ def _is_computing_meta_flops(x):
             torch.utils._python_dispatch._get_current_dispatch_mode_stack()
         )
         return any(
-            type(x) == torch.utils.flop_counter.FlopCounterMode
+            type(x) == torch.utils.flop_counter._FlopCounterMode
             for x in torch_dispatch_mode_stack
         )
     return False
@@ -634,7 +669,7 @@ def _autocast(
     key: torch.Tensor,
     value: torch.Tensor,
     attn_mask: Optional[torch.Tensor],
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """
     [Autocasting SDPA for NJT]
 
@@ -693,7 +728,9 @@ def jagged_scaled_dot_product_attention(
         and isinstance(key, NestedTensor)
         and isinstance(value, NestedTensor)
     )
-    from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+    from torch.nested._internal.nested_tensor import (
+        nested_view_from_values_offsets_lengths,
+    )
 
     # Special path for non-ragged sequence length (e.g. for SAM where we have a ragged
     # second batch dim instead). For this case, we can just send the dense buffers through
@@ -710,7 +747,13 @@ def jagged_scaled_dot_product_attention(
             is_causal=is_causal,
             scale=scale,
         )
-        return nested_view_from_values_offsets(output, query.offsets())
+        return nested_view_from_values_offsets_lengths(
+            output,
+            query.offsets(),
+            query.lengths(),
+            min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
+            max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+        )
 
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad
 
@@ -742,13 +785,12 @@ def jagged_scaled_dot_product_attention(
             max_seqlen_batch_kv,
             output_nt_info,
         ) = _sdpa_nested_preprocessing(query_padded, key_padded, value_padded)
-
         (
             attention,
-            logsumexp,
-            philox_seed,
-            philox_offset,
-            debug_attn_mask,
+            _logsumexp,
+            _philox_seed,
+            _philox_offset,
+            _debug_attn_mask,
         ) = torch.ops.aten._flash_attention_forward(
             query_buffer_reshaped,
             key_buffer_reshaped,
@@ -762,13 +804,10 @@ def jagged_scaled_dot_product_attention(
             False,
             scale=og_scale,
         )
-
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = nested_view_from_values_offsets(
+        attention = nested_view_from_values_offsets_lengths(
             attention,  # output from flash_attn is [total_q, num_heads, head_size_og]
-            output_nt_info["offsets"],
-            min_seqlen=output_nt_info["_min_seqlen"],
-            max_seqlen=output_nt_info["_max_seqlen"],
+            **output_nt_info,
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
     elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
@@ -803,28 +842,61 @@ def jagged_scaled_dot_product_attention(
             compute_logsumexp,
             scale=scale,
         )
-
         # Reshape output to convert nnz to batch_size and seq_len
-        return nested_view_from_values_offsets(
+        return nested_view_from_values_offsets_lengths(
             attention.squeeze(0),
-            output_nt_info["offsets"],
-            min_seqlen=output_nt_info["_min_seqlen"],
-            max_seqlen=output_nt_info["_max_seqlen"],
+            **output_nt_info,
+        ).transpose(1, 2)
+    elif backend_choice == SDPBackend.CUDNN_ATTENTION:
+        (
+            query_reshaped,
+            key_reshaped,
+            value_reshaped,
+            cumulative_sequence_length_q,
+            cumulative_sequence_length_kv,
+            max_seqlen_batch_q,
+            max_seqlen_batch_kv,
+            output_nt_info,
+        ) = _sdpa_nested_preprocessing(query, key, value)
+        (
+            attention,
+            logsumexp,
+            cum_seqlen_q,
+            cum_seqlen_kv,
+            max_seqlen_q,
+            max_seqlen_kv,
+            seed,
+            offset,
+            _,
+        ) = torch.ops.aten._cudnn_attention_forward(
+            query_reshaped,
+            key_reshaped,
+            value_reshaped,
+            attn_mask,
+            cumulative_sequence_length_q,
+            cumulative_sequence_length_kv,
+            max_seqlen_batch_q,
+            max_seqlen_batch_kv,
+            compute_logsumexp,
+            dropout_p,
+            is_causal,
+            False,
+            scale=scale,
+        )
+        return nested_view_from_values_offsets_lengths(
+            attention,
+            **output_nt_info,
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
         # save the offsets and shape of the inputs, so we can reshape the final output
         # query @ key = attn: [B, D1, j0, D'] @ [B, D1, D' j1] = [B, D1, j0, j1]
         # attn @ value = out: [B, D1, j0, j1] @ [B, D1, j1, D2] = [B, D1, j0, D2]
         offsets = query.offsets()
+        q_lengths = query.lengths()
+        min_seqlen = query._maybe_min_seqlen
+        max_seqlen = query._maybe_max_seqlen
         d1 = query._size[1]
         d2 = value._size[-1]
-
-        min_seqlen_tensor = query._metadata_cache.get(
-            "min_seqlen", None
-        )  # type: ignore[attr-defined]
-        max_seqlen_tensor = query._metadata_cache.get(
-            "max_seqlen", None
-        )  # type: ignore[attr-defined]
 
         # convert jagged layout Nested Tensor to strided layout Nested Tensor
         # which support the math implementation of SDPA
@@ -844,24 +916,15 @@ def jagged_scaled_dot_product_attention(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
 
-        from torch.nested._internal.nested_tensor import _load_val_from_tensor
-
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
         attn_out = attn_out.view(-1, d1, d2)
-        attn_out = nested_view_from_values_offsets(
+        attn_out = nested_view_from_values_offsets_lengths(
             attn_out,
             offsets,
-            min_seqlen=(
-                None
-                if min_seqlen_tensor is None
-                else _load_val_from_tensor(min_seqlen_tensor)
-            ),
-            max_seqlen=(
-                None
-                if max_seqlen_tensor is None
-                else _load_val_from_tensor(max_seqlen_tensor)
-            ),
+            lengths=q_lengths,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
         ).transpose(1, 2)
 
         return attn_out

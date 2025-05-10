@@ -2,9 +2,10 @@
 # mypy: allow-untyped-defs
 import collections
 import copyreg
+from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -25,7 +26,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
+_cache: dict[tuple[int, str], Optional[Tensor]] = {}
 
 
 @contextmanager
@@ -160,14 +161,12 @@ class ParametrizationList(ModuleList):
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     try:
-                        new = module.right_inverse(new)
+                        new = module.right_inverse(new)  # type: ignore[operator]
                     except NotImplementedError:
                         pass
                 # else, or if it throws, we assume that right_inverse is the identity
 
-        if not isinstance(new, Tensor) and not isinstance(
-            new, collections.abc.Sequence
-        ):
+        if not isinstance(new, Tensor) and not isinstance(new, Sequence):
             raise ValueError(
                 "'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
                 f"Got {type(new).__name__}"
@@ -247,7 +246,7 @@ class ParametrizationList(ModuleList):
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
-                    value = module.right_inverse(value)
+                    value = module.right_inverse(value)  # type: ignore[operator]
                 else:
                     raise RuntimeError(
                         f"parametrization {type(module).__name__} does not implement "

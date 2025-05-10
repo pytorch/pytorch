@@ -62,6 +62,7 @@ ThreadPool::~ThreadPool() {
   for (auto& t : threads_) {
     try {
       t.join();
+      // NOLINTNEXTLINE(bugprone-empty-catch)
     } catch (const std::exception&) {
     }
   }
@@ -169,5 +170,5 @@ C10_DEFINE_SHARED_REGISTRY(
     TaskThreadPoolBase,
     int,
     int,
-    bool);
+    bool)
 } // namespace c10

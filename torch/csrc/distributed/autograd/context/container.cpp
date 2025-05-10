@@ -3,9 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
@@ -53,7 +51,7 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
     return container;
   }
 
-  container.worker_id_ = worker_id;
+  container.worker_id_ = static_cast<int16_t>(worker_id);
   container.next_context_id_ = static_cast<int64_t>(worker_id)
       << kAutoIncrementBits;
   container.next_autograd_message_id_ = static_cast<int64_t>(worker_id)
@@ -329,6 +327,4 @@ int64_t DistAutogradContainer::currentContextId() {
   return current_context_id_;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

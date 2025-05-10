@@ -58,7 +58,7 @@ struct BenchmarkConfig {
   // If set autograd profiler will be enabled. I.e. this variable would be
   // created before the main benchmark loop (but after the warmup):
   // RecordProfile guard(profiler_output_path);
-  std::string profiler_output_path{""};
+  std::string profiler_output_path;
 };
 
 namespace detail {
@@ -103,6 +103,7 @@ struct C10_HIDDEN ModuleInput {
   ModuleInput(const ModuleInput&) = delete;
   ModuleInput& operator=(ModuleInput& other) = delete;
   ModuleInput& operator=(ModuleInput&& other) = delete;
+  ~ModuleInput() = default;
 
   ModuleInput(py::args&& args, py::kwargs&& kwargs)
       : args(std::move(args)), kwargs(std::move(kwargs)) {}

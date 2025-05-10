@@ -118,7 +118,7 @@ struct LexerImpl {
   void* loc() const {
     return (void*)next_;
   }
-  LexerImpl& skip(int64_t bytes) {
+  LexerImpl& skip(size_t bytes) {
     next_ += bytes;
     return *this;
   }

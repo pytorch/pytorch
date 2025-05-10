@@ -1,12 +1,10 @@
 # Owner(s): ["module: inductor"]
 
-from typing import List
-
 import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import ReinplaceCounters
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
@@ -31,7 +29,11 @@ device = GPU_TYPE
 
 
 def num_reinplacing_failures():
-    return counters["inductor"]["possibly_missed_reinplacing_opportunities"]
+    return ReinplaceCounters.get_total_missed()
+
+
+def miss_inplaced_bytes():
+    return ReinplaceCounters.get_total_missed_bytes()
 
 
 @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
@@ -81,7 +83,7 @@ def boo(x: torch.Tensor) -> None:
 
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
-        counters.clear()
+        ReinplaceCounters.clear()
         return super().setUp()
 
     def _test(self, f):
@@ -134,7 +136,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self._test(f)
 
     def test_counters_functionalize_old(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x):
             out = torch.empty_like(x)
@@ -151,9 +153,10 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # we're artificially creating this example to test the counter.
         # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
         self.assertEqual(num_reinplacing_failures(), 1)
+        self.assertEqual(miss_inplaced_bytes(), 12)
 
     def test_counters_functionalize_v2(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x):
             out = torch.empty_like(x)
@@ -193,7 +196,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
     def test_view_inplaced_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            torch.ops.aten.select.int(arg0_1, 0, 0)
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
                 _x_base_index=0,
@@ -203,7 +206,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
-            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return ()
 
         x1 = torch.randn(3, device=device)
@@ -215,7 +218,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     # introduce a view another_view that is used `after` the copy
     def test_view_inplaced2_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
             another_view = arg0_1[2]
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
@@ -226,7 +229,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
-            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return another_view
 
         x1 = torch.randn(3, device=device)
@@ -238,7 +241,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     # introduce a view another_view that is used `before` the copy
     def test_views_not_inplaced_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
             another_view = arg0_1[2]
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
@@ -250,7 +253,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             )
             getitem_1 = auto_functionalized[1]
             use_another_view = another_view * 10
-            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return use_another_view
 
         x1 = torch.randn(3, device=device)
@@ -262,8 +265,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     # a view over input without copy node, inplace not allowed
     def test_views_not_inplaced2_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
-            another_view = arg0_1[2]
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            _another_view = arg0_1[2]
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
                 _x_base_index=0,
@@ -272,7 +275,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _x_storage_offset=0,
                 _all_bases=[arg0_1],
             )
-            getitem_1 = auto_functionalized[1]
+            _getitem_1 = auto_functionalized[1]
             return
 
         x1 = torch.randn(3, device=device)
@@ -294,7 +297,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _x_storage_offset=0,
                 _all_bases=[a],
             )
-            getitem_1 = auto_functionalized[1]
+            _getitem_1 = auto_functionalized[1]
             return another_view
 
         x1 = torch.randn(3, device=device)
@@ -309,7 +312,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 with inductor_config.patch(
                     {"enable_auto_functionalized_v2": enable_v2}
                 ):
-                    counters.clear()
+                    ReinplaceCounters.clear()
 
                     def f(x):
                         out1 = torch.empty_like(x)
@@ -324,7 +327,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                     self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_multiple_mutations(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x, out):
             sin(x, out)
@@ -340,7 +343,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_multiple_intermediate(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x):
             out = torch.empty_like(x)
@@ -358,7 +361,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         with inductor_config.patch({"enable_auto_functionalized_v2": True}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: List[Tensor]) -> None:
+            def mutate_op(y: list[Tensor]) -> None:
                 y[0].add_(2)
                 y[1].add_(3)
 
@@ -378,13 +381,14 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # We can inplace the base y. no clones emitted.
             self.assertEqual(num_reinplacing_failures(), 0)
+            self.assertEqual(miss_inplaced_bytes(), 0)
             self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
 
     def test_lists_old_functionalize(self):
         with inductor_config.patch({"enable_auto_functionalized_v2": False}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: List[Tensor]) -> None:
+            def mutate_op(y: list[Tensor]) -> None:
                 y[0].add_(2)
                 y[1].add_(3)
 
@@ -404,6 +408,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # Can't reinplace on views yet (1 for the "entire list" failing to reinplace)
             self.assertEqual(num_reinplacing_failures(), 1)
+            self.assertEqual(miss_inplaced_bytes(), 8)
 
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
             self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
@@ -443,7 +448,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             return MySin.apply(x)
 
         x = torch.randn(3, requires_grad=True, device=device)
-        y = f(x)
+        f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
 
 

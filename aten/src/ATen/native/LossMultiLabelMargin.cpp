@@ -76,7 +76,7 @@ static void multilabel_margin_loss_forward_out_frame(
 
     accscalar_t sum = 0;
 
-    for (C10_UNUSED const auto t : c10::irange(nframe)) {
+    for ([[maybe_unused]] const auto t : c10::irange(nframe)) {
       sum += multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -117,8 +117,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
 #ifndef STRIP_ERROR_MESSAGES
   auto target_arg = TensorArg(target, "target", 2);
 #endif
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   const int64_t ndims = input.dim();
   multilabel_margin_loss_shape_check(nframe, dim, ndims, input, target);
 
@@ -180,7 +179,7 @@ static void multilabel_margin_loss_backward_out_frame(
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
   scalar_t* grad_input_row_data = grad_input.mutable_data_ptr<scalar_t>();
-  for (C10_UNUSED const auto t : c10::irange(nframe)) {
+  for ([[maybe_unused]] const auto t : c10::irange(nframe)) {
     for (const auto dt : c10::irange(dim)) {
       int64_t target_idx = target_data[dt];
       if (target_idx < 0) {
@@ -230,8 +229,7 @@ static void multilabel_margin_loss_backward_out_cpu_template(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t nframe, dim;
+  int64_t nframe = 0, dim = 0;
   CheckedFrom c = "multilabel_margin_loss_backward_cpu_template";
   auto target_arg = TensorArg(target, "target", 3);
   auto is_target_arg = TensorArg(is_target, "is_target", 5);

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import torch
 
@@ -95,9 +96,9 @@ import torch.nn.functional as F
 # Testing utils
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
-from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
-    freeze_rng_state, slowTest, TemporaryFileName, \
+from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -107,10 +108,10 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
 from torch.testing._internal.jit_metaprogramming_utils import (
     get_script_args,
     create_input, unpack_variables,
-    additional_module_tests, EXCLUDE_SCRIPT_MODULES,
+    get_all_nn_module_tests, EXCLUDE_SCRIPT_MODULES,
     get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template)
 
-from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
+from torch.testing._internal.common_nn import criterion_tests
 
 # For testing truediv in python 2
 from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
@@ -456,6 +457,13 @@ class TestJit(JitTestCase):
                 return x
 
             pkl_fn = pickle.dumps(fn, protocol=0)
+
+    def test_script_fn_valid_name(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+        self.assertIsNotNone(fn.__name__)
+        self.assertIsNotNone(fn.__qualname__)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
@@ -1753,8 +1761,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             n_ = g2.createClone(node, lambda x: g_to_g2[x])
             g2.appendNode(n_)
-            for o, no in zip(node.outputs(), n_.outputs()):
-                g_to_g2[o] = no
+            g_to_g2.update(zip(node.outputs(), n_.outputs()))
 
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])
@@ -8237,6 +8244,42 @@ dedent """
         with self.assertRaises(RuntimeError):
             parse_ir(g, parse_tensor_constants=False)
 
+    def test_parse_scalar_tensor_constants(self):
+        for dtype_str, dtype, value in [
+            ("Float", torch.float32, 1234.5),
+            ("Double", torch.float64, 1234.5),
+            ("BFloat16", torch.bfloat16, 123.5),
+            ("Int", torch.int32, 12345),
+            ("Long", torch.int64, 12345),
+            ("Short", torch.int16, 12345),
+        ]:
+            g_str = f"""
+                graph():
+                  %1 : {dtype_str}(requires_grad=0, device=cpu) = prim::Constant[value={{{value}}}]()
+                  return (%1)
+            """
+
+            jit_graph = parse_ir(g_str, parse_tensor_constants=True)
+
+            node = next(
+                n
+                for n in jit_graph.nodes()
+                if isinstance(n.output().type(), torch.TensorType)
+            )
+            assert isinstance(node.output().type(), torch.TensorType)
+            t = node.t("value")
+            assert isinstance(t, torch.Tensor)
+            self.assertEqual(t.dtype, dtype)
+            self.assertEqual(t.item(), value)
+
+        with self.assertRaises(RuntimeError):
+            g_str = """
+                graph():
+                  %1 : Long(requires_grad=0, device=cpu) = prim::Constant[value={invalid}]()
+                  return (%1)
+            """
+            jit_graph = parse_ir(g_str, parse_tensor_constants=True)
+
     def test_parse_nested_names(self):
         g_str = """
     graph(%x.1 : Tensor):
@@ -13580,7 +13623,7 @@ dedent """
             self.checkScript(test_oct, (n,))
             self.checkScript(test_hex, (n,))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_get_set_state(self):
         class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
@@ -14147,6 +14190,43 @@ dedent """
             self.assertEqual(script_out, eager_out)
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
+
+    def test_parse_generator(self):
+        def _test_parse_generator(seed):
+            jit_graph = parse_ir(
+                f"""
+                graph():
+                  %0 : float = prim::Constant[value=-0.31622776601683789]()
+                  %1 : float = prim::Constant[value=0.31622776601683789]()
+                  %2 : Generator = prim::Constant[value=torch.Generator(device="cpu", seed={seed})]()
+                  %3 : NoneType = prim::Constant()
+                  %4 : int[] = prim::Constant[value=[]]()
+                  %5 : int = prim::Constant[value=6]()
+                  %6 : Device = prim::Constant[value="cpu"]()
+                  %7 : Tensor = aten::empty(%4, %5, %3, %6, %3, %3)
+                  %8 : Float() = aten::uniform(%7, %0, %1, %2)
+                  return (%8)
+                """,
+            )
+
+            node = next(
+                n
+                for n in jit_graph.nodes()
+                if isinstance(n.output().type(), torch._C._GeneratorType)
+            )
+            assert isinstance(node.output().type(), torch._C._GeneratorType)
+            g = node.ival("value")
+            assert isinstance(g, torch.Generator)
+            self.assertEqual(g.initial_seed(), seed)
+
+        _test_parse_generator(2024)
+        _test_parse_generator(2**63 - 1)
+
+        with self.assertRaisesRegex(RuntimeError, "Seed must be a non-negative integer"):
+            _test_parse_generator(-2024)
+
+        with self.assertRaisesRegex(RuntimeError, "Number is too big"):
+            _test_parse_generator(2**63)
 
     def test_early_return_rewrite(self):
         def test_foo(x: bool):
@@ -14754,30 +14834,31 @@ dedent """
             torch.jit.script(w)
 
         # testing overload declared first, then non-overload
-        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
-            class W3(torch.nn.Module):
-                @torch.jit._overload_method  # noqa: F811
-                def forward(self, x):  # noqa: F811
-                    # type: (int) -> int
-                    pass
+        if sys.version_info < (3, 13):  # test broken in 3.13
+            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+                class W3(torch.nn.Module):
+                    @torch.jit._overload_method  # noqa: F811
+                    def forward(self, x):  # noqa: F811
+                        # type: (int) -> int
+                        pass
 
-                @torch.jit._overload_method  # noqa: F811
-                def forward(self, x):  # noqa: F811
-                    # type: (Tensor) -> Tensor
-                    pass
+                    @torch.jit._overload_method  # noqa: F811
+                    def forward(self, x):  # noqa: F811
+                        # type: (Tensor) -> Tensor
+                        pass
 
-                def forward(self, x):  # noqa: F811
-                    return x + 5
+                    def forward(self, x):  # noqa: F811
+                        return x + 5
 
-            a = W3()
-            b = torch.jit.script(a)
+                a = W3()
+                b = torch.jit.script(a)
 
-            class W3(torch.nn.Module):
-                def forward(self, x):  # noqa: F811
-                    return x + 5 + 10
+                class W3(torch.nn.Module):
+                    def forward(self, x):  # noqa: F811
+                        return x + 5 + 10
 
-            a = W3()
-            b = torch.jit.script(a)
+                a = W3()
+                b = torch.jit.script(a)
 
         # testing non-overload declared first, then overload
         class W2(torch.nn.Module):
@@ -14806,8 +14887,9 @@ dedent """
             def forward(self, x):
                 return self.hello(1), self.hello(x)
 
-        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
-            a = torch.jit.script(W2())
+        if sys.version_info < (3, 13):  # test broken in 3.13
+            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+                a = torch.jit.script(W2())
 
     def test_narrow_copy(self):
         def foo(a):
@@ -15269,7 +15351,7 @@ dedent """
             return 1
         self.assertEqual(fun(), 1)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
         tester = self
@@ -15360,7 +15442,6 @@ dedent """
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.triplet_margin_loss)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self) -> None:
@@ -15385,16 +15466,17 @@ dedent """
             m.save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
-            pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
+            pickled_data = archive.read(f"{archive_name}/data.pkl")
 
             out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
+            archive.close()
 
             FileCheck().check_count(s1, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True) \
                 .check_count(s2, 1, exactly=True) \
-                .check_count("BINGET", 2, exactly=True).run(out.getvalue())
+                .check_count("BINGET", 2, exactly=True).run(disassembled)
 
     def test_sys_stdout_override(self):
         @torch.jit.script
@@ -16008,44 +16090,6 @@ class TestJitGeneratedModule(JitTestCase):
 class TestJitGeneratedFunctional(JitTestCase):
     pass
 
-# UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
-# and we have to disable the failing tests here instead.
-UBSAN_DISABLED_TESTS = [
-    "test___rdiv___constant",
-    "test___rdiv___scalar_constant",
-    "test_addcdiv",
-    "test_addcdiv_broadcast_all",
-    "test_addcdiv_broadcast_rhs",
-    "test_addcdiv_scalar",
-    "test_addcdiv_scalar_broadcast_lhs",
-    "test_addcdiv_scalar_broadcast_rhs",
-    "test_addcdiv_scalar_scale",
-    "test_addcdiv_scalar_scale_broadcast_lhs",
-    "test_addcdiv_scalar_scale_broadcast_rhs",
-    "test_addcdiv_scale",
-    "test_addcdiv_scale_broadcast_all",
-    "test_addcdiv_scale_broadcast_rhs",
-    "test_add_broadcast_all",
-    "test_add_broadcast_lhs",
-    "test_add_broadcast_rhs",
-    "test_add_constant",
-    "test_add_scalar",
-    "test_add_scalar_broadcast_lhs",
-    "test_add_scalar_broadcast_rhs",
-    "test_div",
-    "test_div_broadcast_all",
-    "test_div_broadcast_lhs",
-    "test_div_broadcast_rhs",
-    "test_div_scalar",
-    "test_div_scalar_broadcast_lhs",
-    "test_div_scalar_broadcast_rhs",
-    "test_rsqrt",
-    "test_rsqrt_scalar",
-    "test_add",
-    "test_reciprocal",
-    "test_reciprocal_scalar",
-]
-
 L = 20
 M = 10
 S = 5
@@ -16183,8 +16227,7 @@ def post_add_test(test_name, skipTestIf, do_test, test_class):
     for skip in skipTestIf:
         do_test = skip(do_test)
 
-    if not (TEST_WITH_UBSAN and test_name in UBSAN_DISABLED_TESTS):
-        setattr(test_class, test_name, do_test)
+    setattr(test_class, test_name, do_test)
 
 
 def normalize_check_ad(check_ad, name):
@@ -16211,7 +16254,7 @@ class TestProducerVersion(TestCase):
         # issue gh-32561
         self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
 
-for test in module_tests + new_module_tests + additional_module_tests:
+for test in get_all_nn_module_tests():
     add_nn_module_test(**test)
 
 for test in criterion_tests:

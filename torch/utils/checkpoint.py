@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import platform
@@ -12,7 +11,6 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1154,12 +1152,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
-    # There should probably be a better way to do this...
-    # TODO: unify _is_compiling across all compile stacks
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and is_fun(arg):
-            return True
-    return False
+    # Checking that a functional mode is active should always do what we want
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
 
 
 class _VersionWrapper:
@@ -1431,7 +1425,7 @@ def _checkpoint_without_reentrant_generator(
     """Checkpointing without reentrant autograd.
 
     Args:
-        function: describes what to run in the forward pass of the model or
+        fn: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the

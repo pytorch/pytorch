@@ -295,6 +295,7 @@ def define_qnnpack(third_party, labels = []):
         compiler_flags = [
             "-O2",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
+            "-fvisibility=default",
         ],
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
@@ -435,9 +436,6 @@ def define_qnnpack(third_party, labels = []):
         # @autodeps-skip
         name = "ukernels_asm",
         srcs = [
-            # Dummy empty source file to work around link error on x86-64 Android
-            # when static library contains no symbols.
-            "wrappers/dummy.c",
             # AArch32 ukernels
             "wrappers/hgemm/8x8-aarch32-neonfp16arith.S",
             "wrappers/q8conv/4x8-aarch32-neon.S",
@@ -466,6 +464,7 @@ def define_qnnpack(third_party, labels = []):
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         compiler_flags = [
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
+            "-Wno-unused-command-line-argument",
         ],
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",

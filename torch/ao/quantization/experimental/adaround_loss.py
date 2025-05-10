@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import numpy as np
 
 import torch
@@ -21,7 +19,7 @@ class AdaptiveRoundingLoss(torch.nn.Module):
         self,
         max_iter: int,
         warm_start: float = 0.2,
-        beta_range: Tuple[int, int] = (20, 2),
+        beta_range: tuple[int, int] = (20, 2),
         reg_param: float = 0.001,
     ) -> None:
         super().__init__()
@@ -87,7 +85,7 @@ class AdaptiveRoundingLoss(torch.nn.Module):
         original_output: torch.Tensor,
         V: torch.Tensor,
         curr_iter: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the asymmetric reconstruction formulation as eq [25]
         """

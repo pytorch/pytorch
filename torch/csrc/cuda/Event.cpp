@@ -183,6 +183,7 @@ static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
 static struct PyGetSetDef THCPEvent_properties[] = {
     {"device", (getter)THCPEvent_get_device, nullptr, nullptr, nullptr},
     {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
+    {"event_id", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
@@ -200,7 +201,8 @@ static PyMethodDef THCPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THCPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._CudaEventBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._CudaEventBase", /* tp_name */
     sizeof(THCPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THCPEvent_dealloc, /* tp_dealloc */
@@ -240,6 +242,9 @@ PyTypeObject THCPEventType = {
 };
 
 void THCPEvent_init(PyObject* module) {
+  TORCH_CHECK(THPEventClass, "THPEvent has not been initialized yet.");
+  Py_INCREF(THPEventClass);
+  THCPEventType.tp_base = THPEventClass;
   THCPEventClass = (PyObject*)&THCPEventType;
   if (PyType_Ready(&THCPEventType) < 0) {
     throw python_error();

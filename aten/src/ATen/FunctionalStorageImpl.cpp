@@ -83,10 +83,10 @@ static c10::SymInt get_nbytes(const Tensor& value) {
     if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
     }
-    return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.sym_storage_offset());
+    return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(),static_cast<int64_t>(value.dtype().itemsize()), value.sym_storage_offset());
   }
   // XLA storage objects also do not properly track nbytes.
-  return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());
+  return static_cast<int64_t>(at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset()));
 }
 
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)

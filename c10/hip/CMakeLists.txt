@@ -33,6 +33,7 @@ file(GLOB_RECURSE C10_HIP_HEADERS *.h)
 
 if(NOT BUILD_LIBTORCHLESS)
   hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
+  torch_compile_options(c10_hip)
 
   # Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
   target_compile_options(c10_hip PRIVATE ${HIP_CXX_FLAGS})
@@ -48,9 +49,7 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10_hip
-  target_link_libraries(c10_hip PUBLIC c10)
-
-  target_link_libraries(c10_hip PUBLIC ${PYTORCH_HIP_LIBRARIES})
+  target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::amdhip64)
 
   target_include_directories(
       c10_hip PUBLIC

@@ -1,9 +1,9 @@
+#include <array>
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/core/Array.h>
 
 using namespace at::native;
 using namespace at::native::memory;
@@ -27,7 +27,7 @@ void reset_buffers() {
   }
 }
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && !defined(_WIN32)
 TEST(TestLoops, HasSameArgTypes) {
   // This is a compile-time unit test. If this file compiles without error,
   // then the test passes and during runtime, we just need to return.
@@ -47,11 +47,11 @@ TEST(TestLoops, HasSameArgTypes) {
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
-  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 8);
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 1), 1);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 1), 1);
@@ -65,8 +65,8 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 4), 2);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 4), 1);
 
-  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 8), 4);
-  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 8), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 8), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 8), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr + 8), 4);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr + 8), 2);
   ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr + 8), 1);
@@ -77,12 +77,12 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   static_assert(vec_size <= thread_work_size() && thread_work_size() % vec_size == 0, "Invalid vec_size");
-  using array_t = at::detail::Array<char*, 2>;
+  using array_t = std::array<char*, 2>;
   array_t data;
   data[0] = reinterpret_cast<char *>(dst);
   data[1] = reinterpret_cast<char *>(src);
   int idx = blockIdx.x;
-  using vectorized = policies::vectorized<vec_size, array_t>;
+  using vectorized = policies::vectorized<vec_size, array_t, thread_work_size()>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size()];
 #if !defined(USE_ROCM)

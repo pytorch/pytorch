@@ -40,6 +40,10 @@ struct C10_API PythonGILHooksRegisterer {
   explicit PythonGILHooksRegisterer(PythonGILHooks* factory) {
     SetPythonGILHooks(factory);
   }
+  PythonGILHooksRegisterer(const PythonGILHooksRegisterer&) = delete;
+  PythonGILHooksRegisterer(PythonGILHooksRegisterer&&) = delete;
+  PythonGILHooksRegisterer& operator=(const PythonGILHooksRegisterer&) = delete;
+  PythonGILHooksRegisterer& operator=(PythonGILHooksRegisterer&&) = delete;
   ~PythonGILHooksRegisterer() {
     SetPythonGILHooks(nullptr);
   }

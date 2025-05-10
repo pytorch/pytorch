@@ -35,6 +35,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
+    - [Building a PDF](#building-a-pdf)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Resources](#resources)
@@ -160,16 +161,14 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 #### Prerequisites
 If you are installing from source, you will need:
-- Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
+- Python 3.9 or later
 - A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
-- Visual Studio or Visual Studio Build Tool on Windows
+- Visual Studio or Visual Studio Build Tool (Windows only)
 
 \* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
-
-\* We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 An example of environment setup is shown below:
 
@@ -196,7 +195,7 @@ If you want to compile with CUDA support, [select a supported version of CUDA fr
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v8.5 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
+Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
@@ -207,6 +206,8 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 If you want to compile with ROCm support, install
 - [AMD ROCm](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) 4.0 and above installation
 - ROCm is currently supported only for Linux systems.
+
+By default the build system expects ROCm to be installed in `/opt/rocm`. If ROCm is installed in a different directory, the `ROCM_PATH` environment variable must be set to the ROCm installation directory. The build system automatically detects the AMD GPU architecture. Optionally, the AMD GPU architecture can be explicitly set with the `PYTORCH_ROCM_ARCH` environment variable [AMD GPU architecture](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-gpus)
 
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
 Other potentially useful environment variables may be found in `setup.py`.
@@ -221,7 +222,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 #### Get the PyTorch Source
 ```bash
-git clone --recursive https://github.com/pytorch/pytorch
+git clone https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
@@ -234,8 +235,6 @@ git submodule update --init --recursive
 
 ```bash
 conda install cmake ninja
-# Run this command on native Windows
-conda install rust
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
 ```
@@ -245,7 +244,8 @@ pip install -r requirements.txt
 ```bash
 pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
+# magma installation: run with active conda environment. specify CUDA version to install
+.ci/docker/common/install_magma_conda.sh 12.4
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
@@ -274,13 +274,6 @@ conda install -c conda-forge libuv=1.39
 #### Install PyTorch
 **On Linux**
 
-If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
-```bash
-export _GLIBCXX_USE_CXX11_ABI=1
-```
-
-Please **note** that starting from PyTorch 2.5, the PyTorch build with XPU supports both new and old C++ ABIs. Previously, XPU only supported the new C++ ABI. If you want to compile with Intel GPU support, please follow [Intel GPU Support](#intel-gpu-support).
-
 If you're compiling for AMD ROCm then first run this command:
 ```bash
 # Only run this if you're compiling for ROCm
@@ -289,19 +282,9 @@ python tools/amd_build/build_amd.py
 
 Install PyTorch
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
 ```
-
-> _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
->
-> ```plaintext
-> build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
-> collect2: error: ld returned 1 exit status
-> error: command 'g++' failed with exit status 1
-> ```
->
-> This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
 
 **On macOS**
 
@@ -315,7 +298,7 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 
 **CPU-only builds**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
 python setup.py develop
@@ -363,6 +346,28 @@ python setup.py develop
 
 ```
 
+**Intel GPU builds**
+
+In this mode PyTorch with Intel GPU support will be built.
+
+Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed and the environment variables are configured prior to starting the build. For build tool support, `Visual Studio 2022` is required.
+
+Then PyTorch can be built with the command:
+
+```cmd
+:: CMD Commands:
+:: Set the CMAKE_PREFIX_PATH to help find corresponding packages
+:: %CONDA_PREFIX% only works after `conda activate custom_env`
+
+if defined CMAKE_PREFIX_PATH (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library;%CMAKE_PREFIX_PATH%"
+) else (
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
+)
+
+python setup.py develop
+```
+
 ##### Adjust Build Options (Optional)
 
 You can adjust the configuration of cmake variables optionally (without building first), by doing
@@ -371,14 +376,14 @@ with such a step.
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
@@ -419,25 +424,80 @@ make -f docker.Makefile
 
 ### Building the Documentation
 
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
-readthedocs theme.
+To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
+and the pytorch_sphinx_theme2.
+
+Before you build the documentation locally, ensure `torch` is
+installed in your environment. For small fixes, you can install the
+nightly version as described in [Getting Started](https://pytorch.org/get-started/locally/).
+
+For more complex fixes, such as adding a new module and docstrings for
+the new module, you might need to install torch [from source](#from-source).
+See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
+for docstring conventions.
 
 ```bash
 cd docs/
 pip install -r requirements.txt
+make html
+make serve
 ```
-You can then build the documentation by running `make <format>` from the
-`docs/` folder. Run `make` to get a list of all available output formats.
+
+Run `make` to get a list of all available output formats.
 
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
 
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-`conda`) then `npm` will probably install a version of `katex` that is not
-compatible with your version of `nodejs` and doc builds will fail.
-A combination of versions that is known to work is `node@6.13.1` and
-`katex@0.13.18`. To install the latter with `npm` you can run
-```npm install -g katex@0.13.18```
+> [!NOTE]
+> If you installed `nodejs` with a different package manager (e.g.,
+> `conda`) then `npm` will probably install a version of `katex` that is not
+> compatible with your version of `nodejs` and doc builds will fail.
+> A combination of versions that is known to work is `node@6.13.1` and
+> `katex@0.13.18`. To install the latter with `npm` you can run
+> ```npm install -g katex@0.13.18```
+
+> [!NOTE]
+> If you see a numpy incompatibility error, run:
+> ```
+> pip install 'numpy<2'
+> ```
+
+When you make changes to the dependencies run by CI, edit the
+`.ci/docker/requirements-docs.txt` file.
+
+#### Building a PDF
+
+To compile a PDF of all PyTorch documentation, ensure you have
+`texlive` and LaTeX installed. On macOS, you can install them using:
+
+```
+brew install --cask mactex
+```
+
+To create the PDF:
+
+1. Run:
+
+   ```
+   make latexpdf
+   ```
+
+   This will generate the necessary files in the `build/latex` directory.
+
+2. Navigate to this directory and execute:
+
+   ```
+   make LATEXOPTS="-interaction=nonstopmode"
+   ```
+
+   This will produce a `pytorch.pdf` with the desired content. Run this
+   command one more time so that it generates the correct table
+   of contents and index.
+
+> [!NOTE]
+> To view the Table of Contents, switch to the **Table of Contents**
+> view in your PDF viewer.
+
 
 ### Previous Versions
 

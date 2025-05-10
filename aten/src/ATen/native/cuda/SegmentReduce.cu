@@ -101,7 +101,7 @@ __global__ void segment_reduce_forward_kernel(
     const int64_t output_stride_axis,
     const int64_t output_size_axis,
     const int64_t lengths_cumsum_stride_axis) {
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx >= (outer_offset * segment_count * inner_offset)) {
     return;
   }
@@ -172,7 +172,7 @@ __global__ void segment_reduce_backward_kernel(
     const int64_t output_stride_axis,
     const int64_t output_size_axis,
     const int64_t lengths_cumsum_stride_axis) {
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx >= (outer_offset * segment_count * inner_offset)) {
     return;
   }
@@ -590,8 +590,8 @@ Tensor _segment_reduce_offsets_cuda_kernel(
     reduction, data, offsets, axis, initial, /*is_offsets_like=*/true);
 }
 
-REGISTER_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cuda_kernel);
-REGISTER_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cuda_kernel);
+REGISTER_DISPATCH(_segment_reduce_lengths_stub, &_segment_reduce_lengths_cuda_kernel)
+REGISTER_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cuda_kernel)
 REGISTER_DISPATCH(
     _segment_reduce_lengths_backward_stub,
     &_segment_reduce_lengths_backward_cuda_kernel);

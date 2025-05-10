@@ -2,10 +2,18 @@
 
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 import torch
+from torch._dynamo.testing import rand_strided
+from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
+from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_cuda_with_enough_memory,
+)
 
 
 try:
@@ -18,12 +26,19 @@ except ImportError:
 
 from torch._inductor import config
 from torch._inductor.runtime.hints import (
+    AttrsDescriptorWrapper,
+    AutotuneHint,
     DeviceProperties,
     HeuristicType,
     TRITON_MAX_BLOCK,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner, triton_config
+from torch._inductor.runtime.triton_heuristics import (
+    autotune_hints_to_configs,
+    CachingAutotuner,
+    template,
+    triton_config,
+)
 from torch._inductor.test_case import run_tests, TestCase
 
 
@@ -34,7 +49,7 @@ class TestTritonHeuristics(TestCase):
         """
         Make sure block size does not exceed the maximum defined in inductor config.
         """
-        cfg = triton_config([2048, 2], 64, 64)
+        cfg = triton_config({"x": 2048, "y": 2}, 64, 64)
         for label in "XYZ":
             key = f"{label}BLOCK"
             if key not in cfg.kwargs:
@@ -87,9 +102,8 @@ class TestTritonHeuristics(TestCase):
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
 
-    def _get_cos_kernel_caching_autotuner_args(self):
-        from triton.compiler.compiler import AttrsDescriptor  # @manual
-
+    @staticmethod
+    def _get_cos_kernel_caching_autotuner_args():
         @triton.jit
         def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
             xnumel = 16
@@ -102,15 +116,17 @@ class TestTritonHeuristics(TestCase):
             tl.store(out_ptr0 + (x0), tmp1, xmask)
 
         triton_meta = {
-            "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
             "device": DeviceProperties.create(torch.device("cuda")),
             "constants": {},
-            "configs": [AttrsDescriptor(divisible_by_16=(0, 1, 2), equal_to_1=())],
+            "configs": [
+                AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())
+            ],
         }
 
         configs = [
-            triton_config([16], 64),
-            triton_config([256], 64),
+            triton_config({"x": 16}, 64),
+            triton_config({"x": 256}, 64),
         ]
 
         inductor_meta = {}
@@ -121,6 +137,8 @@ class TestTritonHeuristics(TestCase):
             "configs": configs,
             "save_cache_hook": False,
             "mutated_arg_names": [],
+            "reset_to_zero_arg_names": [],
+            "optimize_mem": True,
             "heuristic_type": HeuristicType.POINTWISE,
             "inductor_meta": inductor_meta,
         }
@@ -138,7 +156,141 @@ class TestTritonHeuristics(TestCase):
             cfg.pre_hook = pre_hook
 
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
-            autotuner = CachingAutotuner(**args)
+            CachingAutotuner(**args)
+
+    def test_autotune_hints_to_configs(self):
+        device_props = DeviceProperties.create(torch.device(GPU_TYPE))
+        device_props = device_props._replace(warp_size=8)
+
+        hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
+        size_hints = (1024,)
+        block_size = 256
+
+        seen_num_elements_per_warp = set()
+
+        def mock_triton_config(
+            size_hints,
+            x,
+            y=None,
+            z=None,
+            num_stages=None,
+            num_elements_per_warp=None,
+            min_elem_per_thread=None,
+        ):
+            seen_num_elements_per_warp.add(num_elements_per_warp)
+            return None
+
+        with unittest.mock.patch(
+            "torch._inductor.runtime.triton_heuristics.triton_config",
+            mock_triton_config,
+        ):
+            _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
+
+        self.assertTrue(8 in seen_num_elements_per_warp)
+
+    @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
+    def test_template_function_ws(self):
+        triton_meta = {"device": MagicMock()}
+        num_stages = 2
+        num_warps = 4
+        num_consumer_groups = 3
+        num_buffers_warp_spec = 5
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.cached_autotune"
+        ) as mock_cached_autotune:
+            template(
+                num_stages=num_stages,
+                num_warps=num_warps,
+                triton_meta=triton_meta,
+                num_consumer_groups=num_consumer_groups,
+                num_buffers_warp_spec=num_buffers_warp_spec,
+            )
+            mock_cached_autotune.assert_called_once()
+            configs = mock_cached_autotune.call_args[0][1]
+            self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
+            self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
+
+
+class TestArgumentCloneAndRestore(TestCase):
+    # Our tensor is large enough. If a unexpected copy happens, the
+    # peak memory increase should be larger than tolerance and the test
+    # will fail.
+    MEM_TOLERANCE = int(256 * 1e6)
+
+    def _create_caching_autotuner(self):
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["optimize_mem"] = True
+        args["mutated_arg_names"] = ["in_ptr0"]
+        autotuner = CachingAutotuner(**args)
+        return autotuner
+
+    def _create_tensor(self, pad=1, with_offset=False):
+        """
+        Create a GPU tensor of about 1GB size.
+        """
+        M = 2
+        N = 2**29 // 4
+        out = rand_strided((M, N), (N + pad, 1), device=GPU_TYPE)
+        if with_offset:
+            out = out[:, 1:]
+        return out
+
+    def _do_test(self, gpu_tensor):
+        torch.cuda.reset_peak_memory_stats()
+        autotuner = self._create_caching_autotuner()
+
+        old_storage_offset = gpu_tensor.storage_offset()
+        gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
+
+        peak_mem_before = torch.cuda.max_memory_allocated()
+        cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
+        self.assertTrue(len(cpu_copies) == 1)
+
+        # Mutate the arg
+        gpu_tensor.add_(1)
+
+        # will restore gpu_tensor
+        autotuner.restore_args_from_cpu(cpu_copies)
+        self.assertTrue(gpu_tensor is not gpu_tensor_clone)
+        self.assertEqual(gpu_tensor.size(), gpu_tensor_clone.size())
+        self.assertEqual(gpu_tensor.stride(), gpu_tensor_clone.stride())
+        self.assertEqual(gpu_tensor.storage_offset(), old_storage_offset)
+
+        # Note: torch.allclose somehow allocates large amount of extra memory.
+        # Record peak memory before that.
+        peak_mem_after = torch.cuda.max_memory_allocated()
+
+        self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
+        self.assertTrue(
+            peak_mem_after <= peak_mem_before + self.MEM_TOLERANCE,
+            f"{peak_mem_before=} v.s. {peak_mem_after=}",
+        )
+
+        # Avoid OOM in CI
+        self.assertTrue(peak_mem_after < 1e10)
+
+    @requires_cuda_with_enough_memory(1e10)
+    def test_clone_contiguous_args(self):
+        arg = self._create_tensor(pad=0)
+        self.assertTrue(arg.is_contiguous())
+        self.assertTrue(arg.storage_offset() == 0)
+        self._do_test(arg)
+
+    @requires_cuda_with_enough_memory(1e10)
+    def test_clone_non_contiguous_args(self):
+        arg = self._create_tensor(pad=1)
+        self.assertFalse(arg.is_contiguous())
+        self.assertTrue(arg.storage_offset() == 0)
+        self._do_test(arg)
+
+    @requires_cuda_with_enough_memory(1e10)
+    def test_clone_args_with_non_zero_offset(self):
+        arg = self._create_tensor(pad=1, with_offset=True)
+        self.assertFalse(arg.is_contiguous())
+        self.assertTrue(arg.storage_offset() > 0)
+
+        self._do_test(arg)
 
 
 if __name__ == "__main__":

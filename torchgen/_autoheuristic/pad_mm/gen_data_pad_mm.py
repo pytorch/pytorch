@@ -1,11 +1,10 @@
-import os
 import random
 import sys
+from pathlib import Path
+from typing import Any
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from typing import Any, Tuple
+sys.path.append(str(Path(__file__).absolute().parents[1]))
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
@@ -30,7 +29,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def __init__(self) -> None:
         super().__init__("pad_mm")
 
-    def create_input(self) -> Tuple[Any, ...]:
+    def create_input(self) -> tuple[Any, ...]:
         dtype = self.get_dtype()
         set_precision(dtype)
         m, k, n = self.get_m_k_n(dtype)
@@ -113,7 +112,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def is_aligned(self, dim: int, align_size: int) -> bool:
         return dim % align_size == 0
 
-    def get_m_k_n(self, dtype: Any) -> Tuple[int, int, int]:
+    def get_m_k_n(self, dtype: Any) -> tuple[int, int, int]:
         uniform = random.choices([True, False])[0]
         align_size = get_alignment_size_dtype(dtype)
 

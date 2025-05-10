@@ -34,10 +34,10 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
   void* data_;
   size_t size_;
   int device_;
-  cudaStream_t stream_;
+  cudaStream_t stream_{};
 };
 
-#if defined(TORCH_HIP_VERSION)
+#if defined(USE_ROCM)
 using streamType = c10::hip::HIPStream;
 #else
 using streamType = c10::cuda::CUDAStream;
@@ -63,7 +63,7 @@ struct _AllocationMetadata {
       cudaStream_t stream);
   size_t size;
   c10::DeviceIndex device_idx;
-  cudaStream_t stream;
+  cudaStream_t stream{};
 };
 
 struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
@@ -73,7 +73,11 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       std::function<FreeFuncType> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
-  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator& other) = delete;
+  CUDAPluggableAllocator(CUDAPluggableAllocator&& other) = delete;
+  CUDAPluggableAllocator& operator=(const CUDAPluggableAllocator& other) =
+      delete;
+  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator&& other) = delete;
+  ~CUDAPluggableAllocator() override = default;
 
   void set_init_fn(std::function<void(int)> init_fn);
 
@@ -108,8 +112,13 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void raw_delete(void* ptr) override;
   void init(int device_count) override;
   bool initialized() override;
+  double getMemoryFraction(c10::DeviceIndex device) override;
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
   void emptyCache() override;
+  void enable(bool) override {}
+  bool isEnabled() const override {
+    return true;
+  }
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
@@ -136,7 +145,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      c10::cuda::CUDACachingAllocator::RecordContext when) override;
+      c10::cuda::CUDACachingAllocator::RecordContext when,
+      bool clearHistory) override;
   void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
   void attachAllocatorTraceTracker(

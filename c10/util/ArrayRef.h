@@ -76,13 +76,13 @@ class ArrayRef final {
   constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an ArrayRef from a pointer and length.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef(const T* data, size_t length)
+  constexpr ArrayRef(const T* data, size_t length)
       : Data(data), Length(length) {
     debugCheckNullptrInvariant();
   }
 
   /// Construct an ArrayRef from a range.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef(const T* begin, const T* end)
+  constexpr ArrayRef(const T* begin, const T* end)
       : Data(begin), Length(end - begin) {
     debugCheckNullptrInvariant();
   }
@@ -98,9 +98,9 @@ class ArrayRef final {
 
   template <
       typename Container,
-      typename = std::enable_if_t<std::is_same_v<
-          std::remove_const_t<decltype(std::declval<Container>().data())>,
-          T*>>>
+      typename U = decltype(std::declval<Container>().data()),
+      typename = std::enable_if_t<
+          (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
   /* implicit */ ArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {
     debugCheckNullptrInvariant();
@@ -114,7 +114,7 @@ class ArrayRef final {
   /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {
     static_assert(
-        !std::is_same<T, bool>::value,
+        !std::is_same_v<T, bool>,
         "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
   }
 
@@ -162,6 +162,11 @@ class ArrayRef final {
     return reverse_iterator(begin());
   }
 
+  /// Check if all elements in the array satisfy the given expression
+  constexpr bool allMatch(const std::function<bool(const T&)>& pred) const {
+    return std::all_of(cbegin(), cend(), pred);
+  }
+
   /// empty - Check if the array is empty.
   constexpr bool empty() const {
     return Length == 0;
@@ -177,14 +182,14 @@ class ArrayRef final {
   }
 
   /// front - Get the first element.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& front() const {
+  constexpr const T& front() const {
     TORCH_CHECK(
         !empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
   /// back - Get the last element.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& back() const {
+  constexpr const T& back() const {
     TORCH_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
     return Data[Length - 1];
   }
@@ -195,8 +200,7 @@ class ArrayRef final {
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N, size_t M)
-      const {
+  constexpr ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
         N + M <= size(),
         "ArrayRef: invalid slice, N = ",
@@ -209,7 +213,7 @@ class ArrayRef final {
   }
 
   /// slice(n) - Chop off the first N elements of the array.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N) const {
+  constexpr ArrayRef<T> slice(size_t N) const {
     TORCH_CHECK(
         N <= size(), "ArrayRef: invalid slice, N = ", N, "; size = ", size());
     return slice(N, size() - N);
@@ -223,7 +227,7 @@ class ArrayRef final {
   }
 
   /// Vector compatibility
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& at(size_t Index) const {
+  constexpr const T& at(size_t Index) const {
     TORCH_CHECK(
         Index < Length,
         "ArrayRef: invalid index Index = ",

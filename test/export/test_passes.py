@@ -3,12 +3,13 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
+import copy
+
 # Owner(s): ["oncall: export"]
 import math
 import operator
 import unittest
 from re import escape
-from typing import List, Set
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -46,6 +47,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -75,11 +77,11 @@ class _AtenAddOperatorSupport(OperatorSupport):
         return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
 
 
-def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
     return [{n.name for n in p.nodes} for p in partitions]
 
 
-def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
+def _get_output_names(gm: torch.fx.GraphModule) -> list[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
     args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
@@ -247,6 +249,17 @@ def _with_autocast_tests():
                 e = d - 1
             return d, e
 
+    class NestedAutocastOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                c = x.sin().sum()
+                with torch.autocast(device_type="cpu", enabled=False):
+                    d = c + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                e = d - 1
+            return d, e
+
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args):
@@ -266,6 +279,40 @@ def _with_autocast_tests():
         "ctx_manager_split": (
             SplitAutocastOp(),
             _get_predispatch_module(SplitAutocastOp(), (x,)),
+            (x,),
+        ),
+        "ctx_manager_nested": (
+            NestedAutocastOp(),
+            _get_predispatch_module(NestedAutocastOp(), (x,)),
+            (x,),
+        ),
+    }
+
+
+def _with_mixed_autocast_set_grad_tests():
+    from torch.export._trace import _export
+
+    class WithAutocastSetGradOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            torch._C._set_grad_enabled(True)
+            c = x.sin()
+            torch._C._set_grad_enabled(False)
+            c = c.cos()
+            with torch.autocast(device_type="cpu", enabled=False):
+                d = c + 1
+            e = d - 1
+            return d, e
+
+    x = torch.randn(2, 2)
+
+    def _get_predispatch_module(mod, args):
+        return _export(mod, args, pre_dispatch=True).module()
+
+    return {
+        "multi_ctx_manager": (
+            WithAutocastSetGradOp(),
+            _get_predispatch_module(WithAutocastSetGradOp(), (x,)),
             (x,),
         ),
     }
@@ -330,17 +377,23 @@ def _sequential_split_inline_tests():
 class TestPasses(TestCase):
     def setUp(self):
         super().setUp()
+        self.MIXED_AUTOCAST_SET_GRAD_TESTS = _with_mixed_autocast_set_grad_tests()
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
         self.WITH_AUTOCAST_TESTS = _with_autocast_tests()
-
         init_torchbind_implementations()
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
         self.SET_GRAD_ENABLED_TESTS.clear()
         self.WITH_AUTOCAST_TESTS.clear()
+        self.MIXED_AUTOCAST_SET_GRAD_TESTS.clear()
         super().tearDown()
+
+    def _check_node_users_in_the_same_graph(self, gm):
+        for node in gm.graph.nodes:
+            for user in node.users:
+                self.assertTrue(user.graph is gm.graph)
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -353,7 +406,9 @@ class TestPasses(TestCase):
         x = torch.zeros(2, 2, 3)
 
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
-        ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
+        ep = torch.export.export(
+            M(), (x,), dynamic_shapes={"x": {1: dim1_x}}, strict=True
+        )
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -380,7 +435,10 @@ class TestPasses(TestCase):
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -410,7 +468,10 @@ class TestPasses(TestCase):
         dim0_x = torch.export.Dim("dim0_x", min=3)
 
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
+            M(),
+            (x, y),
+            dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None},
+            strict=True,
         )
 
         with self.assertRaisesRegex(
@@ -445,7 +506,7 @@ class TestPasses(TestCase):
 
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(
-            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}
+            M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}, strict=True
         )
 
         with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
@@ -475,7 +536,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        ep = export(M(), (x,))
+        ep = export(M(), (x,), strict=True)
         self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
         ep = ep._transform_do_not_use(ReplaceViewOpsWithViewCopyOpsPass())
@@ -491,7 +552,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
         foo = Module()
-        ep = export(foo, (x,))._transform_do_not_use(
+        ep = export(foo, (x,), strict=True)._transform_do_not_use(
             ReplaceViewOpsWithViewCopyOpsPass()
         )
         # After this pass, there shouldn't be any view nodes in the graph
@@ -562,7 +623,7 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        ep = torch.export.export(m, inputs, strict=False)
+        ep = export(m, inputs, strict=False).run_decompositions({})
         without_token_ep = _remove_effect_tokens(ep)
         self.assertExpectedInline(
             without_token_ep.graph_module.code.strip(),
@@ -592,7 +653,7 @@ def forward(self, token, obj_attr, x):
                 allow_non_fake_inputs=True,
             )
             with _fakify_script_objects(m, (), {}, fake_mode) as (
-                patched_mod,
+                _,
                 _,
                 _,
                 fake_constant_attrs,
@@ -606,17 +667,16 @@ def forward(self, token, obj_attr, x):
     @unittest.expectedFailure
     def test_fakify_script_objects_properly_handle_containers(self):
         m = ModelsWithScriptObjectAttr.SimpleWithAttrInContainer()
-        constant_attrs = _gather_constant_attrs(m)
         fake_mode = FakeTensorMode(
             shape_env=ShapeEnv(tracked_fakes=[]),
             allow_non_fake_inputs=True,
         )
         with _fakify_script_objects(m, (), {}, fake_mode) as (
-            patched_mod,
+            _,
             _,
             _,
             fake_constant_attrs,
-            fake_to_real,
+            _,
         ):
             self.assertTrue("attr" in fake_constant_attrs.values())
             self.assertTrue("pytree_attr2" in fake_constant_attrs.values())
@@ -634,7 +694,7 @@ def forward(self, token, obj_attr, x):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,))
+        ep = export(mod, (x,), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, r"Runtime assertion failed for expression u[\d+] \<\= 5"
@@ -659,7 +719,9 @@ def forward(self, token, obj_attr, x):
 
         mod = M()
         dim0_x = torch.export.Dim("dim0_x")
-        ep = torch.export.export(mod, (x,), dynamic_shapes={"x": {0: dim0_x}})
+        ep = torch.export.export(
+            mod, (x,), dynamic_shapes={"x": {0: dim0_x}}, strict=True
+        )
 
         num_assert = count_call_function(
             ep.graph, torch.ops.aten._assert_scalar.default
@@ -712,7 +774,7 @@ def forward(self, token, obj_attr, x):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y))
+        ep = export(mod, (torch.tensor(True), x, y), strict=True)
 
         with self.assertRaisesRegex(
             RuntimeError, "is outside of inline constraint \\[2, 5\\]."
@@ -729,17 +791,12 @@ def forward(self, token, obj_attr, x):
 
         func = Module()
         x = torch.randn(1, dtype=torch.float32)
-        ep = torch.export.export(func, args=(x,))
+        ep = torch.export.export(func, args=(x,), strict=True)
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatch_set_grad(self):
-        def _check_node_users_in_the_same_graph(gm):
-            for node in gm.graph.nodes:
-                for user in node.users:
-                    self.assertTrue(user.graph is gm.graph)
-
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -758,7 +815,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -777,7 +834,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -796,7 +853,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -816,7 +873,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -841,7 +898,7 @@ def forward(self, x):
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS[
             "ctx_manager_multi_dep_no_grad"
         ]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -929,14 +986,79 @@ def forward(self, sin, cos):
     """,
         )
 
+    def test_predispatch_autocast_and_set_grad(self):
+        mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
+        self._check_node_users_in_the_same_graph(mod)
+        self.assertEqual(mod_orig(*args), mod(*args))
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    submod_3 = self.submod_3
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
+    getitem_2 = sin[0];  sin = None
+    cos = torch.ops.aten.cos.default(getitem_2);  getitem_2 = None
+    submod_4 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_4, cos);  submod_4 = cos = None
+    getitem = add_1[0];  add_1 = None
+    sub = torch.ops.aten.sub.Tensor(getitem, 1)
+    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_3.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    return (sin,)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, cos):
+    add_1 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
+    return (add_1,)
+    """,
+        )
+
     def test_predispatch_autocast(self):
-        def _check_node_users_in_the_same_graph(gm):
-            for node in gm.graph.nodes:
-                for user in node.users:
-                    self.assertTrue(user.graph is gm.graph)
+        mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_nested"]
+        self._check_node_users_in_the_same_graph(mod)
+        self.assertEqual(mod_orig(*args), mod(*args))
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    submod_3 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
+    getitem = add_1[0];  add_1 = None
+    submod_4 = self.submod_2
+    sub = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, getitem);  submod_4 = None
+    getitem_1 = sub[0];  sub = None
+    return pytree.tree_unflatten((getitem, getitem_1), self._out_spec)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    submod_2 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_2, sum_1);  submod_2 = sum_1 = None
+    getitem = add_1[0];  add_1 = None
+    return (getitem,)
+    """,
+        )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -986,7 +1108,7 @@ def forward(self, add_1):
         )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_multi_dep"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -1043,7 +1165,7 @@ def forward(self, add_1, add_2):
         )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_split"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -1121,7 +1243,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,), strict=True)
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             nodes = inplace_ep.graph.nodes
             for node in nodes:
@@ -1164,7 +1286,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,), strict=True).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             graph_text = str(inplace_ep.graph)
             self.assertExpectedInline(
@@ -1194,7 +1316,7 @@ default](args = (%x, %b_state), kwargs = {})
         # move the exported program from cpu to cuda:0
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
-        ep = export(mod, example_inputs)
+        ep = export(mod, example_inputs, strict=True)
         location = torch.device("cuda:0")
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
@@ -1215,6 +1337,97 @@ default](args = (%x, %b_state), kwargs = {})
         test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cuda:0"))
+
+    def test_constant_folding_pass(self):
+        from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
+        from torch.ao.quantization.pt2e._affine_quantization import (
+            AffineQuantizedMinMaxObserver,
+        )
+        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+        from torch.ao.quantization.quantizer import (
+            QuantizationAnnotation,
+            QuantizationSpec,
+            Quantizer,
+        )
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.linear.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, torch.fx.Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, torch.fx.Node)
+
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                # TODO: maybe align the arg name here
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerToken(),
+                            ),
+                        )
+
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=None,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
+                                target_dtype=torch.uint8,
+                                mapping_type=MappingType.SYMMETRIC,
+                                granularity=PerGroup(group_size=128),
+                            ),
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                            },
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(128, 20)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(5, 128),)
+        model = M()
+        quantizer = BackendAQuantizer()
+        m = torch.export.export(model.eval(), example_inputs, strict=True).module()
+        m = prepare_pt2e(m, quantizer)
+        # Calibration
+        m(*example_inputs)
+        # Get the quantized model
+        m_fold = copy.deepcopy(m)
+        m_fold = convert_pt2e(m_fold, fold_quantize=True)
+
+        # If fold, check the graph only contains frozed params and no linear_weight
+        FileCheck().check("_frozen_param0").check_not("linear_weight").run(m_fold.code)
+
+        m_not_fold = copy.deepcopy(m)
+        m_not_fold = convert_pt2e(m_not_fold, fold_quantize=False)
+
+        # If not fold, check the graph doesn't contain frozed params and contain linear_weight
+        FileCheck().check_not("_frozen_param0").check("linear_weight").run(
+            m_not_fold.code
+        )
 
 
 if __name__ == "__main__":
