@@ -62,12 +62,7 @@ from . import (
     trace_rules,
     variables,
 )
-from .bytecode_analysis import (
-    get_indexof,
-    JUMP_OPNAMES,
-    livevars_analysis,
-    propagate_line_nums,
-)
+from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
@@ -3961,7 +3956,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
         instructions = cleaned_instructions(code)
-        propagate_line_nums(instructions)
         super().__init__(
             output=parent.output,
             f_locals={},
