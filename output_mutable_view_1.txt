@@ -1,0 +1,120 @@
+~/local/tlparse_logs/my_trace_log_dir_1746342818
+============================= test session starts ==============================
+platform linux -- Python 3.12.2, pytest-8.3.5, pluggy-1.5.0
+rootdir: /home/willfeng/local/pytorch
+configfile: pytest.ini
+plugins: hypothesis-6.125.3, anyio-4.8.0, typeguard-2.13.3
+collected 1 item
+Running 1 items in this shard
+
+test/inductor/test_pattern_matcher.py F                                  [100%]
+
+=================================== FAILURES ===================================
+_____ TestPatternMatcher.test_mutable_op_view_inputs_register_replacement ______
+Traceback (most recent call last):
+  File "/home/willfeng/local/miniconda3/lib/python3.12/unittest/case.py", line 58, in testPartExecutor
+    yield
+  File "/home/willfeng/local/miniconda3/lib/python3.12/unittest/case.py", line 634, in run
+    self._callTestMethod(testMethod)
+  File "/home/willfeng/local/miniconda3/lib/python3.12/unittest/case.py", line 589, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "/home/willfeng/local/pytorch/torch/testing/_internal/common_utils.py", line 3154, in wrapper
+    method(*args, **kwargs)
+  File "/home/willfeng/local/pytorch/test/inductor/test_pattern_matcher.py", line 1801, in test_mutable_op_view_inputs_register_replacement
+    self.assertEqual(f(inp.clone().detach()), f_replaced(inp.clone().detach()))
+  File "/home/willfeng/local/pytorch/torch/testing/_internal/common_utils.py", line 4095, in assertEqual
+    raise error_metas.pop()[0].to_error(  # type: ignore[index]
+AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 3 / 3 (100.0%)
+Greatest absolute difference: 5.0 at index (0,) (up to 1e-05 allowed)
+Greatest relative difference: 0.7154640555381775 at index (2,) (up to 1.3e-06 allowed)
+
+To execute this test, run the following from the base repo dir:
+    python test/inductor/test_pattern_matcher.py TestPatternMatcher.test_mutable_op_view_inputs_register_replacement
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0
+----------------------------- Captured stdout call -----------------------------
+DEBUG here3: fwd_only: called make_fx, gm.graph: graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %auto_functionalized_v2 : [num_users=2] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.foo_inplace.default,), kwargs = {_x_base_index: 0, _all_bases: [%arg0_1]})
+    %getitem : [num_users=0] = call_function[target=operator.getitem](args = (%auto_functionalized_v2, 0), kwargs = {})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2, 1), kwargs = {})
+    %auto_functionalized_v2_1 : [num_users=2] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.bar.default,), kwargs = {x: %getitem_1, _out_base_index: 0, _all_bases: [%arg1_1]})
+    %getitem_2 : [num_users=0] = call_function[target=operator.getitem](args = (%auto_functionalized_v2_1, 0), kwargs = {})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2_1, 1), kwargs = {})
+    return getitem_3
+before post_grad_custom_post_pass: graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %auto_functionalized_v2 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.foo_inplace.default,), kwargs = {_x_base_index: 0, _x_size: (3,), _x_stride: (1,), _x_storage_offset: 0, _all_bases: [%arg0_1]})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2, 1), kwargs = {})
+    %select_1 : [num_users=1] = call_function[target=torch.ops.aten.select.int](args = (%getitem_1, 0, 0), kwargs = {})
+    %full_default : [num_users=1] = call_function[target=torch.ops.aten.full.default](args = ([3], 0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cpu, pin_memory: False})
+    %auto_functionalized_v2_1 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.bar.default,), kwargs = {x: %select_1, _out_base_index: 0, _all_bases: [%full_default]})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2_1, 1), kwargs = {})
+    return (getitem_3,)
+after post_grad_custom_post_pass: graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %auto_functionalized_v2 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.foo_inplace.default,), kwargs = {_x_base_index: 0, _x_size: (3,), _x_stride: (1,), _x_storage_offset: 0, _all_bases: [%arg0_1]})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2, 1), kwargs = {})
+    %select_1 : [num_users=1] = call_function[target=torch.ops.aten.select.int](args = (%getitem_1, 0, 0), kwargs = {})
+    %full_default : [num_users=1] = call_function[target=torch.ops.aten.full.default](args = ([3], 0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cpu, pin_memory: False})
+    %auto_functionalized_v2_1 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.bar.default,), kwargs = {x: %select_1, _out_base_index: 0, _all_bases: [%full_default]})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2_1, 1), kwargs = {})
+    return (getitem_3,)
+before reinplace_inplaceable_ops: graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %auto_functionalized_v2 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.foo_inplace.default,), kwargs = {_x_base_index: 0, _x_size: (3,), _x_stride: (1,), _x_storage_offset: 0, _all_bases: [%arg0_1]})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2, 1), kwargs = {})
+    %select_1 : [num_users=1] = call_function[target=torch.ops.aten.select.int](args = (%getitem_1, 0, 0), kwargs = {})
+    %full_default : [num_users=1] = call_function[target=torch.ops.aten.full.default](args = ([3], 0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cpu, pin_memory: False})
+    %auto_functionalized_v2_1 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.bar.default,), kwargs = {x: %select_1, _out_base_index: 0, _all_bases: [%full_default]})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2_1, 1), kwargs = {})
+    return (getitem_3,)
+after reinplace_inplaceable_ops: graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %auto_functionalized_v2 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.foo_inplace.default,), kwargs = {_x_base_index: 0, _x_size: (3,), _x_stride: (1,), _x_storage_offset: 0, _all_bases: [%arg0_1]})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2, 1), kwargs = {})
+    %select_1 : [num_users=1] = call_function[target=torch.ops.aten.select.int](args = (%getitem_1, 0, 0), kwargs = {})
+    %full_default : [num_users=1] = call_function[target=torch.ops.aten.full.default](args = ([3], 0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cpu, pin_memory: False})
+    %auto_functionalized_v2_1 : [num_users=1] = call_function[target=torch.ops.higher_order.auto_functionalized_v2](args = (mylib.bar.default,), kwargs = {x: %select_1, _out_base_index: 0, _all_bases: [%full_default]})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%auto_functionalized_v2_1, 1), kwargs = {})
+    return (getitem_3,)
+after decompose_auto_functionalized: graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %as_strided_default : [num_users=1] = call_function[target=torch.ops.aten.as_strided.default](args = (%arg0_1, [9], [1], 0), kwargs = {})
+    %clone_default : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%as_strided_default,), kwargs = {})
+    %as_strided_default_1 : [num_users=2] = call_function[target=torch.ops.aten.as_strided.default](args = (%clone_default, [3, 3], [3, 1], 0), kwargs = {})
+    %as_strided_default_2 : [num_users=1] = call_function[target=torch.ops.aten.as_strided.default](args = (%as_strided_default_1, [3], [1], 0), kwargs = {})
+    %foo_inplace_default : [num_users=0] = call_function[target=torch.ops.mylib.foo_inplace.default](args = (%as_strided_default_2,), kwargs = {})
+    %select_1 : [num_users=1] = call_function[target=torch.ops.aten.select.int](args = (%as_strided_default_1, 0, 0), kwargs = {})
+    %full_default : [num_users=2] = call_function[target=torch.ops.aten.full.default](args = ([3], 0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cpu, pin_memory: False})
+    %bar_default : [num_users=0] = call_function[target=torch.ops.mylib.bar.default](args = (%select_1, %full_default), kwargs = {})
+    return (full_default,)
+after post_grad_passes: graph():
+    %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+    %as_strided_default : [num_users=1] = call_function[target=torch.ops.aten.as_strided.default](args = (%arg0_1, [9], [1], 0), kwargs = {})
+    %clone_default : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%as_strided_default,), kwargs = {})
+    %as_strided_default_1 : [num_users=2] = call_function[target=torch.ops.aten.as_strided.default](args = (%clone_default, [3, 3], [3, 1], 0), kwargs = {})
+    %as_strided_default_2 : [num_users=1] = call_function[target=torch.ops.aten.as_strided.default](args = (%as_strided_default_1, [3], [1], 0), kwargs = {})
+    %foo_inplace_default : [num_users=0] = call_function[target=torch.ops.mylib.foo_inplace.default](args = (%as_strided_default_2,), kwargs = {})
+    %select_1 : [num_users=1] = call_function[target=torch.ops.aten.select.int](args = (%as_strided_default_1, 0, 0), kwargs = {})
+    %full_default : [num_users=2] = call_function[target=torch.ops.aten.full.default](args = ([3], 0), kwargs = {dtype: torch.float32, layout: torch.strided, device: cpu, pin_memory: False})
+    %bar_default : [num_users=0] = call_function[target=torch.ops.mylib.bar.default](args = (%select_1, %full_default), kwargs = {})
+    return (full_default,)
+inline_call []
+stats [('calls_captured', 5), ('unique_graphs', 1)]
+inductor [('pattern_matcher_count', 2), ('pattern_matcher_nodes', 2), ('extern_calls', 2), ('fxgraph_cache_bypass', 1)]
+aot_autograd [('total', 1), ('autograd_cache_bypass', 1), ('ok', 1)]
+graph_break []
+----------------------------- Captured stderr call -----------------------------
+/home/willfeng/local/pytorch/test/inductor/test_pattern_matcher.py:1780: FutureWarning: `config.shallow_copy_dict()` has been deprecated. It no longer changes the underlying config. use `config.get_config_copy()` instead if you just want a copy of the config, or config.load_config if you need mutable access
+  current_config = config.shallow_copy_dict()
+=========================== short test summary info ============================
+FAILED [2.1599s] test/inductor/test_pattern_matcher.py::TestPatternMatcher::test_mutable_op_view_inputs_register_replacement
+============================== 1 failed in 7.82s ===============================
+Stats { ok: 67, other_rank: 0, fail_glog: 0, fail_json: 0, fail_payload_md5: 0, fail_dynamo_guards_json: 0, fail_parser: 0, unknown: 0 }
+Link to logs: 
+https://manifold.edge.x2p.facebook.net/v0/read/tree/logs/.tmpjNBqkW/index.html?bucketName=tlparse_reports&apiKey=tlparse_reports-key&withPayload=1&timeoutMsec=10000

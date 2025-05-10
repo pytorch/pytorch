@@ -173,10 +173,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
+    print(f"before post_grad_custom_post_pass: {gm.graph}")
+
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
         GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
             post_grad_custom_post_pass
         )
+
+    print(f"after post_grad_custom_post_pass: {gm.graph}")
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
 
@@ -186,17 +190,25 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
+    print(f"before reinplace_inplaceable_ops: {gm.graph}")
+
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         reinplace_inplaceable_ops
     )
+
+    print(f"after reinplace_inplaceable_ops: {gm.graph}")
+
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
+
+    print(f"after decompose_auto_functionalized: {gm.graph}")
+
     if not torch._dynamo.config.skip_fsdp_hooks:
         GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
             comms.reinplace_fsdp_all_gather
@@ -217,6 +229,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         ),
     )
     gm.graph.lint()
+
+    print(f"after post_grad_passes: {gm.graph}")
 
 
 def prepare_softmax_pattern(x, dim):
