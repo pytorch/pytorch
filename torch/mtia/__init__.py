@@ -234,7 +234,7 @@ def set_stream(stream: Stream):
     torch._C._mtia_setCurrentStream(stream)
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: torch.types.Device) -> None:
     r"""Set the current device.
 
     Args:
