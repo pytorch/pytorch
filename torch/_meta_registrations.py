@@ -2170,7 +2170,8 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(0)
     dim2 = batch1.size(1)
     dim3 = batch2.size(2)
-    self = self.expand((dim1, dim2, dim3))
+    if self.shape != (dim1, dim2, dim3):
+        self = self.expand((dim1, dim2, dim3))
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
     torch._check(
@@ -4298,7 +4299,7 @@ def meta_alias(self):
     return self.view(self.shape)
 
 
-def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
+def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype=None):
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
 
@@ -4316,10 +4317,18 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
         lambda: f"Expected size for first two dimensions of batch2 tensor to be: [{bs}"
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
-
-    # TODO: handle out
-
-    output = batch2.new_empty(output_size)
+    if out_dtype:
+        supported_out_dtype = (
+            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+        ) and out_dtype == torch.float32
+        torch._check(
+            out_dtype == batch1.dtype or supported_out_dtype,
+            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+        )
+        output = batch2.new_empty(output_size).to(out_dtype)
+    else:
+        # TODO: handle out
+        output = batch2.new_empty(output_size)
 
     if not is_bmm and self_baddbmm is not None:
         torch._check(self_baddbmm.dim() == 3, lambda: "self must be a 3D tensor")
@@ -4334,6 +4343,11 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
 @register_meta(aten.bmm.default)
 def meta_bmm(self, mat2):
     return common_meta_baddbmm_bmm(self, mat2, True)
+
+
+@register_meta(aten.bmm.dtype)
+def meta_bmm_dtype(self, mat2, out_dtype):
+    return common_meta_baddbmm_bmm(self, mat2, True, out_dtype=out_dtype)
 
 
 def div_rtn(x, y):
