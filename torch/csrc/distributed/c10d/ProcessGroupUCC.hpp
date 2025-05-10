@@ -17,6 +17,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAStream.h>
 #endif
 
