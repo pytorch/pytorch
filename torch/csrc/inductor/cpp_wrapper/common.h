@@ -11,6 +11,7 @@
 
 // Include some often-used cpp_wrapper headers, for precompiling.
 #include <c10/util/BFloat16.h>
+#include <c10/util/Float8_e4m3fn.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -70,6 +71,7 @@ using namespace torch::aot_inductor;
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
 using half = at::Half;
 using bfloat16 = at::BFloat16;
+using float8_e4m3fn = at::Float8_e4m3fn;
 
 // Round up to the nearest multiple of 64
 [[maybe_unused]] inline int64_t align(int64_t nbytes) {
