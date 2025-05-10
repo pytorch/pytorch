@@ -174,7 +174,6 @@ def associative_scan(
 
     """
     # TODO: Support lifted arguments in inductor for associative_scan
-    # TODO: Support autograd for cases with lifted arguments for combine_mode=pointwise
 
     # The reason we flatten xs before calling into dynamo is that
     # we want to create a consistent input ordering for combine_fn
