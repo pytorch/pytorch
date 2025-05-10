@@ -5,6 +5,7 @@
 import builtins
 from enum import Enum, IntEnum
 from pathlib import Path
+from types import EllipsisType
 from typing import (
     Any,
     AnyStr,
@@ -30,7 +31,7 @@ from typing import (
     overload,
     runtime_checkable,
 )
-from typing_extensions import ParamSpec, Self
+from typing_extensions import ParamSpec, Self, TypeAlias
 
 import numpy
 
@@ -1795,6 +1796,8 @@ class _ImperativeEngine:
 
 # Defined in torch/csrc/autograd/python_variable.cpp
 class _TensorMeta(type): ...
+
+${index_type_def}
 
 # Defined in torch/csrc/autograd/python_variable.cpp
 class TensorBase(metaclass=_TensorMeta):
