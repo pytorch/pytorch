@@ -46,14 +46,14 @@ while IFS=: read -r filepath url; do
     fi
     # Treat Cloudflare JS-challenge and rate-limit as success.
     if [[ "$code" == "403" || "$code" == "429" || "$code" == "503" ]]; then
-      printf "${yellow}%s${reset} ${cyan}%s${reset} %s\n" "$code" "$url" "$filepath"
+      printf "${yellow}WARN %s${reset} ${cyan}%s${reset} %s\n" "$code" "$url" "$filepath"
       exit 0
     fi
     if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
-      printf "${red}%s${reset} ${yellow}%s${reset} %s\n" "$code" "$url" "$filepath" >&2
+      printf "${red}FAIL %s${reset} ${yellow}%s${reset} %s\n" "$code" "$url" "$filepath" >&2
       exit 1
     else
-      printf "${green}%s${reset} ${cyan}%s${reset} %s\n" "$code" "$url" "$filepath"
+      printf "${green} OK  %s${reset} ${cyan}%s${reset} %s\n" "$code" "$url" "$filepath"
       exit 0
     fi
   ) &
