@@ -681,7 +681,7 @@ class CppOptions(BuildOptionsBase):
             passthrough_args,
         ) = get_cpp_options(
             cpp_compiler=self._compiler,
-            compile_only=compile_only,
+            compile_only=compile_only or precompiling or preprocessing,
             extra_flags=extra_flags,
             warning_all=warning_all,
             min_optimize=min_optimize,
@@ -1099,15 +1099,15 @@ def get_cpp_torch_options(
         + omp_include_dir_paths
     )
     cflags = sys_libs_cflags + omp_cflags
-    ldflags = omp_ldflags
-    libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
-    libraries = torch_libraries + omp_lib
-    passthrough_args = (
-        sys_libs_passthrough_args
-        + isa_ps_args_build_flags
-        + cxx_abi_passthrough_args
-        + omp_passthrough_args
-    )
+    passthrough_args = isa_ps_args_build_flags + cxx_abi_passthrough_args
+
+    if not compile_only:
+        ldflags = omp_ldflags
+        libraries_dirs = (
+            python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
+        )
+        libraries = torch_libraries + omp_lib
+        passthrough_args += sys_libs_passthrough_args + omp_passthrough_args
 
     return (
         definitions,
@@ -1174,7 +1174,7 @@ class CppTorchOptions(CppOptions):
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
-            compile_only=compile_only,
+            compile_only=compile_only or precompiling or preprocessing,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
         )
@@ -1274,13 +1274,6 @@ def get_cpp_torch_device_options(
                 "Intel GPU driver is not properly installed, please follow the instruction "
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
-
-    if aot_mode:
-        if config.is_fbcode():
-            from torch._inductor.codecache import cpp_prefix_path
-
-            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
-            include_dirs += cpp_prefix_include_dir
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
@@ -1632,14 +1625,9 @@ class CppBuilder:
     def build_fbcode_re(
         self,
     ) -> None:
-        from torch._inductor.codecache import cpp_prefix_path
-
         with dynamo_timed("compile_file"):
             command = self.get_command_line().split()
             try:
-                # Need to copy our header into the same folder as the sourcecode.
-                header_path = cpp_prefix_path()
-                header_name = os.path.basename(header_path)
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
                 # that are required during the compilation process into our build directly.
@@ -1647,7 +1635,6 @@ class CppBuilder:
                 torch_includes_path = os.path.join(_TORCH_PATH, "include")
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     # Copy everything to tmp compilation folder
-                    shutil.copy(header_path, os.path.join(tmp_dir, header_name))
                     shutil.copy(_LINKER_SCRIPT, os.path.join(tmp_dir, "script.ld"))
                     for src in self._orig_source_paths:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
