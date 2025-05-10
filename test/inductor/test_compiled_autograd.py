@@ -4179,7 +4179,11 @@ def wrap_test_class(orig_cls):
         fn = dct[name]
         if not callable(fn) or name in skipped_tests:
             continue
-        elif xfail_re.match(name) or name in xfail_by_backend["ca_eager"]:
+        elif (
+            xfail_re.match(name)
+            or name in xfail_by_backend["ca_eager"]
+            or name in xfail_divergence_from_eager
+        ):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
             ctxs = [
@@ -4370,6 +4374,7 @@ xfail_by_backend = {
         "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
         "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
     },
+    # tests not present in this dict will be run with torch.compile(backend="inductor")
 }
 
 # These tests fail due to difference in semantics that we won't fix
