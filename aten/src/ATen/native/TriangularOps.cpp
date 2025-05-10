@@ -51,7 +51,6 @@ void apply_triu_tril_single(
     int64_t self_row_stride,
     int64_t self_col_stride,
     bool upper) {
-      
   if (upper) {
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
       for (int64_t i : c10::irange(start, end)) {
