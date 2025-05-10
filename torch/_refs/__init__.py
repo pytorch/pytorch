@@ -3787,33 +3787,58 @@ def _compute_stride(old_shape, old_stride, new_shape):
     return new_stride
 
 
-# When _reshape_view_helper hits a data dependent error it fall back to this funciton to
-# try to do the reshape/view using as_strided if it can.
-# if the a is contiguous, we can always reshape with as_strided.
-# if a is not  contiguous
-def _unbacked_fallback_reshape_view_helper(
-    a: TensorLikeType, shape, allow_copy: bool, data_dependent_error
+# When _reshape_view_helper hits a data dependent error it fall back to this funciton to.
+# This is also used as meta kernal for reshpe/view.
+# if a is contiguous, we can always reshape with as_strided.
+# if a is not contiguous and _compute_stride succeed we also use as_strided.
+# if if a is not contiguous and _compute_stride fail we clone and call it on the clone. (if allow_copy)
+def _unbacked_fallback_reshape_view(
+    a: TensorLikeType, shape, allow_copy: bool, data_dependent_error=None
 ):
-    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq,guard_or_false
+    
+    # Creates a valid shape
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    
+    # Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    shape = utils.infer_size(shape, a.numel())
 
+
+    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+    shape_numel = reduce(operator.mul, shape, 1)
+    torch._check(
+        a.numel() == shape_numel,
+        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+    )
+
+    # if a is contiguous, we can always reshape with as_strided.
     if a.is_contiguous():
-        if len(shape) >= 1 and a.ndim >= 1:
-            if len(shape) == len(a.shape) and statically_known_true(
+        if len(shape) == len(a.shape) and statically_known_true(
                 sym_eq(shape, a.shape)
             ):
                 return prims.view_of(a)
 
-            strides = [1]
-            for x in reversed(shape[1:]):
-                strides.append(strides[-1] * x)
-            strides.reverse()
-            return a.as_strided(shape, strides)
-    else:
-        new_strides = _compute_stride(a.size(), a.stride(), shape)
-        if new_strides is not None:
-            return a.as_strided(shape, new_strides)
+        return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
 
-    raise data_dependent_error
+    # if a is not contiguous and _compute_stride succeed we also use as_strided.
+    new_strides = _compute_stride(a.size(), a.stride(), shape)
+    if new_strides is not None:
+        return a.as_strided(shape, new_strides)
+
+    # if a is not contiguous and _compute_stride fail we clone and call it on the clone. (if allow_copy)
+    if allow_copy:
+        t = a.clone()
+        return _unbacked_fallback_reshape_view(
+            t, shape, allow_copy, data_dependent_error
+        )
+
+    if data_dependent_error:
+        raise data_dependent_error
+    else:
+        raise ValueError(
+            f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
+        )
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
@@ -3872,11 +3897,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
 
-    # for s in shape:
-    #     torch._check(
-    #         a.numel() % s == 0,
-    #         f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
-    #     )
     deferred: list[Callable[[], bool]] = []
 
     # NOTE [Reshape Algorithm]
@@ -3978,7 +3998,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return a_
     except GuardOnDataDependentSymNode as e:
-        return _unbacked_fallback_reshape_view_helper(a, shape, allow_copy, e)
+        return _unbacked_fallback_reshape_view(a, shape, allow_copy, e)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4826,7 +4846,6 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(aten.view.default)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
