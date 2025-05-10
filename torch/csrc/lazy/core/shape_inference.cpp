@@ -140,7 +140,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
         TORCH_CHECK(
             ((xstep > 0) && (xend >= xstart)) ||
                 ((xstep < 0) && (xend <= xstart)),
-            "upper bound and larger bound inconsistent with step sign");
+            "upper bound and lower bound inconsistent with step sign");
 
         TORCH_CHECK(
             size_d >= 0 &&
