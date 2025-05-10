@@ -148,6 +148,14 @@ def map_wrapper(f, xs, *args):
         unflattened_out = f(xs, *flat_args[num_mapped_args:])
         flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
 
+        if any(
+            not isinstance(out, torch.Tensor) for out in flat_out if out is not None
+        ):
+            raise RuntimeError(
+                "Expect outputs of map only contains tensors or None. "
+                f"Got types {[type(out) for out in flat_out]}."
+            )
+
         nonlocal out_spec
         out_spec = tmp_out_spec
         return flat_out
@@ -222,8 +230,7 @@ def map_dense(f, xs, pos_args):
     return _stack_pytree(pytrees)
 
 
-# TODO: Rework DispatchKey.Autograd to py_autograd_impl
-@map_impl.py_impl(DispatchKey.Autograd)
+@map_impl.py_autograd_impl
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
     fw_graph, bw_graph = create_fw_bw_graph(f, num_mapped_args, *xs, *pos_args)
