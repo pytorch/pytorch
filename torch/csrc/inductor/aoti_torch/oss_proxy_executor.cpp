@@ -1,4 +1,5 @@
 #include <nlohmann/json.hpp>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -17,12 +18,6 @@ bool has_key(
     const std::string& key) {
   return map.find(key) != map.end();
 }
-
-#ifdef _WIN32
-const std::string k_separator = "\\";
-#else
-const std::string k_separator = "/";
-#endif
 
 } // namespace
 
@@ -597,10 +592,8 @@ OSSProxyExecutor::OSSProxyExecutor(
     // Load custom objects from custom_objs_config.json file
     // Get the constants json path from the extern_kernel_nodes .json file
 
-    size_t lastSlash = json_path.find_last_of("/\\");
-    std::string folder_path = json_path.substr(0, lastSlash);
-    std::string custom_objs_json_path =
-        folder_path + k_separator + "custom_objs_config.json";
+    auto folder_path = std::filesystem::path(json_path).parent_path();
+    auto custom_objs_json_path = folder_path / "custom_objs_config.json";
     LOG(INFO) << "Loading custom_objs_config .json file from "
               << custom_objs_json_path;
 
@@ -615,8 +608,7 @@ OSSProxyExecutor::OSSProxyExecutor(
       custom_objs_json_file >> custom_objs_json;
       // Load custom objects from binary torchbind file
       for (auto& [customObjName, file_name] : custom_objs_json.items()) {
-        std::string customObjPath =
-            folder_path + k_separator + file_name.get<std::string>();
+        auto customObjPath = folder_path / file_name.get<std::string>();
         LOG(INFO) << "Loading custom object to FbProxyExecutor from: "
                   << customObjPath;
 

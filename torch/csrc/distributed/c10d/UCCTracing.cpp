@@ -42,7 +42,8 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
   std::filesystem::path trace_filename =
       fullpath / fmt::format("rank{}.json", rank);
   std::error_code ec{};
-  if (!std::filesystem::create_directories(fullpath, ec)) {
+  if (!std::filesystem::create_directories(fullpath, ec) &&
+      !std::filesystem::is_directory(fullpath)) {
     LOG(INFO) << getLogPrefix() << "[INFO] failed to mkdir " << fullpath
               << " with error " << ec.message();
     return;
