@@ -1702,19 +1702,23 @@ namespace {
     }
     TEST(FP8E4M3Test, FP8E4M3ConversionFloat) {
       for (uint32_t index = 0; index < 256; ++index) {
-        uint8_t input_u8 = static_cast<uint8_t>(index);
-        float f32 = static_cast<float>(input_u8);
+        uint8_t input = static_cast<uint8_t>(index);
       #if defined(CPU_CAPABILITY_AVX512) && !defined(__APPLE__) && !defined(_MSC_VER)
+        float f32 = at::vec::fp8e4m3_to_fp32_scalar(input);
         uint8_t u8 = at::vec::fp32_to_fp8e4m3_scalar(f32);
-        float x = at::vec::fp8e4m3_to_fp32_scalar(u8);
       #else
+        float f32 = c10::detail::fp8e4m3fn_to_fp32_value(input);
         uint8_t u8 = c10::detail::fp8e4m3fn_from_fp32_value(f32);
-        float x = c10::detail::fp8e4m3fn_to_fp32_value(u8);
       #endif
+        if (index == 255 || index == 127) {
+          // EXPECT_EQ failed to check nan
+          ASSERT_TRUE(std::isnan(f32));
+        } else {
+          EXPECT_EQ(f32, c10::detail::fp8e4m3fn_to_fp32_value(input))
+              << "Test failed for u8 to float " << input << "\n";
+        }
         EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32))
             << "Test failed for float to u8 " << f32 << "\n";
-        EXPECT_EQ(x, c10::detail::fp8e4m3fn_to_fp32_value(u8))
-            << "Test failed for u8 to float " << u8 << "\n";
       }
     }
     TEST(FP8E4M3Test, FP8E4M3BinaryAdd) {
