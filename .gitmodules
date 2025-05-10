@@ -133,3 +133,6 @@
 [submodule "third_party/flash-attention"]
 	path = third_party/flash-attention
 	url = https://github.com/Dao-AILab/flash-attention.git
+[submodule "third_party/x86-simd-sort"]
+	path = third_party/x86-simd-sort
+	url = https://github.com/intel/x86-simd-sort.git
