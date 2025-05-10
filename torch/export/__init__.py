@@ -57,6 +57,7 @@ __all__ = [
 # To make sure export specific custom ops are loaded
 import torch.export.custom_ops
 
+from ._draft_export import draft_export
 from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import AdditionalInputs, Constraint, Dim, dims, ShapesCollection
 from .exported_program import (

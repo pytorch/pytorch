@@ -17,9 +17,9 @@ from torch._export.passes.insert_custom_op_guards import (
     insert_custom_op_guards,
     OpProfile,
 )
-from torch.export import ExportedProgram
-from torch.export._trace import _export
-from torch.export.dynamic_shapes import _DimHint, _DimHintType, Dim
+
+from .dynamic_shapes import _DimHint, _DimHintType, Dim
+from .exported_program import ExportedProgram
 
 
 log = logging.getLogger(__name__)
@@ -368,6 +368,13 @@ def draft_export(
     strict: bool = False,
     pre_dispatch: bool = True,
 ) -> ExportedProgram:
+    """
+    A version of torch.export.export which is designed to consistently produce
+    an ExportedProgram, even if there are potential soundness issues, and to
+    generate a report listing the issues found.
+    """
+    from ._trace import _export
+
     kwargs = kwargs or {}
     dynamic_shapes = dynamic_shapes or {}
 

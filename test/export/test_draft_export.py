@@ -5,8 +5,8 @@ import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.export import Dim, export
-from torch.export._draft_export import draft_export, FailureType
+from torch.export import Dim, draft_export, export
+from torch.export._draft_export import FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
