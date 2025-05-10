@@ -1712,7 +1712,7 @@ namespace {
       #endif
         if (index == 255 || index == 127) {
           // EXPECT_EQ failed to check nan
-          ASSERT_TRUE(std::isnan(f32));
+          EXPECT_TRUE(std::isnan(f32));
         } else {
           EXPECT_EQ(f32, c10::detail::fp8e4m3fn_to_fp32_value(input))
               << "Test failed for u8 to float " << input << "\n";
