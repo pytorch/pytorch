@@ -14,6 +14,10 @@ namespace torch {
 TORCH_API std::vector<pybind11::object> py_symbolize(
     std::vector<CapturedTraceback*>& to_symbolize);
 
+// Return the callback in json format so that it can be used within cpp
+TORCH_API std::vector<std::string> json_symbolize(
+    std::vector<CapturedTraceback*>& to_symbolize);
+
 // requires GIL to be held, frees any pending free frames
 TORCH_PYTHON_API void freeDeadCapturedTracebackFrames();
 

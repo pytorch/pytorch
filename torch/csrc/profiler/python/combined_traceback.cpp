@@ -115,6 +115,12 @@ struct PythonTraceback : public CapturedTraceback::Python {
 
 } // namespace
 
+std::vector<std::string> json_symbolize(
+    std::vector<CapturedTraceback*>& to_symbolize) {
+  std::vector<std::string> result;
+  return result;
+}
+
 std::vector<py::object> py_symbolize(
     std::vector<CapturedTraceback*>& to_symbolize) {
   // we dedup repeated to_symbolize objects to prevent
