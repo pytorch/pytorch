@@ -47,7 +47,8 @@ static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
 
-// Control whether or not wait() is blocking or non-blocking.
+// Control whether or not wait() is blocking or non-blocking. If blocking, no
+// watchdog thread is running.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
     "NCCL_BLOCKING_WAIT"};
@@ -87,13 +88,17 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
 // Enable monitoring thread which aborts the process when the ProcessGroupNCCL
 // Watchdog thread gets stuck and no heartbeat is detected after
 // TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC. This can happen due to calling CUDA/NCCL
-// APIs that may hang. It is Useful to prevent jobs being stuck for a prolonged
-// time than necessary tying up cluster resources.
+// APIs that may hang. It is useful to prevent jobs being stuck for a prolonged
+// time than necessary tying up cluster resources. (The thread is enabled by
+// default.)
 static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
     "TORCH_NCCL_ENABLE_MONITORING"};
 
 // Control the watchdog heartbeat timeout period after which the monitoring
-// thread will abort the process.
+// thread will abort the process. This timeout doesn't require collectives
+// to make progress. As long as the watchdog thread is alive, the heartbeat is
+// updated. Workload timeouts are defined via timeout= argument to
+// init_process_group().
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
