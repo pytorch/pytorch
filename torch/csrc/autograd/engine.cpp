@@ -1307,8 +1307,8 @@ auto Engine::execute(
 
   auto graph_task = std::make_shared<GraphTask>(
       /* keep_graph */ keep_graph,
-      /* create_graph */ create_graph,
-      /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
+      /* grad_mode */ create_graph,
+      /* reentrant_depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue,
       /* graph_roots */ std::move(temp_roots));
 
@@ -1329,8 +1329,6 @@ auto Engine::execute(
 
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(
-        !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
     GraphTaskGuard guard(graph_task);
     CheckpointValidGuard cpvguard(graph_task);
