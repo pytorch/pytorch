@@ -4120,7 +4120,9 @@ class CompiledAutograd1(torch.nn.Module):
             first, second, third, fourth = None, None, None, None
             try:
                 with compiled_autograd._enable(ca_compiler):
-                    first = torch.autograd.grad(fwd_compiler(f)(x), x, create_graph=True)[0]
+                    first = torch.autograd.grad(
+                        fwd_compiler(f)(x), x, create_graph=True
+                    )[0]
                     second = torch.autograd.grad(first, x, create_graph=True)[0]
                     third = torch.autograd.grad(second, x, create_graph=True)[0]
                     fourth = torch.autograd.grad(third, x, create_graph=True)[0]
@@ -4389,6 +4391,8 @@ xfail_by_backend = {
         "test_wrapped_number_saved_tensors_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
         "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
         "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
+        "test_grad",  # AOT backward higher order gradients
+        "test_grad_materialize_grads",  # AOT backward higher order gradients
     },
     "inductor": {  # will be run with torch.compile(backend="aot_eager")
         "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
