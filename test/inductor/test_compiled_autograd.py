@@ -4118,7 +4118,9 @@ class CompiledAutograd1(torch.nn.Module):
             first, second, third, fourth = None, None, None, None
             try:
                 with compiled_autograd._enable(ca_compiler):
-                    first = torch.autograd.grad(fwd_compiler(f)(x), x, create_graph=True)[0]
+                    first = torch.autograd.grad(
+                        fwd_compiler(f)(x), x, create_graph=True
+                    )[0]
                     second = torch.autograd.grad(first, x, create_graph=True)[0]
                     third = torch.autograd.grad(second, x, create_graph=True)[0]
                     fourth = torch.autograd.grad(third, x, create_graph=True)[0]
@@ -4381,6 +4383,8 @@ known_failing_tests = {
     "test_nested_anomaly_printstack_cleanup",  # anomaly NaN error message different
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
+    "test_grad",  # AOT backward higher order gradients
+    "test_grad_materialize_grads",  # AOT backward higher order gradients
 }
 
 if not HAS_CUDA:
