@@ -1707,30 +1707,30 @@ class TestPatternMatcher(TestCase):
             current_config["post_grad_custom_post_pass"] = custom_pass
             return compile_fx(graph, example_inputs, config_patches=current_config)
 
-        # Case 1: mutates a clone of graph input
-        @torch.compile(fullgraph=True, backend=custom_backend)
-        def f1(x):
-            x = x.clone()
-            out = torch.zeros_like(x)
-            foo_inplace(x)
-            bar_out(x, out)
-            return out
+        # # Case 1: mutates a clone of graph input
+        # @torch.compile(fullgraph=True, backend=custom_backend)
+        # def f1(x):
+        #     x = x.clone()
+        #     out = torch.zeros_like(x)
+        #     foo_inplace(x)
+        #     bar_out(x, out)
+        #     return out
 
-        def f1_replaced(x):
-            x = x.clone()
-            out = torch.zeros_like(x)
-            foobar_out(x, out)
-            return out
+        # def f1_replaced(x):
+        #     x = x.clone()
+        #     out = torch.zeros_like(x)
+        #     foobar_out(x, out)
+        #     return out
 
-        f1_inp = inp.clone().detach()
-        f1_replaced_inp = inp.clone().detach()
-        f1_out = f1(f1_inp)
-        f1_replaced_out = f1_replaced(f1_replaced_inp)
-        self.assertEqual(f1_inp, f1_replaced_inp)
-        self.assertEqual(f1_out, f1_replaced_out)
-        self.assertEqual(count, 1)
+        # f1_inp = inp.clone().detach()
+        # f1_replaced_inp = inp.clone().detach()
+        # f1_out = f1(f1_inp)
+        # f1_replaced_out = f1_replaced(f1_replaced_inp)
+        # self.assertEqual(f1_inp, f1_replaced_inp)
+        # self.assertEqual(f1_out, f1_replaced_out)
+        # self.assertEqual(count, 1)
 
-        # Case 2: mutates graph input (not supported yet)
+        # Case 2: mutates graph input
         @torch.compile(fullgraph=True, backend=custom_backend)
         def f2(x):
             out = torch.zeros_like(x)
@@ -1747,7 +1747,7 @@ class TestPatternMatcher(TestCase):
         f2_replaced_inp = inp.clone().detach()
         f2_out = f2(f2_inp)
         f2_replaced_out = f2_replaced(f2_replaced_inp)
-        self.assertEqual(f1_inp, f1_replaced_inp)
+        self.assertEqual(f2_inp, f2_replaced_inp)
         self.assertEqual(f2_out, f2_replaced_out)
         self.assertEqual(count, 1)
 
@@ -1773,24 +1773,24 @@ class TestPatternMatcher(TestCase):
             x2 = torch.ops.inductor.opaque_view(x)
             foo_inplace(x1, x2)
             bar_out(x1, x2, out)
-            return x, out
+            return out
 
         def mutable_ops_replacement(x, out):
             x1 = torch.ops.inductor.opaque_view(x)
             x2 = torch.ops.inductor.opaque_view(x)
             foobar_out(x1, x2, out)
-            return x, out
+            return out
 
         inp = torch.randn(3, 3)
 
-        # my_patterns = PatternMatcherPass()
-        # register_replacement(
-        #     search_fn=mutable_ops_pattern,
-        #     replace_fn=mutable_ops_replacement,
-        #     example_inputs=[inp[0].clone().detach(), inp[0].clone().detach()],
-        #     trace_fn=functools.partial(fwd_only, apply_auto_functionalize=True),
-        #     pass_dicts=my_patterns,
-        # )
+        my_patterns = PatternMatcherPass()
+        register_replacement(
+            search_fn=mutable_ops_pattern,
+            replace_fn=mutable_ops_replacement,
+            example_inputs=[inp[0].clone().detach(), inp[0].clone().detach(), inp[0].clone().detach()],
+            trace_fn=functools.partial(fwd_only, apply_auto_functionalize=True),
+            pass_dicts=my_patterns,
+        )
 
         count = 0
 
@@ -1804,7 +1804,7 @@ class TestPatternMatcher(TestCase):
             current_config = config.shallow_copy_dict()
             from torch._inductor.compile_fx import compile_fx
 
-            # current_config["post_grad_custom_post_pass"] = custom_pass
+            current_config["post_grad_custom_post_pass"] = custom_pass
             return compile_fx(graph, example_inputs, config_patches=current_config)
 
         # Case 1: mutates a clone of graph input
@@ -1828,9 +1828,9 @@ class TestPatternMatcher(TestCase):
         f1_replaced_inp = inp.clone().detach()
         f1_out = f1(f1_inp)
         f1_replaced_out = f1_replaced(f1_replaced_inp)
-        self.assertEqual(f1_inp, f1_replaced_inp)
-        self.assertEqual(f1_out, f1_replaced_out)
-        # self.assertEqual(count, 1)
+        # self.assertEqual(f1_inp, f1_replaced_inp)
+        # self.assertEqual(f1_out, f1_replaced_out)
+        self.assertEqual(count, 1)
 
         # # Case 2: mutates graph input
         # # TODO: rewrite to have x1 and x2

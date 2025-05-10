@@ -2108,6 +2108,10 @@ def fx_to_pattern(
                                 continue
 
                         return CallFunction(target, pos0, **kw_patts)
+            elif target is torch.ops.inductor.opaque_view.default:
+                # We do NOT want an explicit CallFunction pattern for this node.
+                # Use Arg() so downstream nodes still receive “something”.
+                return Arg()
 
             args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
