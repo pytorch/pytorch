@@ -681,9 +681,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 
-        import pdb
-        pdb.set_trace()
-
         with torch._C._AutoDispatchBelowAutograd():
             # 1.) Compute the forward output of the associative_scan
             ys = associative_scan_op(combine_fn, xs, additional_inputs)
@@ -701,16 +698,13 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             flat_grads (torch.Tensor): The tensor of upstream gradients, or anested pytree of tensors.
         """
 
-        import pdb
-        pdb.set_trace()
-        
         # The backward of associative_scan is always performed on the first dimension
         dim = 0
         scan_length = ctx._scan_length
         num_xs = ctx._num_xs
         num_additional_inputs = ctx._num_additional_inputs
         additional_inputs_tensor_mask = ctx._additional_inputs_tensor_mask
-        
+
         # Extract the inputs to the forward path and outputs from the forward path
         flat_args = saved_tensors_and_symints(ctx)
         xs, additional_inputs, outs = split_into_chunks(
@@ -727,9 +721,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             ctx._combine_fn,
             (*xs_slices, *additional_inputs),
         )
-        
-        import pdb
-        pdb.set_trace()
 
         # 3.) Materialize the ``ctx._combine_fn_bw``
         # TODO: we need to materialize the bw graphs because dynamo is unable to
@@ -754,7 +745,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             in_dims=tuple(
                 [0] * 2 * num_xs + [None] * num_additional_inputs + [0] * num_xs
             ),
-            out_dims=list(
+            out_dims=list(  # type: ignore[arg-type]
                 [0] * 2 * num_xs
                 + [
                     0 if add_inp_m else None
@@ -763,15 +754,18 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             ),
         )
 
-        import pdb
-        pdb.set_trace()
         # 4.) Compute the instantaneous gradients at every step ``t``
         # Use a ones_like tensor in order not to scale the g_y_t and g_x_t
         dummy_upstream_grad = (torch.ones_like(x) for x in g_ys)
         grads = mapped_combine_fn_bw_gm(
-            *(o.roll(1, dim) for o in outs), *xs, *additional_inputs, *dummy_upstream_grad
+            *(o.roll(1, dim) for o in outs),
+            *xs,
+            *additional_inputs,
+            *dummy_upstream_grad,
         )
-        g_y_t, g_x_t, _ = split_into_chunks(grads, [num_xs, num_xs, num_additional_inputs])
+        g_y_t, g_x_t, _ = split_into_chunks(
+            grads, [num_xs, num_xs, num_additional_inputs]
+        )
 
         def compute_grad_y_mat(g_y: torch.Tensor) -> torch.Tensor:
             # Prepare a ones and a zeros helper mask in order to easily compute the y_mat
@@ -840,8 +834,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # as these gradients can be computed independently from each other
         compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
 
-        import pdb
-        pdb.set_trace()
         grad_xs, sum_y_mat = compute_grad_mapped(g_x_stacked, g_y_stacked, g_ys_stacked)
 
         grads2 = mapped_combine_fn_bw_gm(
@@ -858,18 +850,13 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             )
         ]
 
-        return *[None] * 2, *grad_xs, *grad_additional_inputs
+        return *[None] * 3, *grad_xs, *grad_additional_inputs
 
 
 @associative_scan_op.py_autograd_impl
 def associative_scan_autograd(combine_fn, xs, additional_inputs):
     num_xs = len(xs)
     num_additional_inputs = len(additional_inputs)
-
-    if num_additional_inputs > 0:
-        raise RuntimeError(
-            "Associative_scan does currently not support gradients for lifted parameters!"
-        )
 
     flat_out = AssociativeScanAutogradOp.apply(
         combine_fn,
