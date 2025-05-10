@@ -2,23 +2,23 @@ add_loop_eager,compile_time_instruction_count,2960000000,0.015
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5806000000,0.025
+add_loop_eager_dynamic,compile_time_instruction_count,5857000000,0.025
 
 
 
-add_loop_inductor,compile_time_instruction_count,29160000000,0.015
+add_loop_inductor,compile_time_instruction_count,29310000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,42960000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44230000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,25630000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,25790000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,1011000000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,1003000000,0.015
 
 
 
@@ -34,7 +34,7 @@ basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,97140000
 
 
 
-update_hint_regression,compile_time_instruction_count,1677500000,0.02
+update_hint_regression,compile_time_instruction_count,1709000000,0.02
 
 
 
@@ -46,7 +46,7 @@ sum_floordiv_regression,compile_time_instruction_count,998400000,0.015
 
 
 
-symint_sum,compile_time_instruction_count,3227000000,0.015
+symint_sum,compile_time_instruction_count,3210000000,0.015
 
 
 
@@ -75,3 +75,19 @@ aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3795000000,
 
 
 aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10280000000,0.015
+
+
+
+basic_InlineMod_eager,compile_time_instruction_count,12937227080,0.015
+
+
+
+basic_NestedModule_eager,compile_time_instruction_count,8606877508,0.015
+
+
+
+mm_loop_inductor_gpu,compile_time_instruction_count,5491351025,0.015
+
+
+
+mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,9490965435,0.015
