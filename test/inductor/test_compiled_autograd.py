@@ -4351,21 +4351,23 @@ xfail_by_backend = {
         "test_nested_anomaly_detect_nan",  # nested anomaly
         "test_select_sum",  # batched gradients
         "test_custom_autograd_no_early_free",  # batched gradients
-        "test_lobpcg",  # NaNs
+        "test_grad_batched_grad",  # batched gradients
         # Uncategorized
+        "test_lobpcg",  # NaNs
+        "test_autograd_simple_views_python",  # gradient is None
+        "test_function_returns_undefined_tensor",  # gradient is None
+        "test_input_buffer_accum",  # add(sparse, dense)
+        "test_return_duplicate",  # batched gradients
+        "test_return_duplicate_inplace",  # batched gradients
+        "test_naughty_autograd_function_stashing_ctx",  # error not raised
+        "test_unrelated_inputs",  # batched gradients
     },
     "eager": {  # will be run without torch.compiling the CA graph
         "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
         "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
         "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
         "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
-        "test_autograd_simple_views_python",  # gradient is None
-        "test_function_returns_undefined_tensor",  # gradient is None
-        "test_naughty_autograd_function_stashing_ctx",  # bytecode issue
-        "test_unrelated_inputs",  # gradient batching rule not implemented for aten::sym_size.int
         "test_custom_function_non_tensor_inputs_outputs",  # gradient batching rule not implemented for aten::sym_size.int
-        "test_return_duplicate",  # gradient batching rule not implemented for aten::sym_size.int
-        "test_return_duplicate_inplace",  # gradient batching rule not implemented for aten::sym_size.int
         "test_setitem",  # CopySlices accuracy error
         "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
         "test_checkpoint_detects_non_determinism",  # different error
@@ -4384,20 +4386,17 @@ xfail_by_backend = {
         "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
         "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
         "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
+        "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
+        "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
     },
     "aot_eager": {  # will be run with torch.compile(backend="eager")
         # Category: FakeTensor
-        "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
         "test_wrapped_number_saved_tensors_hooks",  # Proxy tensor should carryover is_wrapped_number_ of its original
-        "test_grad_batched_grad",  # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
         "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
         "test_grad",  # AOT backward higher order gradients
         "test_grad_materialize_grads",  # AOT backward higher order gradients
     },
-    "inductor": {  # will be run with torch.compile(backend="aot_eager")
-        "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
-        "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
-    },
+    "inductor": {},  # will be run with torch.compile(backend="aot_eager")
     # tests not present in this dict will be run with torch.compile(backend="inductor")
 }
 
