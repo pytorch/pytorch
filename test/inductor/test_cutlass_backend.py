@@ -276,8 +276,12 @@ class TestCutlassBackend(TestCase):
             expected = model(a, b, c)
             actual, codes = run_and_get_code(compiled, a, b, c)
             torch.testing.assert_close(actual, expected)
+            pattern = r"cutlass_[\w]+\.cutlass_[\w]+"
+            match = re.search(pattern, codes[0])
+            self.assertTrue(match is not None)
+            cutlass_kernel = match.group()
             FileCheck().check_count(
-                "cuda_fused_0.cuda_fused_0",
+                cutlass_kernel,
                 2,
             ).run(codes[0])
 
@@ -321,10 +325,7 @@ class TestCutlassBackend(TestCase):
             expected = model(a, b, c)
             actual, codes = run_and_get_code(compiled, a, b, c)
             torch.testing.assert_close(actual, expected)
-            FileCheck().check_count(
-                "cuda_fused_0.cuda_fused_0",
-                1,
-            ).run(codes[0])
+            self.assertTrue(re.search(r"cutlass_.*.cutlass_.*", codes[0]))
             # Verifies expected number of precompilations
             self.assertEqual(
                 torch._dynamo.utils.counters["inductor"][
@@ -1338,7 +1339,25 @@ class TestCutlassBackend(TestCase):
             }
         ):
             _ = torch.compile(model)(B)
-        self.assertTrue(time.time() - start_time < 100)
+        self.assertTrue(time.time() - start_time < 60)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_compilation_time(self):
+        M = 1024
+        A = torch.randn(M, M).cuda().half()
+        B = torch.randn(M, M).cuda().half()
+
+        start_time = time.time()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            _ = torch.compile(torch.mm)(A, B)
+        self.assertTrue(time.time() - start_time < 50)
 
 
 if __name__ == "__main__":
