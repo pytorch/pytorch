@@ -1847,25 +1847,31 @@ def non_single_tensor_return_unsupported(api, ret):
 
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="map doesn't work unless it is captured completely with torch.compile."
+    )
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from . import TensorVariable
-        from .builder import wrap_fx_proxy_cls
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         if len(kwargs) > 0:
             unimplemented(
                 "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
-        _check_supported_callable_arg(tx, args[0].realize(), "map_fn")
+        _check_supported_callable_arg(tx, args[0], "map_fn")
 
-        assert type(args[1].realize()) is TensorVariable
+        # args = f, flat_xs, flat_args
+        assert isinstance(args[1], (ListVariable, TupleVariable)), args[1]
+        assert isinstance(args[2], (ListVariable, TupleVariable)), args[2]
+        unpacked_xs = args[1].unpack_var_sequence(tx)
+        unpacked_args = args[2].unpack_var_sequence(tx)
 
-        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
+        sample_shape = get_fake_value(unpacked_xs[0].as_proxy().node, tx).size()
 
         if len(sample_shape) < 1 or sample_shape[0] == 0:
             unimplemented(
@@ -1876,9 +1882,15 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
         with discard_graph_changes(tx):
-            first_dim = wrap_fx_proxy_cls(
-                target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
-            )
+            sliced_xs = [
+                xs.call_method(
+                    tx,
+                    "select",
+                    args=(VariableTracker.build(tx, 0), VariableTracker.build(tx, 0)),
+                    kwargs={},
+                )
+                for xs in unpacked_xs
+            ]
 
         # TODO: Support kwargs
         (
@@ -1889,8 +1901,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx,
             args[0],
             [
-                first_dim,
-                *args[2:],
+                *sliced_xs,
+                *unpacked_args,
             ],
             {},
             "torch.ops.higher_order.map",
@@ -1898,23 +1910,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
-
-        subgraph_example_value = [
-            proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
-        ]
-
-        with tx.output.fake_mode:
-            # We need to expand the example output from map() so that it has
-            # the same first dimension as the mapped input.
-            # We also do a clone with contiguous_format. This is to be consistent with
-            # eager semantic of map, which stacks the outputs. The result is contiguous
-            # as a result of the stack operation.
-            map_example_out = [
-                t.expand(sample_shape[0], *t.size()).clone(
-                    memory_format=torch.contiguous_format
-                )
-                for t in subgraph_example_value
-            ]
 
         body_nn_modules = dict(tx.output.nn_modules)
 
@@ -1927,12 +1922,13 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = (
             body_node,
-            [args[1].as_proxy()],
-            [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
+            [xs.as_proxy() for xs in unpacked_xs],
+            [arg.as_proxy() for arg in unpacked_args]
+            + list(body_lifted_freevars.keys()),
         )
 
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, map_example_out, body_spec
+            tx, torch.ops.higher_order.map_impl, p_args, {}, None, body_spec
         )
 
 
