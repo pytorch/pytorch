@@ -111,7 +111,7 @@ static_assert(
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
-inline TORCH_API std::atomic<bool> privateuse1_backend_name_set{false};
+inline TORCH_API std::atomic<bool> privateuse1_backend_name_set;
 inline TORCH_API std::string privateuse1_backend_name;
 inline TORCH_API std::mutex privateuse1_lock;
 
