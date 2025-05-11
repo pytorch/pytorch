@@ -72,7 +72,10 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
 
     TORCH_CHECK(dstep != 0.0, "step must be nonzero");
     TORCH_CHECK(std::isfinite(dstart) && std::isfinite(dend),
-                "unsupported range: ", dstart, " -> ", dend);
+                "unsupported range: ", 
+                dstart, 
+                " -> ", 
+                dend);
     TORCH_CHECK((dstep > 0 && dstart <= dend) || (dstep < 0 && dstart >= dend),
                 "upper bound and lower bound inconsistent with step sign");
 
