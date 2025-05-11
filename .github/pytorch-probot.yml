@@ -28,6 +28,7 @@ ciflow_push_tags:
 - ciflow/autoformat
 - ciflow/op-benchmark
 - ciflow/pull
+- ciflow/h100
 retryable_workflows:
 - pull
 - trunk
