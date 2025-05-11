@@ -467,7 +467,7 @@ MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes, MPSShape* stride
                                                         offset:t.storage_offset() * t.element_size()
                                                     descriptor:srcTensorDesc] autorelease];
   if (strides != nil) {
-    srcNDArray = [srcNDArray arrayViewWithShape:sizes strides:strides];
+    srcNDArray = getStridedMPSNDArray(t, srcNDArray);
   }
   return srcNDArray;
 }
@@ -476,7 +476,7 @@ MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes, const I
   return getMPSNDArray(t, getMPSShape(sizes.empty() ? t.sizes() : sizes), strides.empty() ? nil : getMPSShape(strides));
 }
 
-static MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray) {
+MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray) {
   auto strides = src.strides();
   auto sizes = src.sizes();
   auto nStrides = strides.size();
@@ -778,6 +778,8 @@ std::string get_mem_format_string(c10::MemoryFormat memory_format) {
 
 MPSGraphCache* MPSGraphCache::_instance_cache = nullptr;
 
+MPSKernelCache* MPSKernelCache::_instance_cache = nullptr;
+
 void MPSGraphCache::profileCachedGraph(const CacheEntry& cacheEntry) const {
   auto& profiler = getMPSProfiler();
   if (profiler.isOperationProfilingEnabled()) {
@@ -1022,12 +1024,34 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             const std::string& name,
                                             std::optional<c10::Scalar> alpha) {
-  TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
+  // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
+  // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
+  // double as common dtype (because Python floating point are always 64-bit values)
+  TORCH_CHECK(iter.output().scalar_type() != at::kDouble, "float64 is not supported on MPS");
   TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
+
+  // Skip for empty iterators
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  auto convert_double_scalar = [](Tensor& t) {
+    if (t.dim() != 0) {
+      return;
+    }
+    if (t.scalar_type() == kDouble) {
+      t = t.to(kFloat);
+    } else if (t.scalar_type() == kComplexDouble) {
+      t = t.to(kComplexFloat);
+    }
+  };
 
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
   Tensor out = iter.output();
+
+  convert_double_scalar(input);
+  convert_double_scalar(other);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();

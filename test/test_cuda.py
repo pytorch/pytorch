@@ -447,6 +447,7 @@ class TestCuda(TestCase):
     )
     def test_set_per_process_memory_fraction(self):
         orig = torch.cuda.get_per_process_memory_fraction(0)
+        torch.cuda.reset_peak_memory_stats(0)
         try:
             # test invalid fraction value.
             with self.assertRaisesRegex(TypeError, "Invalid type"):
@@ -4867,15 +4868,16 @@ class TestBlockStateAbsorption(TestCase):
             torch.cuda.synchronize()
             stream = torch.cuda.Stream()
             stream.wait_stream(torch.cuda.current_stream())
-            stream_context = torch.cuda.stream(stream)
-            stream_context.__enter__()
-            torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
-            try:
-                yield
-            finally:
-                torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
-                torch._C._cuda_releasePool(device, mem_pool)
-                stream_context.__exit__(None, None, None)
+
+            with torch.cuda.stream(stream), torch.device(device):
+                torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
+                try:
+                    yield
+                finally:
+                    torch._C._cuda_endAllocateToPool(device, mem_pool)
+                    torch._C._cuda_releasePool(device, mem_pool)
+
+            torch.cuda.current_stream().wait_stream(stream)
 
         segments = get_cudagraph_segments(pool)
         self.assertEqual(len(get_cudagraph_segments(pool)), 1)
