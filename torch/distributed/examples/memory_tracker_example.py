@@ -30,6 +30,7 @@ def run_one_model(net: torch.nn.Module, input: torch.Tensor):
 
 if __name__ == "__main__":
     import torchvision
+
     run_one_model(
         torchvision.models.resnet34(), torch.rand(32, 3, 224, 224, device="cuda")
     )
