@@ -133,9 +133,24 @@ supported_multiprocessing_contexts = [None] + list(
 )
 
 
-# collate_fn that returns the batch cloned; defined globally here for pickle purposes.
+# The following collate functions are defined globally here for pickle purposes.
+
+
+# collate_fn that returns the batch cloned
 def _clone_collate(b):
     return [x.clone() for x in b]
+
+
+# collate_fn that returns the batch of sparse coo tensors re-constructed & cloned
+def _sparse_coo_collate(b):
+    # we'll use constructor prior clone to force sparse tensor
+    # invariant checks, required to reproduce gh-153143
+    return [
+        torch.sparse_coo_tensor(
+            x._indices(), x._values(), x.shape, check_invariants=True
+        ).clone()
+        for x in b
+    ]
 
 
 @unittest.skipIf(
@@ -2893,8 +2908,9 @@ class TestDataLoaderDeviceType(TestCase):
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
-            # TODO: Skip this better in a better way when the test framework allows
-            return
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
 
         dataset = [
             torch.nested.nested_tensor([torch.randn(5)], device=device)
@@ -2931,6 +2947,37 @@ class TestDataLoaderDeviceType(TestCase):
             )
 
             next(iter(loader))
+
+    @parametrize(
+        "context",
+        [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_sparse_tensor_multiprocessing(self, device, context):
+        # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+        if "cuda" in device and context == "fork":
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
+
+        dataset = [torch.randn(5, 5).to_sparse().to(device) for _ in range(10)]
+
+        pin_memory_settings = [False]
+        if device == "cpu" and torch.cuda.is_available():
+            pin_memory_settings.append(True)
+
+        for pin_memory in pin_memory_settings:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                collate_fn=_sparse_coo_collate,
+                pin_memory=pin_memory,
+                multiprocessing_context=context,
+            )
+
+            for i, batch in enumerate(loader):
+                self.assertEqual(batch[0], dataset[i])
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):

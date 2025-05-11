@@ -26,6 +26,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#ifndef WIN32
+#include <torch/csrc/utils/device_lazy_init.h>
+#endif
 
 #include <cstdint>
 #include <mutex>
@@ -105,6 +108,13 @@ class TORCH_API Context {
       // If the device is not initialized, no pointer can be pinned for it
       return false;
     }
+#ifndef WIN32
+    if (torch::utils::is_device_in_bad_fork(opt_device_type.value())) {
+      // If the device is initialized in fork's parent, CUDA API calls
+      // within fork will fail.
+      return false;
+    }
+#endif
     return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
 
