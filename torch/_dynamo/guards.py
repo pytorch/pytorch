@@ -1938,9 +1938,10 @@ class GuardBuilder(GuardBuilderBase):
     def DEFAULT_DEVICE(self, guard: Guard):
         """Guard on CURRENT_DEVICE per torch.utils._device"""
         assert guard.source is GuardSource.GLOBAL
-        import torch.utils._device as m
 
-        code = [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
+        code = [
+            f"utils_device.CURRENT_DEVICE == {self.check_fn_manager.output_graph.current_device!r}"
+        ]
         self._set_guard_export_info(guard, code)
 
         self.get_guard_manager(guard).add_default_device_guard(

@@ -1196,6 +1196,23 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         with torch.enable_grad():
             self._test_check_fn(ref, loaded, {"x": x}, True)
 
+    def test_default_device(self):
+        device = torch.get_default_device()
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        try:
+            torch.set_default_device("cpu")
+            ref, loaded = self._test_serialization("DEFAULT_DEVICE", fn, x)
+            torch.set_default_device("meta")
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            torch.set_default_device("cpu")
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch.set_default_device(device)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
