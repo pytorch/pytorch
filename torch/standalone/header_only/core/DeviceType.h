@@ -111,15 +111,15 @@ static_assert(
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
-inline C10_API std::atomic<bool> privateuse1_backend_name_set{false};
-inline C10_API std::string privateuse1_backend_name;
-inline C10_API std::mutex privateuse1_lock{};
+inline TORCH_API std::atomic<bool> privateuse1_backend_name_set{false};
+inline TORCH_API std::string privateuse1_backend_name;
+inline TORCH_API std::mutex privateuse1_lock;
 
-inline C10_API bool is_privateuse1_backend_registered() {
+inline TORCH_API bool is_privateuse1_backend_registered() {
   return privateuse1_backend_name_set.load(std::memory_order_acquire);
 }
 
-inline C10_API void register_privateuse1_backend(
+inline TORCH_API void register_privateuse1_backend(
     const std::string& backend_name) {
   std::lock_guard<std::mutex> guard(privateuse1_lock);
   TORCH_CHECK(
@@ -141,7 +141,7 @@ inline C10_API void register_privateuse1_backend(
   privateuse1_backend_name_set.store(true, std::memory_order_release);
 }
 
-inline C10_API std::string get_privateuse1_backend(bool lower_case = true) {
+inline TORCH_API std::string get_privateuse1_backend(bool lower_case = true) {
   // Applying the same atomic read memory ordering logic as in Note [Memory
   // ordering on Python interpreter tag].
   // Guaranteed that if the flag is set, then privateuse1_backend_name has been
@@ -155,7 +155,7 @@ inline C10_API std::string get_privateuse1_backend(bool lower_case = true) {
   return backend_name;
 }
 
-inline C10_API std::string DeviceTypeName(
+inline TORCH_API std::string DeviceTypeName(
     DeviceType d,
     bool lower_case = false) {
   switch (d) {
@@ -224,7 +224,7 @@ inline C10_API std::string DeviceTypeName(
 // the caller is allowed to cast a possibly invalid int16_t to DeviceType and
 // then pass it to this function.  (I considered making this function take an
 // int16_t directly, but that just seemed weird.)
-inline C10_API bool isValidDeviceType(DeviceType d) {
+inline TORCH_API bool isValidDeviceType(DeviceType d) {
   switch (d) {
     case DeviceType::CPU:
     case DeviceType::CUDA:
@@ -253,7 +253,7 @@ inline C10_API bool isValidDeviceType(DeviceType d) {
   }
 }
 
-inline C10_API std::ostream& operator<<(
+inline TORCH_API std::ostream& operator<<(
     std::ostream& stream,
     DeviceType type) {
   stream << DeviceTypeName(type, /* lower case */ true);
