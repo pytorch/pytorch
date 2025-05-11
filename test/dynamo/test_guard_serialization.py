@@ -5,6 +5,7 @@ import importlib
 import pickle
 import sys
 import types
+import unittest
 from collections.abc import Iterator
 from unittest.mock import patch
 
@@ -23,9 +24,8 @@ from torch._dynamo.symbolic_convert import (
 )
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
-from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.overrides import TorchFunctionMode
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -1165,7 +1165,11 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             with LocalTorchFunctionMode():
                 ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_training_state(self):
+        from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
+        from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+
         param_group = FSDPParamGroup(
             [],  # params: List[nn.Parameter],
             (torch.nn.Linear(1, 1),),  # module: nn.Module,
