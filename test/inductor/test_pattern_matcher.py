@@ -1663,7 +1663,7 @@ class TestPatternMatcher(TestCase):
             x.add_(1)
 
         # NOTE: only returning None is supported; the custom op cannot return `out` because it's part of op input.
-        @torch.library.custom_op("mylib::bar", mutates_args={"out"})
+        @torch.library.custom_op("mylib::bar_out", mutates_args={"out"})
         def bar_out(x: torch.Tensor, out: torch.Tensor) -> None:
             out.copy_(x + 2)
 
@@ -1773,13 +1773,13 @@ class TestPatternMatcher(TestCase):
             x2 = torch.ops.inductor.opaque_view(x)
             foo_inplace(x1, x2)
             bar_out(x1, x2, out)
-            return out
+            return x1, x2, out
 
         def mutable_ops_replacement(x, out):
             x1 = torch.ops.inductor.opaque_view(x)
             x2 = torch.ops.inductor.opaque_view(x)
             foobar_out(x1, x2, out)
-            return out
+            return x1, x2, out
 
         inp = torch.randn(3, 3)
 
