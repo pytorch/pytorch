@@ -100,6 +100,7 @@ MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph,
                                  const TensorBase& input,
                                  bool includesInt64 = false);
 
+MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
 MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes = nil, MPSShape* strides = nil);
 // The MPSShape could vary based on memory format
@@ -160,6 +161,26 @@ std::string get_mem_format_string(c10::MemoryFormat memory_format);
 
 using MPSCacheKey = uint64_t;
 
+struct MPSCachedKernel {
+  MPSCachedKernel(NSObject* object) : _object([object retain]) {}
+  virtual ~MPSCachedKernel() {
+    [_object release];
+    _object = nullptr;
+  }
+
+  // Delete copy constructor and assignment
+  MPSCachedKernel(const MPSCachedKernel&) = delete;
+  void operator=(const MPSCachedKernel&) = delete;
+
+  template <typename T>
+  inline T* kernel() const {
+    return (T*)_object;
+  }
+
+ private:
+  NSObject* _object = nullptr;
+};
+
 // derive this class to cache a graph and its inputs/outputs
 // can be used to store any NSObject
 struct MPSCachedGraph {
@@ -213,6 +234,97 @@ struct MPSBinaryGradCachedGraph : public MPSCachedGraph {
   MPSGraphTensor* otherTensor_ = nil;
   MPSGraphTensor* gradInputTensor_ = nil;
 };
+
+struct MPSKernelCache {
+  typedef MPSCachedKernel* (^CreateCachedKernelBlock)();
+
+  struct CacheEntry {
+    CacheEntry(const std::string& key, MPSCachedKernel* cachedKernel) : cachedKernel_(cachedKernel), key_(key) {}
+    MPSCachedKernel* cachedKernel_ = nullptr;
+    std::string key_;
+  };
+
+ public:
+  static MPSKernelCache* getInstance() {
+    if (_instance_cache == nullptr) {
+      _instance_cache = new MPSKernelCache();
+    }
+    return _instance_cache;
+  }
+
+  ~MPSKernelCache() {
+    dispatch_release(serialQueue_);
+    for (const auto& i : cache_) {
+      delete i.second.cachedKernel_;
+    }
+  }
+
+  // Disallow the copy constructor and operator= functions
+  MPSKernelCache(const MPSKernelCache&) = delete;
+  void operator=(const MPSKernelCache&) = delete;
+
+  MPSCachedKernel* CreateCachedKernel(const std::string& key, CreateCachedKernelBlock createCacheBlock) {
+    __block MPSCachedKernel* cachedKernel = nil;
+    MPSCacheKey hash = std::hash<std::string>{}(key);
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        cachedKernel = entry.cachedKernel_;
+      } else {
+        cachedKernel = createCacheBlock();
+        CacheEntry entry(key, cachedKernel);
+        cache_.emplace(hash, entry);
+      }
+    });
+    return cachedKernel;
+  }
+  template <typename T>
+  inline T* CreateCachedKernelAs(const std::string& key, CreateCachedKernelBlock createCacheBlock) {
+    return static_cast<T*>(CreateCachedKernel(key, createCacheBlock));
+  }
+
+  MPSCachedKernel* LookUp(const std::string& key) const {
+    __block MPSCachedKernel* cachedKernel = nil;
+
+    MPSCacheKey hash = std::hash<std::string>{}(key);
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
+        cachedKernel = entry.cachedKernel_;
+      }
+    });
+    return cachedKernel;
+  }
+
+  template <typename T>
+  inline T* LookUpAs(const std::string& key) const {
+    return static_cast<T*>(LookUp(key));
+  }
+
+ private:
+  MPSKernelCache() {
+    serialQueue_ = dispatch_queue_create("kernel cache queue", DISPATCH_QUEUE_SERIAL);
+  }
+
+  static MPSKernelCache* _instance_cache;
+  std::unordered_map<MPSCacheKey, CacheEntry> cache_;
+  dispatch_queue_t serialQueue_ = nullptr;
+};
+
+// Common template for creating cached kernel if missing
+template <typename T>
+inline T* LookUpOrCreateCachedKernel(const std::string& key, std::function<MPSKernel*()> instantiate) {
+  auto cache_ = MPSKernelCache::getInstance();
+  if (auto rc = cache_->LookUpAs<T>(key)) {
+    return rc;
+  }
+  return cache_->CreateCachedKernelAs<T>(key, ^mps::MPSCachedKernel*() {
+    auto k_ = new mps::MPSCachedKernel(instantiate());
+    return k_;
+  });
+}
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176

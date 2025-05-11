@@ -7633,6 +7633,15 @@ utils_device.CURRENT_DEVICE == None""".split(
             torch.compile(dyn_fn, backend="eager")(y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_empty_tensor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            n = x.item()
+            return torch.empty((n - 1) // 2)
+
+        self.assertEqual(fn(torch.tensor([4])).size(0), 1)
+        self.assertEqual(fn(torch.tensor([1])).size(0), 0)
+
     def test_unbacked_2d_expand(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):
@@ -7640,16 +7649,16 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a * 10
 
         a = torch.rand(1, 1)
-        b = torch.rand(2, 2)
+        b = torch.rand(1, 1)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
         torch._dynamo.decorators.mark_unbacked(b, 0)
         torch._dynamo.decorators.mark_unbacked(b, 1)
-        # TODO(laithsakka): update inductor runtime asserts to properly raise
         func(a, b)
         func(torch.rand(4, 5), torch.rand(4, 5))
-        func(torch.rand(1, 1), torch.rand(2, 1))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(1, 1), torch.rand(2, 1))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_sym_constrain_range_on_replaced_unbacked_symbol(self):
@@ -12492,6 +12501,16 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             )
 
         f(torch.tensor([30, 30], device=device), torch.tensor([68, 32], device=device))
+
+    def test_scalar_isin_decomposition(self):
+        def f():
+            x = torch.tensor(0)
+            return torch.isin(x, x)
+
+        opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+        ref = f()
+        res = opt_f()
+        self.assertEqual(ref, res)
 
 
 devices = ("cuda", "hpu")

@@ -396,44 +396,25 @@ def _unlift_graph(
 def _get_subgraph_names(
     gm: GraphModule, skip_invoke_subgraph: bool = False
 ) -> Generator[str, None, None]:
-    # invoke_subgraph can call the same subgraph multiple times, so this set
-    # ensures that we don't run redundant passes.
-    seen_invoke_subgraph_names: OrderedSet[str] = OrderedSet()
-    for node in sorted(
-        itertools.chain(
-            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
-            gm.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.while_loop
-            ),
-            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.scan),
-            gm.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.invoke_subgraph
-            ),
-        )
-    ):
-        if node.target == torch.ops.higher_order.cond:
-            true_subgraph_name = node.args[1].name
-            false_subgraph_name = node.args[2].name
-            yield true_subgraph_name
-            yield false_subgraph_name
-        elif node.target == torch.ops.higher_order.while_loop:
-            cond_subgraph_name = node.args[0].name
-            body_subgraph_name = node.args[1].name
-            yield cond_subgraph_name
-            yield body_subgraph_name
-        elif node.target == torch.ops.higher_order.scan:
-            combine_subgraph_name = node.args[0].name
-            yield combine_subgraph_name
-        elif (
-            not skip_invoke_subgraph
-            and node.target == torch.ops.higher_order.invoke_subgraph
+    all_subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in gm.graph.find_nodes(op="get_attr")
+    )
+    fx_subgraph_names: OrderedSet[str] = OrderedSet()
+    for child_name, child_module in gm.named_children():
+        # Sometimes an owning_module can have unused children. Skip them
+        # by checking them from get_attr node targets.
+        if child_name in all_subgraph_names and isinstance(
+            child_module, torch.fx.GraphModule
         ):
-            get_attr_node = node.args[0]
-            assert get_attr_node.op == "get_attr"
-            subgraph_name = get_attr_node.target
-            if subgraph_name not in seen_invoke_subgraph_names:
-                seen_invoke_subgraph_names.add(subgraph_name)
-                yield subgraph_name
+            fx_subgraph_names.add(child_name)
+
+    if skip_invoke_subgraph:
+        for node in gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            fx_subgraph_names.discard(node.args[0].target)
+
+    yield from fx_subgraph_names
 
 
 def _recursive_pre_grad_passes(
@@ -714,6 +695,8 @@ def compile_fx_inner(
                 "compile_fx_inner",
                 phase_name="inductor_compile",
                 log_pt2_compile_event=True,
+                log_waitcounter=True,
+                waitcounter_name_override="compile_inductor",
                 dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
@@ -802,6 +785,15 @@ def _compile_fx_inner(
         remote = fx_graph_remote_cache
         set_feature_use("fx_cache", use_cache)
 
+        log.debug(
+            "FX cache status: use_cache=%s, local=%s, remote=%s, aot_mode=%s, force_disable_caches=%s",
+            use_cache,
+            local,
+            remote,
+            aot_mode,
+            config.force_disable_caches,
+        )
+
         # TODO: This is a hack purely to get some info to extract_tensor_metadata_for_cache_key,
         # figure out how to not have to modify example inputs
         for i, input in enumerate(example_inputs):
@@ -829,8 +821,10 @@ def _compile_fx_inner(
             # Attempt a cache lookup
             if key_info is not None:
                 key, debug_lines = key_info
+                log.debug("FX cache key generated: %s", key)
                 if remote:
                     remote_cache = FxGraphCache.get_remote_cache()
+                    log.debug("Using remote FX cache")
                 mb_compiled_graph, cache_info = FxGraphCache.load_with_key(
                     key,
                     debug_lines,
@@ -840,12 +834,22 @@ def _compile_fx_inner(
                     is_backward=graph_kwargs.get("is_backward", False),
                     constants=constants,
                 )
+            else:
+                log.debug("Failed to generate FX cache key")
 
         # CACHE BYPASS: Compile the graph, don't save it to the cache
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
         if cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
+            log.debug(
+                "FX cache bypass reason: %s",
+                (
+                    cache_info.get("cache_bypass_reason", "unknown")
+                    if cache_info is not None
+                    else "FX cache disabled or key generation failed"
+                ),
+            )
             mb_compiled_graph = fx_codegen_and_compile(
                 gm, example_inputs, inputs_to_check, **graph_kwargs
             )
@@ -854,6 +858,7 @@ def _compile_fx_inner(
         elif cache_info["cache_state"] == "miss":
             assert mb_compiled_graph is None
             assert key_info is not None
+            log.debug("FX cache miss, compiling and saving to cache")
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
@@ -880,6 +885,7 @@ def _compile_fx_inner(
             if triton_bundler_meta is not None:
                 cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = mb_compiled_graph._time_taken_ns
+            log.debug("Saving compiled graph to FX cache with key: %s", cache_key)
             FxGraphCache._save_graph(
                 cache_key,
                 mb_compiled_graph,
@@ -895,6 +901,7 @@ def _compile_fx_inner(
             assert mb_compiled_graph is not None
             assert key_info is not None
             (cache_key, debug_lines) = key_info
+            log.debug("FX cache hit with key: %s", cache_key)
             mb_compiled_graph._fx_graph_cache_key = cache_key
             mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
 
@@ -1162,8 +1169,15 @@ class _InProcessFxCompile(FxCompile):
                         colored=True,
                     ),
                 )
+
+                # We're printing the graph to be used as a cache key - so a
+                # printer which is a little less readable but faster is
+                # appropriate.
                 inductor_post_grad_graph_str = gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
+                    print_output=False,
+                    include_stride=True,
+                    include_device=True,
+                    fast_sympy_print=True,
                 )
                 trace_structured(
                     "inductor_post_grad_graph",
@@ -1263,16 +1277,20 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_wrapper_code=const_wrapper_code.value
-                    if const_wrapper_code
-                    else None,
-                    const_kernel_code=const_kernel_code.value
-                    if const_kernel_code
-                    else None,
+                    const_wrapper_code=(
+                        const_wrapper_code.value if const_wrapper_code else None
+                    ),
+                    const_kernel_code=(
+                        const_kernel_code.value if const_kernel_code else None
+                    ),
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
+
+                # We are going to start code generating runtime asserts, so make sure
+                # you don't start adding new ones in the lowering process
+                graph.freeze_runtime_asserts()
                 with V.set_graph_handler(graph):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
@@ -1304,10 +1322,6 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
-                        # We are going to start code generating runtime asserts, so make sure
-                        # you don't start adding new ones in the lowering process
-                        graph.freeze_runtime_asserts()
-
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
