@@ -18,7 +18,7 @@ The following constraints are implemented:
 - ``constraints.less_than(upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
-- ``constraints.mixture_same_family(constraint)``
+- ``constraints.MixtureSameFamilyConstraint(base_constraint)``
 - ``constraints.multinomial``
 - ``constraints.nonnegative``
 - ``constraints.nonnegative_integer``
@@ -57,7 +57,7 @@ __all__ = [
     "less_than",
     "lower_cholesky",
     "lower_triangular",
-    "mixture_same_family",
+    "MixtureSameFamilyConstraint",
     "multinomial",
     "nonnegative",
     "nonnegative_integer",
@@ -267,7 +267,7 @@ class _IndependentConstraint(Constraint):
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
 
 
-class mixture_same_family(Constraint):
+class MixtureSameFamilyConstraint(Constraint):
     """
     Constraint for the :class:`~torch.distribution.MixtureSameFamily`
     distribution that adds back the rightmost batch dimension before
@@ -276,7 +276,7 @@ class mixture_same_family(Constraint):
 
     Args:
         base_constraint: The ``Constraint`` object of
-            the component distribution constraint of
+            the component distribution of
             the :class:`~torch.distribution.MixtureSameFamily` distribution.
     """
 

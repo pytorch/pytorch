@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 from torch import Tensor
 from torch.distributions import Categorical, constraints
-from torch.distributions.constraints import mixture_same_family
+from torch.distributions.constraints import MixtureSameFamilyConstraint
 from torch.distributions.distribution import Distribution
 
 
@@ -125,7 +125,7 @@ class MixtureSameFamily(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        return mixture_same_family(self._component_distribution.support)
+        return MixtureSameFamilyConstraint(self._component_distribution.support)
 
     @property
     def mixture_distribution(self) -> Categorical:
