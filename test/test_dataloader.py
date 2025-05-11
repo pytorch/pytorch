@@ -135,16 +135,22 @@ supported_multiprocessing_contexts = [None] + list(
 
 # The following collate functions are defined globally here for pickle purposes.
 
+
 # collate_fn that returns the batch cloned
 def _clone_collate(b):
     return [x.clone() for x in b]
+
 
 # collate_fn that returns the batch of sparse coo tensors re-constructed & cloned
 def _sparse_coo_collate(b):
     # we'll use constructor prior clone to force sparse tensor
     # invariant checks, required to reproduce gh-153143
-    return [torch.sparse_coo_tensor(x._indices(), x._values(), x.shape, check_invariants=True).clone()
-            for x in b]
+    return [
+        torch.sparse_coo_tensor(
+            x._indices(), x._values(), x.shape, check_invariants=True
+        ).clone()
+        for x in b
+    ]
 
 
 @unittest.skipIf(
@@ -2902,7 +2908,9 @@ class TestDataLoaderDeviceType(TestCase):
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
-            self.skipTest(f"{context} multiprocessing context not supported for {device}")
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
 
         dataset = [
             torch.nested.nested_tensor([torch.randn(5)], device=device)
@@ -2948,11 +2956,11 @@ class TestDataLoaderDeviceType(TestCase):
     def test_sparse_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
-            self.skipTest(f"{context} multiprocessing context not supported for {device}")
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
 
-        dataset = [
-            torch.randn(5, 5).to_sparse().to(device) for _ in range(10)
-        ]
+        dataset = [torch.randn(5, 5).to_sparse().to(device) for _ in range(10)]
 
         pin_memory_settings = [False]
         if device == "cpu" and torch.cuda.is_available():
