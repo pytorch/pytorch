@@ -1504,7 +1504,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma
+    from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
@@ -1535,7 +1535,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
     return (
         config.triton.enable_persistent_tma_matmul
-        and has_triton_tma()
+        and has_triton_tma_device()
         and all(_is_tma_compatible(m) for m in matrices)
     )
 
