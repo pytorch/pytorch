@@ -394,7 +394,7 @@ else:
         and will select/set the device for the current process if user does not set the device
         beforehands. Note that manual device selection should happen BEFORE the DeviceMesh initialization.
 
-        DeviceMesh can also be used as a context manager when using together with most DTensor APIs.
+        DeviceMesh can also be used as a context manager when using together with DTensor APIs.
 
         .. note::
             DeviceMesh follows SPMD programming model, which means the same PyTorch Python program
