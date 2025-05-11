@@ -183,6 +183,7 @@ THIRD_PARTY_LIBS = {
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
     "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
     "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
+    "nlohmann-json": ["fbsource//third-party/nlohmann-json:nlohmann-json", "//third_party:nlohmann-json"],
 }
 
 def third_party(name):
@@ -1736,6 +1737,7 @@ def define_buck_targets(
         deps = [
             third_party("glog"),
             third_party("kineto"),
+            third_party("nlohmann-json"),
         ],
         exported_deps = [
             ":aten_cpu",
