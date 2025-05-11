@@ -69,7 +69,7 @@ try:
     not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 except ValueError as e:
     if "'not_implemented' not registered" in str(e):
-        not_implemented_log = logging.getLogger(__name__ + ".not_implemented_log")
+        not_implemented_log = logging.getLogger(__name__ + ".not_implemented")
     else:
         raise e
 
