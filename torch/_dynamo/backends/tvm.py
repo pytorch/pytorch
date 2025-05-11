@@ -62,7 +62,7 @@ def tvm(
     import tvm  # type: ignore[import]
 
     if Version(tvm.__version__) >= Version("0.20.0"):
-        raise RuntimeError(f"TVM {tvm.__version__} is not supported yet. Please use 0.19.0 or earlier.")
+        raise RuntimeError(f"TVM v{tvm.__version__} is not supported yet. Please use v0.19.0 or earlier.")
 
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
