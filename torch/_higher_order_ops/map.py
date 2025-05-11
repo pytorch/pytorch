@@ -25,9 +25,12 @@ from .utils import (
     _stack_pytree,
     _unstack_pytree,
     clone_outputs_aliasing_inputs,
+    create_bw_fn,
+    materialize_as_graph,
     prepare_fw_with_masks,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
+    split_into_chunks,
 )
 
 
@@ -167,29 +170,66 @@ def map_wrapper(f, xs, *args):
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, fw_graph, joint_graph, num_mapped_args, *flat_args):
-        save_tensors_and_symints_for_backward(ctx, flat_args)
-        ctx._joint_graph = joint_graph
+    def forward(ctx, f, num_mapped_args, *flat_args):
+        ctx._f = f
         ctx._num_mapped_args = num_mapped_args
+        ctx._num_pos_args = len(flat_args) - num_mapped_args
+
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        save_tensors_and_symints_for_backward(ctx, flat_args)
         with torch._C._AutoDispatchBelowAutograd():
             return (
-                *map_impl(
-                    fw_graph, flat_args[:num_mapped_args], flat_args[num_mapped_args:]
-                ),
+                *map_impl(f, flat_args[:num_mapped_args], flat_args[num_mapped_args:]),
             )
 
     @staticmethod
     def backward(ctx, *flat_grads):
         fw_args = saved_tensors_and_symints(ctx)
-        fw_mapped_args = fw_args[: ctx._num_mapped_args]
-        pos_args = fw_args[ctx._num_mapped_args :]
-
-        grads = map_impl(
-            ctx._joint_graph,
-            fw_mapped_args + flat_grads,
-            pos_args,
+        fw_mapped_args, pos_args = split_into_chunks(
+            fw_args, [ctx._num_mapped_args, ctx._num_pos_args]
         )
-        return None, None, None, *grads
+        num_mapped_args = ctx._num_mapped_args
+        num_pos_args = ctx._num_pos_args
+        num_grads = len(flat_grads)
+
+        ctx._bw_f = create_bw_fn(ctx._f, fw_args)
+
+        # Create a wrapper around thefor the bw_f
+        def bw_f_wrapper(*args):
+            # Dissect args and re-order them for the ``ctx._bw_f``
+            # args provided to the wrapper are composed of [*fw_mapped_args, *flat_grads, *pos_args]
+            # The content of ``bw_f_tangents`` are the upstream gradients, i.e. flat_grads
+            # The content of ``bw_f_primals`` are the fw_args, i.e., [*fw_mapped_args, *pos_args]
+            # The bw_f requires *bw_f_primals, *bw_f_tangents
+            fw_m_args, bw_f_tangents, pos_args = split_into_chunks(
+                args, [num_mapped_args, num_grads, num_pos_args]
+            )
+            bw_f_primals = [*fw_m_args, *pos_args]
+            return ctx._bw_f(*bw_f_primals, *bw_f_tangents)
+
+        def construct_args_single_step_bw():
+            fw_mapped_args_slice = _unstack_pytree(fw_mapped_args)[0]
+            flat_grads_slice = _unstack_pytree(flat_grads)[0]
+            return *fw_mapped_args_slice, *flat_grads_slice, *pos_args
+
+        args_single_step_bw = construct_args_single_step_bw()
+
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint funcion when torch.compile torch.autograd.grad.
+        fn_bw_gm = materialize_as_graph(
+            bw_f_wrapper,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+
+        grads = map_impl(fn_bw_gm, fw_mapped_args + list(flat_grads), pos_args)
+
+        return None, None, *grads
 
 
 def trace_map(proxy_mode, func_overload, f, xs, pos_args):
@@ -233,8 +273,7 @@ def map_dense(f, xs, pos_args):
 @map_impl.py_autograd_impl
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
-    fw_graph, bw_graph = create_fw_bw_graph(f, num_mapped_args, *xs, *pos_args)
-    flat_out = MapAutogradOp.apply(fw_graph, bw_graph, num_mapped_args, *xs, *pos_args)
+    flat_out = MapAutogradOp.apply(f, num_mapped_args, *xs, *pos_args)
     return flat_out
 
 
