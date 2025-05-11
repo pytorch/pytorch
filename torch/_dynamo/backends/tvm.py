@@ -51,6 +51,14 @@ def tvm(
         {"scheduler": None, "trials": 20000, "opt_level": 3}
     ),
 ):
+    try :
+        import tvm  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "TVM is not installed. Please install it using the instructions at "
+            "https://tvm.apache.org/docs/install/index.html"
+        )
+
     import tvm  # type: ignore[import]
 
     if Version(tvm.__version__) >= Version("0.20.0"):
