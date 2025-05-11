@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import hashlib
 import logging
 from collections.abc import Sequence
 from typing import cast
@@ -7,6 +8,7 @@ from torch._inductor.codegen.cuda.cutlass_python_evt import (
     CutlassEVTCodegen,
     MockCutlassHandler,
 )
+from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
 
 from ...._dynamo.utils import counters
@@ -20,7 +22,7 @@ from ...scheduler import (
     SchedulerNode,
     WhyNoFuse,
 )
-from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
+from ...utils import get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 
@@ -89,15 +91,11 @@ class CUDACPPScheduling(BaseScheduling):
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
-            fused_name = (
-                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
-                if config.triton.descriptive_names
-                else ""
-            )
-            kernel_name = "_".join(["cuda", fused_name, wrapper.next_kernel_suffix()])
             # use the original src_code as the key
+            kernel_hash = hashlib.sha256(src_code.encode("utf-8")).hexdigest()[:8]
+            kernel_name = f"cutlass_{kernel_hash}"
             wrapper.src_to_kernel[src_code] = kernel_name
-            src_code = src_code.replace("KERNEL_NAME", kernel_name)
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_name)
 
             _, _, kernel_path = get_path(code_hash(src_code), "py")
 
