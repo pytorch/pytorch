@@ -333,6 +333,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     self._frame_state.f_code,
                     guards_state.output_graph,
                     guards_serialization_mode="load",
+                    shape_code_parts=guards_state.shape_code_parts,
                 )
                 loaded_gm = check_fn_manager.guard_manager
 
@@ -1212,6 +1213,30 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             self._test_check_fn(ref, loaded, {"x": x}, True)
         finally:
             torch.set_default_device(device)
+
+    def test_shape_env(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(2, 2)}, False)
+
+        x = torch.randn(3, 3, 2)
+        torch._dynamo.mark_dynamic(x, 1, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
 
 
 if __name__ == "__main__":
