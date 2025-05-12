@@ -1548,7 +1548,7 @@ def record_compilation_metrics(
         "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton_package() else "",
+        "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
@@ -3830,14 +3830,15 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type: str) -> bool:
+def is_compile_supported(device_type):
     from .eval_frame import is_dynamo_supported
 
+    type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
+    if type == "cpu":
         pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
-        compile_supported = has_triton(device_type)
+    elif type in ["cuda", "xpu"] and compile_supported:
+        compile_supported = has_triton()
     else:
         compile_supported = False
     return compile_supported
