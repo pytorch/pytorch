@@ -845,6 +845,7 @@ def _record_memory_history_legacy(
     device: "Device" = None,
     record_context_cpp=False,
     clear_history=False,
+    compile_context=False,
 ):
     _C._cuda_record_memory_history_legacy(
         enabled,
@@ -853,6 +854,7 @@ def _record_memory_history_legacy(
         trace_alloc_record_context,
         record_context_cpp,
         clear_history,
+        compile_context,
     )
 
 
@@ -908,8 +910,11 @@ def _record_memory_history_impl(
     max_entries: int = sys.maxsize,
     device: "Device" = None,
     clear_history: bool = False,
+    compile_context: bool = False,
 ):
-    _C._cuda_record_memory_history(enabled, context, stacks, max_entries, clear_history)
+    _C._cuda_record_memory_history(
+        enabled, context, stacks, max_entries, clear_history, compile_context
+    )
 
 
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
