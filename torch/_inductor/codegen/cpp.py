@@ -322,7 +322,7 @@ def reduction_prefix_array(
 ):
     """
     MSVC don't support dynamic array(VLA). So we use std::unique_ptr here.
-    Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler
+    Ref: https://stackoverflow.com/questions/56555406/creating-dynamic-sized-array-using-msvc-c-compiler  # @lint-ignore
     MSVC is the only one compiler without VLA. support. Since MSVC can't get good performance here.
     We just use unique_ptr make it works on MSVC.
     For other compilers, we continue to use VLA to get best performence.
