@@ -297,9 +297,13 @@ class OutputGraphGuardsState:
     global_scope: Scope
     # This records the initial torch function mode stack for guarding
     torch_function_mode_stack: list[torch.overrides.TorchFunctionMode]
-    guard_on_key_order: set[str]
+    guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
+    dual_level: int
+    functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
+    current_device: Optional[torch.device]
+
     export: bool = False
     export_constraints: bool = False
 
@@ -351,6 +355,9 @@ class OutputGraph(OutputGraphGuardsState):
             torch_function_mode_stack,
             guard_on_key_order=set(),
             input_source_to_sizes_strides={},
+            dual_level=torch.autograd.forward_ad._current_level,
+            functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
+            current_device=torch.utils._device.CURRENT_DEVICE,
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -586,6 +593,9 @@ class OutputGraph(OutputGraphGuardsState):
             torch_function_mode_stack=self.torch_function_mode_stack,
             guard_on_key_order=self.guard_on_key_order,
             input_source_to_sizes_strides=self.input_source_to_sizes_strides,
+            dual_level=self.dual_level,
+            functorch_layers=self.functorch_layers,
+            current_device=self.current_device,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
@@ -1115,7 +1125,7 @@ class OutputGraph(OutputGraphGuardsState):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for value in stack_values:
-            value.realize()
+            variables.LazyVariableTracker.realize_all(value)
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
@@ -1547,6 +1557,8 @@ class OutputGraph(OutputGraphGuardsState):
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
+            log_waitcounter=True,
+            waitcounter_name_override="compile_aot_autograd",
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
             return self._call_user_compiler(gm)
@@ -2429,12 +2441,21 @@ class SubgraphTracer(fx.Tracer):
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
-            if (
-                not is_strict_export
-                and not is_non_strict_export
-                and isinstance(example_value, torch.Tensor)
-            ):
-                self._lift_basic_symbols(example_value, source)
+            if not is_strict_export and not is_non_strict_export:
+                if isinstance(example_value, torch.Tensor):
+                    self._lift_basic_symbols(example_value, source)
+                elif isinstance(example_value, (list, tuple)):
+                    for i, e in enumerate(example_value):
+                        if not isinstance(e, torch.Tensor):
+                            continue
+
+                        e_source = None
+                        if source:
+                            e_source = GetItemSource(
+                                base=source, index=i, index_is_slice=False
+                            )
+
+                        self._lift_basic_symbols(e, e_source)
 
             # Bound the symbol to ph if example_value is a SymInt with basic symbol.
             if isinstance(example_value, torch.SymInt) and isinstance(
@@ -2618,7 +2639,7 @@ class SubgraphTracer(fx.Tracer):
         self, example_value: Union[torch.SymInt, torch.Tensor], src: Optional[Source]
     ):
         # The before arg is for inserting symints in the sizes/strides of a tensor
-        # before the tensor. This odering ensures that when we look at the tensor's
+        # before the tensor. This ordering ensures that when we look at the tensor's
         # symbols, they're already lifted/tracked. E.g. this assumption is used
         # in insert_deferred_runtime_asserts.
         def _lift_symbols_in_symint(

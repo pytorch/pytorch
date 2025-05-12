@@ -218,9 +218,12 @@ def _check_bf16_tensor_supported(device: _device_t):
 
 def is_tf32_supported() -> bool:
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
-    # Check for ROCm.  If true, return false, since PyTorch does not currently support
-    # tf32 on ROCm.
     if torch.version.hip:
+        prop_name = torch.cuda.get_device_properties().gcnArchName
+        archs = ("gfx94", "gfx95")
+        for arch in archs:
+            if arch in prop_name:
+                return True
         return False
 
     # Otherwise, tf32 is supported on CUDA platforms that natively (i.e. no emulation)
@@ -1254,16 +1257,24 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     if socket_power != "N/A":
         return socket_power
     else:
-        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+        socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+        if socket_power != "N/A":
+            return socket_power
+        else:
+            return 0
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
     clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
     if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
-        return clock_info["cur_clk"]
+        clock_rate = clock_info["cur_clk"]
     else:
-        return clock_info["clk"]
+        clock_rate = clock_info["clk"]
+    if clock_rate != "N/A":
+        return clock_rate
+    else:
+        return 0
 
 
 def device_memory_used(device: Optional[Union[Device, int]] = None) -> int:

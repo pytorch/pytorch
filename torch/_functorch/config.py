@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import Optional, TYPE_CHECKING
+from typing import Literal, Optional, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -174,6 +174,20 @@ fake_tensor_allow_unsafe_data_ptr_access = True
 # tokens.
 unlift_effect_tokens = False
 
+# NOTE: [The default layout constraint for custom operators.]
+# This must be the name of one of the layout constraint tags
+# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
+# If the custom op does not have a layout constraint tag already
+# then we assume the following applies.
+#
+# This config is respected by Inductor and we recommend other backends also
+# respect it.
+# This config is in torch._functorch and not torch._inductor because it affects
+# ProxyTensor tracing.
+custom_op_default_layout_constraint: Literal[
+    "needs_exact_strides", "needs_fixed_stride_order", "flexible_layout"
+] = "needs_exact_strides"
+
 
 # Run aot eager decomp partition with CrossRefFakeMode
 # options = False, "all", "custom_ops"
@@ -265,6 +279,10 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
 guess_tangent_strides_as_outputs = False
+
+# This is a temporary config to ensure all ranks take the same decision in the partitioner
+# it will untimately be removed once we share size_hints across ranks through compiler collectives
+_broadcast_rank0_decision = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

@@ -227,7 +227,9 @@ class CUDAAllocator : public Allocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
-  virtual int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  virtual int getPoolUseCount(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/) {
     TORCH_CHECK(
         false,
         name(),
@@ -235,19 +237,30 @@ class CUDAAllocator : public Allocator {
         "If you need it, please file an issue describing your use case.");
   }
   virtual void ensureExistsAndIncrefPool(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id) {
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/) {
     TORCH_CHECK(
         false,
         name(),
         " does not yet support ensureExistsAndIncrefPool. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual void setUseOnOOM(
+      c10::DeviceIndex device,
+      bool use_on_oom,
+      MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support setUseOnOOM. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      const std::unordered_set<void*>& expected_live_allocations) {
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      const std::unordered_set<void*>& /*expected_live_allocations*/) {
     TORCH_CHECK(
         false,
         name(),
@@ -270,7 +283,7 @@ class CUDAAllocator : public Allocator {
       RecordContext when,
       bool clearHistory) = 0;
   virtual void recordAnnotation(
-      const std::vector<std::pair<std::string, std::string>>& md) {}
+      const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -457,6 +470,12 @@ inline void ensureExistsAndIncrefPool(
     MempoolId_t mempool_id) {
   get()->ensureExistsAndIncrefPool(device, mempool_id);
 }
+inline void setUseOnOOM(
+    c10::DeviceIndex device,
+    bool use_on_oom,
+    MempoolId_t mempool_id) {
+  get()->setUseOnOOM(device, use_on_oom, mempool_id);
+}
 
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
@@ -506,7 +525,8 @@ namespace c10::cuda {
 struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
-      bool is_user_created = true);
+      bool is_user_created = true,
+      bool use_on_oom = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;

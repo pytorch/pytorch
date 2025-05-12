@@ -80,8 +80,8 @@ StringCordView StringCordView::substr(size_t start, size_t size) const {
   if (start + size >= this->size()) {
     size = this->size() - start;
   }
-  IteratorImpl begin = IteratorImpl(this) + start;
-  IteratorImpl end = begin + size;
+  IteratorImpl begin = iter_impl_for_pos(start);
+  IteratorImpl end = iter_impl_for_pos(start + size);
 
   if (begin.line_ == end.line_) {
     // same line
@@ -134,6 +134,14 @@ StringCordView::Iterator StringCordView::iter_for_pos(size_t pos) const {
     return end();
   }
   return begin() + pos;
+}
+
+StringCordView::IteratorImpl StringCordView::iter_impl_for_pos(
+    size_t pos) const {
+  if (pos >= size()) {
+    return end_impl();
+  }
+  return begin_impl() + pos;
 }
 
 StringCordView::IteratorImpl& StringCordView::IteratorImpl::operator+=(

@@ -43,6 +43,7 @@ from typing_extensions import (
     dataclass_transform,
     ParamSpec,
     Self,
+    TypeAlias,
     TypeGuard,
 )
 from unittest import mock
@@ -54,6 +55,10 @@ from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
+
+OPTIMUS_EXCLUDE_POST_GRAD = [
+    "activation_quantization_aten_pass",
+]
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
@@ -390,7 +395,7 @@ def ceildiv(
 def _type_of(key: Optional[torch.dtype]) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
-    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # https://github.com/triton-lang/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
     if key is None:
         return "*i8"
@@ -435,6 +440,23 @@ def convert_shape_to_inductor(
     return [sympy.sympify(i) for i in lst]
 
 
+def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
+    """
+    Like convert_shape_to_symint, but operates on a single expression.
+    """
+    from .virtualized import V
+
+    return (
+        i
+        if isinstance(i, int)
+        else (
+            int(i)
+            if isinstance(i, sympy.Integer)
+            else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        )
+    )
+
+
 def convert_shape_to_symint(
     lst: Iterable[Union[int, sympy.Expr]],
 ) -> list[Union[int, torch.SymInt]]:
@@ -442,20 +464,7 @@ def convert_shape_to_symint(
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
     """
-    from .virtualized import V
-
-    return [
-        (
-            i
-            if isinstance(i, int)
-            else (
-                int(i)
-                if isinstance(i, sympy.Integer)
-                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
-            )
-        )
-        for i in lst
-    ]
+    return [convert_to_symint(i) for i in lst]
 
 
 def is_view(op: torch._ops.OpOverload) -> bool:
@@ -796,16 +805,45 @@ def sympy_str(expr: sympy.Expr) -> str:
     somewhat worse, as it doesn't do as much simplification.  So don't
     use this for final codegen.
     """
-    if isinstance(expr, sympy.Symbol):
-        return expr.name
-    if isinstance(expr, sympy.Add):
-        return " + ".join(map(sympy_str, expr.args))
-    if isinstance(expr, sympy.Mul):
-        return " * ".join(map(sympy_str, expr.args))
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
-        return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
-    return str(expr)
+    def is_neg_lead(expr: sympy.Expr) -> bool:
+        return (
+            isinstance(expr, sympy.Mul) and len(expr.args) == 2 and expr.args[0] == -1
+        )
+
+    def sympy_str_add(expr: sympy.Expr) -> str:
+        if isinstance(expr, sympy.Add):
+            # Special case 'a - b'. Note that 'a - b - c' will still appear as
+            # 'a + -1 * b + -1 * c'.
+            if len(expr.args) == 2 and is_neg_lead(expr.args[1]):
+                return f"{sympy_str_mul(expr.args[0])} - {sympy_str_mul(expr.args[1].args[1])}"
+            else:
+                return " + ".join(map(sympy_str_mul, expr.args))
+        else:
+            return sympy_str_mul(expr)
+
+    def sympy_str_mul(expr: sympy.Expr) -> str:
+        if isinstance(expr, sympy.Mul):
+            if is_neg_lead(expr):
+                # Special case '-a'. Note that 'a * -b' will still appear as
+                # '-1 * a * b'.
+                return f"-{sympy_str_atom(expr.args[1])}"
+            else:
+                return " * ".join(map(sympy_str_atom, expr.args))
+        else:
+            return sympy_str_atom(expr)
+
+    def sympy_str_atom(expr: sympy.Expr) -> str:
+        if isinstance(expr, sympy.Symbol):
+            return expr.name
+        elif isinstance(expr, (sympy.Add, sympy.Mul)):
+            return f"({sympy_str_add(expr)})"
+        elif isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
+            return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
+        else:
+            return str(expr)
+
+    return sympy_str_add(expr)
 
 
 def get_bounds_index_expr(index: sympy.Expr) -> ValueRanges[Any]:
@@ -1136,6 +1174,15 @@ class IndentedBuffer:
         self._lines: list[Union[DeferredLineBase, LineContext, str]] = []
         self._indent = initial_indent
 
+    @contextlib.contextmanager
+    def set_tabwidth(self, tabwidth: int) -> Iterator[None]:
+        prev = self.tabwidth
+        try:
+            self.tabwidth = tabwidth
+            yield
+        finally:
+            self.tabwidth = prev
+
     def getvaluewithlinemap(self) -> ValueWithLineMap:
         buf = StringIO()
         p = 1
@@ -1381,12 +1428,15 @@ def get_num_sms() -> int:
 def get_tma_workspace_arg(
     num_tma_descriptors: int,
     device: torch.device,
+    num_programs: Optional[int] = None,
 ) -> WorkspaceArg:
     """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
     from .codegen.common import WorkspaceArg, WorkspaceZeroMode
 
+    if num_programs is None:
+        num_programs = get_num_sms()
     zero_mode = WorkspaceZeroMode.from_bool(False)
-    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    size = num_programs * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
     return WorkspaceArg(
         count=size,
         zero_mode=zero_mode,
@@ -1520,6 +1570,85 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
             )
             return False
     return res
+
+
+decompose_k_threshold = 32
+
+# To limit compile time
+k_splits_limit = 5
+
+# Hand-tuned
+default_k_splits = [16, 32, 64, 128, 256]
+
+_IntLike: TypeAlias = Union[int, sympy.Expr]
+
+
+def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
+    from torch._inductor.virtualized import V
+
+    return (
+        V.graph.sizevars.is_expr_static_and_true(
+            sympy.And(
+                sympy.Ge(k, decompose_k_threshold * m),
+                sympy.Ge(k, decompose_k_threshold * n),
+            )
+        )
+        and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
+        and not V.graph.cpp_wrapper
+    )
+
+
+@functools.lru_cache(None)
+def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
+    # If k is a sympy expression, we can't do any splitting
+    if isinstance(k, sympy.Expr) and not k.is_number:
+        return default_k_splits
+
+    if (isinstance(m, sympy.Expr) and not m.is_number) or (
+        isinstance(n, sympy.Expr) and not n.is_number
+    ):
+        max_k_split = 256
+    else:
+        max_k_split = min(k // m, k // n)
+
+    min_k_split = 2
+    # Get all divisors of k, k has to be divisible by kPart
+    divisors = sympy.divisors(k)
+
+    divisors = [
+        divisor
+        for divisor in divisors
+        if divisor <= max_k_split and divisor >= min_k_split
+    ]
+
+    pow_of_2_divisors, mul_of_32_divisors, rest_of_splits = [], [], []
+
+    for d in divisors:
+        kPart = k // d
+
+        # Smaller than 128 might not even fit in a single tile, BLOCK_K can be 128
+        if kPart < 128:
+            continue
+
+        # Power of 2 divisors are best performing, conform to hardware
+        if (kPart & kPart - 1) == 0 and kPart >= 128:
+            pow_of_2_divisors.append(d)
+        # Else check if creates a multiple of 32
+        elif kPart % 32 == 0:
+            mul_of_32_divisors.append(d)
+        # otherwise, take the smallest values
+        else:
+            rest_of_splits.append(d)
+
+    # If the # of power of 2 divisors are greater than k_splits_limit, return all
+    # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
+    # should never be a massive amount
+    if len(pow_of_2_divisors) >= k_splits_limit:
+        return pow_of_2_divisors
+    else:
+        best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+        # Otherwise, conform results to k_splits_limit
+        return best_splits[:k_splits_limit]
 
 
 @functools.lru_cache(None)
@@ -1981,7 +2110,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
-        # Triton API change in https://github.com/openai/triton/pull/2293
+        # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
         sm_clock = max_clock_rate()

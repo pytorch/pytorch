@@ -572,6 +572,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -976,6 +977,51 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+
+  # Use env var for these for now for prototyping purposes
+  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Whether to build with NVSHMEM support")
+  # If user has specified NVSHMEM_HOME, we use it;
+  # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
+  if($ENV{NVSHMEM_HOME})
+    set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
+  endif()
+
+  if(USE_NVSHMEM AND NOT DEFINED NVSHMEM_HOME)
+    message(WARNING "USE_NVSHMEM set to 1 but NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to the NVSHMEM build dir")
+    # Disable nvshmem if NVSHMEM_HOME is not found
+    set(USE_NVSHMEM FALSE CACHE BOOL "Whether to build with NVSHMEM support")
+  endif()
+
+  if(USE_NVSHMEM)
+    message("Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
+    set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
+    set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
+
+    include_directories(${NVSHMEM_INCLUDE_DIR})
+
+    # Linking with nvshmem requires the source binary to be built with -rdc
+    # which is not viable for libtorch_cuda. So we isolate the linking of
+    # nvshmem in nvshmem_extension.
+    add_library(nvshmem_extension SHARED
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/nvshmem_extension.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/NVSHMEMSymmetricMemory.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryUtils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
+    )
+    set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+    target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
+    target_link_directories(nvshmem_extension PRIVATE ${NVSHMEM_LIB_DIR})
+    target_link_libraries(nvshmem_extension PRIVATE
+        # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
+        # otherwise, we could just write `nvshmem_host`
+        ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
+        nvshmem_device
+    )
+    target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
+    install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+  endif()
+
   if(USE_UCC)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
@@ -1283,6 +1329,7 @@ if(BUILD_TEST)
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/tensorexpr
@@ -1373,13 +1420,6 @@ if(USE_ROCM)
     set(ROCM_SOURCE_DIR "/opt/rocm")
   endif()
   message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
-  target_include_directories(torch_hip PRIVATE
-    ${ROCM_SOURCE_DIR}/include
-    ${ROCM_SOURCE_DIR}/hcc/include
-    ${ROCM_SOURCE_DIR}/rocblas/include
-    ${ROCM_SOURCE_DIR}/hipsparse/include
-    ${ROCM_SOURCE_DIR}/include/rccl/
-    )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE
         USE_FLASH_ATTENTION
@@ -1713,7 +1753,8 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
@@ -1890,9 +1931,18 @@ if(BUILD_TEST)
   endif()
 
   if(USE_ROCM)
+    set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
-      add_executable(${test_name} "${test_src}")
+      if(WIN32 AND test_src MATCHES "^.*\.hip$")
+        # Solves bug with hip_add_executable propagating flags from the previous tests
+        set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
+        set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+        hip_add_executable(${test_name} "${test_src}")
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
+      else()
+        add_executable(${test_name} "${test_src}")
+      endif()
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
