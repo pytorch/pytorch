@@ -96,6 +96,8 @@ class HalidePrinter(PythonPrinter):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.floor({self._print(expr.args[0])})")
 
+    _print_FloorToInt = _print_floor
+
     def _print_Trunc(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.trunc({self._print(expr.args[0])})")
@@ -140,39 +142,42 @@ class HalidePrinter(PythonPrinter):
 
     def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
-        return f"hl.cos(({self._print(expr.args[0])})"
+        return f"hl.cos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.cosh(({self._print(expr.args[0])})"
+        return f"hl.cosh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
-        return f"hl.acos(({self._print(expr.args[0])})"
+        return f"hl.acos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
-        return f"hl.sin(({self._print(expr.args[0])})"
+        return f"hl.sin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.sinh(({self._print(expr.args[0])})"
+        return f"hl.sinh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
-        return f"hl.asin(({self._print(expr.args[0])})"
+        return f"hl.asin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
-        return f"hl.tan(({self._print(expr.args[0])})"
+        return f"hl.tan({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
-        return f"hl.tanh(({self._print(expr.args[0])})"
+        return f"hl.tanh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
-        return f"hl.atan(({self._print(expr.args[0])})"
+        return f"hl.atan({self._print(expr.args[0])})"
+
+    def _print_OpaqueUnaryFn_log2(self, expr):
+        raise NotImplementedError("log2")
 
     def _print_FloorDiv(self, expr):
         if expr.is_integer:
@@ -268,10 +273,6 @@ class HalideOverrides(OpOverrides):
         if not hasattr(x, "name"):
             return f"hl.exp({x})"
         return f"hl.fast_exp(hl.cast(hl.Float(32), {x})) if {x.name}.type().bits() <= 32 else hl.exp({x})"
-
-    @staticmethod
-    def libdevice_exp(x):
-        return f"hl.exp({x})"  # higher precision that ops.exp
 
     @staticmethod
     def sqrt(x):
@@ -452,6 +453,10 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def log(x):
         return f"hl.log({x})"  # hl.fast_log fails accuracy
+
+    @staticmethod
+    def log2(x):
+        raise NotImplementedError("log2")
 
     @staticmethod
     def isinf(x):
@@ -934,7 +939,7 @@ class HalideKernel(SIMDKernel):
 
         # group the expression by variables used
         offset = sympy.S.Zero
-        split_expr = {s: sympy.S.Zero for s in symbols}
+        split_expr = dict.fromkeys(symbols, sympy.S.Zero)
         split_failed: list[tuple[list[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
@@ -1628,7 +1633,9 @@ class HalideKernel(SIMDKernel):
         call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]
         current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cuda":
-            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
+            stream_name = wrapper.write_get_raw_stream(
+                current_device.index, V.graph.name
+            )
             call_args.append(stream_name)
         wrapper.generate_kernel_call(
             name,

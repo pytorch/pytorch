@@ -5,6 +5,7 @@ import functools
 import inspect
 import logging
 import re
+import sys
 import time
 import warnings
 from contextlib import contextmanager, nullcontext
@@ -25,6 +26,7 @@ from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
     _NonStrictTorchFunctionHandler,
+    _override_builtin_ops,
     make_constraints,
     make_fake_inputs,
     produce_guards_and_solve_constraints,
@@ -71,6 +73,7 @@ from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental.proxy_tensor import (
     get_proxy_slot,
     make_fx,
@@ -89,6 +92,7 @@ from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
+from ._wrapper_utils import _WrapperModule
 from .exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -116,21 +120,21 @@ class ExportDynamoConfig:
     # This isn't really necessary, and isn't much more efficient since the runtime asserts pass does CSE,
     # but if we want to reason more about what guards/runtime asserts to emit,
     # this makes it a bit cleaner to do from the export side. Also no real point in running this twice.
-    do_not_emit_runtime_asserts = True
+    do_not_emit_runtime_asserts: bool = True
+    specialize_int: bool = True
+    specialize_float: bool = True
+    assume_static_by_default: bool = False
+    automatic_dynamic_shapes: bool = False
+    capture_dynamic_output_shape_ops: bool = True
+    capture_scalar_outputs: bool = True
+    prefer_deferred_runtime_asserts_over_guards: bool = False
 
 
 @dataclasses.dataclass
 class ATenExportArtifact:
     gm: torch.fx.GraphModule
     sig: ExportGraphSignature
-    constants: dict[
-        str,
-        Union[
-            torch.Tensor,
-            FakeScriptObject,
-            torch.ScriptObject,
-        ],
-    ]
+    constants: dict[str, _ConstantAttributeType]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -372,7 +376,7 @@ def _preserve_requires_grad_pass(
     gm: torch.fx.GraphModule,
     sig: ExportGraphSignature,
     fake_params_buffers: dict[str, torch.Tensor],
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
     flat_fake_args: list[Any],
 ):
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
@@ -410,7 +414,7 @@ def _preserve_requires_grad_pass(
 def _remap_constants(
     orig_constant_attrs: ConstantAttrMap,
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
 ) -> None:
     """Rewrite the graph signature and constants table to use the FQN from the original module."""
     remap_table: dict[str, list[str]] = {}
@@ -492,11 +496,12 @@ def _produce_aten_artifact(
 
     It does:
     1. Applies runtime assertion pass
-    2. Populate meta val when missing
-    3. Lift constants as placeholders
-    4. Replace raw autograd and autocast ops with HOPs
-    5. Prettify names for placeholders
-    6. Preserve requires_grad value on node meta val
+    2. Recompute unbacked_bindings pass
+    3. Populate meta val when missing
+    4. Lift constants as placeholders
+    5. Replace raw autograd and autocast ops with HOPs
+    6. Prettify names for placeholders
+    7. Preserve requires_grad value on node meta val
     """
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
     # Overwrite output specs afterwards.
@@ -910,7 +915,7 @@ def _rewrite_dynamo_tensor_constants(
     orig_mod_buffers: set[torch.Tensor],
     traced_mod_buffers: dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
 ) -> None:
     """
     Dynamo erroneously marks tensor attributes on modules as buffers.
@@ -931,7 +936,7 @@ def _rewrite_dynamo_tensor_constants(
 def _move_non_persistent_buffers_to_tensor_constants(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
-    constants: dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
+    constants: dict[str, _ConstantAttributeType],
 ) -> None:
     """
     Moves non-persistent buffers to tensor constants.
@@ -1089,6 +1094,13 @@ def _log_export_wrapper(fn):
                     message=str(e),
                     flags=_EXPORT_FLAGS,
                 )
+
+            if hasattr(e, "partial_fx_graph"):
+                print(
+                    e.partial_fx_graph,
+                    file=sys.stderr,
+                )
+
             raise e
         finally:
             _EXPORT_FLAGS = None
@@ -1140,10 +1152,15 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     kwargs = kwargs if kwargs is not None else {}
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
-    if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+    if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
+        verify_additional_inputs = dynamic_shapes.verify
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+    else:
+        verify_additional_inputs = lambda ep: None  # noqa: E731
+        if isinstance(dynamic_shapes, torch.export.ShapesCollection):
+            dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    return args, kwargs, original_in_spec, dynamic_shapes
+    return args, kwargs, original_in_spec, dynamic_shapes, verify_additional_inputs
 
 
 def _get_module_call_graph(
@@ -1276,15 +1293,6 @@ def _temp_disable_texpr_fuser():
         yield
     finally:
         torch._C._jit_set_texpr_fuser_enabled(original_state)
-
-
-class _WrapperModule(torch.nn.Module):
-    def __init__(self, f):
-        super().__init__()
-        self.f = f
-
-    def forward(self, *args, **kwargs):
-        return self.f(*args, **kwargs)
 
 
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
@@ -1622,8 +1630,9 @@ def _export_to_aten_ir_make_fx(
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)
                 buffer_input_names = {
-                    buf: input_names[param_len + i]
-                    for i, buf in enumerate(non_strict_root._buffers)
+                    name: input_names[param_len + i]
+                    for i, (name, buf) in enumerate(non_strict_root._buffers.items())
+                    if buf is not None
                 }
                 output_node = list(gm.graph.nodes)[-1]
                 # We copy nodes corresponding to buffer assignments to buffers in the graph.
@@ -1888,14 +1897,26 @@ def _non_strict_export(
         )
 
     tx = TracingContext(fake_mode)
-    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(tx):
+
+    # We also need to attach dynamo configs as these will be used in HOOs that
+    # use torch.compile, like cond
+    dynamo_config = dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
+    dynamo_config[
+        "do_not_emit_runtime_asserts"
+    ] = False  # We want to emit runtime asserts
+
+    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(
+        tx
+    ), torch._dynamo.config.patch(dynamo_config):
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
             patched_mod,
             new_fake_args,
             new_fake_kwargs,
             new_fake_constant_attrs,
             map_fake_to_real,
-        ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode):
+        ), _fakify_module_inputs(
+            fake_args, fake_kwargs, fake_mode
+        ), _override_builtin_ops():
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
                 new_fake_args,
@@ -1946,6 +1967,7 @@ def _export_for_training(
         kwargs,
         orig_in_spec,
         dynamic_shapes,
+        verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
     original_state_dict = _get_original_state_dict(mod)
@@ -2008,6 +2030,7 @@ def _export_for_training(
         verifiers=[TrainingIRVerifier],
     )
 
+    verify_additional_inputs(exported_program)
     return exported_program
 
 
@@ -2107,6 +2130,7 @@ def _export(
         kwargs,
         original_in_spec,
         dynamic_shapes,
+        verify_additional_inputs,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
 
     original_state_dict = _get_original_state_dict(mod)
@@ -2180,4 +2204,5 @@ def _export(
 
     dtrace_structured("exported_program", payload_fn=lambda: str(exported_program))
 
+    verify_additional_inputs(exported_program)
     return exported_program

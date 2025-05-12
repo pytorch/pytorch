@@ -96,7 +96,8 @@ Reducer::Reducer(
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
     std::unordered_map<size_t, std::string> param_names,
-    int64_t first_bucket_bytes_cap)
+    int64_t first_bucket_bytes_cap,
+    bool skip_all_reduce_unused_params)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -111,10 +112,12 @@ Reducer::Reducer(
       num_bwd_calls_(0),
       first_autograd_hook_called_(false),
       num_buckets_ready_(0),
+      num_buckets_reduced_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
+      skip_all_reduce_unused_params_(skip_all_reduce_unused_params),
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
@@ -1020,6 +1023,22 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
   }
 }
 
+bool Reducer::is_unused_bucket(Bucket& bucket) {
+  for (const auto& variable_index : bucket.variable_indices) {
+    if (std::find(
+            unused_parameters_.begin(),
+            unused_parameters_.end(),
+            variable_index) == unused_parameters_.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Reducer::should_skip_all_reduce_bucket(Bucket& bucket) {
+  return is_unused_bucket(bucket) && skip_all_reduce_unused_params_;
+}
+
 // Called when the bucket at the specified index is ready to be reduced.
 void Reducer::mark_bucket_ready(size_t bucket_index) {
   TORCH_INTERNAL_ASSERT(bucket_index >= next_bucket_);
@@ -1040,7 +1059,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       record_backward_comm_start_time();
     }
     auto& bucket = buckets_[next_bucket_];
-    all_reduce_bucket(bucket);
+    if (!should_skip_all_reduce_bucket(bucket)) {
+      all_reduce_bucket(bucket);
+      num_buckets_reduced_++;
+    }
   }
 }
 
@@ -1357,6 +1379,8 @@ void Reducer::reset_bucket_counting() {
   // in each iteration.
   num_buckets_ready_ = 0;
 
+  num_buckets_reduced_ = 0;
+
   for (auto& bucket : buckets_) {
     bucket.pending = bucket.variables.size();
   }
@@ -1643,10 +1667,16 @@ void Reducer::finalize_backward() {
   // flattened `gradients` tensor.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
-    TORCH_INTERNAL_ASSERT(
-        bucket.future_work,
-        "Expected bucket.future_work not to be null. "
-        "This may indicate that communication hook was not properly installed.");
+    // It is possible that the bucket all_reduce is skipped if the bucket is
+    // unused bucket and skip_all_reduce_unused_params_ is true.
+    if (bucket.future_work == nullptr) {
+      TORCH_INTERNAL_ASSERT(
+          skip_all_reduce_unused_params_,
+          "currently only support to skip all reduce for unused params "
+          "when skip_all_reduce_unused_params_ is true.");
+      continue;
+    }
+
     bucket.future_work->wait();
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
@@ -1815,6 +1845,11 @@ void Reducer::sync_bucket_indices(
   indices_accessor_Index = 0;
   for (const auto i : c10::irange(num_buckets)) {
     const auto& bucket_size = bucket_sizes_accessor[static_cast<int64_t>(i)];
+    TORCH_CHECK_WITH(
+        IndexError,
+        bucket_size >= 0 && bucket_size <= indices_accessor.size(0),
+        "received invalid bucket_size, was abort called?");
+
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
     for (const auto j : c10::irange(bucket_size)) {

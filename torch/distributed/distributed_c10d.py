@@ -1153,12 +1153,15 @@ def _canonicalize_group_rank(
     if group_rank is not None:
         if global_rank is not None:
             raise ValueError("Can't specify both group_rank and global_rank")
-        global_rank = get_global_rank(group, group_rank)
+        if return_global:
+            return get_global_rank(group, group_rank)
     else:
         if global_rank is None:
             raise ValueError("Must specify global_rank or group_rank")
+        if return_global:
+            return global_rank
         group_rank = get_group_rank(group, global_rank)
-    return global_rank if return_global else group_rank
+    return group_rank
 
 
 def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
@@ -2501,7 +2504,7 @@ class _CoalescingManager:
     def __init__(self) -> None:
         self.works: list[Work] = []
 
-    def append(self, work: Work):
+    def append(self, work: Optional[Work] = None):
         if work:
             self.works.append(work)
 
@@ -2514,7 +2517,7 @@ class _CoalescingManager:
 def _coalescing_manager(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
-    async_ops: Optional[bool] = False,
+    async_ops: bool = False,
 ):
     """
     Context manager used to coalesce collectives or P2P operations when possible.
@@ -2553,6 +2556,7 @@ def _coalescing_manager(
         group._start_coalescing(device)
     cm = _CoalescingManager()
     yield cm
+    work = None
     op_list = _world.pg_coalesce_state.pop(group)
     if op_list:
         # Collectives supporting "Fast Path" coalescing are captured.
@@ -2566,6 +2570,7 @@ def _coalescing_manager(
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
+            all_reduce_opts.asyncOp = async_ops
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
         elif op0 == all_gather_into_tensor:
             inputs = []
@@ -2573,6 +2578,8 @@ def _coalescing_manager(
             for op in op_list:
                 inputs.append(op.tensor)
                 outputs.append(not_none(op.dst_tensor))
+            all_gather_opts = AllgatherOptions()
+            all_gather_opts.asyncOp = async_ops
             work = group.allgather_into_tensor_coalesced(outputs, inputs)
         elif op0 == reduce_scatter_tensor:
             inputs = []
@@ -2582,6 +2589,7 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
+            reduce_opts.asyncOp = async_ops
             work = group.reduce_scatter_tensor_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
@@ -2594,9 +2602,12 @@ def _coalescing_manager(
         work = group._end_coalescing(device)
 
     if async_ops:
-        cm.append(work)  # type: ignore[possibly-undefined]
-    else:
-        work.wait()  # type: ignore[possibly-undefined]
+        cm.append(work)
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
+        work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 class _TimeEstimator:
@@ -2772,8 +2783,11 @@ def broadcast(
     work = group.broadcast([tensor], opts)
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2853,6 +2867,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
     if group is None:
         group = _get_default_group()
 
@@ -2869,8 +2884,11 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2929,13 +2947,17 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
         return work.get_future()
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2980,11 +3002,15 @@ def reduce(
     opts = ReduceOptions()
     opts.reduceOp = op
     opts.rootRank = group_dst
+    opts.asyncOp = async_op
     work = group.reduce([tensor], opts)
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def _object_to_tensor(obj, device, group):
@@ -3054,6 +3080,10 @@ def all_gather_object(object_list, obj, group=None):
         ``torch.cuda.current_device()`` and it is the user's responsiblity to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`all_gather_object` uses ``pickle`` module implicitly, which is
@@ -3154,6 +3184,10 @@ def gather_object(
         ``torch.cuda.current_device()`` and it is the user's responsiblity to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`gather_object` uses ``pickle`` module implicitly, which is
@@ -3277,6 +3311,10 @@ def send_object_list(
         ``torch.cuda.set_device()``.
 
     .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
+
+    .. warning::
         :func:`send_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
@@ -3373,6 +3411,10 @@ def recv_object_list(
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`recv_object_list` uses ``pickle`` module implicitly, which
@@ -3483,6 +3525,10 @@ def broadcast_object_list(
     .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
@@ -3602,6 +3648,10 @@ def scatter_object_list(
     .. note:: Note that this API differs slightly from the scatter collective
         since it does not provide an ``async_op`` handle and thus will be a
         blocking call.
+
+    .. warning::
+        Object collectives have a number of serious performance and scalability
+        limitations.  See :ref:`object_collectives` for details.
 
     .. warning::
         :func:`scatter_object_list` uses ``pickle`` module implicitly, which
@@ -3783,12 +3833,17 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     group = group or _get_default_group()
-    work = group.allgather([tensor_list], [tensor])
+    opts = AllgatherOptions()
+    opts.asyncOp = async_op
+    work = group.allgather([tensor_list], [tensor], opts)
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -3841,10 +3896,6 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
                 [3, 4]], device='cuda:0') # Rank 0
         tensor([[1, 2],
                 [3, 4]], device='cuda:1') # Rank 1
-
-    .. warning::
-        The Gloo backend does not support this API.
-
     """
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
@@ -3895,8 +3946,11 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4006,12 +4060,17 @@ def all_gather_coalesced(
     ]
 
     group = group or _get_default_group()
-    work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
+    opts = AllgatherOptions()
+    opts.asyncOp = async_op
+    work = group.allgather_coalesced(output_tensor_lists, input_tensor_list, opts)
 
     if async_op:
         return work.get_future()
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def _validate_output_list_for_rank(my_rank, dst, gather_list):
@@ -4097,12 +4156,16 @@ def gather(
 
     opts = GatherOptions()
     opts.rootRank = group_dst
+    opts.asyncOp = async_op
     work = group.gather(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4203,8 +4266,11 @@ def scatter(
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4236,14 +4302,18 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
 
     opts = ReduceScatterOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
 
     group = group or _get_default_group()
     work = group.reduce_scatter([output], [input_list], opts)
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4297,9 +4367,6 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         tensor([0, 2], device='cuda:0') # Rank 0
         tensor([4, 6], device='cuda:1') # Rank 1
 
-    .. warning::
-        The Gloo backend does not support this API.
-
     """
     # Dynamo has built-in logic to map legacy distributed ops to functional collectives.
     # Let's redirect to a torch function mode that can mimic this logic outside Dynamo
@@ -4343,8 +4410,11 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @deprecated(
@@ -4497,6 +4567,7 @@ def all_to_all_single(
         return
 
     opts = AllToAllOptions()
+    opts.asyncOp = async_op
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
     _ensure_all_tensors_same_dtype(output, input)
@@ -4516,8 +4587,11 @@ def all_to_all_single(
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4618,6 +4692,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         return
 
     opts = AllToAllOptions()
+    opts.asyncOp = async_op
     _check_tensor_list(output_tensor_list, "output_tensor_list")
     _check_tensor_list(input_tensor_list, "input_tensor_list")
     _ensure_all_tensors_same_dtype(output_tensor_list, input_tensor_list)
@@ -4634,8 +4709,11 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4652,7 +4730,7 @@ def barrier(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        device_ids ([int], optional): List of device/GPU ids.
+        device_ids ([int], optional): List of device/GPU ids. Only one id is expected.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4660,27 +4738,44 @@ def barrier(
 
     .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
     """
+    group = group or _get_default_group()
+
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")
         return
 
     opts = BarrierOptions()
-    opts.device = torch.device(_get_object_coll_device(group))
-    if device_ids is not None:
-        if isinstance(device_ids, list):
-            opts.device_ids = device_ids
-        else:
-            raise TypeError(
-                "Invalid function argument: device_ids type should be List[int]"
-            )
+    opts.asyncOp = async_op
+    # Detect the accelerator on the machine. If no accelerator is available, it
+    # returns CPU.
+    device = torch._C._get_accelerator()
+    if isinstance(device_ids, list):
+        opts.device_ids = device_ids
+        # use only the first device id
+        opts.device = torch.device(device.type, device_ids[0])
+    elif getattr(group, "bound_device_id", None) is not None:
+        # Use device id from `init_process_group(device_id=...)`
+        opts.device = group.bound_device_id  # type: ignore[assignment]
+    elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
+        opts.device = torch.device("cpu")
+    else:
+        # Use the current device set by the user. If user did not set any, this
+        # may use default device 0, causing issues like hang or all processes
+        # creating context on device 0.
+        opts.device = device
+        warnings.warn(  # warn only once
+            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
+        )
 
-    group = group or _get_default_group()
     work = group.barrier(opts=opts)
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def monitored_barrier(
@@ -5060,9 +5155,9 @@ def new_group(
         group, they must be synchronized with other cuda streams by calling `work.wait()`
         before using another process group.
 
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See `Using multiple NCCL communicators concurrently
+        <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using-multiple-nccl-communicators-concurrently>`
+        for more details.
 
     Args:
         ranks (list[int]): List of ranks of group members. If ``None``, will be
@@ -5081,10 +5176,9 @@ def new_group(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams. For other availble options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
-        use_local_synchronization (bool, optional): perform a group-local
-            barrier at the end of the process group creation. This is different
-            in that non-member ranks don't need to call into API and don't
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-tuse_local_synchronization
+            (bool, optional): perform a group-local barrier at the end of the process group creation.
+            This is different in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
         device_id (torch.device, optional): a single, specific device
@@ -5280,6 +5374,8 @@ def new_subgroups(
             the default subgroup size is equal to the number of devices on each machine,
             based on the assumption that each machine has exactly the same
             number of devices. Default is ``None``.
+        group (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used. Default is ``None``.
         timeout (timedelta, optional): see `init_process_group` for details and default value.
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values are ``gloo`` and ``nccl``.
@@ -5325,7 +5421,7 @@ def new_subgroups(
     if group_size <= 0:
         raise ValueError(f"The arg 'group_size' ({group_size}) must be positive")
 
-    world_size = get_world_size()
+    world_size = get_world_size(group=group)
     if world_size < group_size:
         raise ValueError(
             f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})"
@@ -5336,10 +5432,9 @@ def new_subgroups(
     subgroups = []
     cur_subgroup = None
 
-    for subgroup_id in range(world_size // group_size):
-        start_rank = subgroup_id * group_size
-        end_rank = start_rank + group_size
-        ranks_in_subgroup = list(range(start_rank, end_rank))
+    # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
+    ranks_iterator = iter(get_process_group_ranks(group=group or _get_default_group()))
+    while ranks_in_subgroup := tuple(itertools.islice(ranks_iterator, group_size)):
         subgroup = new_group(
             ranks=ranks_in_subgroup,
             timeout=timeout,
@@ -5349,8 +5444,7 @@ def new_subgroups(
         )
         subgroups.append(subgroup)
 
-        rank = get_rank()
-        if rank in ranks_in_subgroup:
+        if rank := get_rank(group=group) in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info("Rank %s is assigned to subgroup %s", rank, ranks_in_subgroup)
 

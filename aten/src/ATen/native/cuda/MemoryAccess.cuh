@@ -48,7 +48,7 @@ struct static_unroll {
 template<template<int i> typename func, int end>
 struct static_unroll<func, end, end> {
   template<typename... Args>
-  static inline C10_HOST_DEVICE void with_args(Args... args) {}
+  static inline C10_HOST_DEVICE void with_args(Args... /*args*/) {}
 };
 
 // helper structs to be used with static_unroll to load arguments
@@ -407,8 +407,8 @@ struct vectorized_templated {
   // float(float,bfloat16) and functor add on float(float,float).
   template <typename scalar_t>
   __device__ inline void store(scalar_t* from, int idx) {
-    using vec_t = aligned_vector<scalar_t, vec_size>;
-    scalar_t* to = reinterpret_cast<scalar_t*>(data[0]) + block_work_size * idx;
+    using vec_t = aligned_vector<CastToT, vec_size>;
+    CastToT* to = reinterpret_cast<CastToT*>(data[0]) + block_work_size * idx;
     vec_t* to_ = reinterpret_cast<vec_t*>(to);
     int thread_idx = threadIdx.x;
 #pragma unroll
@@ -516,7 +516,7 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
 template<int i>
 struct can_vectorize_up_to_helper {
   template <typename array_t, typename traits>
-  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
+  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits /*_*/) {
     using arg_t = typename traits::template arg<i>::type;
     // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
@@ -535,5 +535,124 @@ inline int can_vectorize_up_to(array_t pointers) {
   detail::static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
   return result;
 }
+
+
+
+template <typename T>
+__inline__ size_t get_alignment(T ptr_or_size) {
+  auto val = reinterpret_cast<uintptr_t>(ptr_or_size);
+  if (val % 16 == 0) {
+    return 16;
+  } else if (val % 8 == 0) {
+    return 8;
+  } else if (val % 4 == 0) {
+    return 4;
+  } else if (val % 2 == 0) {
+    return 2;
+  } else {
+    return 1;
+  }
+}
+
+template <>
+__inline__ size_t get_alignment<size_t>(size_t size) {
+  return get_alignment(reinterpret_cast<void*>(size));
+}
+
+template <bool Value, class... Args>
+inline constexpr bool dependent_bool_value = Value;
+
+template <class... Args>
+inline constexpr bool dependent_false = dependent_bool_value<false, Args...>;
+
+template <int Size>
+union Vec;
+
+template <>
+union Vec<4> {
+  uint16_t u16[2];
+  uint32_t u32, as_scalar;
+  float f32;
+};
+
+template <>
+union Vec<8> {
+  uint16_t u16[4];
+  uint32_t u32[2];
+  uint64_t u64, as_scalar;
+  float f32[2];
+};
+
+template <>
+union alignas(16) Vec<16> {
+  uint16_t u16[8];
+  uint32_t u32[4];
+  uint64_t u64[2];
+  uint4 u128, as_scalar;
+  float f32[4];
+};
+
+template <int Alignment, typename T>
+__device__ __inline__ Vec<Alignment> ld_vec(const T* addr) {
+  Vec<Alignment> vec;
+  if constexpr (Alignment == 16) {
+#if defined(USE_ROCM)
+    vec.u128 = *reinterpret_cast<const uint4*>(addr);
+  } else if constexpr (Alignment == 8) {
+    vec.u64 = *reinterpret_cast<const uint64_t*>(addr);
+  } else if constexpr (Alignment == 4) {
+    vec.u32 = *reinterpret_cast<const uint32_t*>(addr);
+#else
+    asm("ld.global.v4.u32 {%0,%1,%2,%3}, [%4];"
+        : "=r"(vec.u32[0]), "=r"(vec.u32[1]), "=r"(vec.u32[2]), "=r"(vec.u32[3])
+        : "l"(addr)
+        : "memory");
+  } else if constexpr (Alignment == 8) {
+    asm("ld.global.v2.u32 {%0,%1}, [%2];"
+        : "=r"(vec.u32[0]), "=r"(vec.u32[1])
+        : "l"(addr)
+        : "memory");
+  } else if constexpr (Alignment == 4) {
+    asm("ld.global.u32 %0, [%1];" : "=r"(vec.u32) : "l"(addr) : "memory");
+#endif
+  } else {
+    static_assert(dependent_false<T>);
+  }
+  return vec;
+}
+
+template <int Alignment, typename T>
+__device__ __inline__ void st_vec(T* addr, const Vec<Alignment>& vec) {
+  if constexpr (Alignment == 16) {
+#if defined(USE_ROCM)
+    reinterpret_cast<uint64_t*>(addr)[0] = vec.u64[0];
+    reinterpret_cast<uint64_t*>(addr)[1] = vec.u64[1];
+  } else if constexpr (Alignment == 8) {
+    *reinterpret_cast<uint64_t*>(addr) = vec.u64;
+  } else if constexpr (Alignment == 4) {
+    *reinterpret_cast<uint32_t*>(addr) = vec.u32;
+#else
+    asm("st.global.v4.u32 [%0], {%1,%2,%3,%4};"
+        :
+        : "l"(addr),
+          "r"(vec.u32[0]),
+          "r"(vec.u32[1]),
+          "r"(vec.u32[2]),
+          "r"(vec.u32[3])
+        : "memory");
+  } else if constexpr (Alignment == 8) {
+    asm("st.global.v2.u32 [%0], {%1,%2};"
+        :
+        : "l"(addr), "r"(vec.u32[0]), "r"(vec.u32[1])
+        : "memory");
+  } else if constexpr (Alignment == 4) {
+    asm("st.global.u32 [%0], %1;" : : "l"(addr), "r"(vec.u32) : "memory");
+#endif
+  } else {
+    static_assert(dependent_false<T>);
+  }
+}
+
+
 
 } // namespace at::native::memory

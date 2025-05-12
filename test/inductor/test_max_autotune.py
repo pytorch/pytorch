@@ -3,6 +3,7 @@ import contextlib
 import json
 import math
 import os
+import random
 import tempfile
 import unittest
 from typing import Callable, Optional
@@ -15,8 +16,9 @@ from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
-    BenchmarkRequest,
+    _TestBenchmarkRequest,
     CUDA_VISIBLE_DEVICES,
+    TuningProcess,
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
@@ -43,21 +45,20 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
+from torch.testing._internal.inductor_utils import (
+    get_func_call,
+    get_kernel_launch,
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA,
+    HAS_GPU,
+)
 
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
-
-
-def _get_func_call() -> str:
-    return "void inductor_entry_impl(" if config.cpp_wrapper else "def call("
-
-
-def _get_kernel_launch() -> str:
-    return "call_triton_" if config.cpp_wrapper else ".run("
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -165,7 +166,7 @@ class TestMaxAutotune(TestCase):
     @parametrize("autotune_multi_device", (True, False))
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
         """
-        This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
+        This crash previously due to a triton issue: https://github.com/triton-lang/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
         """
         m, n, k = 2048, 1536, 64
@@ -290,6 +291,38 @@ class TestMaxAutotune(TestCase):
         # if any of the input inner dims are not 16-byte aligned. As a result,
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_max_autotune_regular_mm_tma_dynamic_outer_dim(self):
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+
+        # TMA requires 16-byte alignment: here we repeat the dims
+        # by the factor of 8, as float16 is 2-byte. All dims are
+        # repeated due to the possible transpositions below.
+        a = a.repeat(8, 8)
+        b = b.repeat(8, 8)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(mm)(a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
@@ -466,6 +499,40 @@ class TestMaxAutotune(TestCase):
         # if any of the input inner dims are not 16-byte aligned. As a result,
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_max_autotune_addmm_tma_dynamic_outer_dim(self):
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+        x = torch.randn(N).to(torch.float16).cuda()
+
+        # TMA requires 16-byte alignment: here we repeat the dims
+        # by the factor of 8, as float16 is 2-byte. All dims are
+        # repeated due to the possible transpositions below.
+        x = x.repeat(8)
+        a = a.repeat(8, 8)
+        b = b.repeat(8, 8)
+
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(addmm)(x, a, b)
+            c_expected = addmm(x, a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @fresh_inductor_cache()
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
@@ -670,7 +737,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @skipIfRocm
+    @runOnRocmArch(MI300_ARCH)
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -897,8 +964,8 @@ class TestMaxAutotune(TestCase):
 
         # mm kernel, and cos kernel
         count = 2 if using_triton_mm else 1
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), count, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), count, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -910,8 +977,8 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 2, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 2, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -1127,6 +1194,112 @@ class TestMaxAutotune(TestCase):
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @parametrize("dynamic", (True, False))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
+        fp16_red_setting = (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        )
+        bf16_red_setting = (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        )
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+
+        M, N, K = sizes
+
+        a = torch.randn(M, K, dtype=dtype, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=dtype, device="cuda", requires_grad=True)
+
+        possible_splits = range(2, min(K // M, K // N) + 1)
+
+        divisors = {split for split in possible_splits if K % split == 0}
+
+        def check_divisors(code):
+            for kernel in code:
+                if "decompose_k" in kernel:
+                    divisor_found = False
+                    for divisor in divisors:
+                        if f"{divisor}_split" in kernel:
+                            divisor_found = True
+                            break
+
+                    self.assertTrue(
+                        divisor_found,
+                        f"Could not find a split in {divisors} in {kernel}",
+                    )
+
+        compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
+        # We assume with the large k dim relative to m, n, decompose_k will be most performant
+        out, code = run_and_get_code(compiled_func, a, b)
+
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+
+        # Test adding epilogue also equivalent to eager
+        compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
+        out, code = run_and_get_code(compiled_func, a, b)
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(
+                compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+            )
+
+        # Test adding reinterpret view before subgraph
+        a = a.transpose(0, 1)
+        compiled_func = torch.compile(
+            lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
+        )
+        out, code = run_and_get_code(compiled_func, a, b)
+        if dynamic:
+            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                "decompose_k"
+            ).run(code[0])
+        else:
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").run(code[0])
+            check_divisors(code)
+            torch.testing.assert_close(
+                compiled_func(a, b),
+                (a.transpose(0, 1) @ b).relu(),
+                atol=1e-2,
+                rtol=1e-2,
+            )
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            fp16_red_setting
+        )
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            bf16_red_setting
+        )
+
 
 @instantiate_parametrized_tests
 class TestMaxAutotuneRemoteCache(TestCase):
@@ -1197,35 +1370,6 @@ class TestMaxAutotuneRemoteCache(TestCase):
             self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
 
 
-class _TestBenchmarkRequest(BenchmarkRequest):
-    def __init__(
-        self, value: float, multi_device: bool, parent_visible_devices: Optional[str]
-    ) -> None:
-        self.value = value
-        self.multi_device = multi_device
-        self.parent_visible_devices = parent_visible_devices
-
-    def benchmark(
-        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
-    ) -> float:
-        # Verify that the visible devices env var is set correctly. If multi-device
-        # auto-tuning is disabled, the visible devices should be unmanipulated from
-        # the parent process. If multi-device auto-tuning is enabled, the visible
-        # devices should be a _single_ valid device number. Note that we can't perform
-        # this validation directly from the test body because benchmarks execute in a
-        # separate process. If the check fails, however, the test will detect the
-        # failure by virtue of not receiving the expected result back.
-        visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
-        if not self.multi_device:
-            assert visible_devices == self.parent_visible_devices
-        else:
-            assert self.parent_visible_devices is not None
-            valid_devices = self.parent_visible_devices.split(",")
-            assert visible_devices in valid_devices
-
-        return self.value
-
-
 class _TestTritonTemplateCaller(TritonTemplateCaller):
     def __init__(self, bmreq: _TestBenchmarkRequest):
         self.bmreq = bmreq
@@ -1235,63 +1379,138 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
 
 
 class TestTuningProcess(TestCase):
+    def check_healthy(self, p: TuningProcess, device: Optional[int] = None):
+        result = random.random()
+        bmreq = _TestBenchmarkRequest(result, device=device)
+        p.put(bmreq.benchmark)
+        self.assertEqual(p.get(), result)
+
+    def test_tuning_subproc_timeout(self):
+        p = TuningProcess(None)
+
+        bmreq = _TestBenchmarkRequest(0, sleep=120)
+        p.put(bmreq.benchmark)
+        with self.assertRaises(TimeoutError):
+            p.get(timeout=1.0)
+
+        # Make sure the TuningProcess is still usable after a timeout.
+        self.check_healthy(p)
+        p.shutdown()
+
+    def test_tuning_subproc_exception(self):
+        p = TuningProcess(None)
+
+        bmreq = _TestBenchmarkRequest(0, exc=RuntimeError("Fail"))
+        p.put(bmreq.benchmark)
+        with self.assertRaises(RuntimeError):
+            p.get()
+
+        # Make sure the TuningProcess is still usable after an exception.
+        self.check_healthy(p)
+        p.shutdown()
+
+    def test_tuning_subproc_crash(self):
+        p = TuningProcess(None)
+
+        bmreq = _TestBenchmarkRequest(0, crash=True)
+        p.put(bmreq.benchmark)
+        with self.assertRaises(EOFError):
+            p.get()
+
+        # Make sure the TuningProcess is still usable after a crash.
+        self.check_healthy(p)
+        p.shutdown()
+
+    def test_tuning_subproc_killed(self):
+        p = TuningProcess(None)
+        p.kill()
+        self.check_healthy(p)
+        p.shutdown()
+
+    def test_visible_devices(self):
+        device_list = TuningProcessPool.get_device_list()
+        for device in device_list:
+            p = TuningProcess(device)
+            self.check_healthy(p, device=device)
+            p.shutdown()
+
+
+class TestTuningProcessPool(TestCase):
+    # Use only one device/subprocess so we test the process restarts
+    # and is usable after a crash.
+    @config.patch({"autotune_multi_device": False})
     def test_tuning_pool_crash(self):
-        # Use only one device/subprocess so we test the process restarts
-        # and is usable after a "crash".
-        with config.patch({"autotune_multi_device": False}):
-            tuning_pool = TuningProcessPool()
-            tuning_pool.initialize()
+        tuning_pool = TuningProcessPool()
 
-            # First force the tuning process to "crash" by setting a bogus
-            # string for the expected visible devices.
-            bmreq = _TestBenchmarkRequest(3.14, False, "invalid")
-            choice = _TestTritonTemplateCaller(bmreq)
+        # First force the tuning process to crash.
+        bmreq = _TestBenchmarkRequest(0, crash=True)
+        choice = _TestTritonTemplateCaller(bmreq)
 
+        timings = tuning_pool.benchmark([choice])
+        self.assertTrue(choice in timings)
+        self.assertEqual(timings[choice], float("inf"))
+
+        # Then send another request and make sure the sub-process
+        # has restarted and is operational.
+        bmreq = _TestBenchmarkRequest(3.14)
+        choice = _TestTritonTemplateCaller(bmreq)
+
+        timings = tuning_pool.benchmark([choice])
+        self.assertTrue(choice in timings)
+        self.assertEqual(timings[choice], bmreq.result)
+
+        tuning_pool.shutdown()
+
+    @config.patch({"autotune_multi_device": False})
+    def test_tuning_pool_timeout(self):
+        tuning_pool = TuningProcessPool()
+
+        # First force the tuning process to timeout.
+        bmreq = _TestBenchmarkRequest(0, sleep=120)
+        choice = _TestTritonTemplateCaller(bmreq)
+
+        with config.patch({"max_autotune_subproc_result_timeout_seconds": 1.0}):
             timings = tuning_pool.benchmark([choice])
-            self.assertTrue(choice in timings)
-            self.assertEqual(timings[choice], float("inf"))
+        self.assertTrue(choice in timings)
+        self.assertEqual(timings[choice], float("inf"))
 
-            # Then send another request and make sure the sub-process
-            # has restarted and is operational. 'valid_devices' expected
-            # to be None because autotune_multi_device is off.
-            choice.bmreq.parent_visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+        # Then send another request and make sure the sub-process
+        # has restarted and is operational.
+        bmreq = _TestBenchmarkRequest(3.14)
+        choice = _TestTritonTemplateCaller(bmreq)
 
-            timings = tuning_pool.benchmark([choice])
-            self.assertTrue(choice in timings)
-            self.assertEqual(timings[choice], bmreq.value)
+        timings = tuning_pool.benchmark([choice])
+        self.assertTrue(choice in timings)
+        self.assertEqual(timings[choice], bmreq.result)
 
-            tuning_pool.terminate()
+        tuning_pool.shutdown()
 
     # XPU have to enable XPU_VISIBLE_DEVICES to control devices visibility.
     @skipIfXpu
+    @config.patch({"autotune_multi_device": True})
     def test_tuning_pool_multiple_devices(self):
-        with config.patch({"autotune_multi_device": True}):
-            # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
-            # is already set in the environment); use a subset of the available devices
-            # to ensure only the subset are visible to the sub-processes.
-            if CUDA_VISIBLE_DEVICES in os.environ:
-                visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
-            else:
-                visible_devices = [str(d) for d in range(torch.cuda.device_count())]
+        # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
+        # is already set in the environment); use a subset of the available devices
+        # to ensure only the subset are visible to the sub-processes.
+        if CUDA_VISIBLE_DEVICES in os.environ:
+            visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
+        else:
+            visible_devices = [str(d) for d in range(torch.cuda.device_count())]
 
-            parent_visible_devices = ",".join(visible_devices[-2:])
-            os.environ[CUDA_VISIBLE_DEVICES] = parent_visible_devices
-
+        cuda_visible_devices = ",".join(visible_devices[-2:])
+        with unittest.mock.patch.dict(
+            os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}
+        ):
             tuning_pool = TuningProcessPool()
-            tuning_pool.initialize()
 
-            choice1 = _TestTritonTemplateCaller(
-                _TestBenchmarkRequest(3.14, True, parent_visible_devices),
-            )
-            choice2 = _TestTritonTemplateCaller(
-                _TestBenchmarkRequest(2.718, True, parent_visible_devices),
-            )
+        choice1 = _TestTritonTemplateCaller(_TestBenchmarkRequest(3.14))
+        choice2 = _TestTritonTemplateCaller(_TestBenchmarkRequest(2.718))
 
-            timings = tuning_pool.benchmark([choice1, choice2])
-            self.assertEqual(timings[choice1], choice1.bmreq.value)
-            self.assertEqual(timings[choice2], choice2.bmreq.value)
+        timings = tuning_pool.benchmark([choice1, choice2])
+        self.assertEqual(timings[choice1], choice1.bmreq.result)
+        self.assertEqual(timings[choice2], choice2.bmreq.result)
 
-            tuning_pool.terminate()
+        tuning_pool.shutdown()
 
 
 @instantiate_parametrized_tests
@@ -1314,21 +1533,21 @@ class TestPrologueFusion(TestCase):
         )
 
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(),
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(),
             num_kernels,
             exactly=True,
         ).run(code_str)
 
         if num_allocs is not None:
-            FileCheck().check(_get_func_call()).check_count(
+            FileCheck().check(get_func_call()).check_count(
                 "empty_strided", num_allocs, exactly=True
             ).run(code_str)
 
         # skip the deallocation check when using cpp_wrapper; most deallocations happen
         # outside of our control via RAIIAtenTensorHandle
         if num_deallocs is not None and not config.cpp_wrapper:
-            FileCheck().check(_get_func_call()).check_count(
+            FileCheck().check(get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
@@ -1451,8 +1670,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )
@@ -1468,8 +1685,8 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(multi_use), x, y)
 
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 2, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 2, exactly=True
         ).run(code[0])
         self.assertEqual(out, multi_use(x, y), atol=0.05, rtol=0.05)
 
@@ -1478,8 +1695,8 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(resolve_pending), x)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 1, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 1, exactly=True
         ).run(code[0])
         self.assertEqual(out, resolve_pending(x), atol=0.05, rtol=0.05)
 
@@ -1487,8 +1704,6 @@ class TestPrologueFusion(TestCase):
         {
             "max_autotune_gemm_backends": "Triton",
             "benchmark_epilogue_fusion": True,
-            "use_mixed_mm": False,
-            "mixed_mm_choice": "default",
             "max_epilogue_benchmarked_choices": 3,
         }
     )
@@ -1502,8 +1717,8 @@ class TestPrologueFusion(TestCase):
 
         x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
-        FileCheck().check(_get_func_call()).check_count(
-            _get_kernel_launch(), 1, exactly=True
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(), 1, exactly=True
         ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 

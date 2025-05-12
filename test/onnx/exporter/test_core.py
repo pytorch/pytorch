@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ml_dtypes
 import numpy as np
 
 import torch
@@ -15,17 +16,17 @@ class TorchTensorTest(common_utils.TestCase):
     @common_utils.parametrize(
         "dtype, np_dtype",
         [
-            (torch.bfloat16, np.uint16),
+            (torch.bfloat16, ml_dtypes.bfloat16),
             (torch.bool, np.bool_),
             (torch.complex128, np.complex128),
             (torch.complex64, np.complex64),
             (torch.float16, np.float16),
             (torch.float32, np.float32),
             (torch.float64, np.float64),
-            (torch.float8_e4m3fn, np.uint8),
-            (torch.float8_e4m3fnuz, np.uint8),
-            (torch.float8_e5m2, np.uint8),
-            (torch.float8_e5m2fnuz, np.uint8),
+            (torch.float8_e4m3fn, ml_dtypes.float8_e4m3fn),
+            (torch.float8_e4m3fnuz, ml_dtypes.float8_e4m3fnuz),
+            (torch.float8_e5m2, ml_dtypes.float8_e5m2),
+            (torch.float8_e5m2fnuz, ml_dtypes.float8_e5m2fnuz),
             (torch.int16, np.int16),
             (torch.int32, np.int32),
             (torch.int64, np.int64),
@@ -45,25 +46,25 @@ class TorchTensorTest(common_utils.TestCase):
     @common_utils.parametrize(
         "dtype",
         [
-            (torch.bfloat16),
-            (torch.bool),
-            (torch.complex128),
-            (torch.complex64),
-            (torch.float16),
-            (torch.float32),
-            (torch.float64),
-            (torch.float8_e4m3fn),
-            (torch.float8_e4m3fnuz),
-            (torch.float8_e5m2),
-            (torch.float8_e5m2fnuz),
-            (torch.int16),
-            (torch.int32),
-            (torch.int64),
-            (torch.int8),
-            (torch.uint16),
-            (torch.uint32),
-            (torch.uint64),
-            (torch.uint8),
+            torch.bfloat16,
+            torch.bool,
+            torch.complex128,
+            torch.complex64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.int8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+            torch.uint8,
         ],
     )
     def test_tobytes(self, dtype: torch.dtype):

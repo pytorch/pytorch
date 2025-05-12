@@ -836,10 +836,11 @@ main()
             def inner_compiler(gm_, example_inputs_):
                 placeholders = get_placeholders(gm_)
                 if is_bwd:
-                    # should be boxed inputs
-                    assert len(placeholders) == 1
+                    # boxed inputs
+                    assert isinstance(placeholders[0].meta["example_value"], list)
                 else:
-                    assert len(placeholders) > 1
+                    # not boxed inputs
+                    assert not isinstance(placeholders[0].meta["example_value"], list)
 
                 return gm_
 
@@ -878,7 +879,12 @@ main()
         activ = torch.ones(100) * 2
         inputs = [param, activ]
         _, proxies, _, _ = compiler.begin_capture(
-            inputs=inputs, sizes=[], scalars=[], origins=[[], [], []]
+            inputs=inputs,
+            sizes=[],
+            scalars=[],
+            origins=[[], [], []],
+            accumulate_grad=False,
+            check_nans=False,
         )
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
@@ -1163,8 +1169,47 @@ main()
                 yield model[2].bias.grad
                 model.zero_grad()
 
-        # TODO(jansel): we should be able to get this count to 1
         self.check_output_and_recompiles(fn)
+
+    def test_dynamic_shapes_from_forward(self):
+        class ToyModel(nn.Module):
+            def __init__(self, in_feat=10, hidden_feat=50, out_feat=5):
+                super().__init__()
+                self.linear1 = nn.Linear(in_feat, hidden_feat)
+                self.linear2 = nn.Linear(hidden_feat, hidden_feat)
+                self.linear3 = nn.Linear(hidden_feat, out_feat)
+                self.mse_loss = torch.nn.MSELoss()
+
+            def forward(self, inputs, output):
+                out1 = self.linear1(inputs)
+                out2 = self.linear2(out1)
+                out3 = self.linear3(out2)
+                return self.mse_loss(out3, output)
+
+        m = ToyModel()
+        m = torch.compile(m)
+
+        def run(i):
+            torch._dynamo.utils.counters.clear()
+            inp = torch.randn(i, 10)
+            target = torch.randn(i, 5)
+            loss = m(inp, target)
+            with compiled_autograd._enable(make_compiler_fn(dynamic=None)):
+                loss.backward()
+
+        counters = torch._dynamo.utils.counters
+        run(3)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
+        run(4)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
+        run(5)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 0)
+        run(6)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+        self.assertEqual(counters["compiled_autograd"]["compiles"], 0)
 
     def test_dynamic_shapes_eager_node(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
@@ -1191,6 +1236,25 @@ main()
                 model.zero_grad()
 
         self.check_output_and_recompiles(fn)
+
+    def test_dynamic_shapes_annotations(self):
+        @torch.compile
+        def f(x):
+            return x.sin().sin()
+
+        with torch._dynamo.compiled_autograd._enable(torch.compile):
+            x = torch.randn(2, 3, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            out = f(x)
+            out.sum().backward()
+
+            x = torch.randn(4, 3, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            out = f(x)
+            out.sum().backward()
+
+        # mark_dynamic should not cause ConstraintViolationError
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_torch_compile_api_dynamic_shapes(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
@@ -2536,9 +2600,9 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
             self.assertEqual(counters["stats"]["unique_graphs"], 3)
         else:
             self.check_output_and_recompiles(
-                fn, count=[1, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+                fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
             )
-            self.assertEqual(counters["stats"]["unique_graphs"], 3)
+            self.assertEqual(counters["stats"]["unique_graphs"], 2)
 
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
@@ -2796,7 +2860,12 @@ main()
             loss.backward()
             torch._inductor.config.triton.cudagraphs = False
 
-        self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
+        if inductor_config.cpp_wrapper:
+            self.assertIn("skipping cudagraphs", stderr_msgs.getvalue())
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        else:
+            self.assertNotIn("skipping cudagraphs", stderr_msgs.getvalue())
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     def test_cudagraphs_cpu_graph(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
@@ -2829,7 +2898,10 @@ main()
             opt_bwd()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            2 if inductor_config.cpp_wrapper else 0,
+        )
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
@@ -2922,7 +2994,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         # In the future, we can consider having a cpu scalar movement pass sometime after we trace
         # into the custom C++ autograd::Function (like in AOTDispatcher)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            2 if inductor_config.cpp_wrapper else 1,
+        )
 
     def test_logs(self):
         logs, ctx = logs_to_string(
@@ -3323,29 +3398,25 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_6 = sizes[1]
         getitem_7 = sizes[2]
         getitem_8 = sizes[3]
-        getitem_9 = sizes[4];  getitem_9 = None
-        getitem_10 = sizes[5];  getitem_10 = None
-        getitem_11 = sizes[6];  getitem_11 = None
-        getitem_12 = sizes[7];  getitem_12 = None
-        getitem_13 = sizes[8];  getitem_13 = None
-        getitem_14 = sizes[9];  getitem_14 = None
-        getitem_15 = sizes[10];  getitem_15 = None
-        getitem_16 = sizes[11];  getitem_16 = None
-        getitem_17 = sizes[12];  getitem_17 = None
-        getitem_18 = sizes[13];  getitem_18 = None
-        getitem_19 = sizes[14];  getitem_19 = None
-        getitem_20 = sizes[15];  getitem_20 = None
-        getitem_21 = sizes[16]
-        getitem_22 = sizes[17]
-        getitem_23 = sizes[18]
-        getitem_24 = sizes[19];  sizes = None
+        getitem_21 = sizes[4]
+        getitem_22 = sizes[5]
+        getitem_23 = sizes[6]
+        getitem_24 = sizes[7];  sizes = None
+        unwrap_maybe_dynamic_int = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_5);  getitem_5 = None
+        unwrap_maybe_dynamic_int_1 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_6);  getitem_6 = None
+        unwrap_maybe_dynamic_int_2 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_7);  getitem_7 = None
+        unwrap_maybe_dynamic_int_3 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_8);  getitem_8 = None
+        unwrap_maybe_dynamic_int_16 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_21);  getitem_21 = None
+        unwrap_maybe_dynamic_int_17 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_22);  getitem_22 = None
+        unwrap_maybe_dynamic_int_18 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_23);  getitem_23 = None
+        unwrap_maybe_dynamic_int_19 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_24);  getitem_24 = None
 
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], True)]);  getitem = None
         getitem_25 = validate_outputs[0];  validate_outputs = None
 
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_25], [True], [getitem_5, getitem_6]);  getitem_25 = getitem_5 = getitem_6 = None
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_25], [True], [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_25 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
         getitem_26 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [getitem_7, getitem_8], True)]);  getitem_26 = getitem_7 = getitem_8 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], True)]);  getitem_26 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_28 = hooks[0];  getitem_28 = None
@@ -3367,7 +3438,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_backward = torch__dynamo_external_utils_call_backward(getitem_33, (), make_subclass);  getitem_33 = make_subclass = None
         getitem_36 = call_backward[0]
         getitem_37 = call_backward[1];  call_backward = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [getitem_21, getitem_22], False), ((None, None, device(type='cpu'), 6, 0, None), [getitem_23, getitem_24], False)]);  getitem_36 = getitem_37 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_16, unwrap_maybe_dynamic_int_17], False), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_18, unwrap_maybe_dynamic_int_19], False)]);  getitem_36 = getitem_37 = unwrap_maybe_dynamic_int_16 = unwrap_maybe_dynamic_int_17 = unwrap_maybe_dynamic_int_18 = unwrap_maybe_dynamic_int_19 = None
         getitem_39 = validate_outputs_2[0]
 
         accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_39);  getitem_4 = getitem_39 = accumulate_grad__default_1 = None
@@ -3584,13 +3655,25 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_11 = sizes[9]
         getitem_12 = sizes[10]
         getitem_13 = sizes[11];  sizes = None
+        unwrap_maybe_dynamic_int = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_2);  getitem_2 = None
+        unwrap_maybe_dynamic_int_1 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_3);  getitem_3 = None
+        unwrap_maybe_dynamic_int_2 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_4);  getitem_4 = None
+        unwrap_maybe_dynamic_int_3 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_5);  getitem_5 = None
+        unwrap_maybe_dynamic_int_4 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_6);  getitem_6 = None
+        unwrap_maybe_dynamic_int_5 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_7);  getitem_7 = None
+        unwrap_maybe_dynamic_int_6 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_8);  getitem_8 = None
+        unwrap_maybe_dynamic_int_7 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_9);  getitem_9 = None
+        unwrap_maybe_dynamic_int_8 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_10);  getitem_10 = None
+        unwrap_maybe_dynamic_int_9 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_11);  getitem_11 = None
+        unwrap_maybe_dynamic_int_10 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_12);  getitem_12 = None
+        unwrap_maybe_dynamic_int_11 = torch__dynamo_external_utils_unwrap_maybe_dynamic_int(getitem_13);  getitem_13 = None
 
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
         getitem_14 = validate_outputs[0];  validate_outputs = None
 
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_14], [True], [getitem_2, getitem_3]);  getitem_14 = getitem_2 = getitem_3 = None
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_14], [True], [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_14 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
         getitem_15 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_15], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4, getitem_5], False)]);  getitem_15 = getitem_4 = getitem_5 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_15], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], False)]);  getitem_15 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
         getitem_16 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_17 = hooks[0]
@@ -3602,7 +3685,7 @@ class CompiledAutograd0(torch.nn.Module):
         mul_backward0 = torch__dynamo_compiled_autograd_ops_MulBackward0([getitem_16], [True, True], call_hook, 6, call_hook_1, 6);  getitem_16 = call_hook = call_hook_1 = None
         getitem_21 = mul_backward0[0]
         getitem_22 = mul_backward0[1];  mul_backward0 = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_21, getitem_22], [((None, None, device(type='cpu'), 6, 0, None), [getitem_6, getitem_7], False), ((None, None, device(type='cpu'), 6, 0, None), [getitem_8, getitem_9], False)]);  getitem_21 = getitem_22 = getitem_6 = getitem_7 = getitem_8 = getitem_9 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_21, getitem_22], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_4, unwrap_maybe_dynamic_int_5], False), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_6, unwrap_maybe_dynamic_int_7], False)]);  getitem_21 = getitem_22 = unwrap_maybe_dynamic_int_4 = unwrap_maybe_dynamic_int_5 = unwrap_maybe_dynamic_int_6 = unwrap_maybe_dynamic_int_7 = None
         getitem_23 = validate_outputs_2[0]
         getitem_24 = validate_outputs_2[1];  validate_outputs_2 = None
 
@@ -3611,7 +3694,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_hook_2 = torch__dynamo_external_utils_call_hook(getitem_25, getitem_26, hook_type = 'unpack_hook');  getitem_25 = getitem_26 = None
         cos_backward0 = torch__dynamo_compiled_autograd_ops_CosBackward0([getitem_24], [True], call_hook_2);  getitem_24 = call_hook_2 = None
         getitem_27 = cos_backward0[0];  cos_backward0 = None
-        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [getitem_10, getitem_11], False)]);  getitem_27 = getitem_10 = getitem_11 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_8, unwrap_maybe_dynamic_int_9], False)]);  getitem_27 = unwrap_maybe_dynamic_int_8 = unwrap_maybe_dynamic_int_9 = None
         getitem_28 = validate_outputs_3[0];  validate_outputs_3 = None
         add = torch.add(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
 
@@ -3620,7 +3703,7 @@ class CompiledAutograd0(torch.nn.Module):
         call_hook_3 = torch__dynamo_external_utils_call_hook(getitem_29, getitem_30, hook_type = 'unpack_hook');  getitem_29 = getitem_30 = None
         sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([add], [True], call_hook_3);  add = call_hook_3 = None
         getitem_31 = sin_backward0[0];  sin_backward0 = None
-        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [getitem_12, getitem_13], False)]);  getitem_31 = getitem_12 = getitem_13 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
 
         accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_32);  getitem_1 = getitem_32 = accumulate_grad__default = None
@@ -3919,6 +4002,9 @@ class CompiledAutograd1(torch.nn.Module):
 
         x = torch.randn(10, 10, requires_grad=True)
 
+        # https://github.com/pytorch/pytorch/issues/147171
+        torch._inductor.config.fallback_random = True
+
         @torch.compile(backend="aot_eager")
         def fn(x):
             return SideEffectfulBackward.apply(x).sum()
@@ -3970,6 +4056,68 @@ class CompiledAutograd1(torch.nn.Module):
 
         with compiled_autograd._enable(lambda gm: gm):
             loss.backward()
+
+    def test_anomaly_mode_already_nan(self):
+        def fn():
+            with torch.autograd.detect_anomaly():
+                a = torch.randn(5, 5, requires_grad=True)
+                a.grad = torch.full((5, 5), float("nan"))
+                b = torch.randn(5, 5)
+                out = torch.matmul(a, b)
+                loss = out.sum()
+                with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                    loss.backward()
+
+        with self.assertRaisesRegex(
+            AssertionError, "already having NaN gradient. This is not supported."
+        ):
+            fn()
+
+    def test_anomaly_mode_backward(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return torch.full(gO.size(), float("nan"))
+
+            with torch.autograd.detect_anomaly():
+                a = torch.randn(5, 5, requires_grad=True)
+                out = MyFn.apply(a)
+                loss = out.sum()
+                with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                    loss.backward()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Compiled Autograd returned NaN gradients for parameters"
+        ):
+            fn()
+
+    def test_anomaly_mode_grad(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return torch.full(gO.size(), float("nan"))
+
+            with torch.autograd.detect_anomaly():
+                a = torch.randn(5, 5, requires_grad=True)
+                out = MyFn.apply(a)
+                loss = out.sum()
+                with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                    torch.autograd.grad(loss, inputs=a)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Compiled Autograd returned NaN gradients for output nodes"
+        ):
+            fn()
 
 
 def load_test_module(name):
@@ -4079,6 +4227,17 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
+    "test_retain_grad",  # retains_grad_hooks
+    "test_retain_grad_cycle",  # retains_grad_hooks
+    "test_retain_grad_inplace",  # retains_grad_hooks
+    "test_retain_grad_inplace_over_view",  # retains_grad_hooks
+    "test_retains_grad_can_always_observe_tensor_prehook",  # retains_grad_hooks
+    "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks
+    "test_hook_edge_case_when_called_with_grad",  # retains_grad_hooks
+    "test_multi_grad_all_hooks",  # retains_grad_hooks
+    "test_prehook_ordering",  # retains_grad_hooks
+    "test_will_engine_execute_node",  # retains_grad_hooks
+    "test_backward_to_node",  # retains_grad_hooks
 }
 
 test_contexts = {
@@ -4103,18 +4262,11 @@ known_failing_tests = {
     "test_reentrant_with_callbacks_depth_0",  # queue_callback
     "test_reentrant_with_callbacks_depth_1",  # queue_callback
     "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
-    "test_anomaly_grad_warnings",  # does not support anomaly mode
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
     "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
     "test_post_accumulate_grad_hook_ordering",  # accuracy error
-    "test_retain_grad_cycle",  # retains_grad_hooks
-    "test_retain_grad_inplace",  # retains_grad_hooks
-    "test_retain_grad_inplace_over_view",  # retains_grad_hooks
-    "test_retains_grad_can_always_observe_tensor_prehook",  # retains_grad_hooks
-    "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks
     "test_accumulate_grad",  # create_graph
     "test_anomaly_assign_parent_cleanup",  # create_graph
-    "test_anomaly_mode_no_check_nan",  # anomaly mode
     "test_backward_create_graph_warns",  # create_graph
     "test_backward_with_nonleaf_inputs",  # create_graph
     "test_create_graph_and_full_backward_hook_cycle",  # create_graph
@@ -4133,20 +4285,13 @@ known_failing_tests = {
     "test_grad_nonleaf",  # create_graph
     "test_grad_nonleaf_many_outputs",  # create_graph
     "test_hessian_vector",  # create_graph
-    "test_hook_edge_case_when_called_with_grad",  # retains_grad_hooks
     "test_inplace_on_view_backward",  # create_graph
     "test_multi_grad_any_hooks",  # register_multi_grad_hook
-    "test_multi_grad_all_hooks",  # retains_grad_hooks
     "test_nested_anomaly_detect_nan",  # create_graph
     "test_nested_anomaly_printstack_cleanup",  # create_graph
     "test_once_differentiable",  # create_graph
-    "test_prehook_ordering",  # retains_grad_hooks
-    "test_retain_grad",  # retains_grad_hooks
     "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # create_graph
     "test_select_sum",  # create_graph, also needs graph breaks
-    "test_will_engine_execute_node",  # retains_grad_hooks
-    "test_backward_to_node",  # retains_grad_hooks NYI
-    "test_anomaly_detect_nan",  # anomaly mode
     "test_custom_autograd_no_early_free",  # create_graph
     "test_custom_function_error",  # vjp
     "test_custom_function_save_for_forward",  # vjp
@@ -4202,6 +4347,9 @@ known_failing_tests = {
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     "test_checkpointing_without_reentrant_custom_function_works",  # ctx.saved_tensors are cached by CA
+    "test_anomaly_mode_no_check_nan",  # different error messages
+    "test_anomaly_grad_warnings",  # different error messages
+    "test_anomaly_detect_nan",  # fake tensor errors on NaN
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }

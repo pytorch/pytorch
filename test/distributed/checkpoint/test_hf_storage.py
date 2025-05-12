@@ -8,15 +8,16 @@ import tempfile
 from unittest.mock import MagicMock
 
 import torch
+from torch.distributed.checkpoint._hf_planner import (
+    _FqnToFileMapping,
+    _HuggingFaceLoadPlanner,
+)
 from torch.distributed.checkpoint._hf_storage import (
     _HuggingFaceStorageReader,
     _HuggingFaceStorageWriter,
     _metadata_fn,
 )
-from torch.distributed.checkpoint.default_planner import (
-    DefaultLoadPlanner,
-    DefaultSavePlanner,
-)
+from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.filesystem import _StorageInfo, FileSystem
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
@@ -58,7 +59,7 @@ class TestHfStorage(TestCase):
 
             save_plan = SavePlan(
                 [write_item_1, write_item_2],
-                storage_data={"tensor_0": 1, "tensor_1": 1},
+                storage_data=_FqnToFileMapping({"tensor_0": 1, "tensor_1": 1}),
             )
             save_planner = DefaultSavePlanner()
             save_planner.set_up_planner(state_dict=state_dict)
@@ -126,7 +127,7 @@ class TestHfStorage(TestCase):
 
             read_items = _create_read_items(name, BytesStorageMetadata(), file_name)
             load_plan = LoadPlan(read_items)
-            load_planner = DefaultLoadPlanner()
+            load_planner = _HuggingFaceLoadPlanner()
             load_planner.set_up_planner(state_dict={name: torch.rand(4)})
 
             read_data = reader.read_data(load_plan, load_planner)
@@ -159,7 +160,7 @@ class TestHfStorage(TestCase):
 
             writer = _HuggingFaceStorageWriter(
                 path=path,
-                fqn_to_index_mapping={},
+                fqn_to_index_mapping=_FqnToFileMapping({}),
             )
             writer.fs = FileSystem()
             writer.finish(
@@ -188,6 +189,41 @@ class TestHfStorage(TestCase):
             reader.fs = FileSystem()
             metadata = reader.read_metadata()
             self.assertEqual(metadata.storage_data, expected_metadata["weight_map"])
+
+    def test_read_metadata_when_metadata_file_does_not_exist(self) -> None:
+        mock_module = MagicMock()
+        sys.modules["huggingface_hub"] = mock_module
+
+        with tempfile.TemporaryDirectory() as path:
+            reader = _HuggingFaceStorageReader(path=path)
+            reader.fs = FileSystem()
+            # there is one safetensor file, but no metadata file,
+            # so we create metadata from the safetensor file
+            keys = ["tensor_0", "tensor_1"]
+            file_name = "test.safetensors"
+            with open(os.path.join(path, file_name), "wb") as f:
+                # write metadata the same way it would be in safetensors file
+                metadata_contents = json.dumps(
+                    {"tensor_0": "value_0", "tensor_1": "value_1"}
+                )
+                metadata_bytes = metadata_contents.encode("utf-8")
+
+                f.write(len(metadata_bytes).to_bytes(8, byteorder="little"))
+                f.write(metadata_bytes)
+
+            metadata = reader.read_metadata()
+
+            self.assertEqual(
+                metadata.state_dict_metadata,
+                {
+                    keys[0]: BytesStorageMetadata(),
+                    keys[1]: BytesStorageMetadata(),
+                },
+            )
+            self.assertEqual(
+                metadata.storage_data,
+                {keys[0]: file_name, keys[1]: file_name},
+            )
 
 
 if __name__ == "__main__":
