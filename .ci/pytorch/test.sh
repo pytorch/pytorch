@@ -1486,8 +1486,6 @@ test_executorch() {
   export PYTHON_EXECUTABLE=python
   export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  # For llama3
-  bash examples/models/llama3_2_vision/install_requirements.sh
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
   bash .ci/scripts/setup-linux.sh --build-tool cmake
