@@ -1504,7 +1504,6 @@ class GraphModule(torch.nn.Module):
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
-            function_ctx = torch.autograd.function.FunctionCtx();  function_ctx = None
             fwd_body_0 = self.fwd_body_0
             bwd_body_0 = self.bwd_body_0
             autograd_function_apply: "f32[8, 8]" = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, args_tensor_mask = [True], non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
