@@ -1125,7 +1125,9 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
         if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
-            return self.item().__format__(format_spec)
+            # Use detach() here to avoid the warning when converting a scalar Tensor that
+            # requires gradients to a python number. It is ok for formatting.
+            return self.detach().item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -1262,7 +1264,7 @@ class Tensor(torch._C.TensorBase):
         """Array view description for cuda tensors.
 
         See:
-        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        https://numba.pydata.org/numba-doc/dev/cuda/cuda_array_interface.html
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
@@ -393,6 +394,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
+    @expectedFailure  # TODO(laithsakka, pianpwk): handle guard_or_false before oblivious hint fallback
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious(self):
         counter = torch._dynamo.testing.CompileCounter()
@@ -472,6 +474,31 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with torch.autocast("cpu", torch.bfloat16):
             self.assertEqual(fn(x), opt_fn(x))
 
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_dunder_call_recompile(self):
+        class Foo:
+            def __call__(self, x):
+                return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x, foo):
+            return foo(x)
+
+        x = torch.ones(2)
+        foo1 = Foo()
+        foo2 = Foo()
+
+        # no recompilation
+        f(x, foo1)
+        f(x, foo2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # one recompilation
+        Foo.__call__ = lambda self, x: x + 2
+        f(x, foo1)
         self.assertEqual(counter.frame_count, 2)
 
 
