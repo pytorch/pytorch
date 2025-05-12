@@ -438,6 +438,13 @@ class DeviceCachingAllocator {
       auto reserved_bytes =
           stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
+
+      c10::reportOutOfMemoryToProfiler(
+          static_cast<int64_t>(size),
+          allocated_bytes,
+          reserved_bytes,
+          c10::Device(c10::DeviceType::XPU, device));
+
       TORCH_CHECK_WITH(
           OutOfMemoryError,
           false,
