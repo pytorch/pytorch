@@ -380,6 +380,16 @@ def can_use_triton_kernel(
     )
 
 
+def create_offsets(x, m1_size, m2_size, offs_size):
+    assert len(m1_size) == 2 and len(m2_size) == 3, (
+        "Autotuning _scaled_grouped_mm is only implemented for 2d-3d tensors"
+    )
+    m = V.graph.sizevars.size_hint(m1_size[0])
+    noffs = V.graph.sizevars.size_hint(offs_size[0])
+    step = m / noffs
+    return torch.linspace(step, m, noffs, dtype=x.get_dtype(), device=x.get_device())
+
+
 @register_lowering(aten._scaled_grouped_mm.default, type_promotion_kind=None)
 def tuned_scaled_grouped_mm(
     mat_a: TensorBox,
@@ -461,4 +471,9 @@ def tuned_scaled_grouped_mm(
                 **config.kwargs,
             )
 
-    return autotune_select_algorithm("scaled_grouped_mm", choices, input_nodes, layout)
+    input_gen_fns = {
+        4: lambda x: create_offsets(x, m1_size, m2_size, offs.get_size()),
+    }
+    return autotune_select_algorithm(
+        "scaled_grouped_mm", choices, input_nodes, layout, input_gen_fns=input_gen_fns
+    )
