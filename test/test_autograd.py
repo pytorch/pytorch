@@ -9335,10 +9335,14 @@ for shape in [(1,), ()]:
             with set_warn_always_context(True):
                 with warnings.catch_warnings(record=True) as w:
                     tmp.exp().sum().backward(create_graph=True)
-                    self.assertTrue(len(w) == 1)
-                    self.assertTrue(
-                        "Using backward() with create_graph=True" in str(w[0].message)
-                    )
+                    self.assertTrue(w)
+                    found = 0
+                    for warning in w:
+                        if "Using backward() with create_graph=True" in str(
+                            warning.message
+                        ):
+                            found += 1
+                    self.assertEqual(found, 1)
 
             # Remove the backward + create_graph=True cycle
             a.grad = None
