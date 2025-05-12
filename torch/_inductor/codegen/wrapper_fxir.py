@@ -15,9 +15,11 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
+from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
+from torch.utils._sympy.functions import FloorDiv
 
 from .. import ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
@@ -486,10 +488,39 @@ class FxConverter:
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
         call_kwargs.update(config.kwargs)
 
+        def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+            """
+            Converts floor(x / c) to x // c.
+            """
+            if isinstance(expr, sympy.core.mul.Mul) and isinstance(
+                expr.args[0], sympy.Rational
+            ):
+                # Only the first argument of a Mul can be a Rational.
+                frac = expr.args[0]
+                numerator = sympy_product(expr.args[1:]) * frac.numerator
+                denominator = frac.denominator
+
+                # Sanity check the results.
+                new_expr = numerator / denominator
+                assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
+                    f"Unsound replacement: '{new_expr}' != '{expr}'"
+                )
+
+                return FloorDiv(numerator, denominator)
+            else:
+                return sympy.floor(expr)
+
+        def expr_to_symint(expr: Union[int, sympy.Expr]) -> Union[int, sympy.Expr]:
+            return (
+                convert_to_symint(expr.replace(sympy.floor, replace_floor_div))
+                if isinstance(expr, sympy.Expr)
+                else expr
+            )
+
         # Convert sympy expressions to symints.
-        for name, val in call_kwargs.items():
-            if isinstance(val, sympy.Expr):
-                call_kwargs[name] = convert_to_symint(val)
+        # Use FloorDiv over sympy.floor, so we can get nicer Python code from FX.
+        wrapper_grid = [tuple(expr_to_symint(dim) for dim in grid)]
+        call_kwargs = {name: expr_to_symint(val) for name, val in call_kwargs.items()}
 
         # Store non-graphable kwargs in the side table.
         (
@@ -502,7 +533,7 @@ class FxConverter:
             kwargs={
                 "kernel_idx": kernel.wrapped.kernel_idx,
                 "constant_args_idx": constant_args_idx,
-                "grid": [convert_shape_to_symint(grid)],
+                "grid": wrapper_grid,
                 "tma_descriptor_metadata": {},
                 "kwargs": call_kwargs,
             },
