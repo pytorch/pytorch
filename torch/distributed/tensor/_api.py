@@ -996,8 +996,6 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     placements: Optional[Sequence[Placement]] = None,
     **kwargs,
 ) -> DTensor:
-    # from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
-
     # if device_mesh is None, use the one from mesh resources
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     kwargs["device"] = device_mesh.device_type
