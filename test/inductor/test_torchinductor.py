@@ -12759,6 +12759,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a = torch.randn(512, 4096, requires_grad=True)
         b = torch.randint(size=(512,), low=0, high=4095)
 
+        if self.device == "mps" and MACOS_VERSION < 13.3:
+            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
+
         self.common(forward, (a, b))
 
     @xfail_if_mps_unimplemented
