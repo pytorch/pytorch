@@ -9472,9 +9472,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         # Testing the fast path introduced in #145936,
         # i.e. reduction to a scalar has to be of right dim.
-        a = torch.rand(2, 2)
+        a = torch.rand(2, 2, device=device)
         a_dims = [-1, -2]
-        b = torch.rand(2, 2)
+        b = torch.rand(2, 2, device=device)
         b_dims = [-2, -1]
         for res_ndim in range(5):
             res_torch = torch.tensordot(a, b, [a_dims, b_dims])
