@@ -606,7 +606,7 @@ class TestProfiler(TestCase):
             return torch.rand(10, 10).cuda()
 
         def create_xpu_tensor():
-            return torch.rand(10, 10)
+            return torch.rand(10, 10).xpu()
 
         def create_mkldnn_tensor():
             return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
@@ -728,6 +728,7 @@ class TestProfiler(TestCase):
                 del y
             elif torch.xpu.is_available():
                 y = torch.rand(10, 10).to("xpu")
+                del y
             gc.collect()
         stats = prof.key_averages(group_by_input_shape=True)
         check_metrics(
