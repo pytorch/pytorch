@@ -127,6 +127,8 @@ def _replace_region_with_subgraph(
         )
         return
 
+    from torch._inductor.pattern_matcher import stable_topological_sort
+
     invoke_subgraph_node = graph.create_node(
         "call_function",
         torch.ops.higher_order.invoke_subgraph,
@@ -152,8 +154,11 @@ def _replace_region_with_subgraph(
                 pass
 
     if config.graph_deduplication_lint:
-        _detect_cycles(graph, node_to_additional_deps)
-        _stable_topological_sort(graph, node_to_additional_deps)
+        _detect_cycles(graph)
+        stable_topological_sort(graph)
+        graph.lint()
+
+    if config.graph_deduplication_lint:
         graph.lint()
 
 

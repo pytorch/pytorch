@@ -30,9 +30,7 @@ def _get_flat_args_unique(
     return args
 
 
-def _detect_cycles(
-    graph: Graph, node_to_additional_deps: dict[Node, OrderedSet[Node]]
-) -> str:
+def _detect_cycles(graph: Graph) -> str:
     current_path: deque[Node] = deque()
     current_path_set: set[Node] = set()
     pending: deque[tuple[Node, Node]] = deque()
@@ -48,30 +46,25 @@ def _detect_cycles(
     def current_path_head() -> Node:
         return current_path[-1]
 
-    for origin in graph.find_nodes(op="output"):
+    for origin in graph.find_nodes(op="placeholder"):
         current_path.clear()
         current_path_set.clear()
         add_to_current_path(origin)
-        for child in _get_flat_args_unique(origin, node_to_additional_deps):
+        for child in origin.users:
             pending.append((child, origin))
 
         while pending:
             cur_node, parent = pending.pop()
 
-            # handle backtracking
-            while current_path and current_path_head() != parent:
+            while current_path_head() != parent:
                 pop_current_path()
-
-            if not isinstance(cur_node, Node):
-                continue
 
             if cur_node in current_path_set:
                 current_path.append(cur_node)
                 return f"cycle detected in path: {current_path}"
 
             add_to_current_path(cur_node)
-
-            for child in _get_flat_args_unique(cur_node, node_to_additional_deps):
+            for child in cur_node.users:
                 pending.append((child, cur_node))
 
     return "no cycle detected"

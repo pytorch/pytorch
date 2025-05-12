@@ -11,7 +11,6 @@ from torch._dynamo.testing import (
     extract_graph_and_tracker,
     normalize_gm,
 )
-from torch.utils._ordered_set import OrderedSet
 
 
 def extract_graph(fn, *args, **kwargs):
@@ -38,19 +37,6 @@ class GraphDededuplicationTests(TestCase):
 
     def run_and_return_graphs(self, fn, *args, **kwargs):
         return extract_graph(fn, *args, **kwargs)
-
-    def run_and_get_simple_graph(self):
-        def fn(x, y):
-            x0 = x + 1
-            y0 = y + 2
-            z = x0.sum() + y0.sum()
-            return z
-
-        x = torch.rand(10, 10, requires_grad=False)
-        y = torch.rand(10, 20, requires_grad=False)
-
-        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
-        return fw_graphs[0]
 
     def test_single_subgraph(self):
         def inner_fn(x, y):
@@ -613,12 +599,6 @@ class <lambda>(torch.nn.Module):
         )
 
     def test_cycle_detection_no_cycle(self):
-        mod = self.run_and_get_simple_graph()
-        self.assertExpectedInline(
-            _detect_cycles(mod.graph, {}), """no cycle detected"""
-        )
-
-    def test_cycle_detection_single_node(self):
         def fn(x, y):
             x0 = x + 1
             y0 = y + 2
@@ -630,69 +610,27 @@ class <lambda>(torch.nn.Module):
 
         _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
         mod = fw_graphs[0]
-        add_node = next(n for n in mod.graph.nodes if n.name == "add")
-        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
-        args = add_node.args
-        add_node.args = (args[0], add_2)
-        self.assertExpectedInline(
-            _detect_cycles(mod.graph, {add_2: OrderedSet([add_2])}),
-            """cycle detected in path: deque([output, add_2, add_2])""",
-        )
-
-    def test_cycle_detection_two_node(self):
-        def fn(x, y):
-            x0 = x + 1
-            y0 = y + 2
-            z = x0.sum() + y0.sum()
-            return z
-
-        x = torch.rand(10, 10, requires_grad=False)
-        y = torch.rand(10, 20, requires_grad=False)
-
-        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
-        mod = fw_graphs[0]
-        add_node = next(n for n in mod.graph.nodes if n.name == "add")
-        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
-        args = add_node.args
-        add_node.args = (args[0], add_2)
-        self.assertExpectedInline(
-            _detect_cycles(
-                mod.graph,
-                {add_2: OrderedSet([add_node]), add_node: OrderedSet([add_2])},
-            ),
-            """cycle detected in path: deque([output, add_2, add, add_2])""",
-        )
-
-    def test_cycle_detection_arg_and_additional_deps(self):
-        def fn(x, y):
-            x0 = x + 1
-            y0 = y + 2
-            z = x0.sum() + y0.sum()
-            return z
-
-        x = torch.rand(10, 10, requires_grad=False)
-        y = torch.rand(10, 20, requires_grad=False)
-
-        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
-        mod = fw_graphs[0]
-        add_node = next(n for n in mod.graph.nodes if n.name == "add")
-        add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
-        args = add_node.args
-        add_node.args = (args[0], add_2)
-        self.assertExpectedInline(
-            _detect_cycles(mod.graph, {add_2: OrderedSet([add_node])}),
-            """cycle detected in path: deque([output, add_2, add, add_2])""",
-        )
+        self.assertExpectedInline(_detect_cycles(mod.graph), """no cycle detected""")
 
     def test_cycle_detection_simple(self):
-        mod = self.run_and_get_simple_graph()
+        def fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+
+        _, _, fw_graphs = self.run_and_return_graphs(fn, x, y)
+        mod = fw_graphs[0]
         add_node = next(n for n in mod.graph.nodes if n.name == "add")
         add_2 = next(n for n in mod.graph.nodes if n.name == "add_2")
         args = add_node.args
         add_node.args = (args[0], add_2)
         self.assertExpectedInline(
-            _detect_cycles(mod.graph, {}),
-            """cycle detected in path: deque([output, add_2, sum_1, add, add_2])""",
+            _detect_cycles(mod.graph),
+            """cycle detected in path: deque([arg0_1, add, sum_1, add_2, add])""",
         )
 
     def test_cycle_detection_complex(self):
@@ -726,8 +664,8 @@ class <lambda>(torch.nn.Module):
         args = invoke_subgraph_node.args
         invoke_subgraph_node.args = (add_2, args[1])
         self.assertExpectedInline(
-            _detect_cycles(mod.graph, {}),
-            """cycle detected in path: deque([output, add_2, add_1, sum_1, getitem, invoke_subgraph, add_2])""",
+            _detect_cycles(mod.graph),
+            """cycle detected in path: deque([arg0_1, invoke_subgraph_1, getitem_1, sum_2, add_2, invoke_subgraph, getitem, sum_1, add_1, add_2])""",
         )
 
     def test_autocast_ordering(self):
