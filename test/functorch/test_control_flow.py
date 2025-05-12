@@ -1418,6 +1418,7 @@ def forward(self, pred_1, x_1):
                 f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5)
             )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_map_illegal_outputs(self):
         def f(x, y):
             return x.item()
@@ -1431,12 +1432,12 @@ def forward(self, pred_1, x_1):
         x = torch.ones([3])
         y = torch.ones([1, 2, 3])
         with self.assertRaisesRegex(
-            RuntimeError, r"Expect outputs of map only contains tensors or None\."
+            RuntimeError, "map doesn't work unless it is captured completely"
         ):
             control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Expect outputs of map only contains tensors or None\."
+            RuntimeError, "Expect outputs of map only contains tensors"
         ):
             control_flow.map(f1, x, y)
 
@@ -6419,8 +6420,6 @@ def forward(self, arg0_1):
 
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):
             y.add_(4)
@@ -6432,12 +6431,10 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
         ):
             functional_f(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_mutation(self):
         def map_fn(x, y):
             x.add_(4)
@@ -6449,7 +6446,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
         ):
             functional_f(*example_inputs)
 
@@ -6476,8 +6473,6 @@ def forward(self, arg0_1):
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):
             x.view(x.shape)
@@ -6489,7 +6484,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4),)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is aliasing the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is aliasing the input!"
         ):
             functional_f(*example_inputs)
 
@@ -6861,7 +6856,7 @@ def forward(self, arg0_1, arg1_1):
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, (arg0_1,));  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
-    return [getitem]""",  # noqa: B950
+    return (getitem,)""",  # noqa: B950
         )
 
     @skipIfCrossRef  # Arg order changes with crossref
@@ -8135,10 +8130,10 @@ class GraphModule(torch.nn.Module):
         _ = self._check_export_ret_graph_str(model, args, dynamic_shapes)
 
     @skipIfTorchDynamo(
-        "Skip because _merge_tensors is not intended for dynamo to compile"
+        "Skip because _merge_output is not intended for dynamo to compile"
     )
-    def test_merge_tensors(self):
-        from torch._higher_order_ops.cond import _merge_tensors
+    def test_merge_output(self):
+        from torch._higher_order_ops.cond import _merge_output
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -8183,7 +8178,7 @@ class GraphModule(torch.nn.Module):
             with fake_mode:
                 t1 = torch.empty_strided(size1, stride1)
                 t2 = torch.empty_strided(size2, stride2)
-            out = _merge_tensors(t1, t2, fake_mode)
+            out = _merge_output(t1, t2, fake_mode)
             self.assertEqual(str(tuple(out.size())), merged_size)
             self.assertEqual(str(tuple(out.stride())), merged_stride)
 

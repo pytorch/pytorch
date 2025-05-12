@@ -93,7 +93,7 @@ Read More
    torch.compiler_faq
    torch.compiler_troubleshooting
    torch.compiler_performance_dashboard
-
+   torch.compiler_inductor_provenance
 ..
   _If you want to contribute a developer-level topic
    that provides in-depth overview of a torch._dynamo feature,
