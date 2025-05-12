@@ -716,6 +716,7 @@ class _PipelineStageBase(ABC):
         output_tuple = _normalize_model_output_as_tuple(output)
 
         # Prepare for final output merge or reduction
+        # Output chunks is only used for the last stage since we only merge the output of the last stage
         if self.is_last:
             self.output_chunks.append(output)
 
