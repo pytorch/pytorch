@@ -353,10 +353,7 @@ class OptimizedModule(torch.nn.Module):
                 "causes undesired behavior, please try using `module.compile()`"
                 ", or use the per-module hooks instead",
             )
-        # All the logic in `torch.nn.Module.__call__` has been captured by
-        # `self.forward = self.dynamo_ctx(self._orig_mod.__call__)`, so we
-        # override here to avoid running that logic again by default.
-        return super().__call__(*args, *kwargs)
+        return super().__call__(*args, **kwargs)
 
     def __reduce__(self):
         return (self.__class__, (self._orig_mod, self.dynamo_ctx))
