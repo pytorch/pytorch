@@ -120,17 +120,14 @@ _global_forward_hooks_with_kwargs: dict[int, bool] = OrderedDict()
 
 
 def _has_any_global_hook():
-    for hooks in (
-        _global_backward_pre_hooks,
-        _global_backward_hooks,
-        _global_forward_pre_hooks,
-        _global_forward_hooks,
-        _global_forward_hooks_always_called,
-        _global_forward_hooks_with_kwargs,
-    ):
-        if len(hooks) > 0:
-            return True
-    return False
+    return (
+        _global_backward_pre_hooks
+        or _global_backward_hooks
+        or _global_forward_pre_hooks
+        or _global_forward_hooks
+        or _global_forward_hooks_always_called
+        or _global_forward_hooks_with_kwargs
+    )
 
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
