@@ -11,22 +11,19 @@ from numpy.testing import assert_array_equal
 import torch
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import (
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
-    init_device_mesh,
-)
-from torch.distributed._tensor.experimental import implicit_replication
-from torch.distributed._tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Replicate,
     Shard,
-    TensorMeta,
 )
 from torch.distributed.tensor._api import _shard_tensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -743,7 +740,7 @@ class DTensorMeshTest(DTensorTestBase):
             ),
         ]
 
-        from torch.distributed._tensor._utils import (
+        from torch.distributed.tensor._utils import (
             compute_local_shape_and_global_offset,
         )
 
@@ -1009,7 +1006,8 @@ class DTensorLogTest(LoggingTestCase):
             """\
 import logging
 import torch
-from torch.distributed._tensor import  init_device_mesh, distribute_tensor, Shard
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, Shard
 
 mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
 placements = [Shard(0)]
