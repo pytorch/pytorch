@@ -689,13 +689,13 @@ class MultiProcessTestCase(TestCase):
 
     @staticmethod
     def _event_listener(parent_pipe, signal_pipe, rank: int):
-        logger.info("Starting event listener thread for rank %s", rank)
+        logger.debug("Starting event listener thread for rank %s", rank)
         while True:
             ready_pipes = multiprocessing.connection.wait([parent_pipe, signal_pipe])
 
             if parent_pipe in ready_pipes:
                 if parent_pipe.closed:
-                    logger.info(
+                    logger.debug(
                         "Pipe closed for process %s, stopping event listener thread",
                         rank,
                     )
