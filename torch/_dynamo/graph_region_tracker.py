@@ -28,7 +28,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
-from .graph_utils import _get_flat_args_unique
+from .graph_utils import _flatten_args_kwargs
 
 
 T = TypeVar("T")
@@ -416,7 +416,7 @@ def _populate_recursive_ancestor_map(graph: torch.fx.Graph) -> dict[Node, set[No
     for node in graph.nodes:
         node_to_recursive_ancestors[node] = set()
     for node in graph.nodes:
-        all_args = _get_flat_args_unique(node, {})
+        all_args = _flatten_args_kwargs((node.args, node.kwargs))
         for arg in all_args:
             if isinstance(arg, Node):
                 node_to_recursive_ancestors[node].update(
