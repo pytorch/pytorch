@@ -25,9 +25,10 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 import torch._logging
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
-from .graph_utils import _flatten_args_kwargs
+from .graph_utils import _get_flat_args_unique
 
 
 T = TypeVar("T")
@@ -199,6 +200,8 @@ class GraphRegionTracker:
     def __init__(self) -> None:
         self.hash_to_duplicates: dict[str, IdenticalNodes] = defaultdict(list)
         self.node_to_duplicates: dict[Node, IdenticalNodes] = {}
+        # Note: position is in flattened args/kwargs list
+        self.node_to_mutated_arg_positions: dict[Node, OrderedSet[int]] = {}
         self.input_pickler = InputPickler()
 
     def _hash_node(
@@ -239,6 +242,28 @@ class GraphRegionTracker:
             self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
+
+    def track_node_mutations(
+        self,
+        node: Node,
+        flat_args_kwargs: list[Any],
+        id_to_initial_version: dict[int, int],
+    ) -> None:
+        """
+        This function tracks which argument positions are mutated by the given node. Subgraph HOP does not support
+        input mutations today so we will skip regions which have inputs that are mutated.
+        """
+        mutated_arg_positions = OrderedSet[int]()
+        for i, arg in enumerate(flat_args_kwargs):
+            val_id = id(arg)
+            if (
+                val_id in id_to_initial_version
+                and id_to_initial_version[val_id] != arg._version
+            ):
+                mutated_arg_positions.add(i)
+
+        if mutated_arg_positions:
+            self.node_to_mutated_arg_positions[node] = mutated_arg_positions
 
     def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
@@ -391,7 +416,7 @@ def _populate_recursive_ancestor_map(graph: torch.fx.Graph) -> dict[Node, set[No
     for node in graph.nodes:
         node_to_recursive_ancestors[node] = set()
     for node in graph.nodes:
-        all_args = _flatten_args_kwargs((node.args, node.kwargs))
+        all_args = _get_flat_args_unique(node, {})
         for arg in all_args:
             if isinstance(arg, Node):
                 node_to_recursive_ancestors[node].update(

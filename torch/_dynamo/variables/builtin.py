@@ -1528,7 +1528,7 @@ class BuiltinVariable(VariableTracker):
                         and isinstance(obj, ConstDictVariable)
                         and not istype(obj, SetVariable)
                     ):
-                        tx.output.guard_on_key_order.add(obj.source.name())
+                        tx.output.guard_on_key_order.add(obj.source)
 
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
@@ -1989,11 +1989,11 @@ class BuiltinVariable(VariableTracker):
                 )
             ):
                 unimplemented_v2(
-                    gb_type="Failed to trace builtin operator",
+                    gb_type="Failed to trace unittest method",
                     context=f"function: unittest.TestCase.{name}",
-                    explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                    explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
                     hints=[
-                        f"Avoid calling builtin `{name}`. "
+                        f"Avoid calling `TestCase.{name}`. "
                         "Please report an issue to PyTorch.",
                     ],
                 )
