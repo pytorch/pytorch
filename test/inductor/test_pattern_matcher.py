@@ -1726,11 +1726,11 @@ class TestPatternMatcher(TestCase):
         f1_replaced_inp = inp.clone().detach()
         f1_out = f1(f1_inp)
         f1_replaced_out = f1_replaced(f1_replaced_inp)
+        self.assertEqual(count, 1)
         self.assertEqual(f1_inp, f1_replaced_inp)
         self.assertEqual(f1_out, f1_replaced_out)
-        self.assertEqual(count, 1)
 
-        # Case 2: mutates graph input (not supported yet)
+        # Case 2: mutates graph input
         @torch.compile(fullgraph=True, backend=custom_backend)
         def f2(x):
             out = torch.zeros_like(x)
@@ -1747,9 +1747,9 @@ class TestPatternMatcher(TestCase):
         f2_replaced_inp = inp.clone().detach()
         f2_out = f2(f2_inp)
         f2_replaced_out = f2_replaced(f2_replaced_inp)
+        self.assertEqual(count, 1)
         self.assertEqual(f2_inp, f2_replaced_inp)
         self.assertEqual(f2_out, f2_replaced_out)
-        self.assertEqual(count, 1)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
