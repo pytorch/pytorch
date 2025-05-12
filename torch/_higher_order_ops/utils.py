@@ -762,7 +762,7 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
     ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
-    return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+    return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
 def check_input_alias_and_mutation_return_ouputs(
