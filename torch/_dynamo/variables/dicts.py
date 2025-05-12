@@ -830,9 +830,9 @@ class SetVariable(ConstDictVariable):
                 "issubset": operator.le,
                 "issuperset": operator.ge,
             }
-            other = args[0]
+            other = args[0].realize()
             if not istype(other, SetVariable):
-                other = variables.BuiltinVariable(set).call_function(tx, [args[0]], {})
+                other = variables.BuiltinVariable(set).call_function(tx, [other], {})
             return variables.BuiltinVariable(op.get(name)).call_function(
                 tx, [self, other], {}
             )
