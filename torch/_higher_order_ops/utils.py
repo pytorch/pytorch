@@ -755,7 +755,7 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
-) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
+) -> tuple[dict[int, int], dict[int, int], dict[int, int], list[int]]:
     (
         mutated_inputs,
         inp_inp_alias_map,

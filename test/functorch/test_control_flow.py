@@ -5772,9 +5772,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            # torch._dynamo.exc.InternalTorchDynamoError,
-            RuntimeError,
-            "cond_true might be aliasing the input or the output!",
+            torch._dynamo.exc.TorchRuntimeError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5814,8 +5813,8 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            RuntimeError,
-            "cond_false might be aliasing the input or the output!",
+            torch._dynamo.exc.TorchRuntimeError,
+            "cond_false might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -5879,8 +5878,8 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "cond_true might be aliasing the input or the output!",
+            torch._dynamo.exc.TorchRuntimeError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
