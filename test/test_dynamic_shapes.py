@@ -3206,7 +3206,6 @@ class TestGuardsExpressions(TestCase):
         ge_3: "Sym(u3 >= 0)" = arg2_1 >= 0
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
 
-         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3170 in func, code: u0, u1 = y.tolist()
         select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
         ge_5: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
@@ -3216,19 +3215,18 @@ class TestGuardsExpressions(TestCase):
         ge_7: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
         _assert_scalar_3 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_7 = _assert_scalar_3 = None
 
-        # No stacktrace found for following nodes
         mul: "Sym(u2*u3)" = arg1_1 * arg2_1;  arg1_1 = arg2_1 = None
         mul_1: "Sym(u0*u1)" = _local_scalar_dense * _local_scalar_dense_1
         eq: "Sym(Eq(u2*u3, u0*u1))" = mul == mul_1;  mul = mul_1 = None
         _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
 
-         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3174 in func, code: result1 = torch.reshape(x, (u0, u1))
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
 
-         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3178 in func, code: return result1 * 10, result2
         mul_16: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         return (mul_16,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
         )
 
         result_eager = func(x, torch.tensor([2, 50]))
