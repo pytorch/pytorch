@@ -16,7 +16,7 @@ function install_timm() {
 
   pip_install "git+https://github.com/huggingface/pytorch-image-models@${commit}"
   # Clean up
-  conda_run pip uninstall -y cmake torch torchvision triton
+  conda_run pip uninstall -y torch torchvision triton
 }
 
 # Pango is needed for weasyprint which is needed for doctr
