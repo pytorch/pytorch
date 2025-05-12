@@ -112,19 +112,20 @@ static_assert(
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
 //
-// Note: Can not directly use inline to declar a global variable here,
-//       because it doesn't work for fbobjc build.
-inline std::atomic<bool>& privateuse1_backend_name_set() {
+// Note: Can not directly use inline to declar a global variable here, because
+//       it doesn't work for fbobjc build, error: declaration requires a global destructor
+//       TORCH_API is also needed to make sure the variables are visible to all files.
+inline TORCH_API std::atomic<bool>& privateuse1_backend_name_set() {
   static std::atomic<bool> privateuse1_backend_name_set_(false);
   return privateuse1_backend_name_set_;
 }
 
-inline std::string& privateuse1_backend_name() {
+inline TORCH_API std::string& privateuse1_backend_name() {
   static std::string privateuse1_backend_name_;
   return privateuse1_backend_name_;
 }
 
-inline std::mutex& privateuse1_lock() {
+inline TORCH_API std::mutex& privateuse1_lock() {
   static std::mutex privateuse1_lock_;
   return privateuse1_lock_;
 }
