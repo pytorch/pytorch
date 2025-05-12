@@ -2053,25 +2053,25 @@ def fx_to_pattern(
                 process_arg_fn = process_arg_fn_impl
 
             if target is torch.ops.higher_order.auto_functionalized_v2:
-                kw_patts = {}
+                kw_dict = {}
 
                 mutable_op = args[0]
 
                 for k, v in kwargs.items():
                     if k == "_all_bases":
-                        kw_patts["_all_bases"] = v
+                        kw_dict["_all_bases"] = v
                     elif k.endswith("_base_index"):
                         # literal int, must match exactly
-                        kw_patts[k] = v
+                        kw_dict[k] = v
                     elif not k.endswith(("_size", "_stride", "_storage_offset")):
                         # Non-view input args to the original mutable op
                         # Capture it with Arg() if it is a node; keep
                         # literal constants otherwise.
-                        kw_patts[k] = Arg() if isinstance(v, torch.fx.Node) else v
+                        kw_dict[k] = Arg() if isinstance(v, torch.fx.Node) else v
                     else:
                         continue
 
-                return CallFunction(target, mutable_op, **kw_patts)
+                return CallFunction(target, mutable_op, **kw_dict)
 
             args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
