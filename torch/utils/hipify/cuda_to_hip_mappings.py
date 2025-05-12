@@ -8749,6 +8749,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10)),
         ("CUDAKernelLaunchRegistry", ("HIPKernelLaunchRegistry", API_C10)),
+        ("c10::cuda::get_cuda_check_suffix", ("c10::hip::get_hip_check_suffix", API_C10)),
     ]
 )
 
