@@ -1871,9 +1871,6 @@ class TestPatternMatcher(TestCase):
         # Case 2: view input's base is *NOT* captured within graph
         def _test_view_base_not_captured_within_graph():
             def mutable_ops_pattern(x1, x2, out):
-                # NOTE: the crazy thing about mark_opaque_view, is that in the user graph, the non-mutated x1 and x2 inputs to bar_out can be a complex (chain of) view op on base x,
-                # and it's not possible to match to this chain of view ops via a single op `opaque_view(x)`.
-                # To solve this, we need to leverage `extra_check=`. TODO: try to write a generic extra_check function to recursively find the ancestor of the opaque_view input until we hit another (earlier) mutable op or hit pattern graph input.
                 foo_inplace(x1, x2)
                 bar_out(x1[0], x2[0], out)
                 return x1, x2, out
