@@ -3271,6 +3271,7 @@ def get_guard_fail_reason_helper(
     # C++ guard manager. We need to fix the issue to remove the comment.
     # assert not guard_debug_info.result
     if not guard_debug_info.result:
+        print(guard_debug_info.failure_reasons)
         breakpoint()
         verbose_code_parts = guard_debug_info.verbose_code_parts
         # verbose_code_parts is either the actual reason (e.g. in case of

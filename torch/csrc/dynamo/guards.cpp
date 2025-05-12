@@ -2615,13 +2615,25 @@ class GuardManager {
       PyObject* value,
       int& num_guards_executed) {
     // Iterate over leaf guards
+    bool guards_failed = false;
+    py::list verbose_code_parts;
+    py::list guard_fail_reasons;
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!debug_info.result) {
-        return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+        guards_failed = true;
+        if (debug_info.verbose_code_parts && !verbose_code_parts) {
+          verbose_code_parts = verbose_code_parts;
+        }
+        if (debug_info.failure_reasons) {
+          guard_fail_reasons += debug_info.failure_reasons;
+        }
       }
+    }
+    if (guards_failed) {
+      return GuardDebugInfo(
+        false, verbose_code_parts, guard_fail_reasons, num_guards_executed);
     }
 
     return GuardDebugInfo(true, num_guards_executed);
