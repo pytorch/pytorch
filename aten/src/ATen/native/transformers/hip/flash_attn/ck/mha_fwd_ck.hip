@@ -17,6 +17,8 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
                                        bool has_lse,
                                        bool enable_bias)
 {
+    std::cout << "HAS DROPOUT IN TRAITS?: " << has_dropout << std::endl;
+    std::cout << "has LSE in TRAITS?: " << has_lse << std::endl;
     return fmha_fwd_traits{head_size,
                            head_size,
                            dtype,
@@ -285,8 +287,13 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
 
     auto rng_state_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
-    auto rng_state = at::empty({2}, rng_state_options.dtype(at::kUInt64));
-    auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA)); 
+    auto rng_state = at::zeros({2}, rng_state_options.dtype(at::kUInt64));
+    std::cout << "SOME INFO ABOUT RNG_STATE: " << std::endl;
+    std::cout << "numel?  : " << rng_state.numel() << std::endl;
+    std::cout << "defined?: " << rng_state.defined() << std::endl;
+    bool has_nonzero = rng_state.ne(0).any().item<bool>();
+    std::cout << "has non_zero before?  : " << has_nonzero << std::endl;
+    auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
     
 
 //    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
@@ -312,15 +319,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
         std::cout << "DROP_SEED: " << drop_seed << std::endl;
         std::cout << "DROP_OFST: " << drop_offset << std::endl;
-//        hipLaunchKernelGGL(
-//            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
-  
 
-//        seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[0])), at::dtype(at::kLong));
-//        offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(rng_state_ptr[1])), at::dtype(at::kLong));
         std::cout << "CHECKPOINT 2.A.B" << std::endl;
-//        std::cout << "fwd Seed device  :" << seed_t.device() << std::endl;
-//        std::cout << "fwd Offset device:" << offset_t.device() << std::endl;
     }
 /*    else
     {
@@ -331,10 +331,13 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     }
     */
     //these are actual values allegedly on the GPU
-    rng_state[0] = drop_seed;
-    rng_state[1] = drop_offset;
-
+    //rng_state[0] = drop_seed;
+    //rng_state[1] = drop_offset;
+    rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
+    rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
     auto drop_options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
+   bool has_nonzero_2 = rng_state.ne(0).any().item<bool>();
+    std::cout << "has non zeros after?  : " << has_nonzero_2 << std::endl;
  //   auto seed_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[0].data_ptr<uint64_t>())), drop_options.dtype(at::kLong));
 //    auto offset_t = at::scalar_tensor(at::Scalar(static_cast<uint64_t>(*rng_state[1].data_ptr<uint64_t>())), drop_options.dtype(at::kLong));
 
