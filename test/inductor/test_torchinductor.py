@@ -13744,6 +13744,7 @@ if RUN_GPU:
 
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
         @requires_gpu()
+        @config.patch(implicit_fallbacks=True)
         def test_grouped_mm(self):
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
