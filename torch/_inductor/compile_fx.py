@@ -95,7 +95,7 @@ from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
-from ..utils._triton import has_triton_package
+from ..utils._triton import has_triton
 from . import config, metrics
 from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
 from .debug import DebugContext
@@ -1857,7 +1857,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
         "triton.autotune_at_compile_time": (
             config.triton.autotune_at_compile_time
             if config.triton.autotune_at_compile_time is not None
-            else has_triton_package()
+            else has_triton()
         ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
