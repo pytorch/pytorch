@@ -235,6 +235,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *inductor-benchmarks* ]]; then
+  export BUILD_AOT_INDUCTOR_TEST=1
+fi
+
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
