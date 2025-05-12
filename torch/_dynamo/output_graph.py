@@ -302,6 +302,7 @@ class OutputGraphGuardsState:
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
+    current_device: Optional[torch.device]
 
     export: bool = False
     export_constraints: bool = False
@@ -356,6 +357,7 @@ class OutputGraph(OutputGraphGuardsState):
             input_source_to_sizes_strides={},
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
+            current_device=torch.utils._device.CURRENT_DEVICE,
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -593,6 +595,7 @@ class OutputGraph(OutputGraphGuardsState):
             input_source_to_sizes_strides=self.input_source_to_sizes_strides,
             dual_level=self.dual_level,
             functorch_layers=self.functorch_layers,
+            current_device=self.current_device,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
@@ -2438,12 +2441,21 @@ class SubgraphTracer(fx.Tracer):
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
-            if (
-                not is_strict_export
-                and not is_non_strict_export
-                and isinstance(example_value, torch.Tensor)
-            ):
-                self._lift_basic_symbols(example_value, source)
+            if not is_strict_export and not is_non_strict_export:
+                if isinstance(example_value, torch.Tensor):
+                    self._lift_basic_symbols(example_value, source)
+                elif isinstance(example_value, (list, tuple)):
+                    for i, e in enumerate(example_value):
+                        if not isinstance(e, torch.Tensor):
+                            continue
+
+                        e_source = None
+                        if source:
+                            e_source = GetItemSource(
+                                base=source, index=i, index_is_slice=False
+                            )
+
+                        self._lift_basic_symbols(e, e_source)
 
             # Bound the symbol to ph if example_value is a SymInt with basic symbol.
             if isinstance(example_value, torch.SymInt) and isinstance(

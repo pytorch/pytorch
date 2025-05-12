@@ -4,6 +4,7 @@ import math
 import os
 import re
 import sysconfig
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -136,6 +137,14 @@ class TestCutlassBackend(TestCase):
         import cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
+    def test_cutlass_key(self):
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+        self.assertTrue(try_import_cutlass())
+        from torch._inductor.codecache import cutlass_key
+
+        self.assertIsNotNone(cutlass_key())
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_cutlass_backend_subproc_mm(self):
@@ -267,8 +276,12 @@ class TestCutlassBackend(TestCase):
             expected = model(a, b, c)
             actual, codes = run_and_get_code(compiled, a, b, c)
             torch.testing.assert_close(actual, expected)
+            pattern = r"cutlass_[\w]+\.cutlass_[\w]+"
+            match = re.search(pattern, codes[0])
+            self.assertTrue(match is not None)
+            cutlass_kernel = match.group()
             FileCheck().check_count(
-                "cuda_fused_0.cuda_fused_0",
+                cutlass_kernel,
                 2,
             ).run(codes[0])
 
@@ -312,10 +325,7 @@ class TestCutlassBackend(TestCase):
             expected = model(a, b, c)
             actual, codes = run_and_get_code(compiled, a, b, c)
             torch.testing.assert_close(actual, expected)
-            FileCheck().check_count(
-                "cuda_fused_0.cuda_fused_0",
-                1,
-            ).run(codes[0])
+            self.assertTrue(re.search(r"cutlass_.*.cutlass_.*", codes[0]))
             # Verifies expected number of precompilations
             self.assertEqual(
                 torch._dynamo.utils.counters["inductor"][
@@ -856,8 +866,8 @@ class TestCutlassBackend(TestCase):
             f"('cuda', 'torch.float16', {k}, {n}, {n}, 1, 0)]"
         ]["high"]
         cutlass_kernels_count = 0
-        for kernel, time in high.items():
-            if kernel.startswith("cutlass_gemm") and not math.isinf(time):
+        for kernel, duration in high.items():
+            if kernel.startswith("cutlass_gemm") and not math.isinf(duration):
                 cutlass_kernels_count += 1
         assert cutlass_kernels_count > 0
 
@@ -1305,6 +1315,49 @@ class TestCutlassBackend(TestCase):
             }
         ):
             _ = torch.compile(model)(B)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_filtered_ops_cache(self):
+        class TestModel(torch.nn.Module):
+            def forward(self, B):
+                A = torch.zeros_like(B)
+                for _ in range(100):
+                    A = A @ B
+                return A
+
+        M = 1024
+        B = torch.randn(M, M).cuda().half()
+        model = TestModel().cuda()
+
+        start_time = time.time()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            _ = torch.compile(model)(B)
+        self.assertTrue(time.time() - start_time < 60)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_compilation_time(self):
+        M = 1024
+        A = torch.randn(M, M).cuda().half()
+        B = torch.randn(M, M).cuda().half()
+
+        start_time = time.time()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            _ = torch.compile(torch.mm)(A, B)
+        self.assertTrue(time.time() - start_time < 50)
 
 
 if __name__ == "__main__":
