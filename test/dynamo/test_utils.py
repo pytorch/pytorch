@@ -237,6 +237,7 @@ class TestDynamoTimed(TestCase):
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
  'create_aot_dispatcher_function': [0.0],
+ 'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0]}""",  # noqa: B950
         )
 
