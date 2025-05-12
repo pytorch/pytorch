@@ -11,27 +11,19 @@ import logging
 import operator
 from collections import defaultdict
 from collections.abc import Generator, Iterable
-from typing import Optional
+from typing import Any
 
 import torch
 import torch.fx
 from torch._dynamo import config
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._ordered_set import OrderedSet
 
 from .graph_region_tracker import Node, Region
 from .graph_utils import _detect_cycles, _get_flat_args, _get_flat_args_unique
 
 
-# Represents an index into the region
-# to select a node and then
-# an index into that node's
-# flattened arguments
-UsageIndex = tuple[int, int]
-
 log = logging.getLogger(__name__)
-
-last_node_to_additional_deps: Optional[dict[Node, OrderedSet[Node]]] = None
 
 
 def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
@@ -65,9 +57,6 @@ when they are created in output_graph.
     duplicated_region_groups = output_graph.region_tracker.get_identical_regions(
         output_graph.graph
     )
-    node_to_mutated_arg_positions = (
-        output_graph.region_tracker.node_to_mutated_arg_positions
-    )
     node_to_additional_deps = _populate_additional_deps(
         output_graph.graph, output_graph.region_tracker.node_to_mutated_arg_positions
     )
@@ -79,11 +68,11 @@ when they are created in output_graph.
         region = region_group[0]
         (
             subgraph,
-            external_node_usages,
+            node_ind_arg_inds,
         ) = _create_subgraph(region, inds_with_external_users)
 
         # Ignore regions with no args for now, could they possibly be evaluated at compile time?
-        if not list(external_node_usages):
+        if not list(node_ind_arg_inds):
             continue
 
         sub_gm = torch.fx.GraphModule(output_graph.nn_modules, subgraph)
@@ -93,26 +82,21 @@ when they are created in output_graph.
             get_subgraph_node = output_graph.graph.create_node(
                 "get_attr", subgraph_name, (), {}
             )
-
         for region in region_group:
             _replace_region_with_subgraph(
                 output_graph.graph,
                 region,
                 get_subgraph_node,
-                external_node_usages,
+                node_ind_arg_inds.keys(),
                 inds_with_external_users,
+                sub_gm,
                 subgraph_name,
                 node_to_additional_deps,
-                node_to_mutated_arg_positions,
             )
-
-    # This is to expose the updated node_to_additional_deps to tests
-    global last_node_to_additional_deps
-    last_node_to_additional_deps = node_to_additional_deps
 
     _stable_topological_sort(
         output_graph.graph,
-        node_to_additional_deps,
+        node_to_additional_deps,  # type: ignore[arg-type]
     )
     return sub_gms
 
@@ -121,34 +105,27 @@ def _replace_region_with_subgraph(
     graph: torch.fx.Graph,
     region: Region,
     get_subgraph_node: Node,
-    external_node_usages: Iterable[OrderedSet[UsageIndex]],
+    node_ind_arg_ind: Iterable[tuple[int, int]],
     inds_with_external_users: list[int],
+    sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
     node_to_additional_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
-    node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
 ) -> None:
     sub_args = []
-    for usages in external_node_usages:
-        node_ind, usage_ind = next(iter(usages))
+    for node_ind, arg_ind in node_ind_arg_ind:
         node = region[node_ind]
         flattened_args_kwargs = _get_flat_args(node, {})
-        for user_ind, node_usage_ind in usages:
-            user = region[user_ind]
-            if user in node_to_mutated_arg_positions:
-                if node_usage_ind in node_to_mutated_arg_positions[user]:
-                    log.debug(
-                        "NYI: Failed to substitute region %s due to mutation", region
-                    )
-                    return
-        sub_args.append(flattened_args_kwargs[usage_ind])
-
-    # Input/Output aliasing not supported in HOPs today
-    # Note: we should use the nodes in the original graph (the region here)
-    # because we use the original traced example values for this check
-    if _has_aliasing(region, sub_args, inds_with_external_users):
-        return
+        sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, *sub_args)
+    fake_inputs = [node.meta["example_value"] for node in sub_args]
+
+    if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
+        log.debug(
+            "NYI: Failed to substitute region %s due to input alias or mutation",
+            region,
+        )
+        return
 
     invoke_subgraph_node = graph.create_node(
         "call_function",
@@ -166,10 +143,6 @@ def _replace_region_with_subgraph(
     # Erase in reverse topological order
     for node in reversed(region):
         graph.erase_node(node)
-        # Remove any nodes with additional deps
-        # This is safe; we've guaranteed that there is
-        # no input mutation, so all additional deps
-        # will be internal to the subgraph
         node_to_additional_deps.pop(node, None)
         for deps in node_to_additional_deps.values():
             try:
@@ -179,27 +152,27 @@ def _replace_region_with_subgraph(
                 pass
 
     if config.graph_deduplication_lint:
-        print(_detect_cycles(graph, node_to_additional_deps))
+        _detect_cycles(graph, node_to_additional_deps)
         _stable_topological_sort(graph, node_to_additional_deps)
         graph.lint()
 
 
 def _get_external_inputs(
     region: Region,
-) -> dict[Node, OrderedSet[UsageIndex]]:
-    external_node_to_usages = defaultdict[Node, OrderedSet[UsageIndex]](OrderedSet)
+) -> dict[Node, tuple[int, int]]:
+    external_node_to_indices = dict()
     region_unique = set(region)
     for node_ind, node in enumerate(region):
         flattened_args_kwargs = _get_flat_args(node, {})
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
-            if isinstance(in_node, Node) and in_node not in region_unique:
-                # in_node may occur in multiple nodes' flat_args
-                # track this so we can check if the arg is mutated
-                # Previously, we only needed to track one occurrence
-                # to be able to map that node to a placeholder
-                external_node_to_usages[in_node].add((node_ind, arg_ind))
+            if (
+                isinstance(in_node, Node)
+                and in_node not in region_unique
+                and in_node not in external_node_to_indices
+            ):
+                external_node_to_indices[in_node] = (node_ind, arg_ind)
 
-    return external_node_to_usages
+    return external_node_to_indices
 
 
 def _get_all_output_indices(regions: list[Region]) -> list[int]:
@@ -222,14 +195,17 @@ def _get_inds_with_external_users(region: Region, inds_unique: set[int]) -> None
 
 def _copy_nodes_and_remap_inputs(
     subgraph: torch.fx.Graph, region: Region
-) -> list[OrderedSet[UsageIndex]]:
-    external_input_to_usages = _get_external_inputs(region)
-    external_node_usages = list[OrderedSet[UsageIndex]]()
+) -> dict[tuple[int, int], Any]:
+    external_inputs_to_indices = _get_external_inputs(region)
+    indices_to_placeholder_ind: dict[tuple[int, int], Any] = {}
     region_to_subgraph_node = {}
-    for node, usage_indices in external_input_to_usages.items():
+    for node in external_inputs_to_indices.keys():
         placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
         region_to_subgraph_node[node] = placeholder
-        external_node_usages.append(usage_indices)
+        arg_indices = external_inputs_to_indices[node]
+        # Note: insertion order matches the order in which placeholders were created
+        # for the calling convention of the subgraph
+        indices_to_placeholder_ind[arg_indices] = None
 
     def map_arg(node: Node) -> Node:
         if node in region_to_subgraph_node:
@@ -241,7 +217,7 @@ def _copy_nodes_and_remap_inputs(
         subgraph_node = subgraph.node_copy(node, lambda old: map_arg(old))
         region_to_subgraph_node[node] = subgraph_node
 
-    return external_node_usages
+    return indices_to_placeholder_ind
 
 
 def _create_subgraph_outputs(
@@ -255,11 +231,11 @@ def _create_subgraph_outputs(
 def _create_subgraph(
     region: Region,
     inds_with_external_users: list[int],
-) -> tuple[torch.fx.Graph, list[OrderedSet[UsageIndex]]]:
+) -> tuple[torch.fx.Graph, dict[tuple[int, int], Any]]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
-    external_node_usages = _copy_nodes_and_remap_inputs(subgraph, region)
+    node_ind_input_inds = _copy_nodes_and_remap_inputs(subgraph, region)
     _create_subgraph_outputs(subgraph, inds_with_external_users)
-    return subgraph, external_node_usages
+    return subgraph, node_ind_input_inds
 
 
 def _stable_topological_sort(
@@ -381,59 +357,3 @@ def _add_mutation_dependencies(
                     node_to_additional_deps[node].add(user)
                 elif user > node:
                     node_to_additional_deps[user].add(node)
-
-
-def _has_aliasing(
-    region: Region, inputs: list[Node], inds_with_external_users: list[int]
-) -> bool:
-    input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
-
-    for node in inputs:
-        example_value = node.meta["example_value"]
-        if isinstance(example_value, torch.Tensor):
-            storage = StorageWeakRef(example_value._typed_storage())
-            if storage in input_storages:
-                # input-input aliasing
-                log.debug(
-                    "NYI: Failed to substitute region %s due to input-output aliasing detected at nodes %s, %s",
-                    region,
-                    input_storages[storage],
-                    node,
-                )
-                return True
-            input_storages[storage] = node
-
-    output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
-    for i in inds_with_external_users:
-        out_node = region[i]
-        if out_node:
-            example_value = out_node.meta["example_value"]
-            assert not isinstance(example_value, list)
-            if isinstance(example_value, torch.Tensor):
-                storage = StorageWeakRef(example_value._typed_storage())
-                if storage in output_storages:
-                    # output-output aliasing
-                    log.debug(
-                        "NYI: Failed to substitute region %s due to output-output aliasing detected at nodes %s, %s",
-                        region,
-                        output_storages[storage],
-                        out_node,
-                    )
-                    return True
-                output_storages[storage] = out_node
-
-    intersected_storages = input_storages.keys() & output_storages.keys()
-    if len(intersected_storages) > 0:
-        # input-output aliasing
-        aliased = [
-            (input_storages[s], output_storages[s]) for s in intersected_storages
-        ]
-        aliased = ", ".join([f"{i} and {o}" for i, o in aliased])
-        log.debug(
-            "NYI: Failed to substitute region %s due to input-output aliasing detected at nodes %s",
-            region,
-            aliased,
-        )
-        return True
-
-    return False
