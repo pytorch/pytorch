@@ -209,7 +209,8 @@ def _scaled_mm_like_strategy(
 
 
 @register_op_strategy(aten.dot.default)
-def dot_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def dot_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
     return _mm_like_strategy("i,i->", mesh, op_schema)
 
 
