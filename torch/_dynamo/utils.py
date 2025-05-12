@@ -3152,20 +3152,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
-
-    if (
-        torch._dynamo.config.use_graph_deduplication
-        or torch._dynamo.config.track_nodes_for_deduplication
-    ):
-        flat_args_kwargs = get_fake_values_from_nodes(
-            tx, _get_flat_args(node, {}), allow_non_graph_fake
-        )
-        id_to_initial_version = {
-            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
-        }
-    else:
-        flat_args_kwargs = []
-        id_to_initial_version = {}
+    flat_args_kwargs = get_fake_values_from_nodes(
+        tx, _get_flat_args(node, {}), allow_non_graph_fake
+    )
+    id_to_initial_version = {
+        id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+    }
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):

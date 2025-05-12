@@ -1418,6 +1418,7 @@ def forward(self, pred_1, x_1):
                 f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5)
             )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_map_illegal_outputs(self):
         def f(x, y):
             return x.item()
@@ -1431,12 +1432,12 @@ def forward(self, pred_1, x_1):
         x = torch.ones([3])
         y = torch.ones([1, 2, 3])
         with self.assertRaisesRegex(
-            RuntimeError, r"Expect outputs of map only contains tensors or None\."
+            RuntimeError, "map doesn't work unless it is captured completely"
         ):
             control_flow.map(f, x, y)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Expect outputs of map only contains tensors or None\."
+            RuntimeError, "Expect outputs of map only contains tensors"
         ):
             control_flow.map(f1, x, y)
 
@@ -1539,6 +1540,39 @@ def forward(self, pred_1, x_1):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+        
+    def test_map_autograd_higher_order(self):
+        from torch.autograd.functional import jacobian as jac
+        from torch.autograd.functional import hessian as hes
+        
+        def f(x, y):
+            return x.sin().cos() + y
+        
+        def wrapper_jac(x, y):
+            return control_flow.map(f, x, y)
+        
+        def wrapper_jac_fake(x, y):
+            return _fake_map(f, x, y)
+        
+        def wrapper_hes(x, y):
+            return control_flow.map(f, x, y).sum()
+        
+        def wrapper_hes_fake(x, y):
+            return _fake_map(f, x, y).sum()
+
+        for g_fct, (wrap, wrap_fake) in [(jac, [wrapper_jac, wrapper_jac_fake]),
+                      (hes, [wrapper_hes, wrapper_hes_fake])]:
+            xs = torch.ones(3, 2, 2, requires_grad=True)
+            # Disable the gradient computation for y
+            y = torch.ones(2, requires_grad=False)
+            res = control_flow.map(f, xs, y)
+            expected_res = _fake_map(f, xs, y)
+            self.assertEqual(expected_res, res)
+
+            expected_grads = g_fct(wrap_fake, (xs, y))
+            grads = g_fct(wrap, (xs, y))
+            self.assertEqual(expected_res, res)
+            self.assertEqual(expected_grads, grads)
 
     def test_scan_y_less_ndim_then_dim(self):
         def combine_fn(carry, x):
@@ -6419,8 +6453,6 @@ def forward(self, arg0_1):
 
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):
             y.add_(4)
@@ -6432,12 +6464,10 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
         ):
             functional_f(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_mutation(self):
         def map_fn(x, y):
             x.add_(4)
@@ -6449,7 +6479,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is mutating the input!"
         ):
             functional_f(*example_inputs)
 
@@ -6476,8 +6506,6 @@ def forward(self, arg0_1):
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):
             x.view(x.shape)
@@ -6489,7 +6517,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4),)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is aliasing the input!"
+            torch._dynamo.exc.TorchRuntimeError, "torch.map is aliasing the input!"
         ):
             functional_f(*example_inputs)
 
@@ -6861,7 +6889,7 @@ def forward(self, arg0_1, arg1_1):
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, (arg0_1,));  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
-    return [getitem]""",  # noqa: B950
+    return (getitem,)""",  # noqa: B950
         )
 
     @skipIfCrossRef  # Arg order changes with crossref
