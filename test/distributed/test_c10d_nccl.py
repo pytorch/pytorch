@@ -4526,9 +4526,17 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 else:
                     self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                     self.assertEqual(t[-1]["collective_seq_id"], 2)
-                    self.assertEqual(
-                        t[-1]["state"], self.started_or_scheduled(timing_enabled)
-                    )
+
+                    #ROCm runtime used to call uSleep(20 µs)inside the default‑signal busy-wait loop.
+                    #Now, this sleep is removed which lets the host thread spin continuously
+                    #Therefore, the state can either be scheduled or started before test dumps the trace.
+                    if TEST_WITH_ROCM and timing_enabled:
+                        self.assertEqual(
+                            t[-1]["state"], ("scheduled", "started"))
+                    else:
+                        self.assertEqual(
+                            t[-1]["state"], self.started_or_scheduled(timing_enabled)
+                        )
 
             self.parent.send("next")
             self.assertEqual("next", self.parent.recv())
