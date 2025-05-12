@@ -7,6 +7,7 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import detect_fake_mode
+from torch._prims_common import is_known_contiguous_for_memory_format
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_aggregate, Node
@@ -51,8 +52,15 @@ def _extract_tensor_metadata(
             torch.channels_last,
             torch.channels_last_3d,
         }
+        # When the shape has unbacked symbols, it could be general enough such that
+        # it represent both contiguous and non contiguous tensors.
+        # ex: size(u0, u1) and strides(u2, u3)! In that case is_contiguous will throw
+        # a data dependent error. Since we only store memory_format when is_contiguous return
+        # true calling is_known_contiguous is appropriate here.
         for query_format in memory_formats:
-            if result.is_contiguous(memory_format=query_format):
+            if is_known_contiguous_for_memory_format(
+                result, memory_format=query_format
+            ):
                 memory_format = query_format
                 break
 
