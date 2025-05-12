@@ -12808,7 +12808,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.randn(2, 1, requires_grad=True)
         self.common(forward, (a, b))
 
-    @xfail_if_mps
     @config.patch(implicit_fallbacks=True)
     def test_weight_norm_bwd(self):
         """
