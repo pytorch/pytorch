@@ -12747,7 +12747,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue((actual == 1).all())
 
     @skip_if_gpu_halide
-    @xfail_if_mps  # Inductor syntax error
     def test_pattern_matcher_multi_user(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/129685
 

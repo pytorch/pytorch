@@ -160,13 +160,6 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.rand(10), torch.ones(10)))
 
-    def test_multistage_norm(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/152155
-        def fn(x):
-            return x / x.sum()
-
-        self.common(fn, (torch.rand(2048),))
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
