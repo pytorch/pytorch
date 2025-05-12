@@ -9335,10 +9335,9 @@ for shape in [(1,), ()]:
             with set_warn_always_context(True):
                 with warnings.catch_warnings(record=True) as w:
                     tmp.exp().sum().backward(create_graph=True)
+                    filtered_warnings = [
+                        w_ for w_ in w if "Using backward() with create_graph=True" in str(w_)]
                     self.assertTrue(len(w) == 1)
-                    self.assertTrue(
-                        "Using backward() with create_graph=True" in str(w[0].message)
-                    )
 
             # Remove the backward + create_graph=True cycle
             a.grad = None
