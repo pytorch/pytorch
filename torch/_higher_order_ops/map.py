@@ -113,6 +113,14 @@ def map(
         def wrapped_fn(*flat_args, f, xs_tree_spec, args_tree_spec, num_xs):
             xs = pytree.tree_unflatten(flat_args[:num_xs], xs_tree_spec)
             args = pytree.tree_unflatten(flat_args[num_xs:], args_tree_spec)
+            # outs = f(xs, *args)
+            # if pytree.tree_any(lambda elem: not isinstance(elem, torch.Tensor) if elem is not None else False, outs):
+            #         raise RuntimeError(
+            #             "Expect outputs of map only contains tensors or None. "
+            #             f"Got types {[type(out) for out in pytree.tree_leaves(outs)]}."
+            #         )
+            # return outs
+            
             return f(xs, *args)
 
         inner_f = functools.partial(
@@ -239,6 +247,7 @@ def map_dense(f, xs, pos_args):
 
 
 @map_impl.py_autograd_impl
+# @map_impl.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
     flat_out = MapAutogradOp.apply(f, num_mapped_args, *xs, *pos_args)
