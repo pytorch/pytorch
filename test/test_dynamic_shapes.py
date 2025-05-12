@@ -3058,11 +3058,9 @@ class TestGuardsExpressions(TestCase):
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_reshape1(self):
         cnt = CompileCounterWithBackend("inductor")
-
-        # since this happen in place, either reshape or view would work.
+        
+        # Reshape happens in place reshape (no-clone)
         # reshape u1 -> (u0*u0)
-        # this result in the tensor "i64[u0, u0][s7*u0, s7].
-        # reshape happens in place reshape (no-clone)
         def func(x, y):
             f = y.item()
             t1 = x.view((f, f))
@@ -3091,17 +3089,18 @@ class TestGuardsExpressions(TestCase):
             self.assertEqual(compiled_result, eager_result)
 
         log_stream, ctx = logs_to_string(
-            "torch._inductor.compile_fx", "post_grad_graphs"
+            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
         )
         with ctx():
             make_non_contiguous_tensor_and_test(4)
-        post_grad_graphs = "\n".join(
+        aot_graphs = "\n".join(
             log_stream.getvalue().strip().split("\n")[3:]
         ).strip()
         self.assertExpectedInline(
-            post_grad_graphs,
+            aot_graphs,
             """\
-def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
+/home/lsakka/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
@@ -3110,9 +3109,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
-        view: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.reshape.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
+        view: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
         mul_9: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.reshape.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
         mul_12: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
         return (mul_9, mul_12)""",
             ignore_comments=True,
@@ -3122,12 +3121,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         make_non_contiguous_tensor_and_test(49)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass in a contiguous tensor, it will recompile due to stride being 1 unfortunately.
-        # marking strides unabcked would have fixed it probably.
+        # Pass in a contiguous tensor, it will recompile due to stride being 1 (0/1 specialization).
+        # marking strides unabcked would have avoided the recompilatipn here.
         x = torch.arange(100)
 
         log_stream, ctx = logs_to_string(
-            "torch._inductor.compile_fx", "post_grad_graphs"
+            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
         )
         with ctx():
             compiled_result = compiled_func(x, torch.tensor([10]))
@@ -3135,22 +3134,23 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
             self.assertEqual(compiled_result, eager_result)
             self.assertEqual(cnt.frame_count, 2)
 
-        post_grad_graphs = "\n".join(
+        aot_graphs = "\n".join(
             log_stream.getvalue().strip().split("\n")[3:]
         ).strip()
         self.assertExpectedInline(
-            post_grad_graphs,
+            aot_graphs,
             """\
-def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(s77)", arg2_1: "i64[s77][1]cpu"):
+/home/lsakka/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(s77)", arg2_1: "i64[s77][1]cpu"):
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
         ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(s77, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s77, u0**2) on node 'eq'");  eq = _assert_scalar_1 = None
-        view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.reshape.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
+        view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         mul_4: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.reshape.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         mul_7: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
         return (mul_4, mul_7)""",
             ignore_comments=True,
@@ -3164,17 +3164,21 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(s77)", arg2_1: "i64[s77][
 
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_unbacked_non_contigious_reshape2(self):
+    def test_unbacked_reshape2(self):
         cnt = CompileCounterWithBackend("inductor")
-
+        # This reshape requires a clone when the input is not known to be always contiguous.
+        # When the input is known to be always contiguous it can be done without a clone.  
         # reshape (u2, u3) -> (u0, u1)
-        def func(x, y):
+        def func(x, y, with_view=False):
             u0, u1 = y.tolist()
             torch._check_is_size(u0)
             torch._check_is_size(u1)
 
-            result = torch.reshape(x, (u0, u1))
-            return result
+            result1 = torch.reshape(x, (u0, u1))
+            result2 = None
+            if with_view:
+                result2 = x.view(x, (u0, u1))*10
+            return result1*10, result2
 
         compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
 
@@ -3183,14 +3187,117 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(s77)", arg2_1: "i64[s77][
         x = x.t_()
         torch._dynamo.decorators.mark_unbacked(x, 0)
         torch._dynamo.decorators.mark_unbacked(x, 1)
+        
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+        )
+        with ctx():
+            result_eager = func(x, torch.tensor([5, 20]))
+            result_compiled = compiled_func(x, torch.tensor([5, 20]))
+            self.assertEqual(result_compiled, result_eager)
+            self.assertEqual(cnt.frame_count, 1)
 
-        result_eager = func(x, torch.tensor([5, 20]))
-        result_compiled = compiled_func(x, torch.tensor([5, 20]))
+        aot_graphs = "\n".join(
+            log_stream.getvalue().strip().split("\n")[3:]
+        ).strip()
+        self.assertExpectedInline(
+            aot_graphs,"""\
+/home/lsakka/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", arg3_1: "f32[u2, u3][1, u2]cpu"):
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3177 in func, code: result1 = torch.reshape(x, (u0, u1))
+        ge_1: "Sym(u2 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        ge_3: "Sym(u3 >= 0)" = arg2_1 >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3173 in func, code: u0, u1 = y.tolist()
+        select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
+        ge_5: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_5 = _assert_scalar_2 = None
+        select_1: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1);  arg0_1 = None
+        _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
+        ge_7: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
+        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_7 = _assert_scalar_3 = None
+        
+        # No stacktrace found for following nodes
+        mul: "Sym(u2*u3)" = arg1_1 * arg2_1;  arg1_1 = arg2_1 = None
+        mul_1: "Sym(u0*u1)" = _local_scalar_dense * _local_scalar_dense_1
+        eq: "Sym(Eq(u2*u3, u0*u1))" = mul == mul_1;  mul = mul_1 = None
+        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
+        
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3177 in func, code: result1 = torch.reshape(x, (u0, u1))
+        clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
+        view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
+        
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3181 in func, code: return result1*10, result2
+        mul_16: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_16,)""")
 
         result_eager = func(x, torch.tensor([2, 50]))
         result_compiled = compiled_func(x, torch.tensor([2, 50]))
+        self.assertEqual(result_compiled, result_eager)
+        self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skip("this test fails due to ")
+        x =  torch.randn(4, 4).t_()
+        result_eager = func(x, torch.tensor([2, 8]))
+        result_compiled = compiled_func(x, torch.tensor([2, 8]))
+        self.assertEqual(result_compiled, result_eager)
+        self.assertEqual(cnt.frame_count, 1)
+        
+
+        # Pass a contiguous tensor. A recompilation will happen due to 0/1 speciialization on stride.
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+        )
+        with ctx():
+            x = torch.randn(10, 10)
+            result_eager = func(x, torch.tensor([2, 50]))
+            result_compiled = compiled_func(x, torch.tensor([2, 50]))
+            self.assertEqual(result_compiled, result_eager)
+            self.assertEqual(cnt.frame_count, 2)
+        self.assertExpectedInline(
+            aot_graphs,"""\
+/home/lsakka/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", arg3_1: "f32[u2, u3][1, u2]cpu"):
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3177 in func, code: result1 = torch.reshape(x, (u0, u1))
+        ge_1: "Sym(u2 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        ge_3: "Sym(u3 >= 0)" = arg2_1 >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3173 in func, code: u0, u1 = y.tolist()
+        select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
+        ge_5: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_5 = _assert_scalar_2 = None
+        select_1: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1);  arg0_1 = None
+        _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
+        ge_7: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
+        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_7 = _assert_scalar_3 = None
+        
+        # No stacktrace found for following nodes
+        mul: "Sym(u2*u3)" = arg1_1 * arg2_1;  arg1_1 = arg2_1 = None
+        mul_1: "Sym(u0*u1)" = _local_scalar_dense * _local_scalar_dense_1
+        eq: "Sym(Eq(u2*u3, u0*u1))" = mul == mul_1;  mul = mul_1 = None
+        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
+        
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3177 in func, code: result1 = torch.reshape(x, (u0, u1))
+        clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
+        view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
+        
+         # File: /home/lsakka/pytorch/test/test_dynamic_shapes.py:3181 in func, code: return result1*10, result2
+        mul_16: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_16,)""")
+
+        x =  torch.randn(4, 4)
+        result_eager = func(x, torch.tensor([2, 8]))
+        result_compiled = compiled_func(x, torch.tensor([2, 8]))
+        self.assertEqual(result_compiled, result_eager)
+        self.assertEqual(cnt.frame_count, 2)
+
+
+    @unittest.skip("this test fails due to inductor/autograd issue #153041")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_non_contigious_reshape_failing(self):
         # reshape u1 -> (u0*u0)
@@ -3218,11 +3325,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(s77)", arg2_1: "i64[s77][
 
         compiled_result = compiled_func(x, torch.tensor([2]))
         eager_result = func(x, torch.tensor([2]))
-        self.assertEqual(compiled_result, eager_result)
-
-        x = make_non_contiguous_tensor(49)
-        compiled_result = compiled_func(x, torch.tensor([7]))
-        eager_result = func(x, torch.tensor([7]))
         self.assertEqual(compiled_result, eager_result)
 
 
