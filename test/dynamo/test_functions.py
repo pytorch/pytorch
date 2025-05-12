@@ -4348,6 +4348,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         def fn(a, b):
             s = _type({"apple", "banana", "cherry"})
             s.__init__({"google", "microsoft", "apple"})
+            # frozenset should remain the same while set gets updated
             if "banana" in s:
                 return a + b
             else:
