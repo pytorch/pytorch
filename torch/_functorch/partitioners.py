@@ -517,9 +517,19 @@ def calculate_range(dtype: torch.dtype) -> tuple:
         # 8-bit floating-point format with e5m2 layout
         min_val = -57344.0
         max_val = 57344.0
+    if dtype == torch.float8_e4m3fn:
+        min_val = -448
+        max_val = 448
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
     return min_val, max_val
+
+
+def has_overflow(node: torch.fx.Node, max_val: float) -> bool:
+    abs = torch.ops.aten.abs.default(node.meta["val"])
+    amex = torch.ops.aten.amax.default(abs.meta["val"], [-1], True)
+    
+    return amex.item() > max_val 
 
 
 def quantize_activation_fw(graph: torch.fx.Graph) -> None:
@@ -532,23 +542,10 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     for node in fwd_outputs:
         # check if the activation node is the node saved for quantization
         if node.meta.get("saved_for_quantization", False):
-            # case: use scaling
-            if torch._inductor.config.post_grad_fusion_options[
+            # use non-scaling in default, fallback to scaling when overflow
+            if not torch._inductor.config.post_grad_fusion_options[
                 "activation_quantization_aten_pass"
-            ].get("use_scaling", False):
-                # calculating the scale
-                scale_node = calculate_quantization_scaling(
-                    graph, node, clamp_max, 1e-12
-                )
-                # converting to fp8
-                quant_node = perform_quantization(
-                    graph, node, scale_node, quant_type, clamp_min, clamp_max
-                )
-                if not is_sym_node(scale_node):
-                    tensor_scale_nodes.append(scale_node)
-                else:
-                    sym_scale_nodes.append(scale_node)
-            else:
+            ].get("use_scaling", False) and not has_overflow(node, clamp_max):
                 # case: do not use scaling
                 with graph.inserting_after(node):
                     quant_node = graph.call_function(
@@ -564,6 +561,19 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
                     quant_node.meta["tensor_meta"] = extract_tensor_metadata(
                         quant_node.meta["val"]
                     )
+            else:
+                # calculating the scale
+                scale_node = calculate_quantization_scaling(
+                    graph, node, clamp_max, 1e-12
+                )
+                # converting to fp8
+                quant_node = perform_quantization(
+                    graph, node, scale_node, quant_type, clamp_min, clamp_max
+                )
+                if not is_sym_node(scale_node):
+                    tensor_scale_nodes.append(scale_node)
+                else:
+                    sym_scale_nodes.append(scale_node)
             node_to_quant[node] = quant_node
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
