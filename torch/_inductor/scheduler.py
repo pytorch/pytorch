@@ -3029,7 +3029,7 @@ class Scheduler:
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
             for node in fused_nodes:
-                fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
+                fusion_log.debug("  %s", node.debug_str_short())
 
         # These are potential fusions which we are async compiling,
         # and which we will benchmark profitability of.
