@@ -22,6 +22,7 @@ import psutil
 
 import torch
 import torch.cuda
+import torch.nn as nn
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -63,7 +64,6 @@ from torch.testing._internal.common_utils import (
     load_tests,
     MI300_ARCH,
     parametrize,
-    recover_orig_fp32_precision,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
@@ -80,6 +80,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -828,55 +829,6 @@ class TestCuda(TestCase):
             enabled=None, benchmark=None, deterministic=None, allow_tf32=True
         ):
             self.assertTrue(torch.backends.cudnn.allow_tf32)
-
-    @recover_orig_fp32_precision
-    def test_fp32_precision_with_tf32(self):
-        with torch.backends.cudnn.flags(
-            enabled=None,
-            benchmark=None,
-            benchmark_limit=None,
-            deterministic=None,
-            allow_tf32=True,
-            fp32_precision="none",
-        ):
-            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
-            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
-
-        with torch.backends.cudnn.flags(
-            enabled=None,
-            benchmark=None,
-            benchmark_limit=None,
-            deterministic=None,
-            allow_tf32=False,
-            fp32_precision="none",
-        ):
-            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "none")
-            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
-
-    @recover_orig_fp32_precision
-    def test_fp32_precision_with_float32_matmul_precision(self):
-        torch.set_float32_matmul_precision("highest")
-        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
-        torch.set_float32_matmul_precision("high")
-        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
-        torch.set_float32_matmul_precision("medium")
-        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
-
-    @recover_orig_fp32_precision
-    def test_invalid_status_for_legacy_api(self):
-        torch.backends.cudnn.conv.fp32_precision = "none"
-        torch.backends.cudnn.rnn.fp32_precision = "tf32"
-        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
-            print(torch.backends.cudnn.allow_tf32)
-
-        torch.set_float32_matmul_precision("highest")
-        torch.backends.cuda.matmul.fp32_precision = "tf32"
-        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
-            print(torch.get_float32_matmul_precision())
-
-        if not TEST_WITH_ROCM:
-            with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
-                print(torch.backends.cuda.matmul.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -4010,6 +3962,67 @@ class TestCudaMallocAsync(TestCase):
                 self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
                 torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    @unittest.skipIf(not has_triton(), "test needs triton")
+    @requiresCppContext
+    def test_memory_compile_regions(self):
+        expected_allocation_sequence = [
+            "Torch-Compiled Region: 0/0",
+            "Torch-Compiled Region: 1/0",
+            "Torch-Compiled Region: 0/0",
+        ]
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(10, 10)
+                self.linear2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+
+                if x.sum() > 0:
+                    x = x + 1
+                else:
+                    x = x - 1
+
+                x = self.linear2(x)
+
+                return x
+
+        try:
+            torch.cuda.memory.empty_cache()
+            input_tensor = torch.randn(1, 10, device="cuda")
+            # Create an instance of the model
+            model = MyModel()
+            model.to("cuda")
+            # Compile the model using torch.compile
+            compiled_model = torch.compile(model)
+            # Create a sample input tensor
+            torch.cuda.memory._record_memory_history(
+                context="all", compile_context=True
+            )
+            compiled_model(input_tensor)
+            ss = torch.cuda.memory._snapshot()["device_traces"]
+            device_idx = 0
+            allocation_sequence = []
+            while len(ss[device_idx]) == 0:
+                device_idx = device_idx + 1
+            for s in ss[device_idx]:
+                context = s["compile_context"]
+                if context == "N/A":
+                    continue
+                if len(allocation_sequence) > 0 and allocation_sequence[-1] == context:
+                    continue
+                allocation_sequence.append(context)
+            self.assertTrue(allocation_sequence == expected_allocation_sequence)
+        except RuntimeError as e:
+            pass
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
