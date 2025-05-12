@@ -3218,7 +3218,6 @@ def strip_local_scope(s: str) -> str:
 
 
 def _format_reasons_for_shape_guards(compile_id: CompileId, reasons: list[str], scope: dict[str, object]) -> str:
-    breakpoint()
     has_parameter = False
     shape_sources = OrderedSet()
     pattern = r"tensor '(.*)' size mismatch at index .* expected (\d+), actual (\d+).*"
@@ -3270,10 +3269,30 @@ def get_guard_fail_reason_helper(
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
     # assert not guard_debug_info.result
+
+    """
+    before:
+    verbose_code_parts:
+    - if string reason, len(1). maybe no_tensor_aliasing_check
+    - if code parts, list.
+        -> eval to see what was the issue
+    if recompiles_verbose:
+    - return multiple failing eval guards
+    
+    after:
+    verbose_code_parts & failure_reasons
+    - if verbose_code_parts:
+        -> do same eval, return 1st reason or more (if verbose)
+        -> append failure reasons too (?)
+        -> go through reasons, suggest whitelist
+    - if empty:
+        -> return failure reasons
+        -> suggest whitelist
+    """
+
     if not guard_debug_info.result:
-        print(guard_debug_info.failure_reasons)
-        breakpoint()
         verbose_code_parts = guard_debug_info.verbose_code_parts
+        breakpoint()
         # verbose_code_parts is either the actual reason (e.g. in case of
         # TENSOR_MATCH) or it could be a list of verbose_code_part that we
         # passed to the leaf guard at construction time. If its a list, we

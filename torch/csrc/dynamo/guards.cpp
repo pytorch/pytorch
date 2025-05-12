@@ -225,8 +225,6 @@ std::string TensorCheck::check_verbose(
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
       fail_reason << "size mismatch at index " << i << ". expected "
                   << known_size.value() << ", actual " << sizes[i];
-      std::cout << "size mismatch for " << tensor_name << std::endl;
-      std::cout << fail_reason.str() << std::endl;
       return fail_reason.str();
     }
   }
@@ -2651,15 +2649,9 @@ class GuardManager {
           accessor->check_verbose_nopybind(value);
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
-        std::cout << "guards_failed on accessor: " << accessor->get_source() << std::endl;
-        std::cout << debug_info.to_string() << std::endl;
         guards_failed = true;
         if (debug_info.verbose_code_parts.size() > 0) {
-          std::cout << "VCP: " << debug_info.verbose_code_parts[0].cast<std::string>() << std::endl;
           verbose_code_parts = debug_info.verbose_code_parts;
-        }
-        if (debug_info.failure_reasons.size() > 0) {
-          std::cout << "fail reason: " << debug_info.failure_reasons[0].cast<std::string>() << std::endl;
         }
         guard_fail_reasons += debug_info.failure_reasons;
       }
@@ -3559,7 +3551,6 @@ class TENSOR_MATCH : public LeafGuard {
         _tensor_name);
 
     if (!fail_reason.empty()) {
-      std::cout << "fail_reason non empty" << fail_reason << std::endl;
       return GuardDebugInfo(false, fail_reason, 0);
     }
     return GuardDebugInfo(true, 1);
