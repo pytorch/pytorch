@@ -1107,8 +1107,6 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     frame.x_metadatas.append(frame.metadata_fn(x))
             return holder
 
-        # See Note: [compiled autograd and checkpoint unpack hook]
-        @torch._disable_dynamo
         def unpack_hook(holder):
             gid = torch._C._current_graph_task_id()
             if gid == -1:
@@ -1494,6 +1492,8 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
+    # See Note: [compiled autograd and checkpoint unpack hook]
+    @torch._disable_dynamo
     def recompute_fn(*inputs):
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
