@@ -238,11 +238,11 @@ def _reshape_view_meta(a, shape):
         f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
 
+    if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
+        return prims.view_of(a)
+
     # if a is contiguous, we can always reshape with as_strided.
     if a.is_contiguous():
-        if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
-            return prims.view_of(a)
-
         return a.as_strided(shape, utils.make_contiguous_strides_for(shape))
 
     # if a is not contiguous and _compute_stride succeed we also use as_strided.
