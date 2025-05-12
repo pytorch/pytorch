@@ -396,8 +396,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = c10::getApproximateTime();
-  event->allow_tf32_cublas_ =
-      at::globalContext().float32Precision("cuda", "matmul") == "tf32";
+  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
