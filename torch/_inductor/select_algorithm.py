@@ -2258,7 +2258,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 if not isinstance(choice, CUDATemplateCaller):
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        str(e),
+                        e,
                     )
                 timing = float("inf")
             except NotImplementedError as e:
