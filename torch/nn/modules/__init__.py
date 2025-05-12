@@ -164,6 +164,7 @@ from .transformer import (
     TransformerEncoderLayer,
 )
 from .upsampling import Upsample, UpsamplingBilinear2d, UpsamplingNearest2d
+from .dense_general import DenseGeneral
 
 
 __all__ = [
