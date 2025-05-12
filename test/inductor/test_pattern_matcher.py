@@ -1707,28 +1707,28 @@ class TestPatternMatcher(TestCase):
             current_config["post_grad_custom_post_pass"] = custom_pass
             return compile_fx(graph, example_inputs, config_patches=current_config)
 
-        # # Case 1: mutates a clone of graph input
-        # @torch.compile(fullgraph=True, backend=custom_backend)
-        # def f1(x):
-        #     x = x.clone()
-        #     out = torch.zeros_like(x)
-        #     foo_inplace(x)
-        #     bar_out(x, out)
-        #     return out
+        # Case 1: mutates a clone of graph input
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f1(x):
+            x = x.clone()
+            out = torch.zeros_like(x)
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
 
-        # def f1_replaced(x):
-        #     x = x.clone()
-        #     out = torch.zeros_like(x)
-        #     foobar_out(x, out)
-        #     return out
+        def f1_replaced(x):
+            x = x.clone()
+            out = torch.zeros_like(x)
+            foobar_out(x, out)
+            return out
 
-        # f1_inp = inp.clone().detach()
-        # f1_replaced_inp = inp.clone().detach()
-        # f1_out = f1(f1_inp)
-        # f1_replaced_out = f1_replaced(f1_replaced_inp)
-        # self.assertEqual(f1_inp, f1_replaced_inp)
-        # self.assertEqual(f1_out, f1_replaced_out)
-        # self.assertEqual(count, 1)
+        f1_inp = inp.clone().detach()
+        f1_replaced_inp = inp.clone().detach()
+        f1_out = f1(f1_inp)
+        f1_replaced_out = f1_replaced(f1_replaced_inp)
+        self.assertEqual(count, 1)
+        self.assertEqual(f1_inp, f1_replaced_inp)
+        self.assertEqual(f1_out, f1_replaced_out)
 
         # Case 2: mutates graph input
         @torch.compile(fullgraph=True, backend=custom_backend)
@@ -1747,9 +1747,9 @@ class TestPatternMatcher(TestCase):
         f2_replaced_inp = inp.clone().detach()
         f2_out = f2(f2_inp)
         f2_replaced_out = f2_replaced(f2_replaced_inp)
+        self.assertEqual(count, 1)
         self.assertEqual(f2_inp, f2_replaced_inp)
         self.assertEqual(f2_out, f2_replaced_out)
-        self.assertEqual(count, 1)
 
     def test_mutable_op_view_inputs_register_replacement(self):
         @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x1", "x2"})
@@ -1758,9 +1758,9 @@ class TestPatternMatcher(TestCase):
             x2.add_(2)
 
         # NOTE: only returning None is supported; the custom op cannot return `out` because it's part of op input.
-        @torch.library.custom_op("mylib::bar", mutates_args={"out"})
-        def bar_out(x1: torch.Tensor, x2: torch.Tensor, out: torch.Tensor) -> None:
-            out.copy_(x1 + x2 + 2)
+        @torch.library.custom_op("mylib::bar_out", mutates_args={"out"})
+        def bar_out(x1_0: torch.Tensor, x2_0: torch.Tensor, out: torch.Tensor) -> None:
+            out.copy_(x1_0 + x2_0 + 2)
 
         @torch.library.custom_op("mylib::foobar_out", mutates_args={"x1", "x2", "out"})
         def foobar_out(x1: torch.Tensor, x2: torch.Tensor, out: torch.Tensor) -> None:
@@ -1768,29 +1768,8 @@ class TestPatternMatcher(TestCase):
             x2.add_(2)
             out.copy_(x1 + x2 + 7)  # intentionally different from bar_out
 
-        def mutable_ops_pattern(x, out):
-            x1 = torch.ops.inductor.opaque_view(x)
-            x2 = torch.ops.inductor.opaque_view(x)
-            foo_inplace(x1, x2)
-            bar_out(x1, x2, out)
-            return x1, x2, out
-
-        def mutable_ops_replacement(x, out):
-            x1 = torch.ops.inductor.opaque_view(x)
-            x2 = torch.ops.inductor.opaque_view(x)
-            foobar_out(x1, x2, out)
-            return x1, x2, out
-
         inp = torch.randn(3, 3)
-
         my_patterns = PatternMatcherPass()
-        register_replacement(
-            search_fn=mutable_ops_pattern,
-            replace_fn=mutable_ops_replacement,
-            example_inputs=[inp[0].clone().detach(), inp[0].clone().detach(), inp[0].clone().detach()],
-            trace_fn=functools.partial(fwd_only, apply_auto_functionalize=True),
-            pass_dicts=my_patterns,
-        )
 
         count = 0
 
@@ -1807,54 +1786,140 @@ class TestPatternMatcher(TestCase):
             current_config["post_grad_custom_post_pass"] = custom_pass
             return compile_fx(graph, example_inputs, config_patches=current_config)
 
-        # Case 1: mutates a clone of graph input
-        @torch.compile(fullgraph=True, backend=custom_backend)
-        def f1(x):
-            x1 = x.clone()[0]
-            x2 = x.clone()[1]
-            out = torch.zeros_like(x)
-            foo_inplace(x1, x2)
-            bar_out(x1, x2, out)
-            return out
+        # Case 1: view input's base is also within graph
+        def _test_view_base_captured_within_graph():
+            # Requirement: if view input's base is also within the captured graph, the pattern must take the base as input,
+            # and user needs to reconstruct the view chain within the pattern.
+            #
+            # A hypothetical alternative design is for the pattern to directly take x1, x2 as input,
+            # but then in Case 1-1, the pattern's auto_functionalized_v2(foo_inplace) op will then have two tensors in _all_bases,
+            # whereas the captured graph's auto_functionalized_v2 op will have only one tensor in _all_bases due to base-sharing,
+            # causing a mismatch.
+            def mutable_ops_pattern(x, out):
+                x1 = x[0]
+                x2 = x[1]
+                foo_inplace(x1, x2)
+                bar_out(x1[0], x2[0], out)
+                return x, out
 
-        def f1_replaced(x):
-            x1 = x.clone()[0]
-            x2 = x.clone()[1]
-            out = torch.zeros_like(x)
-            foobar_out(x1, x2, out)
-            return out
+            def mutable_ops_replacement(x, out):
+                x1 = x[0]
+                x2 = x[1]
+                foobar_out(x1, x2, out)
+                return x, out
 
-        f1_inp = inp.clone().detach()
-        f1_replaced_inp = inp.clone().detach()
-        f1_out = f1(f1_inp)
-        f1_replaced_out = f1_replaced(f1_replaced_inp)
-        # self.assertEqual(f1_inp, f1_replaced_inp)
-        # self.assertEqual(f1_out, f1_replaced_out)
-        self.assertEqual(count, 1)
+            register_replacement(
+                search_fn=mutable_ops_pattern,
+                replace_fn=mutable_ops_replacement,
+                example_inputs=[inp.clone().detach(), inp.clone().detach()],
+                trace_fn=functools.partial(fwd_only, apply_auto_functionalize=True),
+                pass_dicts=my_patterns,
+            )
 
-        # # Case 2: mutates graph input
-        # # TODO: rewrite to have x1 and x2
-        # @torch.compile(fullgraph=True, backend=custom_backend)
-        # def f2(x):
-        #     x = x[0]
-        #     out = torch.zeros_like(x)
-        #     foo_inplace(x)
-        #     bar_out(x, out)
-        #     return out
+            # Case 1-1: mutates a clone of graph input
+            @torch.compile(fullgraph=True, backend=custom_backend)
+            def f11(x):
+                x = x.clone()
+                x1 = x[0]
+                x2 = x[1]
+                out = torch.zeros_like(x)
+                foo_inplace(x1, x2)
+                bar_out(x1[0], x2[0], out)
+                return out
 
-        # def f2_replaced(x):
-        #     x = x[0]
-        #     out = torch.zeros_like(x)
-        #     foobar_out(x, out)
-        #     return out
+            def f11_replaced(x):
+                x = x.clone()
+                x1 = x[0]
+                x2 = x[1]
+                out = torch.zeros_like(x)
+                foobar_out(x1, x2, out)
+                return out
 
-        # f2_inp = inp.clone().detach()
-        # f2_replaced_inp = inp.clone().detach()
-        # f2_out = f2(f2_inp)
-        # f2_replaced_out = f2_replaced(f2_replaced_inp)
-        # self.assertEqual(f2_inp, f2_replaced_inp)
-        # self.assertEqual(f2_out, f2_replaced_out)
-        # self.assertEqual(count, 1)
+            f11_inp = inp.clone().detach()
+            f11_replaced_inp = inp.clone().detach()
+            f11_out = f11(f11_inp)
+            f11_replaced_out = f11_replaced(f11_replaced_inp)
+            self.assertEqual(count, 1)
+            self.assertEqual(f11_inp, f11_replaced_inp)
+            self.assertEqual(f11_out, f11_replaced_out)
+            
+            # Case 1-2: mutates graph input (DOESN'T WORK YET)
+            @torch.compile(fullgraph=True, backend=custom_backend)
+            def f12(x):
+                x1 = x[0]
+                x2 = x[1]
+                out = torch.zeros_like(x)
+                foo_inplace(x1, x2)
+                bar_out(x1[0], x2[0], out)
+                return out
+
+            def f12_replaced(x):
+                x1 = x[0]
+                x2 = x[1]
+                out = torch.zeros_like(x)
+                foobar_out(x1, x2, out)
+                return out
+
+            f12_inp = inp.clone().detach()
+            f12_replaced_inp = inp.clone().detach()
+            f12_out = f12(f12_inp)
+            f12_replaced_out = f12_replaced(f12_replaced_inp)
+            self.assertEqual(count, 1)
+            self.assertEqual(f12_inp, f12_replaced_inp)
+            self.assertEqual(f12_out, f12_replaced_out)
+        
+        # Case 2: view input's base is *NOT* captured within graph
+        def _test_view_base_not_captured_within_graph():
+            def mutable_ops_pattern(x1, x2, out):
+                # NOTE: the crazy thing about mark_opaque_view, is that in the user graph, the non-mutated x1 and x2 inputs to bar_out can be a complex (chain of) view op on base x,
+                # and it's not possible to match to this chain of view ops via a single op `opaque_view(x)`.
+                # To solve this, we need to leverage `extra_check=`. TODO: try to write a generic extra_check function to recursively find the ancestor of the opaque_view input until we hit another (earlier) mutable op or hit pattern graph input.
+                foo_inplace(x1, x2)
+                bar_out(x1[0], x2[0], out)
+                return x1, x2, out
+
+            def mutable_ops_replacement(x1, x2, out):
+                foobar_out(x1, x2, out)
+                return x1, x2, out
+
+            register_replacement(
+                search_fn=mutable_ops_pattern,
+                replace_fn=mutable_ops_replacement,
+                example_inputs=[inp[0].clone().detach(), inp[0].clone().detach(), inp.clone().detach()],
+                trace_fn=functools.partial(fwd_only, apply_auto_functionalize=True),
+                pass_dicts=my_patterns,
+            )
+
+            # Case 2-1: mutates graph input (which is itself a view)
+            def f21(x1, x2, out):
+                foo_inplace(x1, x2)
+                bar_out(x1[0], x2[0], out)
+                return out
+
+            def f21_replaced(x1, x2, out):
+                foobar_out(x1, x2, out)
+                return out
+
+            def f21_caller(x, compile=False):
+                x1 = x[0]
+                x2 = x[1]
+                out = torch.zeros_like(x)
+                if compile:
+                    return torch.compile(f21, fullgraph=True, backend=custom_backend)(x1, x2, out)
+                else:
+                    return f21_replaced(x1, x2, out)
+
+            f21_inp = inp.clone().detach()
+            f21_replaced_inp = inp.clone().detach()
+            f21_out = f21_caller(f21_inp, compile=True)
+            f21_replaced_out = f21_caller(f21_replaced_inp, compile=False)
+            self.assertEqual(count, 1)
+            self.assertEqual(f21_inp, f21_replaced_inp)
+            self.assertEqual(f21_out, f21_replaced_out)
+
+        _test_view_base_captured_within_graph()
+        _test_view_base_not_captured_within_graph()
+        
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
