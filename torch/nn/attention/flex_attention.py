@@ -8,7 +8,7 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -1156,7 +1156,7 @@ def _validate_nestedness(query: Tensor, key: Tensor, value: Tensor):
 
 def _enforce_mem_layouts(
     query: Tensor, key: Tensor, value: Tensor
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Enforce memory layouts for query, key, and value tensors.
 
@@ -1177,13 +1177,21 @@ def _enforce_mem_layouts(
     def is_col_major(tensor: Tensor) -> bool:
         return tensor.stride()[-2] == 1
 
+    # These memory layout constraint are only for FP8 GEMMs on architectures prior to SM100.
+    # SM100 has support for TN, NT, TT, NN layouts for FP8 GEMM
+    # (i.e., left and right operands can be in row or column major layouts)
+    # so this check is only needed for older architectures.
+    # See: https://github.com/NVIDIA/cutlass/blob/main/media/docs/cpp/blackwell_functionality.md
     fp8_dtypes = (
         torch.float8_e4m3fn,
         torch.float8_e5m2,
     )
-
     gemm_precision = query.dtype
-    if gemm_precision not in fp8_dtypes:
+    is_sm100_or_greater = (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability("cuda") >= (10, 0)
+    )
+    if gemm_precision not in fp8_dtypes or not is_sm100_or_greater:
         return query, key, value
 
     # Query must be in row-major memory layout as the left-operand in the FP8 GEMM `q @ k.T`
