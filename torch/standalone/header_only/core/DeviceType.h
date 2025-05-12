@@ -111,9 +111,13 @@ static_assert(
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will
 //     be much faster.
-inline TORCH_API std::atomic<bool> privateuse1_backend_name_set;
-inline TORCH_API std::string privateuse1_backend_name;
-inline TORCH_API std::mutex privateuse1_lock;
+//
+// Use C10_EXPORT instead of C10_API to make sure the following global varibles
+// are defined as exported symbols. Otherwise, Windows build will complain that
+// the global variables can not be imported.
+inline C10_EXPORT std::atomic<bool> privateuse1_backend_name_set;
+inline C10_EXPORT std::string privateuse1_backend_name;
+inline C10_EXPORT std::mutex privateuse1_lock{};
 
 inline TORCH_API bool is_privateuse1_backend_registered() {
   return privateuse1_backend_name_set.load(std::memory_order_acquire);
