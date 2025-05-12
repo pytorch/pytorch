@@ -435,13 +435,12 @@ void gemm(
       return;
    }
 #endif
-#if defined(__aarch64__) && AT_MKLDNN_ENABLED()
-// add support for non-aarch64 CPU's
+#if AT_MKLDNN_ACL_ENABLED()
 // add heuristic based on shape to dispatch to sbgemm_ vs MKLDNN
    if (mkldnn_bf16f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
-#endif
+#endif //AT_MKLDNN_ACL_ENABLED
 
 #ifdef MKL_HAS_SBGEMM
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
