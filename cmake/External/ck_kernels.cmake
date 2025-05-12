@@ -50,7 +50,7 @@ if(NOT __ck_kernels_included)
       INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_BINARY_DIR}/ck_kernels_tarball"
       "${ck_kernels_install_dir}"
-      INSTALL_BYPRODUCTS "${ck_kernels_install_path}"
+      BUILD_BYPRODUCTS "${ck_kernels_install_path}"
     )
     add_dependencies(__ck_kernels_lib ck_kernels_external)
     message(STATUS "Using CK_kernels from pre-compiled binary ${ck_kernels_package_full_url}; installed at ${ck_kernels_install_dir}")
