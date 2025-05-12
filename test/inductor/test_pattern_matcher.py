@@ -1843,7 +1843,7 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(f11_inp, f11_replaced_inp)
             self.assertEqual(f11_out, f11_replaced_out)
             
-            # Case 1-2: mutates graph input (DOESN'T WORK YET)
+            # Case 1-2: mutates graph input
             @torch.compile(fullgraph=True, backend=custom_backend)
             def f12(x):
                 x1 = x[0]
@@ -1869,6 +1869,7 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(f12_out, f12_replaced_out)
         
         # Case 2: view input's base is *NOT* captured within graph
+        # TODO: currently doesn't work because compile gives different result vs. eager in this repro: https://gist.github.com/yf225/04666fbf07a75b1e59ae12c78671c564
         def _test_view_base_not_captured_within_graph():
             def mutable_ops_pattern(x1, x2, out):
                 foo_inplace(x1, x2)
