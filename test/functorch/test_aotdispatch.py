@@ -40,6 +40,7 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
+from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
@@ -4536,55 +4537,74 @@ def forward(self, arg0_1):
         inps = [torch.randn(2, 2), torch.ones(2)]
         gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(
-            str(gm.code).strip(),
+            normalize_gm(gm.print_readable(False)),
             """\
-def forward(self, arg0_1, arg1_1):
-    sum_1 = torch.ops.aten.sum.default(arg0_1)
-    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1, arg1_1));  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
-    getitem = cond[0];  cond = None
-    add = torch.ops.aten.add.Tensor(getitem, 3)
-    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            str(gm.true_graph_0.code).strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
-    cos = torch.ops.aten.cos.default(add);  add = None
-    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
-    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add_1,)""",
-        )
-        self.assertExpectedInline(
-            str(gm.false_graph_0.code).strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
-    getitem = map_impl[0];  map_impl = None
-    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
-    add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
-    body_graph_1 = self.body_graph_1
-    map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
-    getitem_1 = map_impl_1[0];  map_impl_1 = None
-    sum_2 = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
-    add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
-    return (add_1,)""",
-        )
-        self.assertExpectedInline(
-            str(gm.false_graph_0.body_graph_0.code).strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
-    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
-    return (add_1,)""",
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2]"):
+        sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (arg0_1, arg1_1));  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+        getitem: "f32[2, 2]" = cond[0];  cond = None
+
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 3)
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+        return (add, add_1)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2]"):
+            sin: "f32[2, 2]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+
+            add: "f32[2, 2]" = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+
+            cos: "f32[2, 2]" = torch.ops.aten.cos.default(add);  add = None
+
+            sum_1: "f32[]" = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+
+            add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+            return (add_1,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2]"):
+            cos: "f32[2, 2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+
+            body_graph_0 = self.body_graph_0
+            map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
+            getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
+
+            sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
+
+            add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
+
+            body_graph_1 = self.body_graph_1
+            map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
+            getitem_1: "f32[2, 2]" = map_impl_1[0];  map_impl_1 = None
+
+            sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+
+            add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+            return (add_1,)
+
+        class body_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "f32[2]", arg1_1: "f32[2]"):
+                cos: "f32[2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+
+                add: "f32[2]" = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+
+                add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+                return (add_1,)
+
+        class body_graph_1(torch.nn.Module):
+            def forward(self, arg0_1: "f32[2]", arg1_1: "f32[2]"):
+                cos: "f32[2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+
+                add: "f32[2]" = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+
+                add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+                return (add_1,)
+""",  # noqa: B950
         )
 
     def test_aot_export_predispatch_map_2(self):
@@ -4605,25 +4625,31 @@ def forward(self, arg0_1, arg1_1):
         inps = [torch.randn(2, 2), torch.ones(2)]
         gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(
-            str(gm.code).strip(),
+            normalize_gm(gm.print_readable(False)),
             """\
-def forward(self, arg0_1, arg1_1):
-    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
-    getitem = map_impl[0];  map_impl = None
-    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
-    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add,)""",
-        )  # noqa: B950
-        self.assertExpectedInline(
-            str(gm.body_graph_0.code).strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
-    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
-    return [add_1]""",
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2]"):
+        cos: "f32[2, 2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+
+        _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
+
+        body_graph_0 = self.body_graph_0
+        map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
+        getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+        return (add,)
+
+    class body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[2]"):
+            cos: "f32[2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+
+            add: "f32[2]" = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+
+            add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+            return (add_1,)
+""",
         )
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
