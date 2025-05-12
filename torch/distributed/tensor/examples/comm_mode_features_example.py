@@ -41,7 +41,7 @@ class CommDebugModeExample:
     def __init__(self, world_size: int, rank: int) -> None:
         self.world_size = world_size
         self.rank = rank
-        self.device_type = torch.accelerator.current_accelerator().type
+        self.device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() and torch.accelerator.device_count() else 'cpu'
 
     def _MLP_model_setup(
         self, model_type: type, parallelize_plan: Union[None, dict] = None

@@ -17,7 +17,7 @@ import torch.distributed.tensor.debug
 assert int(os.getenv("WORLD_SIZE", "1")) >= 4, "We need at least 4 devices"
 rank = int(os.environ["RANK"])
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = torch.accelerator.current_accelerator().type if torch.accelerator.current_accelerator() else 'cpu'
 
 
 def section(msg: str) -> None:
