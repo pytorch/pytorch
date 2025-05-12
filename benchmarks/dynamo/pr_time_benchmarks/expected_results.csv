@@ -1,28 +1,28 @@
-add_loop_eager,compile_time_instruction_count,2960000000,0.015
+add_loop_eager,compile_time_instruction_count,3170000000,0.015
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,5806000000,0.025
+add_loop_eager_dynamic,compile_time_instruction_count,6127000000,0.025
 
 
 
-add_loop_inductor,compile_time_instruction_count,29160000000,0.015
+add_loop_inductor,compile_time_instruction_count,29540000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,42960000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44680000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,25630000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,26020000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,1011000000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,1019000000,0.015
 
 
 
-basic_modules_ListOfLinears_inductor,compile_time_instruction_count,18150000000,0.015
+basic_modules_ListOfLinears_inductor,compile_time_instruction_count,18250000000,0.015
 
 
 
@@ -34,7 +34,7 @@ basic_modules_ListOfLinears_inductor_gpu,compile_time_instruction_count,97140000
 
 
 
-update_hint_regression,compile_time_instruction_count,1677500000,0.02
+update_hint_regression,compile_time_instruction_count,1735000000,0.02
 
 
 
@@ -42,19 +42,19 @@ float_args,compile_time_instruction_count,439200000,0.015
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,998400000,0.015
+sum_floordiv_regression,compile_time_instruction_count,1023000000,0.015
 
 
 
-symint_sum,compile_time_instruction_count,3227000000,0.015
+symint_sum,compile_time_instruction_count,3280000000,0.015
 
 
 
-symint_sum_loop,compile_time_instruction_count,4224000000,0.015
+symint_sum_loop,compile_time_instruction_count,4303000000,0.015
 
 
 
-aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2075364055,0.015
+aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2093000000,0.015
 
 
 
@@ -62,15 +62,15 @@ aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,5944000000,0
 
 
 
-aotdispatcher_partitioner_cpu,compile_time_instruction_count,8586000000,0.015
+aotdispatcher_partitioner_cpu,compile_time_instruction_count,8649000000,0.015
 
 
 
-aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1884000000,0.015
+aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1911000000,0.015
 
 
 
-aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3795000000,0.015
+aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3815000000,0.015
 
 
 
