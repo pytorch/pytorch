@@ -152,23 +152,30 @@ class BackendCompilerFailed(ShortenTraceback):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg: str, *, case_name: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        msg: str,
+        *,
+        case_name: Optional[str] = None,
+        counter_category: Optional[str] = None,
+    ) -> None:
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
         self.category: Optional[str] = None
+        self.counter_category: str = counter_category if counter_category else msg
         self.add_to_stats()
         self.case_name: Optional[str] = case_name
 
     def remove_from_stats(self) -> None:
         assert self.category is not None
-        counters[self.category][self.msg] -= 1
-        if counters[self.category][self.msg] <= 0:
-            del counters[self.category][self.msg]
+        counters[self.category][self.counter_category] -= 1
+        if counters[self.category][self.counter_category] <= 0:
+            del counters[self.category][self.counter_category]
 
     def add_to_stats(self, category: str = "unimplemented") -> None:
         self.category = category
-        counters[category][self.msg] += 1
+        counters[category][self.counter_category] += 1
 
 
 class UnknownPropertiesDuringBackwardTrace(Unsupported):
@@ -513,8 +520,8 @@ def unimplemented_v2(
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
-        raise Unsupported(msg) from from_exc
-    raise Unsupported(msg)
+        raise Unsupported(msg, counter_category=gb_type) from from_exc
+    raise Unsupported(msg, counter_category=gb_type)
 
 
 def warning(msg: str) -> None:
