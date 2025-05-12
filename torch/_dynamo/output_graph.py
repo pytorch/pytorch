@@ -517,8 +517,6 @@ class OutputGraph(OutputGraphGuardsState):
             self.install_builtins_dict_in_fglobals()
         )
 
-        self.guard_on_key_order: set[str] = set()
-
         self.compiler_trace_stack = contextlib.ExitStack()
 
     def mark_bytecode_tracing_start(self):
