@@ -35,6 +35,11 @@
 #include <thrust/iterator/reverse_iterator.h>
 #endif
 
+#if CUB_V3_PLUS()
+#include <cuda/functional>
+#include <thrust/iterator/constant_iterator.h>
+#endif
+
 namespace at::native {
 
 #if !CUB_SUPPORTS_SCAN_BY_KEY()
@@ -210,7 +215,11 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
+#if CUB_V3_PLUS()
+        thrust::constant_iterator<index_t>(1),
+#else
         NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<index_t>(1),
+#endif
         count_data,
         num_indices
       );
@@ -222,7 +231,11 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::make_reverse_iterator(sorted_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
+#if CUB_V3_PLUS()
+        ::cuda::maximum<>(),
+#else
         NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max(),
+#endif
         num_indices
       );
     });

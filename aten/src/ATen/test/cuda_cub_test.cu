@@ -2,6 +2,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <gtest/gtest.h>
 
+#if CUB_V3_PLUS()
+#include <cuda/std/functional>
+#endif
+
+
 TEST(NumBits, CubTest) {
   using at::cuda::cub::get_num_bits;
   ASSERT_EQ(get_num_bits(0b0000000000000000000000000000000000000000000000000000000000000000UL), 1);
@@ -146,8 +151,13 @@ TEST(InclusiveScanSplit, CubTest) {
   cudaMallocManaged(&output1, sizeof(int) * 10);
 
   cudaDeviceSynchronize();
+#if CUB_V3_PLUS()
+  at::cuda::cub::inclusive_scan<int *, int *, ::cuda::std::plus<>, /*max_cub_size=*/2>(
+    input, output1, ::cuda::std::plus<>(), 10);
+#else
   at::cuda::cub::inclusive_scan<int *, int *, ::at_cuda_detail::cub::Sum, /*max_cub_size=*/2>(
     input, output1, ::at_cuda_detail::cub::Sum(), 10);
+#endif
   cudaDeviceSynchronize();
 
   ASSERT_EQ(output1[0], 1);
@@ -172,8 +182,13 @@ TEST(ExclusiveScanSplit, CubTest) {
   cudaMallocManaged(&output2, sizeof(int) * 10);
 
   cudaDeviceSynchronize();
+#if CUB_V3_PLUS()
+  at::cuda::cub::exclusive_scan<int *, int *, ::cuda::std::plus<>, int, /*max_cub_size=*/2>(
+    input, output2, ::cuda::std::plus<>(), 0, 10);
+#else
   at::cuda::cub::exclusive_scan<int *, int *, ::at_cuda_detail::cub::Sum, int, /*max_cub_size=*/2>(
     input, output2, ::at_cuda_detail::cub::Sum(), 0, 10);
+#endif
   cudaDeviceSynchronize();
 
   ASSERT_EQ(output2[0], 0);
