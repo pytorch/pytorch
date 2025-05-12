@@ -114,18 +114,18 @@ static_assert(
 //
 // Note: Can not directly use inline to declar a global variable here, because
 //       it doesn't work for fbobjc build, error: declaration requires a global destructor
-//       TORCH_API is also needed to make sure the variables are visible to all files.
-inline TORCH_API std::atomic<bool>& privateuse1_backend_name_set() {
+//       C10_EXPORT is also needed to make sure the variables are visible to all files.
+inline C10_EXPORT std::atomic<bool>& privateuse1_backend_name_set() {
   static std::atomic<bool> privateuse1_backend_name_set_(false);
   return privateuse1_backend_name_set_;
 }
 
-inline TORCH_API std::string& privateuse1_backend_name() {
+inline C10_EXPORT std::string& privateuse1_backend_name() {
   static std::string privateuse1_backend_name_;
   return privateuse1_backend_name_;
 }
 
-inline TORCH_API std::mutex& privateuse1_lock() {
+inline C10_EXPORT std::mutex& privateuse1_lock() {
   static std::mutex privateuse1_lock_;
   return privateuse1_lock_;
 }
