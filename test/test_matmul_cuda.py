@@ -1376,7 +1376,7 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
-    @xfailIfSM100OrLater # CUTLASS only supports SM carveout via green contexts on SM100
+    @xfailIfSM100OrLater  # CUTLASS only supports SM carveout via green contexts on SM100
     def test_honor_sm_carveout(self) -> None:
         torch.manual_seed(42)
 
