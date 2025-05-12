@@ -403,6 +403,13 @@ struct ExpandableSegment {
 #ifndef FBCODE_CAFFE2
       prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 #endif
+      int flag = 0;
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuDeviceGetAttribute_(
+          &flag,
+          CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED,
+          device_));
+      if (flag)
+        prop.allocFlags.gpuDirectRDMACapable = 1;
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       prop.location.id = static_cast<int>(device_);
@@ -1268,11 +1275,10 @@ class DeviceCachingAllocator {
         for (MempoolId_t mempool_id : use_on_oom_pools) {
           auto filter = [](cudaStream_t) { return true; };
           beginAllocateToPool(mempool_id, filter);
-          auto& pool = get_pool(size, stream);
-          const size_t alloc_size = get_allocation_size(size);
+          auto& mempool = get_pool(size, stream);
           AllocParams mempool_params(
-              device, size, stream, &pool, alloc_size, stats);
-          mempool_params.stat_types = get_stat_types_for_pool(pool);
+              device, size, stream, &mempool, alloc_size, stats);
+          mempool_params.stat_types = get_stat_types_for_pool(mempool);
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
           releasePool(mempool_id);

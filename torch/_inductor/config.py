@@ -92,6 +92,12 @@ bundle_triton_into_fx_graph_cache: Optional[bool] = (
     bundle_triton_into_fx_graph_cache_default()
 )
 
+non_blocking_remote_cache_write: bool = Config(
+    justknob="pytorch/remote_cache:enable_non_blocking_remote_cache_write",
+    env_name_force="TORCHINDUCTOR_NON_BLOCKING_REMOTE_CACHE_WRITE",
+    default=True,
+)
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
@@ -137,15 +143,6 @@ unsafe_marked_cacheable_functions: list[str] = []
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None
-
-# The default layout constraint for custom operators.
-# This must be the name of one of the layout constraint tags
-# (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
-# If the custom op does not have a layout constraint tag already
-# then we assume the following applies.
-custom_op_default_layout_constraint: Literal[
-    "needs_fixed_stride_order", "flexible_layout"
-] = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
@@ -340,6 +337,9 @@ reorder_for_compute_comm_overlap_passes: list[
     "sink_waits",
     "raise_comms",
 ]
+
+# Maximum number of positions to advance a given collective, unlimited by default
+reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
@@ -1005,6 +1005,12 @@ class cpp:
     # enable this feature by their need.
     enable_concat_linear = False
 
+    # Whether to use decomposed tanh for cpu device
+    # Disable by default due to https://github.com/pytorch/pytorch/issues/148241
+    use_decompose_tanh = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_DECOMPOSE_TANH", "0") == "1"
+    )
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -1325,6 +1331,9 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4]
+
+    # Whether to use CUTLASS EVT for epilogue fusion
+    cutlass_epilogue_fusion_enabled = False
 
     # Path to CUDA NVCC.
     # NVCC search order:

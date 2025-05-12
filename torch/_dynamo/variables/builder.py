@@ -675,7 +675,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
-            # For all_const, we dont have to guard on anything yet. We guard on
+            # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
             # For cases where we need to guard on all keys, we lazily put guards
             # during the dict call_method (check dicts.py)
@@ -696,7 +696,7 @@ class VariableBuilder:
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
                 # values. Indices are cheap to save.
-                self.tx.output.guard_on_key_order.add(self.source.name())
+                self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
@@ -1337,7 +1337,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Guard on the key order
-            self.tx.output.guard_on_key_order.add(self.source.name())
+            self.tx.output.guard_on_key_order.add(self.source)
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
@@ -1456,6 +1456,15 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+        for item in value:
+            if item is value:
+                unimplemented_v2(
+                    gb_type="list elements are pointing to the list itself",
+                    context="",
+                    explanation="Dynamo does not support lists whose items reference to itself",
+                    hints=["Avoid using self referential list"],
+                )
+
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -1728,7 +1737,7 @@ class VariableBuilder:
 
     def wrap_literal(self, value):
         if type(value) is int:
-            # allowlist has higher precendence over specialization control.
+            # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name()):
                 return self.wrap_symint(value, True)
 

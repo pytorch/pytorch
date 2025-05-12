@@ -1,3 +1,4 @@
+import atexit
 import contextlib
 import dataclasses
 import enum
@@ -6,7 +7,10 @@ import itertools
 import logging
 import math
 import operator
+import os
 import re
+import tempfile
+from abc import ABC, abstractmethod
 from collections.abc import Iterator, MutableMapping, Sequence
 from enum import auto, Enum
 from itertools import chain
@@ -21,7 +25,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import Self, TypeVar
+from typing_extensions import Self, TypeAlias, TypeVar
 
 import sympy
 
@@ -56,6 +60,8 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
+    from torch.fx import GraphModule
+
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
@@ -70,7 +76,7 @@ _T = TypeVar("_T")
 
 # OpVarT should really be Union[CSEVariable, str], however this
 # causes typing errors in subclasses (defined in other files).
-OpVarT = str
+OpVarT: TypeAlias = str
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 log = logging.getLogger(__name__)
@@ -79,6 +85,38 @@ log = logging.getLogger(__name__)
 def data_type_logger(msg: str) -> None:
     if schedule_log.isEnabledFor(logging.DEBUG):
         schedule_log.debug("Data type propagation: %s", msg)
+
+
+@dataclasses.dataclass
+class FileBackedGraphModule:
+    """
+    Output of FX wrapper codegen. Exposes the same methods as ModuleType, but these
+    map back to a GraphModule instead of Python source.
+    """
+
+    gm: "GraphModule"
+    compiled_fn: Callable[..., Any]
+
+    def __post_init__(self) -> None:
+        # Write the code to a file for compatibility with debugging utilities.
+        # The file is deleted upon program termination.
+        self.tempfile = tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".py", delete=False
+        )
+        atexit.register(os.remove, self.tempfile.name)
+        with self.tempfile as f:
+            f.write(self.value)
+
+    @property
+    def __file__(self) -> str:
+        return self.tempfile.name
+
+    def call(self, args: list[Any]) -> Any:
+        return self.compiled_fn(*args)
+
+    @property
+    def value(self) -> str:
+        return self.gm.code
 
 
 class WorkspaceZeroMode(enum.Enum):
@@ -101,8 +139,22 @@ class WorkspaceZeroMode(enum.Enum):
         return WorkspaceZeroMode.UNINITIALIZED
 
 
+class CodegenSymbol(ABC):
+    """
+    An IR object possibly corresponding to a variable in the wrapper code.
+    """
+
+    @abstractmethod
+    def get_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        pass
+
+
 @ir_dataclass(frozen=True)
-class WorkspaceArg:
+class WorkspaceArg(CodegenSymbol):
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
@@ -165,6 +217,9 @@ class WorkspaceArg:
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
+    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+        return self.get_layout().get_example()
+
     def get_layout(self) -> "FixedLayout":
         from ..ir import FixedLayout
 
@@ -182,6 +237,9 @@ class WorkspaceArg:
     get_output_spec = get_layout
     maybe_get_output_spec = get_layout
     maybe_get_layout = get_layout
+
+    def get_offset(self) -> sympy.Expr:
+        return sympy.S.Zero
 
     def get_size(self) -> list[sympy.Expr]:
         return [self.count]
@@ -1507,15 +1565,8 @@ class KernelArgs:
     def wrap_size_arg(self, size: "SymbolLike") -> str:
         return str(size)
 
-    def cpp_argdefs(
-        self, dtype_to_cpp_type: Optional[dict[torch.dtype, str]] = None
-    ) -> tuple[list[str], list[str], list[str]]:
-        from .cpp_utils import INDEX_TYPE
-
-        if dtype_to_cpp_type is None:
-            from .cpp_utils import DTYPE_TO_CPP
-
-            dtype_to_cpp_type = DTYPE_TO_CPP
+    def cpp_argdefs(self) -> tuple[list[str], list[str], list[str]]:
+        from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
 
         call_args = []
         arg_defs = []
@@ -1526,7 +1577,7 @@ class KernelArgs:
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = dtype_to_cpp_type[dtype]
+            cpp_dtype = DTYPE_TO_CPP[dtype]
             arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
@@ -1534,7 +1585,7 @@ class KernelArgs:
             if outer in self.inplace_buffers:
                 continue
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = dtype_to_cpp_type[dtype]
+            cpp_dtype = DTYPE_TO_CPP[dtype]
             arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
@@ -1542,7 +1593,7 @@ class KernelArgs:
             if outer in self.inplace_buffers or isinstance(maybe_inner, RemovedArg):
                 continue
             dtype = V.graph.get_dtype(outer)
-            cpp_dtype = dtype_to_cpp_type[dtype]
+            cpp_dtype = DTYPE_TO_CPP[dtype]
             arg_defs.append(f"{cpp_dtype}* {maybe_inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
@@ -1679,10 +1730,10 @@ class CSEVariable:
 AugmentedKeyT = TypeVar("AugmentedKeyT", default=str)
 CSEVariableType = TypeVar("CSEVariableType", bound=CSEVariable, default=CSEVariable)
 
-ReductionCacheKey = tuple[
+ReductionCacheKey: TypeAlias = tuple[
     torch.dtype,
     ReductionType,
-    Union["CSEVariable", tuple["CSEVariable", ...]],
+    Union[CSEVariable, tuple[CSEVariable, ...]],
 ]
 
 
@@ -2365,8 +2416,12 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
+        from .cuda.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
+            return ValueRanges.unknown()
+
+        if isinstance(V.kernel, CUDATemplateKernel):
             return ValueRanges.unknown()
 
         fx_node = V.interpreter.current_node

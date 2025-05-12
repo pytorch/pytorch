@@ -1977,7 +1977,7 @@ def forward(self, l_x_):
         xs = torch.randn(0, 2)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "zero-sized tensor",
+            "Observed exception",
         ):
             torch._dynamo.export(mod)(xs)
 
@@ -2516,7 +2516,7 @@ def forward(self, x):
         dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*valid.*inferred to be a constant",
+            "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
         ):
             torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes, strict=True)
 
