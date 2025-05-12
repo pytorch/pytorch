@@ -1418,7 +1418,12 @@ class CPUReproTests(TestCase):
         use_quant_list = [False, True]
         use_tensor_overload_list = [False, True]
 
-        assert dtype in [torch.uint8, torch.int8, torch.float8_e4m3fn, torch.float8_e5m2]
+        assert dtype in [
+            torch.uint8,
+            torch.int8,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
         if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
