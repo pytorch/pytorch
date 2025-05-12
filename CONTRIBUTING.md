@@ -103,13 +103,17 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
    Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
    would be sufficient to make change visible in `torch` package.
 
-
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
   uninstall torch` multiple times. You'll know `torch` is fully
   uninstalled when you see `WARNING: Skipping torch as it is not
   installed`. (You should only have to `pip uninstall` a few times, but
   you can always `uninstall` with `timeout` or in a loop if you're feeling
   lazy.)
+
+   ```bash
+  conda uninstall pytorch -y
+  yes | pip uninstall torch
+  ```
 
   Next run `python setup.py clean`. After that, you can install in `develop` mode again.
 
@@ -177,7 +181,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
 Or if you would like to re-use an existing conda environment, you can pass in
 the prefix argument (`--prefix`):
-<!-- Do we need updates here? -->
+
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch -p my-env

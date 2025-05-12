@@ -132,12 +132,14 @@ Import error
 The problem is caused by the missing of the essential files. Actually,
 we include almost all the essential files that PyTorch need for the conda
 package except VC2017 redistributable and some mkl libraries.
-You can resolve this by typing the following command.
+You can resolve this by typing the following command:
 
-.. Do these need to be updated?
 .. code-block:: bat
     conda install -c peterjc123 vc vs2017_runtime
     conda install mkl_fft intel_openmp numpy mkl
+
+Please note that as of 2.6, conda builds have been deprecated.
+Please refer to the [PyTorch install guide](https://pytorch.org/get-started/locally/) for the latest installation instructions.
 
 As for the wheels package, since we didn't pack some libraries and VS2017
 redistributable files in, please make sure you install them manually.
